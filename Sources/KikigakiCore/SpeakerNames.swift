@@ -34,18 +34,27 @@ public struct SpeakerNames: Equatable, Sendable {
         names[slot]
     }
 
-    /// 名前を付ける。前後の空白を落とし、空なら既定に戻す。改行は Markdown の行構造を壊すので空白にする
+    /// 名前を付ける。前後の空白を落とし、空かその枡の既定名なら既定に戻す。改行は空白にする
     public mutating func set(_ name: String, for slot: Int) {
-        let trimmed = name
-            .replacingOccurrences(of: "\r\n", with: " ")
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
+        let trimmed = Self.normalized(name)
+        if trimmed.isEmpty || trimmed == Self.defaultName(for: slot) {
             names[slot] = nil
         } else {
             names[slot] = trimmed
         }
+    }
+
+    public static func normalized(_ name: String) -> String {
+        name
+            .replacingOccurrences(of: "\r\n", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public func otherSlot(using name: String, excluding slot: Int) -> Int? {
+        let name = Self.normalized(name)
+        return (0..<Self.slotCount).first { $0 != slot && self.name(for: $0) == name }
     }
 
     /// 全枡を既定に戻す(新しい会議を始めるとき。Sortformer のスロットは会議ごとに振り直されるため、

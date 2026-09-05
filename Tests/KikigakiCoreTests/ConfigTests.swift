@@ -6,6 +6,44 @@ import Testing
 @Suite struct ConfigTests {
     private let home = URL(fileURLWithPath: "/Users/test")
 
+    @Test func 台帳は省略でき枡数より多く登録できる() throws {
+        #expect(ResolvedConfig(config: try ConfigLoader.parse(toml: "")).speakers.isEmpty)
+        let toml = (0..<12).map { "[[speakers]]\nname = \"参加者\($0)\"" }.joined(separator: "\n")
+        #expect(try ConfigLoader.parse(toml: toml).speakers?.count == 12)
+    }
+
+    @Test func 台帳の画像パスとURLと省略を解決する() throws {
+        let toml = """
+        [[speakers]]
+        name = " 田中 "
+        avatar = "~/Pictures/tanaka.png"
+        [[speakers]]
+        name = "迅雷"
+        avatar = "https://example.com/jinrai.webp"
+        [[speakers]]
+        name = "佐藤"
+        """
+        let speakers = ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: home).speakers
+        #expect(speakers == [.init(name: "田中", avatar: "/Users/test/Pictures/tanaka.png"),
+                             .init(name: "迅雷", avatar: "https://example.com/jinrai.webp"), .init(name: "佐藤")])
+    }
+
+    @Test func 台帳の名前は必須で空と正規化後の重複を拒否する() {
+        for toml in ["[[speakers]]\navatar = \"a.png\"", "[[speakers]]\nname = \"  \"",
+                     "[[speakers]]\nname = \"田中\"\n[[speakers]]\nname = \" 田中 \"",
+                     "[[speakers]]\nname = 12"] {
+            #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: toml) }
+        }
+    }
+
+    @Test func 使用中候補は別枡だけを検出する() {
+        let names = SpeakerNames([1: "田中"])
+        #expect(names.otherSlot(using: "田中", excluding: 0) == 1)
+        #expect(names.otherSlot(using: "田中", excluding: 1) == nil)
+        #expect(names.otherSlot(using: "話者C", excluding: 0) == 2)
+        #expect(names.otherSlot(using: "新しい人", excluding: 0) == nil)
+    }
+
     @Test func 空の設定は既定値になる() throws {
         let config = try ConfigLoader.parse(toml: "")
         let resolved = ResolvedConfig(config: config, home: home)

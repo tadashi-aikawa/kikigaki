@@ -16,9 +16,13 @@ private enum Washi {
     static let tentative = color(0x4A443D)
     static let red = color(0xAA1405)
     static let brightRed = color(0xCF321F)
-    static let slots = [red, color(0xC4801F), color(0x514A43), color(0x3E706C)]
-    static func speakerColor(for slot: Int?) -> NSColor {
-        guard let slot, slot >= 0 else { return muted }
+    struct SpeakerColor { let background: NSColor; let foreground: NSColor }
+    static let slots = [SpeakerColor(background: red, foreground: paper),
+                        SpeakerColor(background: color(0xC4801F), foreground: ink),
+                        SpeakerColor(background: color(0x514A43), foreground: paper),
+                        SpeakerColor(background: color(0x3E706C), foreground: paper)]
+    static func speakerColor(for slot: Int?) -> SpeakerColor {
+        guard let slot, slot >= 0 else { return SpeakerColor(background: muted, foreground: paper) }
         // パレットはエンジンの枡数とは独立。5枡目以降の色はここへ足せる。
         // 未定義の枡も、黙って不明話者の色にせず既存の色を循環させる。
         return slots[slot % slots.count]
@@ -71,13 +75,19 @@ private final class RecordingMark: NSView {
     }
 }
 
-/// 段3で画像とクリック領域を追加するため、本文から独立させる。
+/// 画像もイニシャルも同じ吹き出し形にする。
 private final class AvatarView: NSView {
     override var isFlipped: Bool { true }
     var initial = "?"
     var slot: Int?
     var tentative = false
+    var image: NSImage? { didSet { if image !== oldValue { needsDisplay = true } } }
     override func draw(_ dirtyRect: NSRect) {
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        let transform = NSAffineTransform()
+        transform.scale(by: min(bounds.width / 25, bounds.height / 26))
+        transform.concat()
         if tentative {
             Washi.muted.setStroke()
             let dashed = NSBezierPath(ovalIn: NSRect(x: 0.875, y: 0.875, width: 22.25, height: 22.25))
@@ -87,18 +97,46 @@ private final class AvatarView: NSView {
             return
         }
         let color = Washi.speakerColor(for: slot)
-        color.setFill()
-        NSBezierPath(ovalIn: NSRect(x: 0, y: 0, width: 24, height: 24)).fill()
+        color.background.setFill()
+        let shape = NSBezierPath(ovalIn: NSRect(x: 0, y: 0, width: 24, height: 24))
         let tail = NSBezierPath()
         tail.move(to: NSPoint(x: 3, y: 18))
-        tail.line(to: NSPoint(x: 1, y: 25))
         tail.line(to: NSPoint(x: 8, y: 22))
+        tail.line(to: NSPoint(x: 1, y: 25))
         tail.close()
-        tail.fill()
+        shape.append(tail)
+        shape.windingRule = .nonZero
+        shape.fill()
+        if let image {
+            shape.addClip()
+            let scale = max(25 / image.size.width, 26 / image.size.height)
+            let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+            image.draw(in: NSRect(x: (25 - size.width) / 2, y: (26 - size.height) / 2, width: size.width, height: size.height),
+                       from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            return
+        }
         let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13, weight: .semibold),
-            .foregroundColor: slot.map { $0 >= 0 && $0 % Washi.slots.count == 1 } == true ? Washi.ink : Washi.paper]
+            .foregroundColor: color.foreground]
         let size = (initial as NSString).size(withAttributes: attributes)
         (initial as NSString).draw(at: NSPoint(x: 12 - size.width / 2, y: 12 - size.height / 2), withAttributes: attributes)
+    }
+}
+
+private final class SpeakerButton: NSButton {
+    private var hovered = false
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+    override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
+    override func draw(_ dirtyRect: NSRect) {
+        if isEnabled && (hovered || isHighlighted) {
+            Washi.rule.withAlphaComponent(0.35).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 4, yRadius: 4).fill()
+        }
+        super.draw(dirtyRect)
     }
 }
 
@@ -113,6 +151,8 @@ private final class TranscriptRow: NSView, DocumentRow {
     private let timeLabel = Washi.label(color: Washi.muted)
     private let hint = Washi.label("コピーには含めません", size: 11, color: Washi.muted)
     private let body = NSTextField(wrappingLabelWithString: "")
+    private let speakerButton = SpeakerButton()
+    var onRename: ((Int, NSView) -> Void)?
     private var utterance: Utterance?
     private var displayedName = ""
     private var displayedTimeline: MeetingTimeline?
@@ -141,8 +181,25 @@ private final class TranscriptRow: NSView, DocumentRow {
         if tentative { nameLabel.font = .systemFont(ofSize: 12) }
         hint.isHidden = !tentative
         for view in [avatar, nameLabel, timeLabel, hint, body] { addSubview(view) }
+        speakerButton.isBordered = false
+        speakerButton.title = ""
+        speakerButton.target = self
+        speakerButton.action = #selector(renamePressed)
+        speakerButton.isHidden = true
+        addSubview(speakerButton)
     }
     required init?(coder: NSCoder) { fatalError() }
+    @objc private func renamePressed() {
+        if let slot = utterance?.speaker { onRename?(slot, speakerButton) }
+    }
+    func updateAvatar(speakers: [KikigakiConfig.Speaker], store: AvatarStore, editable: Bool) {
+        let source = utterance?.speaker == nil ? nil : speakers.first { $0.name == displayedName }?.avatar
+        avatar.image = store.image(for: source)
+        speakerButton.isHidden = tentative || utterance?.speaker == nil
+        speakerButton.isEnabled = editable
+        speakerButton.toolTip = "\(displayedName)の名前を変更"
+        speakerButton.setAccessibilityLabel(speakerButton.toolTip)
+    }
 
     /// 本文・話者変更だけを点灯対象とする。時刻の再描画では点灯しない。
     @discardableResult
@@ -196,6 +253,7 @@ private final class TranscriptRow: NSView, DocumentRow {
         avatar.frame = NSRect(x: 20, y: 8, width: 25, height: 26)
         let nameWidth = min(nameLabel.intrinsicContentSize.width, max(70, bounds.width - 220))
         nameLabel.frame = NSRect(x: 54, y: 8, width: nameWidth, height: 18)
+        speakerButton.frame = NSRect(x: 18, y: 5, width: nameWidth + 40, height: 29)
         timeLabel.frame = NSRect(x: 54 + nameWidth + 12, y: 8, width: 62, height: 18)
         hint.frame = NSRect(x: bounds.width - 150, y: 8, width: 130, height: 18)
         body.frame = NSRect(x: 54, y: 31, width: max(44, bounds.width - 74), height: max(20, bounds.height - 36))
@@ -298,7 +356,7 @@ private final class TranscriptDocument: NSView {
 
 @MainActor
 final class TranscriptWindowController: NSWindowController {
-    var onRename: ((SpeakerNames) -> Void)?
+    var onRename: ((Int, String) -> Void)?
     var onStartStop: (() -> Void)?
     var onPauseResume: (() -> Void)?
     var onCopy: ((Bool) -> Void)?
@@ -307,8 +365,6 @@ final class TranscriptWindowController: NSWindowController {
     private let startStopButton = NSButton()
     private let pauseButton = NSButton()
     private let openButton = NSButton()
-    // 段3までは一括改名を維持。右上はほかの操作と同じアイコンにする。
-    private let namesButton = NSButton()
     private let copyButton = CopyButton(title: "会話をコピー", target: nil, action: nil)
     private let moreButton = NSButton(title: "別の範囲をコピー ▾", target: nil, action: nil)
     private let latestButton = NSButton(title: "最新の発言へ ↓", target: nil, action: nil)
@@ -325,7 +381,8 @@ final class TranscriptWindowController: NSWindowController {
     private let boundary = CopyBoundary()
     private let tentativeRow = TranscriptRow(tentative: true)
     private var snapshot = SessionSnapshot()
-    private var namesSheet: SpeakerNamesSheet?
+    private let avatars = AvatarStore()
+    private var renamePopover: SpeakerPopover?
     // 開始時刻が重複しても落とさず、同時刻の出現順で別ビューとして扱う。
     private struct RowID: Hashable { let start: Double; let occurrence: Int }
     private var rows: [RowID: TranscriptRow] = [:]
@@ -344,6 +401,11 @@ final class TranscriptWindowController: NSWindowController {
         window.setFrameAutosaveName("KikigakiTranscript")
         super.init(window: window)
         window.contentView = buildContent()
+        avatars.onChange = { [weak self] in
+            guard let self else { return }
+            for row in rows.values { row.updateAvatar(speakers: snapshot.speakers, store: avatars, editable: snapshot.canShare) }
+            renamePopover?.refreshAvatars()
+        }
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification,
                                                object: scrollView.contentView)
@@ -357,7 +419,7 @@ final class TranscriptWindowController: NSWindowController {
     func apply(_ value: SessionSnapshot) {
         let previous = snapshot
         snapshot = value
-        if value.state == .preparing { namesSheet?.cancel() }
+        if value.state == .preparing || previous.timeline.startedAt != value.timeline.startedAt { renamePopover?.close() }
         let startTitle = value.state == .idle && value.markdownURL != nil ? "新しい録音" : value.state.startStopTitle
         symbol(startStopButton, name: value.state.canStart ? "record.circle" : "stop.fill", title: startTitle)
         startStopButton.isEnabled = value.state.canStart || value.state.canStop
@@ -365,7 +427,6 @@ final class TranscriptWindowController: NSWindowController {
         pauseButton.isEnabled = value.state.canPauseOrResume
         pauseButton.isHidden = value.state == .idle && value.markdownURL != nil
         openButton.isHidden = !(value.state == .idle && value.saved)
-        namesButton.isEnabled = value.canShare
         statusLabel.stringValue = value.state == .idle && value.saved ? "保存済み" : value.state.statusLabel
         statusDot.isHidden = value.state != .recording && value.state != .paused
         statusDot.paused = value.state == .paused
@@ -416,6 +477,8 @@ final class TranscriptWindowController: NSWindowController {
             let row = rows[id] ?? TranscriptRow()
             if rows[id] == nil { inserted.append(row) }
             if row.update(utterance, names: snapshot.names, timeline: snapshot.timeline) { changed.append(row) }
+            row.updateAvatar(speakers: snapshot.speakers, store: avatars, editable: snapshot.canShare)
+            row.onRename = { [weak self] slot, view in self?.showRename(slot: slot, relativeTo: view) }
             next[id] = row
             ordered.append(row)
         }
@@ -438,16 +501,14 @@ final class TranscriptWindowController: NSWindowController {
         configure(startStopButton, #selector(startStopPressed))
         configure(pauseButton, #selector(pausePressed))
         configure(openButton, #selector(openPressed))
-        configure(namesButton, #selector(namesPressed))
         configure(copyButton, #selector(copyPressed))
         configure(moreButton, #selector(morePressed))
         configure(latestButton, #selector(latestPressed))
-        for button in [startStopButton, pauseButton, openButton, namesButton] {
+        for button in [startStopButton, pauseButton, openButton] {
             button.widthAnchor.constraint(equalToConstant: 34).isActive = true
             button.heightAnchor.constraint(equalToConstant: 28).isActive = true
         }
         symbol(openButton, name: "doc.text", title: "Markdownを開く")
-        symbol(namesButton, name: "person.text.rectangle", title: "話者名…")
         copyButton.isBordered = false
         copyButton.heightAnchor.constraint(equalToConstant: 30).isActive = true
         copyButton.toolTip = "会話ファイルへの参照と、今回読む範囲をクリップボードにコピー"
@@ -468,7 +529,7 @@ final class TranscriptWindowController: NSWindowController {
         logoRule.widthAnchor.constraint(equalToConstant: 1).isActive = true
         logoRule.heightAnchor.constraint(equalToConstant: 20).isActive = true
         let status = row([statusDot, statusLabel, elapsedLabel], spacing: 8)
-        let controls = row([Washi.logoView(size: 26), logoRule, status, NSView(), pauseButton, startStopButton, openButton, namesButton], spacing: 12)
+        let controls = row([Washi.logoView(size: 26), logoRule, status, NSView(), pauseButton, startStopButton, openButton], spacing: 12)
         let header = column([controls, messageLabel], spacing: 8, inset: 12)
         Washi.surface(header)
         scrollView.documentView = transcriptDocument
@@ -580,77 +641,108 @@ final class TranscriptWindowController: NSWindowController {
         menu.addItem(full)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: moreButton.bounds.minY), in: moreButton)
     }
-    @objc private func namesPressed() {
-        guard namesSheet == nil, let window else { return }
-        let sheet = SpeakerNamesSheet(names: snapshot.names)
-        namesSheet = sheet
-        sheet.present(on: window) { [weak self] names in
-            self?.namesSheet = nil
-            if let names { self?.onRename?(names) }
-        }
+    private func showRename(slot: Int, relativeTo view: NSView) {
+        guard snapshot.canShare, (0..<SpeakerNames.slotCount).contains(slot) else { return }
+        renamePopover?.close()
+        let popover = SpeakerPopover(slot: slot, names: snapshot.names, speakers: snapshot.speakers, avatars: avatars)
+        popover.onRename = { [weak self] name in self?.onRename?(slot, name) }
+        renamePopover = popover
+        // 行が再分割で消えても編集は維持するため、安定したscrollViewをアンカーにする。
+        popover.present(relativeTo: scrollView.convert(view.bounds, from: view), of: scrollView)
     }
 }
 
-/// 段3のクリック改名へ移すまでは、既存の一括改名を維持する。
 @MainActor
-final class SpeakerNamesSheet: NSObject {
-    let window: NSWindow
-    private var fields: [NSTextField] = []
-    private var completion: ((SpeakerNames?) -> Void)?
-    init(names: SpeakerNames) {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 165 + CGFloat(SpeakerNames.slotCount) * 30),
-                          styleMask: [.titled], backing: .buffered, defer: false)
-        window.title = "話者名を編集"
+private final class SpeakerPopover: NSObject, NSTextFieldDelegate {
+    private let popover = NSPopover()
+    private let field = NSTextField()
+    private let avatars: AvatarStore
+    private var avatarRows: [(AvatarView, String?)] = []
+    private let speakers: [KikigakiConfig.Speaker]
+    var onRename: ((String) -> Void)?
+
+    init(slot: Int, names: SpeakerNames, speakers: [KikigakiConfig.Speaker], avatars: AvatarStore) {
+        self.avatars = avatars
+        self.speakers = speakers
         super.init()
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 10
-        stack.addArrangedSubview(Washi.label("会話全体に反映します。停止後は保存も更新します。", color: Washi.muted))
-        for slot in 0..<SpeakerNames.slotCount {
-            let label = Washi.label(SpeakerNames.letter(for: slot))
-            label.widthAnchor.constraint(equalToConstant: 20).isActive = true
-            let field = NSTextField(string: names.customName(for: slot) ?? "")
-            field.placeholderString = SpeakerNames.defaultName(for: slot)
-            field.setAccessibilityLabel("話者" + SpeakerNames.letter(for: slot) + "の名前")
-            fields.append(field)
-            let row = NSStackView(views: [label, field])
-            row.spacing = 12
-            stack.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        popover.behavior = .transient
+        popover.animates = false
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 204 + min(8, speakers.count) * 28))
+        Washi.surface(content, color: Washi.paper)
+        let title = Washi.label("話者\(SpeakerNames.letter(for: slot))の名前", size: 14, weight: .semibold)
+        title.frame = NSRect(x: 18, y: content.bounds.height - 42, width: 260, height: 22)
+        content.addSubview(title)
+        let listHeight = CGFloat(min(8, speakers.count) * 28)
+        let scroll = NSScrollView(frame: NSRect(x: 14, y: 150, width: 272, height: listHeight))
+        scroll.hasVerticalScroller = speakers.count > 8
+        scroll.drawsBackground = false
+        let list = NSView(frame: NSRect(x: 0, y: 0, width: 256, height: speakers.count * 28))
+        scroll.documentView = list
+        content.addSubview(scroll)
+        for (index, speaker) in speakers.enumerated() {
+            let y = CGFloat((speakers.count - index - 1) * 28)
+            let used = names.otherSlot(using: speaker.name, excluding: slot)
+            let avatar = AvatarView(frame: NSRect(x: 4, y: y + 2, width: 22, height: 23))
+            avatar.slot = used ?? slot
+            avatar.initial = String(speaker.name.prefix(1))
+            avatar.alphaValue = used == nil ? 1 : 0.45
+            list.addSubview(avatar)
+            avatarRows.append((avatar, speaker.avatar))
+            let label = Washi.label(speaker.name, color: used == nil ? Washi.ink : Washi.muted)
+            label.lineBreakMode = .byTruncatingTail
+            label.frame = NSRect(x: 34, y: y + 5, width: used == nil ? 210 : 110, height: 18)
+            list.addSubview(label)
+            if let used {
+                let hint = Washi.label("話者\(SpeakerNames.letter(for: used))で使用中", size: 10, color: Washi.muted)
+                hint.frame = NSRect(x: 146, y: y + 5, width: 110, height: 18)
+                list.addSubview(hint)
+            }
+            let button = SpeakerButton(frame: NSRect(x: 0, y: y, width: 256, height: 28))
+            button.title = ""
+            button.isBordered = false
+            button.isEnabled = used == nil
+            button.tag = index
+            button.target = self
+            button.action = #selector(candidatePressed(_:))
+            button.setAccessibilityLabel(speaker.name + (used.map { "、話者\(SpeakerNames.letter(for: $0))で使用中" } ?? ""))
+            button.toolTip = speaker.name
+            list.addSubview(button)
         }
-        let cancel = NSButton(title: "キャンセル", target: self, action: #selector(cancelPressed))
-        cancel.bezelStyle = .rounded
-        cancel.keyEquivalent = "\u{1b}"
-        let apply = NSButton(title: "反映する", target: self, action: #selector(applyPressed))
-        apply.bezelStyle = .rounded
-        apply.keyEquivalent = "\r"
-        let buttons = NSStackView(views: [NSView(), cancel, apply])
-        buttons.spacing = 10
-        stack.addArrangedSubview(buttons)
-        buttons.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        let content = NSView()
-        content.addSubview(stack)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20)
-        ])
-        window.contentView = content
+        list.scroll(NSPoint(x: 0, y: max(0, list.bounds.height - listHeight)))
+        let inputLabel = Washi.label("自由に入力", color: Washi.muted)
+        inputLabel.frame = NSRect(x: 18, y: 117, width: 260, height: 18)
+        content.addSubview(inputLabel)
+        field.frame = NSRect(x: 18, y: 82, width: 264, height: 26)
+        field.stringValue = names.name(for: slot)
+        field.placeholderString = SpeakerNames.defaultName(for: slot)
+        field.setAccessibilityLabel("話者\(SpeakerNames.letter(for: slot))の名前")
+        field.delegate = self
+        content.addSubview(field)
+        let reset = NSButton(title: "既定に戻す", target: self, action: #selector(resetPressed))
+        reset.bezelStyle = .rounded
+        reset.controlSize = .small
+        reset.frame = NSRect(x: 14, y: 30, width: 100, height: 26)
+        content.addSubview(reset)
+        let controller = NSViewController()
+        controller.view = content
+        popover.contentViewController = controller
+        refreshAvatars()
     }
-    func present(on parent: NSWindow, completion: @escaping (SpeakerNames?) -> Void) {
-        self.completion = completion
-        parent.beginSheet(window) { [weak self] response in
-            guard let self else { return }
-            var names = SpeakerNames()
-            for (i, field) in self.fields.enumerated() { names.set(field.stringValue, for: i) }
-            self.completion?(response == .OK ? names : nil)
-            self.completion = nil
-        }
-        window.makeFirstResponder(fields.first)
+    func present(relativeTo rect: NSRect, of view: NSView) {
+        popover.show(relativeTo: rect, of: view, preferredEdge: .maxY)
+        field.window?.makeFirstResponder(field)
+        field.selectText(nil)
     }
-    func cancel() { window.sheetParent?.endSheet(window, returnCode: .cancel) }
-    @objc private func cancelPressed() { cancel() }
-    @objc private func applyPressed() { window.makeFirstResponder(nil); window.sheetParent?.endSheet(window, returnCode: .OK) }
+    func refreshAvatars() {
+        for (view, source) in avatarRows { view.image = avatars.image(for: source) }
+    }
+    func close() { popover.close() }
+    private func commit(_ name: String) { close(); onRename?(name) }
+    @objc private func candidatePressed(_ sender: NSButton) { commit(speakers[sender.tag].name) }
+    @objc private func resetPressed() { commit("") }
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) { commit(field.stringValue); return true }
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) { close(); return true }
+        return false
+    }
 }

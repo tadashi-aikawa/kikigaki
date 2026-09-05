@@ -3,6 +3,11 @@ import TOMLKit
 
 /// `~/.config/kikigaki/config.toml` に対応する設定。設定UIは持たず、ファイルを直接編集する
 public struct KikigakiConfig: Codable, Equatable, Sendable {
+    public struct Speaker: Codable, Equatable, Sendable {
+        public var name: String
+        public var avatar: String?
+        public init(name: String, avatar: String? = nil) { self.name = name; self.avatar = avatar }
+    }
     public struct Hotkey: Codable, Equatable, Sendable {
         public var modifiers: [String]
         public var key: String
@@ -32,12 +37,15 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     /// 停止時に短い繰り返し相槌を省き、省略前のMarkdownも残す実験機能
     public var dropRepeatedBackchannels: Bool?
     public var hotkeys: Hotkeys?
+    public var speakers: [Speaker]?
 
-    public init(outputDir: String? = nil, saveRecording: Bool? = nil, hotkeys: Hotkeys? = nil, dropRepeatedBackchannels: Bool? = nil) {
+    public init(outputDir: String? = nil, saveRecording: Bool? = nil, hotkeys: Hotkeys? = nil, dropRepeatedBackchannels: Bool? = nil,
+                speakers: [Speaker]? = nil) {
         self.outputDir = outputDir
         self.saveRecording = saveRecording
         self.hotkeys = hotkeys
         self.dropRepeatedBackchannels = dropRepeatedBackchannels
+        self.speakers = speakers
     }
 }
 
@@ -56,6 +64,7 @@ public struct ResolvedConfig: Equatable, Sendable {
     public var dropRepeatedBackchannels: Bool
     public var toggleRecording: KikigakiConfig.Hotkey
     public var togglePause: KikigakiConfig.Hotkey
+    public var speakers: [KikigakiConfig.Speaker]
 
     public init(config: KikigakiConfig, home: URL = FileManager.default.homeDirectoryForCurrentUser) {
         outputDir = Self.expand(config.outputDir ?? Self.defaultOutputDir, home: home)
@@ -63,6 +72,14 @@ public struct ResolvedConfig: Equatable, Sendable {
         dropRepeatedBackchannels = config.dropRepeatedBackchannels ?? false
         toggleRecording = config.hotkeys?.toggleRecording ?? Self.defaultToggleRecording
         togglePause = config.hotkeys?.togglePause ?? Self.defaultTogglePause
+        speakers = (config.speakers ?? []).map { speaker in
+            var speaker = speaker
+            speaker.name = SpeakerNames.normalized(speaker.name)
+            if let avatar = speaker.avatar, !avatar.hasPrefix("http://"), !avatar.hasPrefix("https://") {
+                speaker.avatar = Self.expand(avatar, home: home).path
+            }
+            return speaker
+        }
     }
 
     /// 先頭の `~` をホームに置き換える。`~user` 形式は扱わない
@@ -105,6 +122,13 @@ public enum ConfigLoader {
     public static let modifierNames: Set<String> = ["cmd", "command", "alt", "option", "ctrl", "control", "shift"]
 
     private static func validate(_ config: KikigakiConfig) throws {
+        var speakerNames = Set<String>()
+        for speaker in config.speakers ?? [] {
+            let name = SpeakerNames.normalized(speaker.name)
+            guard !name.isEmpty, speakerNames.insert(name).inserted else {
+                throw ConfigError.invalid(description: "speakers.name must be non-empty and unique: \(name)")
+            }
+        }
         if let dir = config.outputDir {
             if dir.trimmingCharacters(in: .whitespaces).isEmpty {
                 throw ConfigError.invalid(description: "outputDir must be a non-empty string")

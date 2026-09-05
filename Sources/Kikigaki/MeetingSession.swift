@@ -53,11 +53,14 @@ final class MeetingSession {
         self.config = config
         self.models = models
         self.log = log
+        snapshot.speakers = config.speakers
     }
 
     /// 設定の再読込。次の会議から反映する(進行中の会議の保存先は開始時に確定済み)
     func update(config: ResolvedConfig) {
         self.config = config
+        snapshot.speakers = config.speakers
+        emit()
     }
 
     // MARK: - 操作
@@ -69,7 +72,7 @@ final class MeetingSession {
         // 準備中や録音中の再読込で、同じ会議の保存方針を途中から切り替えない。
         let meetingConfig = config
         dropRepeatedBackchannels = meetingConfig.dropRepeatedBackchannels
-        snapshot = SessionSnapshot(state: .preparing, message: "エンジンを準備中...")
+        snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers, message: "エンジンを準備中...")
         handoff = HandoffHistory()
         archive = nil
         emit()
@@ -231,13 +234,9 @@ final class MeetingSession {
 
     /// 枡に名前を付ける。停止後なら Markdown を保存し直す
     func rename(slot: Int, to name: String) {
+        guard snapshot.canShare, (0..<SpeakerNames.slotCount).contains(slot) else { return }
         var names = snapshot.names
         names.set(name, for: slot)
-        rename(names: names)
-    }
-
-    /// 4枠を一度に反映し、停止後のファイルも一度だけ保存する。
-    func rename(names: SpeakerNames) {
         guard names != snapshot.names else { return }
         snapshot.names = names
         if archive != nil {

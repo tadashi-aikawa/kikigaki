@@ -40,7 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.session = session
 
         let window = TranscriptWindowController()
-        window.onRename = { session.rename(names: $0) }
+        window.onRename = { session.rename(slot: $0, to: $1) }
         window.onStartStop = { [weak self] in self?.toggleRecording() }
         window.onPauseResume = { session.togglePause() }
         window.onCopy = { full in session.copyContext(full: full, writeClipboard: Self.writeClipboard) }

@@ -50,7 +50,20 @@ key = "k"
 [hotkeys.togglePause]
 modifiers = ["ctrl", "alt", "cmd"]
 key = "p"
+
+# 話者候補とアバター。省略可
+[[speakers]]
+name = "田中"
+avatar = "~/Pictures/avatars/tanaka.png"
+
+[[speakers]]
+name = "迅雷"
+avatar = "https://example.com/jinrai.webp"
 ```
+
+話者名かアバターをクリックすると、台帳の候補選択・自由入力・既定名へのリセットができます。同じ枡の全発言に反映し、停止後は保存も更新します。別の枡で使用中の候補は選べません。台帳の名前は空と重複を認めません。
+
+画像はローカルパスとHTTP・HTTPSのURLに対応します。取得できない画像はイニシャルで表示し、URL画像は `~/Library/Caches/kikigaki/avatars/` へキャッシュします。台帳の変更は既存の設定再読込で反映します。
 
 保存先には `2026-09-05_1240.md` (有効時は同名の `.wav`) を1会議1ファイルで書きます。
 
