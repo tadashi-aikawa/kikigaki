@@ -21,7 +21,16 @@ public enum SpeakerFreeze {
     ) -> [Int?] {
         let limit = min(tokens.count, max(finalCount, 0))
         var count = min(frozen.count, limit)
-        while count < limit, tokens[count].end < elapsed - grace { count += 1 }
+        while count < limit, tokens[count].end < elapsed - grace {
+            // 長い1文字は後続文字で尾部の話者を確認する。次の確定結果がまだ無い時点で
+            // 凍結すると、停止後にしか語頭を直せなくなるため、その文字から先を保留する。
+            if tokens[count].duration > 0.8,
+               tokens[count].text.filter({ $0.isLetter || $0.isNumber }).count == 1,
+               !tokens[(count + 1)..<limit].contains(where: { $0.text.contains(where: { $0.isLetter || $0.isNumber }) }) {
+                break
+            }
+            count += 1
+        }
         return Array(speakers.prefix(count))
     }
 }

@@ -42,12 +42,30 @@ struct WordBoundaries {
             let end = location + value.utf16.count - String(value.reversed().prefix(while: Self.ignored)).utf16.count
             return start < end ? start..<end : nil
         }
-        words = Set(ranges)
-        starts = Set(ranges.map(\.lowerBound))
-        ends = Set(ranges.map(\.upperBound))
+        // NLTokenizerは「なり / ます」を分ける。語尾だけが別話者に見えても、
+        // 直前の語と連続する丁寧語尾は一つの語として文字多数決へ渡す。
+        // 空白・句読点を越えて接続しない。
+        var connected: [Range<Int>] = []
+        let tokenEndOffsets = Set(tokens.indices.map {
+            offsets[$0 + 1] - String(tokens[$0].text.reversed().prefix(while: Self.ignored)).utf16.count
+        })
+        for range in ranges {
+            let value = (text as NSString).substring(with: NSRange(location: range.lowerBound, length: range.count))
+            if ["ます", "です"].contains(value), let previous = connected.last,
+               previous.upperBound == range.lowerBound, tokenEndOffsets.contains(range.upperBound),
+               !["ます", "です"].contains(where: (text as NSString).substring(with:
+                   NSRange(location: previous.lowerBound, length: previous.count)).hasSuffix) {
+                connected[connected.count - 1] = previous.lowerBound..<range.upperBound
+            } else {
+                connected.append(range)
+            }
+        }
+        words = Set(connected)
+        starts = Set(connected.map(\.lowerBound))
+        ends = Set(connected.map(\.upperBound))
     }
 
-    func containsWholeWords(_ range: Range<Int>) -> Bool {
+    func containsWholeWords(_ range: Range<Int>, sentenceEndAllowed: Bool = true) -> Bool {
         let text = tokens[range].map(\.text).joined()
         let leading = text.prefix(while: Self.ignored).utf16.count
         let trailing = String(text.reversed().prefix(while: Self.ignored)).utf16.count
@@ -59,7 +77,26 @@ struct WordBoundaries {
         // 文中の「経過報告」のような複数語の誤島を広く救済しない。
         // 1語の返答「はい」、または文末まで完結した「すごいね。」から保守的に残す。
         let sentenceEnd = text.trimmingCharacters(in: .whitespacesAndNewlines).last.map { "。！？!?".contains($0) } == true
-        return words.contains(start..<end) || sentenceEnd
+        return words.contains(start..<end) || (sentenceEndAllowed && sentenceEnd)
+    }
+
+    /// 句点が認識されなくても、語境界で閉じた質問・否定・依頼は意味のある短い発言として扱う。
+    /// 一般の複数語を全て保護すると、文中の誤った話者の島も残るため範囲を限定する。
+    func containsMeaningfulReply(_ range: Range<Int>) -> Bool {
+        let text = tokens[range].map(\.text).joined()
+        let leading = text.prefix(while: Self.ignored).utf16.count
+        let trailing = String(text.reversed().prefix(while: Self.ignored)).utf16.count
+        let start = offsets[range.lowerBound] + leading
+        let end = offsets[range.upperBound] - trailing
+        guard start < end, starts.contains(start), ends.contains(end) else { return false }
+        let prefix = tokens[..<range.lowerBound].map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard prefix.isEmpty || prefix.last?.isPunctuation == true else { return false }
+        let following = tokens[range.upperBound...].map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !following.hasPrefix("どうか") else { return false }
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: .punctuationCharacters)
+        return ["ですか", "ますか"]
+            .contains(where: value.hasSuffix)
     }
 
     private static func ignored(_ char: Character) -> Bool { char.isWhitespace || char.isPunctuation }

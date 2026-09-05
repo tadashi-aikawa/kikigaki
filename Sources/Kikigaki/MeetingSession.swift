@@ -332,6 +332,10 @@ final class MeetingSession {
         guard snapshot.state == .recording || snapshot.state == .paused else { return }
         snapshot.utterances = utterances
         snapshot.elapsed = elapsed
+        if ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_LIVE_TRACE"] != nil {
+            log(String(format: "[live at=%.2f]\n", elapsed)
+                + TranscriptRenderer.text(utterances, names: snapshot.names))
+        }
         emit()
     }
 }
