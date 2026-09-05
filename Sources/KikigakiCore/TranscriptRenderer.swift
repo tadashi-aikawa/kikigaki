@@ -3,8 +3,8 @@ import Foundation
 /// 発話行のテキスト整形。書き起こしウィンドウと Markdown の両方が同じ行形式を使う
 public enum TranscriptRenderer {
     /// 会議開始からの経過時刻を mm:ss で表す。60分を超えても時を出さず分を伸ばす(桁が揃うほうが
-    /// 縦に流れる表示で読みやすい)
-    public static func clock(_ seconds: Double) -> String {
+    /// 縦に流れる表示で読みやすい)。実時刻の `MeetingTimeline.clock` とは別物なので名前を分ける
+    public static func elapsed(_ seconds: Double) -> String {
         let total = max(Int(seconds), 0)
         return String(format: "%02d:%02d", total / 60, total % 60)
     }
@@ -30,6 +30,6 @@ public enum TranscriptRenderer {
 
     public static func text(_ utterances: [Utterance], names: SpeakerNames) -> String {
         // 診断出力は従来どおり音声上の経過を残す。
-        utterances.map { formattedLine($0, names: names, stamp: clock($0.start)) }.joined(separator: "\n")
+        utterances.map { formattedLine($0, names: names, stamp: elapsed($0.start)) }.joined(separator: "\n")
     }
 }

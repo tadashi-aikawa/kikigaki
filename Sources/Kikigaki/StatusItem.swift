@@ -67,7 +67,7 @@ final class StatusItem {
     }
 
     func update(state: RecordingState, elapsed: Double) {
-        statusMenuItem.title = state.canStop ? "\(state.statusLabel)  \(TranscriptRenderer.clock(elapsed))" : state.statusLabel
+        statusMenuItem.title = state.canStop ? "\(state.statusLabel)  \(TranscriptRenderer.elapsed(elapsed))" : state.statusLabel
         startStopItem.title = state.startStopTitle
         startStopItem.isEnabled = state.canStart || state.canStop
         pauseResumeItem.title = state.pauseResumeTitle

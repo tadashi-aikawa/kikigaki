@@ -28,7 +28,7 @@ public enum MeetingMarkdown {
         lines.append("# KIKIGAKI \(stamp)")
         lines.append("")
         lines.append("- 開始: \(stamp)")
-        lines.append("- 長さ: \(TranscriptRenderer.clock(meeting.duration))")
+        lines.append("- 長さ: \(TranscriptRenderer.elapsed(meeting.duration))")
         let speakers = appearingSlots(meeting.utterances)
         if !speakers.isEmpty {
             let list = speakers.map { "\(SpeakerNames.letter(for: $0))=\(meeting.names.name(for: $0))" }

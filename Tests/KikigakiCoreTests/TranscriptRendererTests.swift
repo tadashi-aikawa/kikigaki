@@ -7,10 +7,10 @@ import Testing
     private let timeline = MeetingTimeline(startedAt: Date(timeIntervalSince1970: 0))
     private let utc = TimeZone(secondsFromGMT: 0)!
     @Test func 経過時刻はmmss() {
-        #expect(TranscriptRenderer.clock(0) == "00:00")
-        #expect(TranscriptRenderer.clock(65.9) == "01:05")
-        #expect(TranscriptRenderer.clock(3725) == "62:05")
-        #expect(TranscriptRenderer.clock(-1) == "00:00")
+        #expect(TranscriptRenderer.elapsed(0) == "00:00")
+        #expect(TranscriptRenderer.elapsed(65.9) == "01:05")
+        #expect(TranscriptRenderer.elapsed(3725) == "62:05")
+        #expect(TranscriptRenderer.elapsed(-1) == "00:00")
     }
 
     @Test func 行は時刻と話者名とテキスト() {

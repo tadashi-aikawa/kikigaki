@@ -226,7 +226,7 @@ private final class TranscriptRow: NSView, DocumentRow {
         searchStyle = nil
         nameLabel.stringValue = name
         timeLabel.stringValue = timeline.clock(at: value.start)
-        timeLabel.toolTip = TranscriptRenderer.clock(value.start)
+        timeLabel.toolTip = TranscriptRenderer.elapsed(value.start)
         avatar.slot = value.speaker
         avatar.initial = value.speaker.map { names.customName(for: $0) == nil ? SpeakerNames.letter(for: $0) : String(name.prefix(1)) } ?? "?"
         avatar.setAccessibilityLabel(name)
@@ -489,7 +489,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         statusLabel.stringValue = value.state == .idle && value.saved ? "保存済み" : value.state.statusLabel
         statusDot.isHidden = value.state != .recording && value.state != .paused
         statusDot.paused = value.state == .paused
-        elapsedLabel.stringValue = TranscriptRenderer.clock(value.elapsed)
+        elapsedLabel.stringValue = TranscriptRenderer.elapsed(value.elapsed)
         var message = value.message ?? ""
         if value.saved, message.hasPrefix("保存:") {
             message = message.components(separatedBy: " / ").dropFirst().joined(separator: " / ")
