@@ -9,20 +9,27 @@ public enum TranscriptRenderer {
         return String(format: "%02d:%02d", total / 60, total % 60)
     }
 
-    /// `[mm:ss] 話者名: テキスト`。テキスト中の改行は1行1発話を保つため空白にする
-    public static func line(_ utterance: Utterance, names: SpeakerNames) -> String {
+    /// `[HH:mm:ss] 話者名: テキスト`。会議開始と一時停止を含む実時刻を使う。
+    public static func line(_ utterance: Utterance, names: SpeakerNames,
+                            timeline: MeetingTimeline, timeZone: TimeZone = .current) -> String {
+        formattedLine(utterance, names: names, stamp: timeline.clock(at: utterance.start, seconds: true, timeZone: timeZone))
+    }
+
+    private static func formattedLine(_ utterance: Utterance, names: SpeakerNames, stamp: String) -> String {
         let text = utterance.text
             .replacingOccurrences(of: "\r\n", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
-        return "[\(clock(utterance.start))] \(names.name(for: utterance.speaker)): \(text)"
+        return "[\(stamp)] \(names.name(for: utterance.speaker)): \(text)"
     }
 
-    public static func lines(_ utterances: [Utterance], names: SpeakerNames) -> [String] {
-        utterances.map { line($0, names: names) }
+    public static func lines(_ utterances: [Utterance], names: SpeakerNames,
+                             timeline: MeetingTimeline, timeZone: TimeZone = .current) -> [String] {
+        utterances.map { line($0, names: names, timeline: timeline, timeZone: timeZone) }
     }
 
     public static func text(_ utterances: [Utterance], names: SpeakerNames) -> String {
-        lines(utterances, names: names).joined(separator: "\n")
+        // 診断出力は従来どおり音声上の経過を残す。
+        utterances.map { formattedLine($0, names: names, stamp: clock($0.start)) }.joined(separator: "\n")
     }
 }

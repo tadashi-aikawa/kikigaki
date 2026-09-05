@@ -27,9 +27,9 @@ import Testing
 
             ## 書き起こし
 
-            - [00:00] 話者A: 始めます
-            - [00:03] 田中: はい
-            - [00:06] ?: …
+            - [12:40:00] 話者A: 始めます
+            - [12:40:03] 田中: はい
+            - [12:40:06] ?: …
 
             """
         #expect(MeetingMarkdown.render(meeting, timeZone: tokyo) == expected)

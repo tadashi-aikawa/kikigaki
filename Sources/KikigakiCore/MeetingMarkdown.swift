@@ -9,12 +9,16 @@ public enum MeetingMarkdown {
         public var duration: Double
         public var utterances: [Utterance]
         public var names: SpeakerNames
+        public var pauses: [MeetingTimeline.Pause]
+        public var timeline: MeetingTimeline { MeetingTimeline(startedAt: startedAt, pauses: pauses) }
 
-        public init(startedAt: Date, duration: Double, utterances: [Utterance], names: SpeakerNames) {
+        public init(startedAt: Date, duration: Double, utterances: [Utterance], names: SpeakerNames,
+                    pauses: [MeetingTimeline.Pause] = []) {
             self.startedAt = startedAt
             self.duration = duration
             self.utterances = utterances
             self.names = names
+            self.pauses = pauses
         }
     }
 
@@ -35,7 +39,7 @@ public enum MeetingMarkdown {
         lines.append("")
         // 箇条書きにするのは、素の行を並べると Markdown レンダラが1段落に繋げてしまうため
         for utterance in meeting.utterances {
-            lines.append("- " + TranscriptRenderer.line(utterance, names: meeting.names))
+            lines.append("- " + TranscriptRenderer.line(utterance, names: meeting.names, timeline: meeting.timeline, timeZone: timeZone))
         }
         return lines.joined(separator: "\n") + "\n"
     }

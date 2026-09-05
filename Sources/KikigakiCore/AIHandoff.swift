@@ -39,11 +39,14 @@ public struct HandoffHistory {
     private let meetingID = UUID()
     private var previousLines: [String] = []
     private var previousStarts: [Double] = []
+    private let startedAt: Date
 
-    public init() {}
+    public init(startedAt: Date = Date()) { self.startedAt = startedAt }
 
-    public func preview(utterances: [Utterance], names: SpeakerNames, full: Bool = false) -> HandoffPreview? {
-        preview(lines: TranscriptRenderer.lines(utterances, names: names), starts: utterances.map(\.start), full: full)
+    public func preview(utterances: [Utterance], names: SpeakerNames, timeline: MeetingTimeline? = nil,
+                        full: Bool = false) -> HandoffPreview? {
+        preview(lines: TranscriptRenderer.lines(utterances, names: names, timeline: timeline ?? MeetingTimeline(startedAt: startedAt)),
+                starts: utterances.map(\.start), full: full)
     }
 
     private func preview(lines: [String], starts: [Double], full: Bool) -> HandoffPreview? {
@@ -66,9 +69,9 @@ public struct HandoffHistory {
 
     public mutating func copy(
         utterances: [Utterance], names: SpeakerNames, outputDirectory: URL,
-        full: Bool = false, writeClipboard: (String) -> Bool
+        timeline: MeetingTimeline? = nil, full: Bool = false, writeClipboard: (String) -> Bool
     ) throws -> HandoffCopy? {
-        let lines = TranscriptRenderer.lines(utterances, names: names)
+        let lines = TranscriptRenderer.lines(utterances, names: names, timeline: timeline ?? MeetingTimeline(startedAt: startedAt))
         let starts = utterances.map(\.start)
         guard let preview = preview(lines: lines, starts: starts, full: full) else { return nil }
         let snapshotID = UUID()

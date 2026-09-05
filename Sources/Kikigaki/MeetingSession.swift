@@ -5,10 +5,18 @@ import KikigakiCore
 /// 音声スレッド側の消費ループから読む一時停止フラグ
 private final class PauseFlag: @unchecked Sendable {
     private let lock = NSLock()
-    private var value = false
-    var isPaused: Bool {
-        get { lock.withLock { value } }
-        set { lock.withLock { value = newValue } }
+    private var clock = RecordedAudioClock(startedAt: Date())
+    var timeline: MeetingTimeline { lock.withLock { clock.timeline } }
+
+    func reset(startedAt: Date) { lock.withLock { clock = RecordedAudioClock(startedAt: startedAt) } }
+    func pause() { lock.withLock { clock.pause(at: Date()) } }
+    func resume() { lock.withLock { clock.resume(at: Date()) } }
+
+    func accept(_ chunk: [Float], into continuation: AsyncStream<[Float]>.Continuation) {
+        lock.withLock {
+            // 計数とyieldを一体にして、再開操作をまたいでチャンクの位置が入れ替わらないようにする。
+            if clock.accept(sampleCount: chunk.count) { continuation.yield(chunk) }
+        }
     }
 }
 
@@ -76,6 +84,9 @@ final class MeetingSession {
             guard snapshot.state == .preparing else { return false }  // 準備中に停止や終了が走った
 
             startedAt = Date()
+            pause.reset(startedAt: startedAt)
+            snapshot.timeline = pause.timeline
+            handoff = HandoffHistory(startedAt: startedAt)
             try FileManager.default.createDirectory(at: meetingConfig.outputDir, withIntermediateDirectories: true)
             let markdownURL = try MeetingFiles.reserveMarkdownURL(in: meetingConfig.outputDir, startedAt: startedAt)
             reservation = markdownURL
@@ -90,13 +101,12 @@ final class MeetingSession {
             // SpeechTranscriber は実時間に十分追いつく。プロトで実測)
             let (stream, continuation) = AsyncStream<[Float]>.makeStream()
             samplesIn = continuation
-            pause.isPaused = false
             consumer = makeConsumer(stream: stream, transcriber: transcriber, diarizer: diarizer, wav: wav)
             let pause = self.pause
             // 一時停止の判定は収録時(音声スレッド)に行う。消費側で判定すると、処理が遅れている間に
             // 収録した分が利用者の操作した境界とずれる
             try source.start { chunk in
-                if !pause.isPaused { continuation.yield(chunk) }
+                pause.accept(chunk, into: continuation)
             }
             self.source = source
 
@@ -189,13 +199,16 @@ final class MeetingSession {
             }
         }
         let duration = Double(result.fedSamples) / 16000
-        let meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: duration, utterances: utterances, names: snapshot.names)
+        snapshot.timeline = pause.timeline
+        let meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: duration, utterances: utterances,
+                                              names: snapshot.names, pauses: snapshot.timeline.pauses)
         if let url = snapshot.markdownURL {
             archive = MeetingArchive(original: meeting, processed: processed, candidateCount: candidates.count, markdownURL: url)
         }
 
         snapshot.state = .idle
         snapshot.utterances = utterances
+        snapshot.tentativeText = nil
         snapshot.elapsed = duration
         save()
         if let note { snapshot.message = note + " / " + (snapshot.message ?? "") }
@@ -205,10 +218,10 @@ final class MeetingSession {
     func togglePause() {
         switch snapshot.state {
         case .recording:
-            pause.isPaused = true
+            pause.pause()
             snapshot.state = .paused
         case .paused:
-            pause.isPaused = false
+            pause.resume()
             snapshot.state = .recording
         default:
             return
@@ -238,11 +251,11 @@ final class MeetingSession {
         guard snapshot.canShare, let url = snapshot.markdownURL else { return }
         do {
             if let copy = try handoff.copy(utterances: snapshot.utterances, names: snapshot.names,
-                                          outputDirectory: url.deletingLastPathComponent(), full: full,
+                                          outputDirectory: url.deletingLastPathComponent(), timeline: snapshot.timeline, full: full,
                                           writeClipboard: writeClipboard) {
                 snapshot.handoffMessage = copy.preview.lineCount == 0
                     ? "会話の訂正をコピーしました"
-                    : "\(TranscriptRenderer.clock(copy.preview.startTime))以降をコピーしました。AIへ貼り付けられます"
+                    : "\(snapshot.timeline.clock(at: copy.preview.startTime))以降をコピーしました。AIへ貼り付けられます"
             } else {
                 snapshot.handoffMessage = "前回のコピーから会話の変更はありません"
             }
@@ -270,7 +283,8 @@ final class MeetingSession {
     // MARK: - 内部
 
     private func emit() {
-        snapshot.handoffPreview = handoff.preview(utterances: snapshot.utterances, names: snapshot.names)
+        snapshot.timeline = pause.timeline
+        snapshot.handoffPreview = handoff.preview(utterances: snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
         snapshot.hasCopied = handoff.lastCopy != nil
         onChange?(snapshot)
     }
@@ -321,20 +335,21 @@ final class MeetingSession {
                 let speakers = Aligner.speakers(for: tokens, segments: segments, frozen: result.frozen)
                 result.frozen = SpeakerFreeze.advance(
                     frozen: result.frozen, speakers: speakers, tokens: tokens, elapsed: elapsed, finalCount: finalCount)
-                let utterances = Aligner.utterances(tokens: tokens, speakers: speakers)
-                await MainActor.run { self.publishLive(utterances: utterances, elapsed: elapsed) }
+                let live = LiveTranscript(tokens: tokens, speakers: speakers, finalCount: finalCount)
+                await MainActor.run { self.publishLive(live, elapsed: elapsed) }
             }
             return result
         }
     }
 
-    private func publishLive(utterances: [Utterance], elapsed: Double) {
+    private func publishLive(_ live: LiveTranscript, elapsed: Double) {
         guard snapshot.state == .recording || snapshot.state == .paused else { return }
-        snapshot.utterances = utterances
+        snapshot.utterances = live.utterances
+        snapshot.tentativeText = live.tentativeText
         snapshot.elapsed = elapsed
         if ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_LIVE_TRACE"] != nil {
             log(String(format: "[live at=%.2f]\n", elapsed)
-                + TranscriptRenderer.text(utterances, names: snapshot.names))
+                + TranscriptRenderer.text(live.utterances, names: snapshot.names))
         }
         emit()
     }
