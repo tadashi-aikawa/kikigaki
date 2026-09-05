@@ -12,6 +12,8 @@
     <string>KIKIGAKI</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>kikigaki.icns</string>
     <key>CFBundleShortVersionString</key>
     <string>0.0.0-development</string>
     <key>CFBundleVersion</key>
