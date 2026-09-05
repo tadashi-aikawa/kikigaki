@@ -5,7 +5,11 @@ import KikigakiCore
 @MainActor
 final class TranscriptWindowController: NSWindowController, NSTextFieldDelegate {
     var onRename: ((Int, String) -> Void)?
+    var onStartStop: (() -> Void)?
+    var onPauseResume: (() -> Void)?
 
+    private let startStopButton = NSButton(title: "", target: nil, action: nil)
+    private let pauseResumeButton = NSButton(title: "", target: nil, action: nil)
     private let statusLabel = NSTextField(labelWithString: "")
     private let messageLabel = NSTextField(labelWithString: "")
     private var nameFields: [NSTextField] = []
@@ -37,6 +41,10 @@ final class TranscriptWindowController: NSWindowController, NSTextFieldDelegate 
     }
 
     func apply(_ snapshot: SessionSnapshot) {
+        startStopButton.title = snapshot.state.startStopTitle
+        startStopButton.isEnabled = snapshot.state.canStart || snapshot.state.canStop
+        pauseResumeButton.title = snapshot.state.pauseResumeTitle
+        pauseResumeButton.isEnabled = snapshot.state.canPauseOrResume
         var status = "\(snapshot.state.statusLabel)  \(TranscriptRenderer.clock(snapshot.elapsed))"
         if let url = snapshot.markdownURL { status += "   \(url.path)" }
         statusLabel.stringValue = status
@@ -60,10 +68,26 @@ final class TranscriptWindowController: NSWindowController, NSTextFieldDelegate 
 
     // MARK: - 構築
 
+    @objc private func startStopPressed() { onStartStop?() }
+    @objc private func pauseResumePressed() { onPauseResume?() }
+
     private func buildContent() -> NSView {
+        startStopButton.target = self
+        startStopButton.action = #selector(startStopPressed)
+        startStopButton.bezelStyle = .rounded
+        // Enter は名前欄の確定に使うので、ボタンにキー割り当てはしない(誤って停止しないため)
+        pauseResumeButton.target = self
+        pauseResumeButton.action = #selector(pauseResumePressed)
+        pauseResumeButton.bezelStyle = .rounded
         statusLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.lineBreakMode = .byTruncatingMiddle
+        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let controlRow = NSStackView(views: [startStopButton, pauseResumeButton, statusLabel])
+        controlRow.orientation = .horizontal
+        controlRow.spacing = 12
+        controlRow.alignment = .centerY
         messageLabel.font = .systemFont(ofSize: 12)
         messageLabel.textColor = .secondaryLabelColor
         messageLabel.lineBreakMode = .byTruncatingMiddle
@@ -103,7 +127,7 @@ final class TranscriptWindowController: NSWindowController, NSTextFieldDelegate 
         scrollView.hasVerticalScroller = true
         scrollView.borderType = .noBorder
 
-        let stack = NSStackView(views: [statusLabel, messageLabel, namesRow, scrollView])
+        let stack = NSStackView(views: [controlRow, messageLabel, namesRow, scrollView])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
@@ -119,7 +143,7 @@ final class TranscriptWindowController: NSWindowController, NSTextFieldDelegate 
             stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             scrollView.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24),
             namesRow.widthAnchor.constraint(lessThanOrEqualTo: scrollView.widthAnchor),
-            statusLabel.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+            controlRow.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
             messageLabel.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
         ])
         return content

@@ -40,6 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let window = TranscriptWindowController()
         window.onRename = { slot, name in session.rename(slot: slot, to: name) }
+        window.onStartStop = { [weak self] in self?.toggleRecording() }
+        window.onPauseResume = { session.togglePause() }
         self.window = window
 
         let statusItem = StatusItem()
