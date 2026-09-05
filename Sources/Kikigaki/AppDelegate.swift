@@ -39,9 +39,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.session = session
 
         let window = TranscriptWindowController()
-        window.onRename = { slot, name in session.rename(slot: slot, to: name) }
+        window.onRename = { session.rename(names: $0) }
         window.onStartStop = { [weak self] in self?.toggleRecording() }
         window.onPauseResume = { session.togglePause() }
+        window.onCopy = { full in session.copyContext(full: full, writeClipboard: Self.writeClipboard) }
+        window.onRecopy = { session.recopyContext(writeClipboard: Self.writeClipboard) }
+        window.onOpenMarkdown = {
+            if session.snapshot.saved, let url = session.snapshot.markdownURL { NSWorkspace.shared.open(url) }
+        }
         self.window = window
 
         let statusItem = StatusItem()
@@ -193,6 +198,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - 補助
+
+    private static func writeClipboard(_ prompt: String) -> Bool {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        return pasteboard.setString(prompt, forType: .string)
+    }
 
     /// `--config <path>` で設定ファイルを差し替えられる(開発・検証用。既定は ~/.config/kikigaki/config.toml)
     nonisolated static func configPath() -> URL {

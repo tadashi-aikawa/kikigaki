@@ -2,19 +2,6 @@ import FluidAudio
 import Foundation
 import KikigakiCore
 
-/// 画面とメニューに渡す1回分の状態
-struct SessionSnapshot {
-    var state: RecordingState = .idle
-    var utterances: [Utterance] = []
-    var names = SpeakerNames()
-    /// 会議の経過秒(一時停止中は進まない)
-    var elapsed: Double = 0
-    /// 保存先(録音開始時に確定し、停止時と話者名の付け直し時に書く)
-    var markdownURL: URL?
-    /// 直近の保存・準備の結果や失敗の説明。ウィンドウに1行で出す
-    var message: String?
-}
-
 /// 音声スレッド側の消費ループから読む一時停止フラグ
 private final class PauseFlag: @unchecked Sendable {
     private let lock = NSLock()
@@ -52,6 +39,7 @@ final class MeetingSession {
     /// 停止後に話者名を付け直して保存し直すために持つ
     private var archive: MeetingArchive?
     private var dropRepeatedBackchannels = false
+    private var handoff = HandoffHistory()
 
     init(config: ResolvedConfig, models: @escaping () async throws -> SortformerModelStore.Loaded, log: @escaping (String) -> Void) {
         self.config = config
@@ -74,6 +62,7 @@ final class MeetingSession {
         let meetingConfig = config
         dropRepeatedBackchannels = meetingConfig.dropRepeatedBackchannels
         snapshot = SessionSnapshot(state: .preparing, message: "エンジンを準備中...")
+        handoff = HandoffHistory()
         archive = nil
         emit()
         var reservation: URL?
@@ -231,6 +220,11 @@ final class MeetingSession {
     func rename(slot: Int, to name: String) {
         var names = snapshot.names
         names.set(name, for: slot)
+        rename(names: names)
+    }
+
+    /// 4枠を一度に反映し、停止後のファイルも一度だけ保存する。
+    func rename(names: SpeakerNames) {
         guard names != snapshot.names else { return }
         snapshot.names = names
         if archive != nil {
@@ -240,9 +234,44 @@ final class MeetingSession {
         emit()
     }
 
+    func copyContext(full: Bool = false, writeClipboard: (String) -> Bool) {
+        guard snapshot.canShare, let url = snapshot.markdownURL else { return }
+        do {
+            if let copy = try handoff.copy(utterances: snapshot.utterances, names: snapshot.names,
+                                          outputDirectory: url.deletingLastPathComponent(), full: full,
+                                          writeClipboard: writeClipboard) {
+                snapshot.handoffMessage = copy.preview.lineCount == 0
+                    ? "会話の訂正をコピーしました"
+                    : "\(TranscriptRenderer.clock(copy.preview.startTime))以降をコピーしました。AIへ貼り付けられます"
+            } else {
+                snapshot.handoffMessage = "前回のコピーから会話の変更はありません"
+            }
+            snapshot.handoffFailed = false
+        } catch {
+            snapshot.handoffMessage = "コピーできません: \(error.localizedDescription)"
+            snapshot.handoffFailed = true
+        }
+        emit()
+    }
+
+    func recopyContext(writeClipboard: (String) -> Bool) {
+        guard snapshot.canShare else { return }
+        do {
+            guard try handoff.recopy(writeClipboard: writeClipboard) != nil else { return }
+            snapshot.handoffMessage = "直前と同じ範囲をコピーしました"
+            snapshot.handoffFailed = false
+        } catch {
+            snapshot.handoffMessage = "再コピーできません: \(error.localizedDescription)"
+            snapshot.handoffFailed = true
+        }
+        emit()
+    }
+
     // MARK: - 内部
 
     private func emit() {
+        snapshot.handoffPreview = handoff.preview(utterances: snapshot.utterances, names: snapshot.names)
+        snapshot.hasCopied = handoff.lastCopy != nil
         onChange?(snapshot)
     }
 
@@ -250,6 +279,7 @@ final class MeetingSession {
         guard let result = archive?.save() else { return }
         snapshot.utterances = result.utterances
         snapshot.message = result.message
+        snapshot.saved = result.succeeded
         if !result.succeeded { log(result.message) }
     }
 
