@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+
+jobs:
+  swift-test:
+    # ローカルの開発環境(macOS 26)と SDK 世代を揃える。SpeechTranscriber が macOS 26 以降のため必須
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+      # 署名検証付きの build_release.sh はリリース時のみ。CI では ad-hoc 署名で
+      # アプリバンドルの組み立てまでを検証する
+      - name: Build app bundle
+        run: ./scripts/make-app.sh release

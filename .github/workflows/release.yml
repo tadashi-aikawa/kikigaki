@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # ci.yml と同じ理由(ローカルの開発環境と SDK 世代を揃える)
+    runs-on: macos-26
+    steps:
+      - name: Verify release branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Releases must run from the main branch." >&2
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # semantic-release がタグとコミット履歴から次バージョンを算出するため全履歴が必要
+          fetch-depth: 0
+
+      # 自己署名証明書 kikigaki-dev を一時 keychain に import する。
+      # ad-hoc 署名だとリリース毎に署名が変わり、マイクの TCC 許可が
+      # アップデートのたびに剥がれるため、署名を固定する。
+      - name: Import signing certificate
+        env:
+          P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$P12_PASSWORD" -T /usr/bin/codesign
+          # codesign が非対話で秘密鍵にアクセスできるようにする(無いとハングする)
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          # make-app.sh の find-identity が見つけられるよう search list に追加
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          rm "$RUNNER_TEMP/cert.p12"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install pnpm
+        run: npm install --global pnpm@11.9.0
+
+      # conventionalcommits v10はrelease notesが空になるバグがあるため9.3.1に固定
+      # https://github.com/semantic-release/release-notes-generator/issues/992
+      - name: Release
+        run: |
+          pnpm dlx \
+            --package semantic-release@25.0.2 \
+            --package conventional-changelog-conventionalcommits@9.3.1 \
+            --package @semantic-release/exec@7.1.0 \
+            semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}

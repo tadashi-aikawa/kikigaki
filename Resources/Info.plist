@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.tadashi-aikawa.kikigaki</string>
+    <key>CFBundleName</key>
+    <string>KIKIGAKI</string>
+    <key>CFBundleDisplayName</key>
+    <string>KIKIGAKI</string>
+    <key>CFBundleExecutable</key>
+    <string>KIKIGAKI</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.0.0-development</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>26.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>会議の発話を聴いて、話者付きで文字起こしするためにマイクを使います。</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>会議の発話を端末内で文字起こしするために音声認識を使います。</string>
+</dict>
+</plist>
