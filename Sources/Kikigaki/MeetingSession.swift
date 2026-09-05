@@ -48,6 +48,7 @@ final class MeetingSession {
     private var archive: MeetingArchive?
     private var dropRepeatedBackchannels = false
     private var handoff = HandoffHistory()
+    private let diagnostics = Diagnostics()
 
     init(config: ResolvedConfig, models: @escaping () async throws -> SortformerModelStore.Loaded, log: @escaping (String) -> Void) {
         self.config = config
@@ -167,50 +168,23 @@ final class MeetingSession {
         transcriber = nil
         diarizer = nil
 
-        // KIKIGAKI_DEBUG_LIVE=1: 停止直前の録音中表示を stderr に出す(最終結果との差を調べる用)
-        if ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_LIVE"] != nil {
-            log("[live]\n" + TranscriptRenderer.text(snapshot.utterances, names: snapshot.names))
-        }
-        // 最終結果は凍結を使わず、確定した区間で全体を判定し直す(暫定区間で凍結した表示より確定区間の
-        // ほうが正確で、保存する Markdown と画面を一致させる。プロトと同じ扱い)
-        let speakers = Aligner.speakers(for: tokens, segments: segments)
-        let utterances = Aligner.utterances(tokens: tokens, speakers: speakers)
-        var processed: [Utterance]?
-        var candidates: [Range<Int>] = []
-        if dropRepeatedBackchannels {
-            let raw = tokens.map { Aligner.speaker(at: $0.midpoint, segments: segments, tiesAreUnknown: true) }
-            candidates = RepeatedBackchannels.candidates(tokens: tokens, rawSpeakers: raw, speakers: speakers)
-            processed = RepeatedBackchannels.utterances(tokens: tokens, speakers: speakers, omitting: candidates)
-            for range in candidates {
-                log("[backchannel] " + String(format: "%.2f-%.2f", tokens[range.lowerBound].start, tokens[range.upperBound - 1].end)
-                    + " " + tokens[range].map(\.text).joined())
-            }
-        }
-        // KIKIGAKI_DEBUG_PHRASES=1: フレーズ分割と話者判定の調査用。フレーズごとにトークンの
-        // 生の判定(区間からの窓判定)→多数決後の判定と時刻を stderr に出す
-        if ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_PHRASES"] != nil {
-            for segment in segments.sorted(by: { $0.start < $1.start }) {
-                log("[segment] \(segment.speaker) " + String(format: "%.3f-%.3f", segment.start, segment.end))
-            }
-            let raw = tokens.map { Aligner.speaker(at: $0.midpoint, segments: segments) }
-            for r in Aligner.phraseRanges(tokens) {
-                let desc = r.map { i in
-                    "\(tokens[i].text)[\(raw[i].map(String.init) ?? "?")→\(speakers[i].map(String.init) ?? "?") "
-                        + String(format: "%.2f-%.2f", tokens[i].start, tokens[i].end) + "]"
-                }.joined(separator: " ")
-                log("[phrase id=\(tokens[r.lowerBound].phraseId)] \(desc)")
-            }
-        }
+        diagnostics.liveLines(snapshot.utterances, names: snapshot.names).forEach(log)
+        let final = MeetingResult.make(tokens: tokens, segments: segments,
+                                       dropRepeatedBackchannels: dropRepeatedBackchannels)
+        diagnostics.backchannelLines(tokens: tokens, candidates: final.candidates).forEach(log)
+        diagnostics.phraseLines(tokens: tokens, segments: segments, speakers: final.speakers).forEach(log)
+
         let duration = Double(result.fedSamples) / 16000
         snapshot.timeline = pause.timeline
-        let meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: duration, utterances: utterances,
+        let meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: duration, utterances: final.utterances,
                                               names: snapshot.names, pauses: snapshot.timeline.pauses)
         if let url = snapshot.markdownURL {
-            archive = MeetingArchive(original: meeting, processed: processed, candidateCount: candidates.count, markdownURL: url)
+            archive = MeetingArchive(original: meeting, processed: final.processed,
+                                     candidateCount: final.candidates.count, markdownURL: url)
         }
 
         snapshot.state = .idle
-        snapshot.utterances = utterances
+        snapshot.utterances = final.utterances
         snapshot.tentativeText = nil
         snapshot.elapsed = duration
         save()
@@ -346,10 +320,7 @@ final class MeetingSession {
         snapshot.utterances = live.utterances
         snapshot.tentativeText = live.tentativeText
         snapshot.elapsed = elapsed
-        if ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_LIVE_TRACE"] != nil {
-            log(String(format: "[live at=%.2f]\n", elapsed)
-                + TranscriptRenderer.text(live.utterances, names: snapshot.names))
-        }
+        diagnostics.liveTraceLines(live.utterances, names: snapshot.names, elapsed: elapsed).forEach(log)
         emit()
     }
 }
