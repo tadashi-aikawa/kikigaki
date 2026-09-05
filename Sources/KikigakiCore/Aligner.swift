@@ -51,24 +51,28 @@ public enum Aligner {
         gapSeconds: Double = phraseGapSeconds, keepIslandSeconds: Double = keepIslandSeconds
     ) -> [Int?] {
         var speakers = Array(frozen.prefix(tokens.count))
-        for tok in tokens.dropFirst(speakers.count) {
-            speakers.append(speaker(at: tok.midpoint, segments: segments))
-        }
+        let observed = SpeechTail.speakers(tokens: tokens, segments: segments, skippingPrefix: speakers.count)
+        speakers.append(contentsOf: observed.dropFirst(speakers.count))
         return smoothSpeakers(tokens: tokens, speakers: speakers, frozenCount: frozen.count,
-                              gapSeconds: gapSeconds, keepIslandSeconds: keepIslandSeconds)
+                              gapSeconds: gapSeconds, keepIslandSeconds: keepIslandSeconds,
+                              evidenceWeights: SpeechTail.evidenceWeights(tokens: tokens, speakers: speakers, segments: segments),
+                              segments: segments)
     }
 
     /// 窓判定の観測値を回帰テストへ渡せるよう、音声区間との突き合わせと分ける。
     static func smoothSpeakers(tokens: [TimedToken], speakers initial: [Int?], frozenCount: Int = 0,
-                               gapSeconds: Double = phraseGapSeconds, keepIslandSeconds: Double = keepIslandSeconds) -> [Int?] {
+                               gapSeconds: Double = phraseGapSeconds, keepIslandSeconds: Double = keepIslandSeconds,
+                               evidenceWeights: [Double]? = nil, segments: [SpeakerSegment] = []) -> [Int?] {
         var speakers = initial
+        let orderedSegments = segments.filter { $0.start.isFinite && $0.end.isFinite && $0.end > $0.start }
+            .sorted { $0.start < $1.start }
         for phrase in phraseRanges(tokens, gapSeconds: gapSeconds) {
             let words = WordBoundaries(tokens: Array(tokens[phrase]))
             let lexicalRanges = words.tokenRanges.map { ($0.lowerBound + phrase.lowerBound)..<($0.upperBound + phrase.lowerBound) }
-            // トークンの長さで重み付けした多数決
+            // 語内補正前の時間重みで多数決。長い1文字は検出された声の時間に絞る。
             var weight: [Int: Double] = [:]
             for i in phrase {
-                if let s = speakers[i] { weight[s, default: 0] += max(tokens[i].duration, 0.04) }
+                if let s = speakers[i] { weight[s, default: 0] += max(evidenceWeights?[i] ?? tokens[i].duration, 0.04) }
             }
             guard let major = argmax(weight) else { continue }
             // 多数派は補正前の時間重みで固定する。長い語頭を動かしてもフレーズ全体を反転させない。
@@ -115,7 +119,17 @@ public enum Aligner {
                         // 語境界で完結する塊は残す。上の境界補正でも完結しない部分語は従来通り。
                         if speakers[i] != nil {
                             let local = (i - phrase.lowerBound)..<(j - phrase.lowerBound)
-                            if words.containsWholeWords(local) { i = j; continue }
+                            // 多数派の声が区間全体を覆う場合、句点だけを根拠に複数語の島を
+                            // 保護しない。一語の返答と、境界から始まる質問の保護は残す。
+                            var coveredUntil = tokens[i].start
+                            for segment in orderedSegments where segment.speaker == major {
+                                if segment.end <= coveredUntil { continue }
+                                if segment.start > coveredUntil + 0.01 { break }
+                                coveredUntil = segment.end
+                            }
+                            let coveredByMajor = coveredUntil >= tokens[j - 1].end
+                            if words.containsWholeWords(local, sentenceEndAllowed: !coveredByMajor)
+                                || (span >= 0.6 && words.containsMeaningfulReply(local)) { i = j; continue }
                         }
                         for k in i..<j where k >= frozenCount { speakers[k] = major }
                     }
