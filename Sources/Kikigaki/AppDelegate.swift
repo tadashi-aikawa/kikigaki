@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminateWhenIdle = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.mainMenu = ApplicationMenu.make()
         let config: ResolvedConfig
         do {
             config = try Self.loadConfig()
