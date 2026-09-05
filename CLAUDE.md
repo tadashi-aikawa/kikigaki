@@ -13,6 +13,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 - `Sources/KikigakiCore/`: 純粋ロジック層 (Foundation + TOMLKit のみ。ユニットテストの主戦場)
   - `Aligner.swift`: トークン時刻と話者区間の突き合わせ。フレーズ単位の多数決・島の扱い・決定的な同点処理
   - `SpeakerFreeze.swift`: 文字起こしの確定結果に属する、8秒より古いトークンの話者判定を凍結。暫定結果は凍結しない
+  - `RepeatedBackchannels.swift` / `MeetingArchive.swift`: 停止時の繰り返し相槌の省略と、省略前後の保存。原文が保存できないときは省略しない
   - `SpeakerNames.swift` / `TranscriptRenderer.swift` / `MeetingMarkdown.swift` / `MeetingFiles.swift`: 話者名の枡・行の整形・Markdown 生成・ファイル命名
   - `Config.swift`: 設定ファイルのパースと既定値
   - `RecordingState.swift`: 録音状態とメニュー表題
@@ -36,6 +37,8 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 outputDir = "~/Documents/KIKIGAKI"
 # 録音WAVを Markdown と並べて残すか。既定: false (通常利用では不要でディスクを食うだけ)
 saveRecording = false
+# 実験機能: 停止時に短い繰り返し相槌の候補を省く。原文を .raw.md にも保存する。既定: false
+dropRepeatedBackchannels = false
 
 # グローバルショートカット。既定は ctrl+alt+cmd+K (開始/停止) と ctrl+alt+cmd+P (一時停止/再開)
 [hotkeys.toggleRecording]
@@ -48,6 +51,12 @@ key = "p"
 ```
 
 保存先には `2026-09-05_1240.md` (有効時は同名の `.wav`) を1会議1ファイルで書きます。
+
+同じ分に録音を始め直した場合、既存の保存物があれば `_2`、`_3` と連番を付けます。
+
+`dropRepeatedBackchannels = true` は、停止時に「うんうん」「そうそう」など短い反復の候補を省きます。録音中は省略せず、通常の `.md` と停止後の画面へ省略結果を反映し、省略前の書き起こしは同名の `.raw.md` に残します。話者名の変更は両方へ反映します。原文ファイルの保存に失敗した会議は、通常の `.md` と画面へ原文を残します。
+
+1回だけの相槌や同じ話者に判定された繰り返しは対象外です。実際の発話者を保証する機能ではなく、誤った省略もあり得ます。詳細は [繰り返し相槌の仕様と検証](docs/repeated-backchannels.md) を参照してください。設定変更は次の録音から適用します。
 
 ## コミットメッセージ
 

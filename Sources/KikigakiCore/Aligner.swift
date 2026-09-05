@@ -15,13 +15,17 @@ public enum Aligner {
     /// 時刻 t の話者を決める。t の前後 `halfWindow` 秒の窓と各話者区間の重なり長を話者ごとに合計し、
     /// 最大の話者を採る(窓なしの点判定だと 0.3 秒程度の細切れ区間に引きずられて話者が飛び飛びになる)。
     /// 重なりが無ければ nil
-    public static func speaker(at t: Double, segments: [SpeakerSegment], halfWindow: Double = 0.5) -> Int? {
+    public static func speaker(at t: Double, segments: [SpeakerSegment], halfWindow: Double = 0.5, tiesAreUnknown: Bool = false) -> Int? {
         var overlap: [Int: Double] = [:]
         let lo = t - halfWindow, hi = t + halfWindow
         for s in segments {
             let o = min(hi, s.end) - max(lo, s.start)
             guard o > 0 else { continue }
             overlap[s.speaker, default: 0] += o
+        }
+        // 表示の同点は従来の番号順。文字を省く判断では、同点を根拠に別話者と断定しない。
+        if tiesAreUnknown, let best = overlap.values.max(), overlap.values.filter({ abs($0 - best) < 1e-9 }).count > 1 {
+            return nil
         }
         return argmax(overlap)
     }

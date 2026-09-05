@@ -50,7 +50,8 @@ final class MeetingSession {
     private let pause = PauseFlag()
     private var startedAt = Date()
     /// 停止後に話者名を付け直して保存し直すために持つ
-    private var lastMeeting: MeetingMarkdown.Meeting?
+    private var archive: MeetingArchive?
+    private var dropRepeatedBackchannels = false
 
     init(config: ResolvedConfig, models: @escaping () async throws -> SortformerModelStore.Loaded, log: @escaping (String) -> Void) {
         self.config = config
@@ -69,9 +70,13 @@ final class MeetingSession {
     @discardableResult
     func start(source: AudioSource) async -> Bool {
         guard snapshot.state.canStart else { return false }
+        // 準備中や録音中の再読込で、同じ会議の保存方針を途中から切り替えない。
+        let meetingConfig = config
+        dropRepeatedBackchannels = meetingConfig.dropRepeatedBackchannels
         snapshot = SessionSnapshot(state: .preparing, message: "エンジンを準備中...")
-        lastMeeting = nil
+        archive = nil
         emit()
+        var reservation: URL?
         do {
             if source is MicSource, !(await MicSource.requestPermission()) {
                 throw NSError(domain: "kikigaki", code: 3, userInfo: [NSLocalizedDescriptionKey: "マイクの使用が許可されていない。システム設定 > プライバシーとセキュリティ > マイク で KIKIGAKI を許可する"])
@@ -82,11 +87,11 @@ final class MeetingSession {
             guard snapshot.state == .preparing else { return false }  // 準備中に停止や終了が走った
 
             startedAt = Date()
-            try FileManager.default.createDirectory(at: config.outputDir, withIntermediateDirectories: true)
-            // 同じ分に2回開始すると同名になり前の会議を上書きするが、1分未満で止めた会議は捨ててよいとみなす
-            let markdownURL = MeetingFiles.markdownURL(in: config.outputDir, startedAt: startedAt)
-            if config.saveRecording {
-                wav = try WavWriter(url: MeetingFiles.recordingURL(in: config.outputDir, startedAt: startedAt))
+            try FileManager.default.createDirectory(at: meetingConfig.outputDir, withIntermediateDirectories: true)
+            let markdownURL = try MeetingFiles.reserveMarkdownURL(in: meetingConfig.outputDir, startedAt: startedAt)
+            reservation = markdownURL
+            if meetingConfig.saveRecording {
+                wav = try WavWriter(url: MeetingFiles.wavURL(for: markdownURL))
             }
             self.transcriber = transcriber
             self.diarizer = diarizer
@@ -114,6 +119,10 @@ final class MeetingSession {
         } catch {
             log("開始に失敗: \(error)")
             await tearDown()
+            // 自分が確保した空の予約だけを片付ける。WAVや書き込み済みの本文は残す。
+            if let reservation, (try? Data(contentsOf: reservation)) == Data() {
+                do { try FileManager.default.removeItem(at: reservation) } catch { log("予約ファイルの片付けに失敗: \(error)") }
+            }
             snapshot = SessionSnapshot(state: .idle, message: "開始に失敗: \(error.localizedDescription)")
             emit()
             return false
@@ -164,6 +173,17 @@ final class MeetingSession {
         // ほうが正確で、保存する Markdown と画面を一致させる。プロトと同じ扱い)
         let speakers = Aligner.speakers(for: tokens, segments: segments)
         let utterances = Aligner.utterances(tokens: tokens, speakers: speakers)
+        var processed: [Utterance]?
+        var candidates: [Range<Int>] = []
+        if dropRepeatedBackchannels {
+            let raw = tokens.map { Aligner.speaker(at: $0.midpoint, segments: segments, tiesAreUnknown: true) }
+            candidates = RepeatedBackchannels.candidates(tokens: tokens, rawSpeakers: raw, speakers: speakers)
+            processed = RepeatedBackchannels.utterances(tokens: tokens, speakers: speakers, omitting: candidates)
+            for range in candidates {
+                log("[backchannel] " + String(format: "%.2f-%.2f", tokens[range.lowerBound].start, tokens[range.upperBound - 1].end)
+                    + " " + tokens[range].map(\.text).joined())
+            }
+        }
         // KIKIGAKI_DEBUG_PHRASES=1: フレーズ分割と話者判定の調査用。フレーズごとにトークンの
         // 生の判定(区間からの窓判定)→多数決後の判定と時刻を stderr に出す
         if ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_PHRASES"] != nil {
@@ -178,7 +198,9 @@ final class MeetingSession {
         }
         let duration = Double(result.fedSamples) / 16000
         let meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: duration, utterances: utterances, names: snapshot.names)
-        lastMeeting = meeting
+        if let url = snapshot.markdownURL {
+            archive = MeetingArchive(original: meeting, processed: processed, candidateCount: candidates.count, markdownURL: url)
+        }
 
         snapshot.state = .idle
         snapshot.utterances = utterances
@@ -208,9 +230,8 @@ final class MeetingSession {
         names.set(name, for: slot)
         guard names != snapshot.names else { return }
         snapshot.names = names
-        if var meeting = lastMeeting {
-            meeting.names = names
-            lastMeeting = meeting
+        if archive != nil {
+            archive?.original.names = names
             save()
         }
         emit()
@@ -223,14 +244,10 @@ final class MeetingSession {
     }
 
     private func save() {
-        guard let meeting = lastMeeting, let url = snapshot.markdownURL else { return }
-        do {
-            try MeetingMarkdown.render(meeting).write(to: url, atomically: true, encoding: .utf8)
-            snapshot.message = "保存: \(url.path)"
-        } catch {
-            log("保存に失敗: \(error)")
-            snapshot.message = "保存に失敗: \(error.localizedDescription)"
-        }
+        guard let result = archive?.save() else { return }
+        snapshot.utterances = result.utterances
+        snapshot.message = result.message
+        if !result.succeeded { log(result.message) }
     }
 
     private func tearDown() async {

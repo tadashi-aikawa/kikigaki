@@ -11,6 +11,7 @@ import Testing
         let resolved = ResolvedConfig(config: config, home: home)
         #expect(resolved.outputDir.path == "/Users/test/Documents/KIKIGAKI")
         #expect(resolved.saveRecording == false)
+        #expect(resolved.dropRepeatedBackchannels == false)
         #expect(resolved.toggleRecording == KikigakiConfig.Hotkey(modifiers: ["ctrl", "alt", "cmd"], key: "k"))
         #expect(resolved.togglePause == KikigakiConfig.Hotkey(modifiers: ["ctrl", "alt", "cmd"], key: "p"))
     }
@@ -19,6 +20,7 @@ import Testing
         let toml = """
             outputDir = "~/work/minerva/Notes/meetings"
             saveRecording = true
+            dropRepeatedBackchannels = true
 
             [hotkeys.toggleRecording]
             modifiers = ["cmd", "shift"]
@@ -31,6 +33,7 @@ import Testing
         let resolved = ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: home)
         #expect(resolved.outputDir.path == "/Users/test/work/minerva/Notes/meetings")
         #expect(resolved.saveRecording == true)
+        #expect(resolved.dropRepeatedBackchannels == true)
         #expect(resolved.toggleRecording == KikigakiConfig.Hotkey(modifiers: ["cmd", "shift"], key: "f18"))
         #expect(resolved.togglePause == KikigakiConfig.Hotkey(modifiers: ["cmd", "shift"], key: "f19"))
     }
@@ -100,6 +103,10 @@ import Testing
 
     @Test func TOMLの文法エラーは不正() {
         #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "outputDir = ") }
+    }
+
+    @Test func 相槌省略は真偽値だけを受け付ける() {
+        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "dropRepeatedBackchannels = \"true\"") }
     }
 
     @Test func ファイルがなければ既定設定() throws {

@@ -29,12 +29,15 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     public var outputDir: String?
     /// 録音WAVを Markdown と並べて残すか
     public var saveRecording: Bool?
+    /// 停止時に短い繰り返し相槌を省き、省略前のMarkdownも残す実験機能
+    public var dropRepeatedBackchannels: Bool?
     public var hotkeys: Hotkeys?
 
-    public init(outputDir: String? = nil, saveRecording: Bool? = nil, hotkeys: Hotkeys? = nil) {
+    public init(outputDir: String? = nil, saveRecording: Bool? = nil, hotkeys: Hotkeys? = nil, dropRepeatedBackchannels: Bool? = nil) {
         self.outputDir = outputDir
         self.saveRecording = saveRecording
         self.hotkeys = hotkeys
+        self.dropRepeatedBackchannels = dropRepeatedBackchannels
     }
 }
 
@@ -50,12 +53,14 @@ public struct ResolvedConfig: Equatable, Sendable {
     /// 録音WAVは既定では残さない。通常利用では不要でディスクを食うだけで、要るのはデバッグや
     /// 別エンジンでの再処理のとき(タダシの決定)
     public var saveRecording: Bool
+    public var dropRepeatedBackchannels: Bool
     public var toggleRecording: KikigakiConfig.Hotkey
     public var togglePause: KikigakiConfig.Hotkey
 
     public init(config: KikigakiConfig, home: URL = FileManager.default.homeDirectoryForCurrentUser) {
         outputDir = Self.expand(config.outputDir ?? Self.defaultOutputDir, home: home)
         saveRecording = config.saveRecording ?? false
+        dropRepeatedBackchannels = config.dropRepeatedBackchannels ?? false
         toggleRecording = config.hotkeys?.toggleRecording ?? Self.defaultToggleRecording
         togglePause = config.hotkeys?.togglePause ?? Self.defaultTogglePause
     }
