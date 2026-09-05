@@ -39,16 +39,23 @@ private func tokens(_ texts: [String], phrase: Int = 1, at start: Double = 0, st
 @Suite struct AlignerPhraseRangesTests {
     @Test func フレーズidの変化と無音と句点で切る() {
         var toks = tokens(["あ", "い", "う"], phrase: 1)
-        toks += tokens(["え", "お。", "か"], phrase: 2, at: 0.6)
+        toks += tokens(["え", "お。", "か"], phrase: 2, at: 0.85)  // 結果境界+無音 0.25秒
         toks += tokens(["き"], phrase: 2, at: 2.0)  // 0.35秒以上の無音
         let ranges = Aligner.phraseRanges(toks)
         #expect(ranges == [0..<3, 3..<5, 5..<6, 6..<7])
     }
 
-    @Test func 語の途中で取り残された短い1トークンは次のフレーズへ寄せる() {
+    @Test func 語の途中に落ちた結果境界はフレーズを切らない() {
         var toks = tokens(["ま"], phrase: 1)
         toks += tokens(["あ", "結局"], phrase: 2, at: 0.25)  // 無音 0.05秒
         #expect(Aligner.phraseRanges(toks) == [0..<3])
+    }
+
+    @Test func 長い1文字でも結果境界に無音がなければ切らない() {
+        // 「読」が0.6秒あっても、直後 0.05秒で「みやすい」が続くなら同じフレーズ
+        var toks = tokens(["読"], phrase: 1, step: 0.6)
+        toks += tokens(["み", "や", "す", "い"], phrase: 2, at: 0.65)
+        #expect(Aligner.phraseRanges(toks) == [0..<5])
     }
 
     @Test func 空のトークン列は空() {
@@ -59,6 +66,30 @@ private func tokens(_ texts: [String], phrase: Int = 1, at start: Double = 0, st
         var toks = tokens(["はい。"], phrase: 1)
         toks += tokens(["そ", "れ", "で"], phrase: 1, at: 0.25)  // 無音 0.05秒だが文末
         #expect(Aligner.phraseRanges(toks) == [0..<1, 1..<4])
+    }
+}
+
+@Suite struct AlignerPunctuationTests {
+    @Test func 句点だけのトークンは直前の話者に付く() {
+        // 話者Bの「みたいなね」の句点が次の話者Aの頭に食い込んでいる
+        var toks = tokens(Array(repeating: "x", count: 10))  // 0〜2.0秒
+        toks += tokens(["。"], at: 2.0, step: 0.06)
+        toks += tokens(Array(repeating: "y", count: 10), at: 2.06)
+        let segments = [
+            SpeakerSegment(speaker: 1, start: 0, end: 1.95),
+            SpeakerSegment(speaker: 0, start: 1.95, end: 5.0),
+        ]
+        let result = Aligner.speakers(for: toks, segments: segments)
+        #expect(result[10] == 1)
+        #expect(result[9] == 1)
+        #expect(result[11] == 0)
+    }
+
+    @Test func 句読点の判定() {
+        #expect(Aligner.isPunctuationOnly(TimedToken(text: "。", phraseId: 1, start: 0, end: 1)))
+        #expect(Aligner.isPunctuationOnly(TimedToken(text: " 、", phraseId: 1, start: 0, end: 1)))
+        #expect(!Aligner.isPunctuationOnly(TimedToken(text: "ね。", phraseId: 1, start: 0, end: 1)))
+        #expect(!Aligner.isPunctuationOnly(TimedToken(text: " ", phraseId: 1, start: 0, end: 1)))
     }
 }
 

@@ -69,44 +69,46 @@ public enum Aligner {
                 i = j
             }
         }
+        // 句読点だけのトークンは直前のトークンの話者に付ける(凍結済みは触らない)。句点は直前の文の
+        // 一部で、時刻が次の発話の頭に食い込むと別話者に判定され「。」だけの行になる(実録で確認)
+        for i in speakers.indices where i >= frozen.count && i > 0 && isPunctuationOnly(tokens[i]) {
+            speakers[i] = speakers[i - 1]
+        }
         return speakers
     }
 
-    /// フレーズの切れ目: エンジンのフレーズ id が変わる / 直前との間が `gapSeconds` 以上空く / 直前が文末の句点
+    /// 句読点・空白だけのトークンか
+    static func isPunctuationOnly(_ token: TimedToken) -> Bool {
+        let trimmed = token.text.trimmingCharacters(in: .whitespaces)
+        return !trimmed.isEmpty && trimmed.allSatisfy { "。、！？!?,.".contains($0) }
+    }
+
+    /// エンジンの結果境界(phraseId の変化)をフレーズの切れ目として数える最小の無音(秒)。
+    /// Apple の確定結果の境界は語の途中にも落ちる(「読 / みやすい」「わ / かりました」)。無音を
+    /// ほぼ挟まない境界は発話の区切りではないので、フレーズを切らずに多数決へ含める。
+    /// プロトでは「0.4秒未満の1トークンだけ次へ寄せる」救済だったが、1文字が0.4秒を超える
+    /// 喋り方で救済から漏れて1文字の行が残った(タダシの実録で確認)
+    public static let resultBoundaryGapSeconds = 0.2
+
+    /// フレーズの切れ目: 直前との間が `gapSeconds` 以上空く / 直前が文末の句点 /
+    /// エンジンのフレーズ id が変わり、かつ直前との間が `resultBoundaryGapSeconds` 以上空く
     public static func phraseRanges(_ tokens: [TimedToken], gapSeconds: Double = phraseGapSeconds) -> [Range<Int>] {
         var ranges: [Range<Int>] = []
         var start = 0
         for i in 1..<max(tokens.count, 1) {
             let prev = tokens[i - 1]
+            let gap = tokens[i].start - prev.end
             let boundary =
-                tokens[i].phraseId != prev.phraseId
-                || tokens[i].start - prev.end >= gapSeconds
+                gap >= gapSeconds
                 || endsSentence(prev)
+                || (tokens[i].phraseId != prev.phraseId && gap >= resultBoundaryGapSeconds)
             if boundary {
                 ranges.append(start..<i)
                 start = i
             }
         }
         if start < tokens.count { ranges.append(start..<tokens.count) }
-        // エンジンの結果境界が語の途中に落ちて1トークンだけ取り残されることがある(「ま / あ結局」)。
-        // 短い1トークンのフレーズは、無音を挟まない次のフレーズへ寄せる。ただし句点で終わる
-        // トークンは文の終わりなので寄せない(「はい。」の直後に別話者が続くと多数決で塗り替わる)
-        var merged: [Range<Int>] = []
-        var i = 0
-        while i < ranges.count {
-            var r = ranges[i]
-            while r.count == 1, i + 1 < ranges.count,
-                tokens[r.lowerBound].duration < 0.4,
-                !endsSentence(tokens[r.upperBound - 1]),
-                tokens[ranges[i + 1].lowerBound].start - tokens[r.upperBound - 1].end < 0.2
-            {
-                i += 1
-                r = r.lowerBound..<ranges[i].upperBound
-            }
-            merged.append(r)
-            i += 1
-        }
-        return merged
+        return ranges
     }
 
     /// 文末の句点・感嘆符・疑問符で終わるトークンか
