@@ -35,12 +35,6 @@ import Testing
         #expect(names.customName(for: 0) == nil)
     }
 
-    @Test func resetで全部既定に戻る() {
-        var names = SpeakerNames([0: "山田", 2: "鈴木"])
-        names.reset()
-        #expect(names == SpeakerNames())
-    }
-
     @Test func 既定名の確定はカスタム名を残さない() {
         for slot in 0..<SpeakerNames.slotCount {
             let defaultName = SpeakerNames.defaultName(for: slot)

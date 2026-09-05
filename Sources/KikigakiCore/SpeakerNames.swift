@@ -56,10 +56,4 @@ public struct SpeakerNames: Equatable, Sendable {
         let name = Self.normalized(name)
         return (0..<Self.slotCount).first { $0 != slot && self.name(for: $0) == name }
     }
-
-    /// 全枡を既定に戻す(新しい会議を始めるとき。Sortformer のスロットは会議ごとに振り直されるため、
-    /// 前の会議の名前を引き継ぐと別人に前の名前が付く)
-    public mutating func reset() {
-        names = [:]
-    }
 }

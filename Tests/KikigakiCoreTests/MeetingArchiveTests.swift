@@ -113,6 +113,17 @@ private func temporaryDirectory() throws -> URL {
 }
 
 @Suite struct MeetingReservationTests {
+    @Test func 予約名は日付と時刻の基底名で録音も同じ基底名() throws {
+        let dir = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let tokyo = TimeZone(identifier: "Asia/Tokyo")!
+        // 2026-09-05 12:40 JST
+        let startedAt = Date(timeIntervalSince1970: 1_788_579_600)
+        let url = try MeetingFiles.reserveMarkdownURL(in: dir, startedAt: startedAt, timeZone: tokyo)
+        #expect(url.path == dir.appendingPathComponent("2026-09-05_1240.md").path)
+        #expect(MeetingFiles.wavURL(for: url).path == dir.appendingPathComponent("2026-09-05_1240.wav").path)
+    }
+
     @Test(arguments: ["md", "raw.md", "wav"])
     func どの保存物が存在していてもその基底名を再利用しない(_ ext: String) throws {
         let dir = try temporaryDirectory()

@@ -42,14 +42,3 @@ import Testing
         #expect(text.hasSuffix("## 書き起こし\n\n"))
     }
 }
-
-@Suite struct MeetingFilesTests {
-    @Test func 基底名は日付と時刻() {
-        let tokyo = TimeZone(identifier: "Asia/Tokyo")!
-        let startedAt = Date(timeIntervalSince1970: 1_788_579_600)
-        #expect(MeetingFiles.baseName(startedAt: startedAt, timeZone: tokyo) == "2026-09-05_1240")
-        let dir = URL(fileURLWithPath: "/tmp/out")
-        #expect(MeetingFiles.markdownURL(in: dir, startedAt: startedAt, timeZone: tokyo).path == "/tmp/out/2026-09-05_1240.md")
-        #expect(MeetingFiles.recordingURL(in: dir, startedAt: startedAt, timeZone: tokyo).path == "/tmp/out/2026-09-05_1240.wav")
-    }
-}

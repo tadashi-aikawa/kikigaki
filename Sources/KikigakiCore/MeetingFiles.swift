@@ -40,12 +40,4 @@ public enum MeetingFiles {
         f.dateFormat = "yyyy-MM-dd_HHmm"
         return f.string(from: startedAt)
     }
-
-    public static func markdownURL(in directory: URL, startedAt: Date, timeZone: TimeZone = .current) -> URL {
-        directory.appendingPathComponent(baseName(startedAt: startedAt, timeZone: timeZone) + ".md")
-    }
-
-    public static func recordingURL(in directory: URL, startedAt: Date, timeZone: TimeZone = .current) -> URL {
-        directory.appendingPathComponent(baseName(startedAt: startedAt, timeZone: timeZone) + ".wav")
-    }
 }
