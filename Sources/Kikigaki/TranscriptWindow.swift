@@ -16,6 +16,8 @@ private enum Washi {
     static let tentative = color(0x4A443D)
     static let red = color(0xAA1405)
     static let brightRed = color(0xCF321F)
+    static let searchMatch = color(0xE09C3C).withAlphaComponent(0.25)
+    static let searchCurrent = color(0xE09C3C).withAlphaComponent(0.6)
     struct SpeakerColor { let background: NSColor; let foreground: NSColor }
     static let slots = [SpeakerColor(background: red, foreground: paper),
                         SpeakerColor(background: color(0xC4801F), foreground: ink),
@@ -158,6 +160,12 @@ private final class TranscriptRow: NSView, DocumentRow {
     private var displayedTimeline: MeetingTimeline?
     private var measuredWidth: CGFloat = -1
     private var measuredHeight: CGFloat = 0
+    private var searchStyle: SearchStyle?
+    private struct SearchStyle: Equatable {
+        let name: String; let text: String
+        let nameRanges: [NSRange]; let textRanges: [NSRange]
+        let currentName: NSRange?; let currentText: NSRange?
+    }
     private let tentative: Bool
 
     init(tentative: Bool = false) {
@@ -210,6 +218,7 @@ private final class TranscriptRow: NSView, DocumentRow {
         utterance = value
         displayedName = name
         displayedTimeline = timeline
+        searchStyle = nil
         nameLabel.stringValue = name
         timeLabel.stringValue = timeline.clock(at: value.start)
         timeLabel.toolTip = TranscriptRenderer.clock(value.start)
@@ -225,6 +234,19 @@ private final class TranscriptRow: NSView, DocumentRow {
         nameLabel.stringValue = "聞き取り中…"
         timeLabel.stringValue = ""
         setBody(text)
+    }
+    func markSearch(nameRanges: [NSRange], textRanges: [NSRange], currentName: NSRange?, currentText: NSRange?) {
+        let style = SearchStyle(name: nameLabel.stringValue, text: body.stringValue, nameRanges: nameRanges,
+                                textRanges: textRanges, currentName: currentName, currentText: currentText)
+        guard searchStyle != style else { return }
+        searchStyle = style
+        for (label, ranges, current) in [(nameLabel, nameRanges, currentName), (body, textRanges, currentText)] {
+            let value = NSMutableAttributedString(attributedString: label.attributedStringValue)
+            value.removeAttribute(.backgroundColor, range: NSRange(location: 0, length: value.length))
+            for range in ranges { value.addAttribute(.backgroundColor, value: Washi.searchMatch, range: range) }
+            if let current { value.addAttribute(.backgroundColor, value: Washi.searchCurrent, range: current) }
+            label.attributedStringValue = value
+        }
     }
     private func setBody(_ text: String) {
         guard body.stringValue != text else { return }
@@ -307,6 +329,7 @@ private final class CopyBoundary: NSView, DocumentRow {
 /// 行ビューを再利用する。再配置は高さの加算だけで、本文の計測は変更行だけに限る。
 private final class TranscriptDocument: NSView {
     override var isFlipped: Bool { true }
+    var followsBottom = true
     var rows: [any DocumentRow] = []
     private var layingOut = false
     struct Anchor {
@@ -347,7 +370,7 @@ private final class TranscriptDocument: NSView {
         }
         setFrameSize(NSSize(width: width, height: max(scroll.contentSize.height, y + 8)))
         let surviving = anchor.candidates.first { $0.0.superview === self }
-        let target = anchor.atBottom ? frame.height - scroll.contentSize.height
+        let target = anchor.atBottom && followsBottom ? frame.height - scroll.contentSize.height
             : surviving.map { $0.0.frame.minY - $0.1 } ?? anchor.y
         scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, min(target, frame.height - scroll.contentSize.height))))
         scroll.reflectScrolledClipView(scroll.contentView)
@@ -355,7 +378,7 @@ private final class TranscriptDocument: NSView {
 }
 
 @MainActor
-final class TranscriptWindowController: NSWindowController {
+final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegate {
     var onRename: ((Int, String) -> Void)?
     var onStartStop: (() -> Void)?
     var onPauseResume: (() -> Void)?
@@ -383,6 +406,20 @@ final class TranscriptWindowController: NSWindowController {
     private var snapshot = SessionSnapshot()
     private let avatars = AvatarStore()
     private var renamePopover: SpeakerPopover?
+    private let searchField = NSSearchField()
+    private let searchCount = Washi.label(color: Washi.muted)
+    private let searchBar = NSStackView()
+    private let searchPrevious = NSButton(title: "↑", target: nil, action: nil)
+    private let searchNext = NSButton(title: "↓", target: nil, action: nil)
+    private var searchOpen = false
+    private struct SearchHit: Equatable {
+        let row: RowID
+        let rowIndex: Int
+        let inName: Bool
+        let range: NSRange
+    }
+    private var searchHits: [SearchHit] = []
+    private var currentHit: Int?
     // 開始時刻が重複しても落とさず、同時刻の出現順で別ビューとして扱う。
     private struct RowID: Hashable { let start: Double; let occurrence: Int }
     private var rows: [RowID: TranscriptRow] = [:]
@@ -457,6 +494,7 @@ final class TranscriptWindowController: NSWindowController {
         emptyView.isHidden = !value.utterances.isEmpty || value.tentativeText != nil
         emptyLabel.stringValue = value.state == .idle ? "録音を開始すると、会話がここに表示されます。" : "発言を待っています…"
         updateRows(previous: previous)
+        refreshSearch(reset: previous.timeline.startedAt != value.timeline.startedAt, reveal: false)
     }
 
     private func updateRows(previous: SessionSnapshot) {
@@ -573,7 +611,128 @@ final class TranscriptWindowController: NSWindowController {
         ])
         let footer = column([footerTitle, buttons, notification], spacing: 8, inset: 16)
         Washi.surface(footer)
-        return column([header, separator(), body, separator(), footer], spacing: 0, inset: 0)
+        searchField.placeholderString = "会話を検索"
+        searchField.setAccessibilityLabel("会話を検索")
+        searchField.sendsSearchStringImmediately = true
+        searchField.delegate = self
+        searchField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        searchCount.widthAnchor.constraint(equalToConstant: 90).isActive = true
+        configure(searchPrevious, #selector(findPrevious(_:)))
+        configure(searchNext, #selector(findNext(_:)))
+        searchPrevious.toolTip = "前を検索 (Shift+Return)"
+        searchNext.toolTip = "次を検索 (Return)"
+        searchPrevious.setAccessibilityLabel("前を検索")
+        searchNext.setAccessibilityLabel("次を検索")
+        let close = NSButton(title: "完了", target: self, action: #selector(closeSearch(_:)))
+        close.bezelStyle = .rounded
+        searchBar.orientation = .horizontal
+        searchBar.alignment = .centerY
+        searchBar.spacing = 8
+        searchBar.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        for view in [searchField, searchCount, searchPrevious, searchNext, close] { searchBar.addArrangedSubview(view) }
+        Washi.surface(searchBar)
+        searchBar.isHidden = true
+        return column([header, searchBar, separator(), body, separator(), footer], spacing: 0, inset: 0)
+    }
+
+    @objc func showSearch(_ sender: Any?) {
+        let anchor = transcriptDocument.anchor()
+        searchOpen = true
+        transcriptDocument.followsBottom = false
+        searchBar.isHidden = false
+        window?.contentView?.layoutSubtreeIfNeeded()
+        transcriptDocument.reflow(anchor: anchor)
+        window?.makeFirstResponder(searchField)
+        searchField.selectText(nil)
+        refreshSearch(reset: false, reveal: true)
+    }
+    @objc func closeSearch(_ sender: Any?) {
+        guard searchOpen else { return }
+        let anchor = transcriptDocument.anchor()
+        searchOpen = false
+        searchBar.isHidden = true
+        window?.makeFirstResponder(nil)
+        window?.contentView?.layoutSubtreeIfNeeded()
+        transcriptDocument.followsBottom = true
+        transcriptDocument.reflow(anchor: anchor)
+        refreshSearch(reset: true, reveal: false)
+        scrolled()
+    }
+    @objc func findNext(_ sender: Any?) { moveSearch(by: 1) }
+    @objc func findPrevious(_ sender: Any?) { moveSearch(by: -1) }
+    private func moveSearch(by direction: Int) {
+        if !searchOpen { showSearch(nil); return }
+        guard !searchHits.isEmpty else { return }
+        currentHit = ((currentHit ?? 0) + direction + searchHits.count) % searchHits.count
+        paintSearch()
+        revealCurrentHit()
+    }
+    func controlTextDidChange(_ notification: Notification) {
+        guard notification.object as? NSSearchField === searchField else { return }
+        refreshSearch(reset: true, reveal: true)
+    }
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === searchField else { return false }
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) { closeSearch(nil); return true }
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) || commandSelector == #selector(NSResponder.insertLineBreak(_:))
+            || commandSelector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
+            moveSearch(by: NSApp.currentEvent?.modifierFlags.contains(.shift) == true ? -1 : 1)
+            return true
+        }
+        return false
+    }
+    override func cancelOperation(_ sender: Any?) {
+        if searchOpen { closeSearch(sender) } else { super.cancelOperation(sender) }
+    }
+    private func refreshSearch(reset: Bool, reveal: Bool) {
+        let previous = currentHit.flatMap { searchHits.indices.contains($0) ? searchHits[$0] : nil }
+        searchHits = []
+        if searchOpen, !searchField.stringValue.isEmpty {
+            var occurrences: [Double: Int] = [:]
+            for (index, utterance) in snapshot.utterances.enumerated() {
+                let occurrence = occurrences[utterance.start, default: 0]
+                occurrences[utterance.start] = occurrence + 1
+                let id = RowID(start: utterance.start, occurrence: occurrence)
+                for (inName, text) in [(true, snapshot.names.name(for: utterance.speaker)), (false, utterance.text)] {
+                    for range in TranscriptSearch.ranges(in: text, query: searchField.stringValue) {
+                        searchHits.append(SearchHit(row: id, rowIndex: index, inName: inName, range: NSRange(range, in: text)))
+                    }
+                }
+            }
+        }
+        if searchHits.isEmpty { currentHit = nil }
+        else if !reset, let previous {
+            let sameRow = searchHits.indices.filter { searchHits[$0].row == previous.row }
+            currentHit = sameRow.min { a, b in
+                let left = searchHits[a], right = searchHits[b]
+                if (left.inName == previous.inName) != (right.inName == previous.inName) { return left.inName == previous.inName }
+                return abs(left.range.location - previous.range.location) < abs(right.range.location - previous.range.location)
+            } ?? searchHits.indices.min { abs(searchHits[$0].rowIndex - previous.rowIndex) < abs(searchHits[$1].rowIndex - previous.rowIndex) }
+        } else { currentHit = 0 }
+        paintSearch()
+        let rowDisappeared = previous.map { old in !searchHits.contains { $0.row == old.row } } ?? false
+        if reveal || rowDisappeared || (previous == nil && currentHit != nil) { revealCurrentHit() }
+    }
+    private func paintSearch() {
+        let current = currentHit.map { searchHits[$0] }
+        let grouped = Dictionary(grouping: searchHits, by: \.row)
+        for (id, row) in rows {
+            let hits = grouped[id] ?? []
+            row.markSearch(nameRanges: hits.filter(\.inName).map(\.range), textRanges: hits.filter { !$0.inName }.map(\.range),
+                           currentName: current?.row == id && current?.inName == true ? current?.range : nil,
+                           currentText: current?.row == id && current?.inName == false ? current?.range : nil)
+        }
+        searchCount.stringValue = currentHit.map { "\($0 + 1) / \(searchHits.count)" } ?? (searchField.stringValue.isEmpty ? "" : "一致なし")
+        searchPrevious.isEnabled = !searchHits.isEmpty
+        searchNext.isEnabled = !searchHits.isEmpty
+    }
+    private func revealCurrentHit() {
+        guard let currentHit, let row = rows[searchHits[currentHit].row] else { return }
+        let clip = scrollView.contentView.bounds
+        if row.frame.minY < clip.minY || row.frame.maxY > clip.maxY {
+            transcriptDocument.scroll(NSPoint(x: 0, y: max(0, min(row.frame.minY - 8, transcriptDocument.frame.height - clip.height))))
+        }
+        scrolled()
     }
     private func symbol(_ button: NSButton, name: String, title: String) {
         // Apple CoreGlyphsのname_availability.plistとNSImage APIで存在を確認した名称。
