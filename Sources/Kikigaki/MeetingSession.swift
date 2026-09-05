@@ -187,6 +187,9 @@ final class MeetingSession {
         // KIKIGAKI_DEBUG_PHRASES=1: フレーズ分割と話者判定の調査用。フレーズごとにトークンの
         // 生の判定(区間からの窓判定)→多数決後の判定と時刻を stderr に出す
         if ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_PHRASES"] != nil {
+            for segment in segments.sorted(by: { $0.start < $1.start }) {
+                log("[segment] \(segment.speaker) " + String(format: "%.3f-%.3f", segment.start, segment.end))
+            }
             let raw = tokens.map { Aligner.speaker(at: $0.midpoint, segments: segments) }
             for r in Aligner.phraseRanges(tokens) {
                 let desc = r.map { i in

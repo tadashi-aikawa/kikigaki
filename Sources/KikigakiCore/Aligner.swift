@@ -41,7 +41,8 @@ public enum Aligner {
     /// 各トークンの話者を決める。`frozen` に入っている先頭部分はそのまま使い(確定済みの行を後から
     /// 塗り替えないため)、残りだけ区間から判定する。
     ///
-    /// 判定は2段階。まずトークンごとに区間から引き、次にフレーズ単位で多数決を取って揃える。
+    /// トークンごとに区間から引き、語内の境界を補正してからフレーズ単位で揃える。
+    /// フレーズの多数派は語内補正前に固定する。
     /// トークン単位のままだと、相槌の重なりや話者区間の数百msのずれが語の途中に切れ目を作る
     /// (「い / や本当に」のような分断。タダシの実録で確認)。フレーズの中で別話者が `keepIslandSeconds`
     /// 以上続く塊と、語境界で完結する短い1語・文末の塊は独立させる
@@ -62,27 +63,59 @@ public enum Aligner {
                                gapSeconds: Double = phraseGapSeconds, keepIslandSeconds: Double = keepIslandSeconds) -> [Int?] {
         var speakers = initial
         for phrase in phraseRanges(tokens, gapSeconds: gapSeconds) {
-            var words: WordBoundaries?
+            let words = WordBoundaries(tokens: Array(tokens[phrase]))
+            let lexicalRanges = words.tokenRanges.map { ($0.lowerBound + phrase.lowerBound)..<($0.upperBound + phrase.lowerBound) }
             // トークンの長さで重み付けした多数決
             var weight: [Int: Double] = [:]
             for i in phrase {
                 if let s = speakers[i] { weight[s, default: 0] += max(tokens[i].duration, 0.04) }
             }
             guard let major = argmax(weight) else { continue }
+            // 多数派は補正前の時間重みで固定する。長い語頭を動かしてもフレーズ全体を反転させない。
+            var correctedWords: [Range<Int>] = []
+            for word in lexicalRanges {
+                guard word.lowerBound >= frozenCount,
+                      word.allSatisfy({ initial[$0] != nil && tokens[$0].duration.isFinite && tokens[$0].duration > 0 }) else { continue }
+                var counts: [Int: Int] = [:]
+                for k in word {
+                    counts[initial[k]!, default: 0] += tokens[k].text.filter { $0.isLetter || $0.isNumber }.count
+                }
+                let total = counts.values.reduce(0, +)
+                guard let winner = counts.first(where: { $0.value * 2 > total })?.key,
+                      word.contains(where: { initial[$0] != winner }) else { continue }
+                // ASRの語頭は前の発話や無音を含んで長くなる。ここだけは時間ではなく文字数を使う。
+                // 同点は語末などへ決め打ちしない。元の境界を残す。
+                for k in word { speakers[k] = winner }
+                correctedWords.append(word)
+            }
             // 多数派と違う短い塊を多数派に揃える(凍結済みは触らない)
             var i = phrase.lowerBound
             while i < phrase.upperBound {
                 var j = i
                 while j < phrase.upperBound && speakers[j] == speakers[i] { j += 1 }
                 if speakers[i] != major {
+                    let coreWords = lexicalRanges.filter { $0.lowerBound >= i && $0.upperBound <= j }
+                    // 戻す側の隣も多数派である場合だけ端を戻す。第三話者への交代を多数派で埋めない。
+                    if speakers[i] != nil, coreWords.count >= 2, let first = coreWords.first, let last = coreWords.last,
+                       Self.hasShortRepairedEdge(first: first, last: last, correctedWords: correctedWords,
+                                                 initial: initial, tokens: tokens, phrase: phrase,
+                                                 speaker: speakers[i]!, limit: keepIslandSeconds),
+                       (first.lowerBound == i || (i > phrase.lowerBound && speakers[i - 1] == major)),
+                       (last.upperBound == j || (j < phrase.upperBound && speakers[j] == major)) {
+                        // 「ゃあ…そ」→「じゃあ…そ」と語頭を修復できた場合だけ、
+                        // 完全な語の核を残し、末尾の「そ」のような部分語を周囲へ戻す。
+                        for k in i..<first.lowerBound where k >= frozenCount { speakers[k] = major }
+                        for k in last.upperBound..<j where k >= frozenCount { speakers[k] = major }
+                        i = j
+                        continue
+                    }
                     let span = tokens[j - 1].end - tokens[i].start
                     if span < keepIslandSeconds {
                         // 「すごいね。」は0.84秒でも別話者の返答だった。短さだけで吸収せず、
-                        // 語境界で完結する塊は残す。「読」「ゃあ…そ」のような語の途中は従来通り。
+                        // 語境界で完結する塊は残す。上の境界補正でも完結しない部分語は従来通り。
                         if speakers[i] != nil {
-                            if words == nil { words = WordBoundaries(tokens: Array(tokens[phrase])) }
                             let local = (i - phrase.lowerBound)..<(j - phrase.lowerBound)
-                            if words!.containsWholeWords(local) { i = j; continue }
+                            if words.containsWholeWords(local) { i = j; continue }
                         }
                         for k in i..<j where k >= frozenCount { speakers[k] = major }
                     }
@@ -96,6 +129,24 @@ public enum Aligner {
             speakers[i] = speakers[i - 1]
         }
         return speakers
+    }
+
+    private static func hasShortRepairedEdge(first: Range<Int>, last: Range<Int>, correctedWords: [Range<Int>],
+                                             initial: [Int?], tokens: [TimedToken], phrase: Range<Int>,
+                                             speaker: Int, limit: Double) -> Bool {
+        for word in correctedWords where word == first || word == last {
+            guard let anchor = word.first(where: { initial[$0] == speaker }) else { continue }
+            var start = anchor, end = anchor + 1
+            while start > phrase.lowerBound && initial[start - 1] == speaker { start -= 1 }
+            while end < phrase.upperBound && initial[end] == speaker { end += 1 }
+            let movedStart = word == first && start > first.lowerBound && start < first.upperBound
+            let movedEnd = word == last && end > last.lowerBound && end < last.upperBound
+            // 元から長い島や、島の内部だけの補正で複数語を新しく保護しない。
+            // 「じ」を取り戻すと1.5秒を超えるため、長さは補正前の連続raw島で判定する。
+            if (movedStart || movedEnd), start < first.upperBound, end > last.lowerBound,
+               tokens[end - 1].end - tokens[start].start < limit { return true }
+        }
+        return false
     }
 
     /// 句読点・空白だけのトークンか

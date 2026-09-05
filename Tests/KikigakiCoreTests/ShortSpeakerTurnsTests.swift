@@ -22,7 +22,7 @@ import Testing
                 == ["一応経過報告させていただきますと", "はい", "それから毎日続いてまして", "すごいね。"])
     }
 
-    @Test func 実録の語境界に合わないゃあからそまでは救済しない() {
+    @Test func 複数語を含むASRトークンの境界は補完しない() {
         let texts = ["11日目じ", "ゃあもう10分の1そ", "うなんですよ。"]
         let times = [187.26, 188.76, 190.20, 190.80]
         let tokens = texts.enumerated().map { TimedToken(text: $0.element, phraseId: 1220, start: times[$0.offset], end: times[$0.offset + 1]) }

@@ -9,6 +9,21 @@ struct WordBoundaries {
     private let starts: Set<Int>
     private let ends: Set<Int>
     private let words: Set<Range<Int>>
+    /// 語の両端がASRトークンの端にも一致する場合だけ返す。混在トークンは分割しない。
+    var tokenRanges: [Range<Int>] {
+        var starts: [Int: Int] = [:]
+        var ends: [Int: Int] = [:]
+        for i in tokens.indices {
+            let text = tokens[i].text
+            guard text.contains(where: { $0.isLetter || $0.isNumber }) else { continue }
+            starts[offsets[i] + text.prefix(while: Self.ignored).utf16.count] = i
+            ends[offsets[i + 1] - String(text.reversed().prefix(while: Self.ignored)).utf16.count] = i + 1
+        }
+        return words.compactMap { word in
+            guard let start = starts[word.lowerBound], let end = ends[word.upperBound], start < end else { return nil }
+            return start..<end
+        }.sorted { $0.lowerBound < $1.lowerBound }
+    }
 
     init(tokens: [TimedToken]) {
         self.tokens = tokens
