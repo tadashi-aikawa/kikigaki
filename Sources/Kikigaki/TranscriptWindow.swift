@@ -186,6 +186,7 @@ private final class TranscriptRow: NSView, DocumentRow {
         body.lineBreakMode = .byWordWrapping
         timeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         nameLabel.textColor = tentative ? Washi.muted : Washi.ink
+        nameLabel.lineBreakMode = .byTruncatingTail
         if tentative { nameLabel.font = .systemFont(ofSize: 12) }
         hint.isHidden = !tentative
         for view in [avatar, nameLabel, timeLabel, hint, body] { addSubview(view) }
@@ -273,7 +274,8 @@ private final class TranscriptRow: NSView, DocumentRow {
         shade.frame = NSRect(x: 12, y: 2, width: max(0, bounds.width - 24), height: bounds.height - 4)
         flash.frame = shade.frame
         avatar.frame = NSRect(x: 20, y: 8, width: 25, height: 26)
-        let nameWidth = min(nameLabel.intrinsicContentSize.width, max(70, bounds.width - 220))
+        // 太字の字形が計測幅の右端へ届くため、端数の丸めと描画の余白を確保する。
+        let nameWidth = min(ceil(nameLabel.intrinsicContentSize.width) + 4, max(70, bounds.width - 220))
         nameLabel.frame = NSRect(x: 54, y: 8, width: nameWidth, height: 18)
         speakerButton.frame = NSRect(x: 18, y: 5, width: nameWidth + 40, height: 29)
         timeLabel.frame = NSRect(x: 54 + nameWidth + 12, y: 8, width: 62, height: 18)
