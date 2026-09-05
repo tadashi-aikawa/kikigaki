@@ -7,7 +7,8 @@ public enum Aligner {
     public static let utteranceGapSeconds = 1.0
     /// フレーズを切る無音の長さ(秒)
     public static let phraseGapSeconds = 0.35
-    /// フレーズ内で別話者がこの長さ以上続く塊は、相槌・割り込みとして多数決から独立させる(秒)。
+    /// フレーズ内で別話者がこの長さ以上続く塊は、多数決から独立させる(秒)。
+    /// より短くても、語境界で完結する1語か文末までの塊は独立させる。
     /// Apple のトークンは単語級で1個でも 0.5 秒を超えるため、本当の発話交代とみなせる 1.5 秒に
     /// しないと語の分断が残る(実測)
     public static let keepIslandSeconds = 1.5
@@ -43,7 +44,7 @@ public enum Aligner {
     /// 判定は2段階。まずトークンごとに区間から引き、次にフレーズ単位で多数決を取って揃える。
     /// トークン単位のままだと、相槌の重なりや話者区間の数百msのずれが語の途中に切れ目を作る
     /// (「い / や本当に」のような分断。タダシの実録で確認)。フレーズの中で別話者が `keepIslandSeconds`
-    /// 以上続く塊だけは相槌・割り込みとして独立させる
+    /// 以上続く塊と、語境界で完結する短い1語・文末の塊は独立させる
     public static func speakers(
         for tokens: [TimedToken], segments: [SpeakerSegment], frozen: [Int?] = [],
         gapSeconds: Double = phraseGapSeconds, keepIslandSeconds: Double = keepIslandSeconds
@@ -52,7 +53,16 @@ public enum Aligner {
         for tok in tokens.dropFirst(speakers.count) {
             speakers.append(speaker(at: tok.midpoint, segments: segments))
         }
+        return smoothSpeakers(tokens: tokens, speakers: speakers, frozenCount: frozen.count,
+                              gapSeconds: gapSeconds, keepIslandSeconds: keepIslandSeconds)
+    }
+
+    /// 窓判定の観測値を回帰テストへ渡せるよう、音声区間との突き合わせと分ける。
+    static func smoothSpeakers(tokens: [TimedToken], speakers initial: [Int?], frozenCount: Int = 0,
+                               gapSeconds: Double = phraseGapSeconds, keepIslandSeconds: Double = keepIslandSeconds) -> [Int?] {
+        var speakers = initial
         for phrase in phraseRanges(tokens, gapSeconds: gapSeconds) {
+            var words: WordBoundaries?
             // トークンの長さで重み付けした多数決
             var weight: [Int: Double] = [:]
             for i in phrase {
@@ -67,7 +77,14 @@ public enum Aligner {
                 if speakers[i] != major {
                     let span = tokens[j - 1].end - tokens[i].start
                     if span < keepIslandSeconds {
-                        for k in i..<j where k >= frozen.count { speakers[k] = major }
+                        // 「すごいね。」は0.84秒でも別話者の返答だった。短さだけで吸収せず、
+                        // 語境界で完結する塊は残す。「読」「ゃあ…そ」のような語の途中は従来通り。
+                        if speakers[i] != nil {
+                            if words == nil { words = WordBoundaries(tokens: Array(tokens[phrase])) }
+                            let local = (i - phrase.lowerBound)..<(j - phrase.lowerBound)
+                            if words!.containsWholeWords(local) { i = j; continue }
+                        }
+                        for k in i..<j where k >= frozenCount { speakers[k] = major }
                     }
                 }
                 i = j
@@ -75,7 +92,7 @@ public enum Aligner {
         }
         // 句読点だけのトークンは直前のトークンの話者に付ける(凍結済みは触らない)。句点は直前の文の
         // 一部で、時刻が次の発話の頭に食い込むと別話者に判定され「。」だけの行になる(実録で確認)
-        for i in speakers.indices where i >= frozen.count && i > 0 && isPunctuationOnly(tokens[i]) {
+        for i in speakers.indices where i >= frozenCount && i > 0 && isPunctuationOnly(tokens[i]) {
             speakers[i] = speakers[i - 1]
         }
         return speakers

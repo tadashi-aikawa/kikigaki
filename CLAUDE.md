@@ -10,8 +10,9 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 
 ## リポジトリ構成
 
-- `Sources/KikigakiCore/`: 純粋ロジック層 (Foundation + TOMLKit のみ。ユニットテストの主戦場)
+- `Sources/KikigakiCore/`: ロジック層 (Foundation + NaturalLanguage + TOMLKit。ユニットテストの主戦場)
   - `Aligner.swift`: トークン時刻と話者区間の突き合わせ。フレーズ単位の多数決・島の扱い・決定的な同点処理
+  - `WordBoundaries.swift`: 日本語の語境界を確認し、短くても語として完結した返答を多数派へ吸収しない
   - `SpeakerFreeze.swift`: 文字起こしの確定結果に属する、8秒より古いトークンの話者判定を凍結。暫定結果は凍結しない
   - `RepeatedBackchannels.swift` / `MeetingArchive.swift`: 停止時の繰り返し相槌の省略と、省略前後の保存。原文が保存できないときは省略しない
   - `SpeakerNames.swift` / `TranscriptRenderer.swift` / `MeetingMarkdown.swift` / `MeetingFiles.swift`: 話者名の枡・行の整形・Markdown 生成・ファイル命名
@@ -100,6 +101,8 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - 環境変数 `KIKIGAKI_DEBUG_PHRASES=1`: 停止時のフレーズごとに、トークンの時刻と窓判定から多数決後への話者の変化を stderr に出す
 
 ### 表示品質の検証
+
+短い別話者区間は通常、フレーズの多数派へ揃えます。ただし語境界で完結し、文字・数字が2文字以上ある1語、または文末句読点まで含む区間は元の判定を残します。「はい」「すごいね。」を吸収しないための条件であり、話者の正しさを保証するものではありません。詳細は [短い返答の話者を残す条件](docs/short-speaker-turns.md) を参照してください。
 
 録音中は確定した文字起こしの古いトークンだけ話者判定を凍結し、停止時は凍結を外して全体を再判定します。文字起こしの確定と話者判定の正しさは別であり、確定した文字列でも話者は誤ることがあります。
 

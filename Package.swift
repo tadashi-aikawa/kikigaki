@@ -14,7 +14,7 @@ let package = Package(
         .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.15.6"),
     ],
     targets: [
-        // 純粋ロジック層(Foundation + TOMLKit のみ。ユニットテストの主戦場)
+        // ロジック層(Foundation + NaturalLanguage + TOMLKit。ユニットテストの主戦場)
         .target(
             name: "KikigakiCore",
             dependencies: ["TOMLKit"],
