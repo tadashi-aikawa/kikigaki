@@ -35,6 +35,13 @@ enum ApplicationMenu {
             item.keyEquivalentModifierMask = modifiers
             edit.submenu?.addItem(item)
         }
+        edit.submenu?.addItem(.separator())
+        for (title, action) in [
+            ("直前の範囲を再コピー", #selector(TranscriptWindowController.recopyPressed)),
+            ("会議の最初からコピー", #selector(TranscriptWindowController.fullCopyPressed))
+        ] {
+            edit.submenu?.addItem(NSMenuItem(title: title, action: action, keyEquivalent: ""))
+        }
         return menu
     }
 }

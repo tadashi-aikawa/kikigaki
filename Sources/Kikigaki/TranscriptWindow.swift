@@ -59,6 +59,10 @@ private enum Washi {
 
 /// NSButtonの操作・フォーカス・アクセシビリティを残して主操作の地だけ描く。
 private final class CopyButton: NSButton {
+    override var intrinsicContentSize: NSSize {
+        let size = super.intrinsicContentSize
+        return NSSize(width: size.width + 32, height: size.height)
+    }
     override func draw(_ dirtyRect: NSRect) {
         (isEnabled ? (isHighlighted ? Washi.brightRed : Washi.red) : Washi.rule).setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 0, dy: 2), xRadius: 6, yRadius: 6).fill()
@@ -380,7 +384,7 @@ private final class TranscriptDocument: NSView {
 }
 
 @MainActor
-final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegate {
+final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegate, NSMenuItemValidation {
     var onRename: ((Int, String) -> Void)?
     var onStartStop: (() -> Void)?
     var onPauseResume: (() -> Void)?
@@ -391,7 +395,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let pauseButton = NSButton()
     private let openButton = NSButton()
     private let copyButton = CopyButton(title: "会話をコピー", target: nil, action: nil)
-    private let moreButton = NSButton(title: "別の範囲をコピー ▾", target: nil, action: nil)
     private let latestButton = NSButton(title: "最新の発言へ ↓", target: nil, action: nil)
     private let statusDot = RecordingMark()
     private let statusLabel = Washi.label(size: 13, weight: .semibold)
@@ -499,7 +502,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         copyButton.attributedTitle = NSAttributedString(string: copyButton.title, attributes: [
             .font: NSFont.systemFont(ofSize: 13), .foregroundColor: copyButton.isEnabled ? NSColor.white : Washi.muted
         ])
-        moreButton.isEnabled = value.canShare && (value.hasCopied || !value.utterances.isEmpty)
+        copyButton.menu = handoffMenu()
         updateRangeLabel()
         emptyView.isHidden = !value.utterances.isEmpty || value.tentativeText != nil
         emptyLabel.stringValue = value.state == .idle ? "録音を開始すると、会話がここに表示されます。" : "発言を待っています…"
@@ -571,13 +574,12 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         configure(pauseButton, #selector(pausePressed))
         configure(openButton, #selector(openPressed))
         configure(copyButton, #selector(copyPressed))
-        configure(moreButton, #selector(morePressed))
         configure(latestButton, #selector(latestPressed))
         for button in [startStopButton, pauseButton, openButton] {
             button.widthAnchor.constraint(equalToConstant: 34).isActive = true
             button.heightAnchor.constraint(equalToConstant: 28).isActive = true
         }
-        symbol(openButton, name: "doc.text", title: "Markdownを開く")
+        symbol(openButton, name: "doc.plaintext", title: "Markdownを開く")
         copyButton.isBordered = false
         copyButton.heightAnchor.constraint(equalToConstant: 30).isActive = true
         copyButton.toolTip = "会話ファイルへの参照と、今回読む範囲をクリップボードにコピー"
@@ -627,9 +629,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         ])
         let title = Washi.label("AIへ渡す会話", size: 13, weight: .semibold)
         let footerTitle = row([title, NSView(), rangeLabel], spacing: 12)
-        let buttons = row([copyButton, moreButton], spacing: 12)
         copyButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let footer = column([footerTitle, buttons], spacing: 8, inset: 16)
+        let footer = column([footerTitle, copyButton], spacing: 8, inset: 16)
         Washi.surface(footer)
         searchField.placeholderString = "会話を検索"
         searchField.setAccessibilityLabel("会話を検索")
@@ -756,9 +757,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     }
     private func symbol(_ button: NSButton, name: String, title: String) {
         // Apple CoreGlyphsのname_availability.plistとNSImage APIで存在を確認した名称。
-        button.image = NSImage(systemSymbolName: name, accessibilityDescription: title)
+        button.image = NSImage(systemSymbolName: name, accessibilityDescription: title)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 14, weight: .regular))
+        button.imageScaling = .scaleProportionallyDown
         button.imagePosition = .imageOnly
-        button.title = title
+        button.title = ""
         button.toolTip = title
         button.setAccessibilityLabel(title)
     }
@@ -802,8 +805,19 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         copyRequested = false
     }
     @objc private func copyPressed() { copyWithNotice { onCopy?(false) } }
-    @objc private func recopyPressed() { copyWithNotice { onRecopy?() } }
-    @objc private func fullCopyPressed() { copyWithNotice { onCopy?(true) } }
+    @objc func recopyPressed() {
+        guard snapshot.canShare && snapshot.hasCopied else { return }
+        copyWithNotice { onRecopy?() }
+    }
+    @objc func fullCopyPressed() {
+        guard snapshot.canShare && (snapshot.hasCopied || !snapshot.utterances.isEmpty) else { return }
+        copyWithNotice { onCopy?(true) }
+    }
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(recopyPressed) { return snapshot.canShare && snapshot.hasCopied }
+        if menuItem.action == #selector(fullCopyPressed) { return snapshot.canShare && (snapshot.hasCopied || !snapshot.utterances.isEmpty) }
+        return true
+    }
     @objc private func latestPressed() {
         transcriptDocument.scroll(NSPoint(x: 0, y: max(0, transcriptDocument.frame.height - scrollView.contentSize.height)))
         latestButton.isHidden = true
@@ -814,18 +828,17 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     @objc private func motionChanged() {
         if shouldReduceMotion() { rows.values.forEach { $0.stopAnimations() } }
     }
-    @objc private func morePressed() {
+    private func handoffMenu() -> NSMenu {
         let menu = NSMenu()
-        menu.autoenablesItems = false
         let recopy = NSMenuItem(title: "直前の範囲を再コピー", action: #selector(recopyPressed), keyEquivalent: "")
         recopy.target = self
-        recopy.isEnabled = snapshot.hasCopied
+        recopy.isEnabled = validateMenuItem(recopy)
         menu.addItem(recopy)
         let full = NSMenuItem(title: "会議の最初からコピー", action: #selector(fullCopyPressed), keyEquivalent: "")
         full.target = self
-        full.isEnabled = snapshot.hasCopied || !snapshot.utterances.isEmpty
+        full.isEnabled = validateMenuItem(full)
         menu.addItem(full)
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: moreButton.bounds.minY), in: moreButton)
+        return menu
     }
     private func showRename(slot: Int, relativeTo view: NSView) {
         guard snapshot.canShare, (0..<SpeakerNames.slotCount).contains(slot) else { return }
