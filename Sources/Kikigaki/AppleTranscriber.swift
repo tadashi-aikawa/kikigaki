@@ -34,6 +34,8 @@ final class AppleTranscriber {
             }
         }
         func all() -> [TimedToken] { finalTokens + volatileTokens }
+        /// 確定・暫定を合わせたトークン列と、先頭から確定結果に属する個数
+        func snapshot() -> (tokens: [TimedToken], finalCount: Int) { (finalTokens + volatileTokens, finalTokens.count) }
     }
 
     init(locale: Locale = Locale(identifier: "ja-JP"), log: @escaping (String) -> Void) async throws {
@@ -107,6 +109,9 @@ final class AppleTranscriber {
     }
 
     func tokens() async -> [TimedToken] { await store.all() }
+
+    /// トークン列と、先頭から確定結果に属する個数(暫定結果のトークンは凍結しないため)
+    func snapshot() async -> (tokens: [TimedToken], finalCount: Int) { await store.snapshot() }
 
     /// 入力を閉じて最後の確定結果まで待つ
     func finish() async throws -> [TimedToken] {

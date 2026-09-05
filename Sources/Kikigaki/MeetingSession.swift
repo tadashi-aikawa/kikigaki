@@ -156,10 +156,26 @@ final class MeetingSession {
         transcriber = nil
         diarizer = nil
 
+        // KIKIGAKI_DEBUG_LIVE=1: 停止直前の録音中表示を stderr に出す(最終結果との差を調べる用)
+        if ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_LIVE"] != nil {
+            log("[live]\n" + TranscriptRenderer.text(snapshot.utterances, names: snapshot.names))
+        }
         // 最終結果は凍結を使わず、確定した区間で全体を判定し直す(暫定区間で凍結した表示より確定区間の
         // ほうが正確で、保存する Markdown と画面を一致させる。プロトと同じ扱い)
         let speakers = Aligner.speakers(for: tokens, segments: segments)
         let utterances = Aligner.utterances(tokens: tokens, speakers: speakers)
+        // KIKIGAKI_DEBUG_PHRASES=1: フレーズ分割と話者判定の調査用。フレーズごとにトークンの
+        // 生の判定(区間からの窓判定)→多数決後の判定と時刻を stderr に出す
+        if ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_PHRASES"] != nil {
+            let raw = tokens.map { Aligner.speaker(at: $0.midpoint, segments: segments) }
+            for r in Aligner.phraseRanges(tokens) {
+                let desc = r.map { i in
+                    "\(tokens[i].text)[\(raw[i].map(String.init) ?? "?")→\(speakers[i].map(String.init) ?? "?") "
+                        + String(format: "%.2f-%.2f", tokens[i].start, tokens[i].end) + "]"
+                }.joined(separator: " ")
+                log("[phrase id=\(tokens[r.lowerBound].phraseId)] \(desc)")
+            }
+        }
         let duration = Double(result.fedSamples) / 16000
         let meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: duration, utterances: utterances, names: snapshot.names)
         lastMeeting = meeting
@@ -249,11 +265,12 @@ final class MeetingSession {
 
                 guard Date().timeIntervalSince(lastDraw) >= 0.5 else { continue }
                 lastDraw = Date()
-                let tokens = await transcriber.tokens()
+                let (tokens, finalCount) = await transcriber.snapshot()
                 let segments = diarizer.segments()
                 let elapsed = Double(result.fedSamples) / 16000
                 let speakers = Aligner.speakers(for: tokens, segments: segments, frozen: result.frozen)
-                result.frozen = SpeakerFreeze.advance(frozen: result.frozen, speakers: speakers, tokens: tokens, elapsed: elapsed)
+                result.frozen = SpeakerFreeze.advance(
+                    frozen: result.frozen, speakers: speakers, tokens: tokens, elapsed: elapsed, finalCount: finalCount)
                 let utterances = Aligner.utterances(tokens: tokens, speakers: speakers)
                 await MainActor.run { self.publishLive(utterances: utterances, elapsed: elapsed) }
             }

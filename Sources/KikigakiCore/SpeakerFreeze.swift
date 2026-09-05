@@ -9,12 +9,19 @@ public enum SpeakerFreeze {
     public static let graceSeconds = 8.0
 
     /// `frozen` を、`elapsed` から猶予を引いた時刻より前に終わるトークンまで伸ばした配列を返す。
-    /// 伸ばす分の値は今回の判定 `speakers` から取る
+    /// 伸ばす分の値は今回の判定 `speakers` から取る。
+    ///
+    /// - finalCount: 先頭から何個までが文字起こしの確定結果に属するか。暫定結果のトークンは
+    ///   猶予を過ぎていても凍結しない。話者の多数決はフレーズ単位で、暫定のうちはフレーズが途中で
+    ///   トークンが揃っていないため、そこで固めると「59」だけが別話者で残るような分断になる
+    ///   (タダシの実録で確認。停止時の判定し直しでは消えるのに録音中だけ出ていた)
     public static func advance(
-        frozen: [Int?], speakers: [Int?], tokens: [TimedToken], elapsed: Double, grace: Double = graceSeconds
+        frozen: [Int?], speakers: [Int?], tokens: [TimedToken], elapsed: Double, finalCount: Int,
+        grace: Double = graceSeconds
     ) -> [Int?] {
-        var count = min(frozen.count, tokens.count)
-        while count < tokens.count, tokens[count].end < elapsed - grace { count += 1 }
+        let limit = min(tokens.count, max(finalCount, 0))
+        var count = min(frozen.count, limit)
+        while count < limit, tokens[count].end < elapsed - grace { count += 1 }
         return Array(speakers.prefix(count))
     }
 }

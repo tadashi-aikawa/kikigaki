@@ -87,6 +87,7 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - `--replay <wav>`: マイクの代わりに音声ファイルを実時間より速く流す
 - `--show-window`: 起動直後に書き起こしウィンドウを表示する (見た目の確認用)
 - `--smoke`: UI を起動せず設定の読み込みだけ確認して終了する (CI 用)
+- 環境変数 `KIKIGAKI_DEBUG_LIVE=1`: 停止直前の録音中表示を stderr に出す (録音中と最終結果の差を調べる用)
 
 FluidAudio の Sortformer モデルは初回起動時に HuggingFace から `~/Library/Application Support/FluidAudio/Models` へ落ちます。Apple Speech の日本語アセットも初回に自動取得されます。
 
