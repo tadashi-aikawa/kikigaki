@@ -1,6 +1,7 @@
 import AVFoundation
 import FluidAudio
 import Foundation
+import KikigakiCore
 
 /// 音源の口。16kHz mono Float32 のサンプル列を渡す。
 /// MVPはマイクのみだが、次の段でシステム音声(Core Audio のプロセスタップ)を足すため差し替え可能にしておく
@@ -13,7 +14,6 @@ protocol AudioSource: AnyObject {
 /// マイク入力を 16kHz mono Float32 に変換して流す(プロトの MicCapture の移植)
 final class MicSource: AudioSource {
     private let engine = AVAudioEngine()
-    private let converter = AudioConverter()
 
     static func requestPermission() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -26,8 +26,13 @@ final class MicSource: AudioSource {
     func start(onSamples: @escaping ([Float]) -> Void) throws {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [converter] buffer, _ in
-            guard let samples = try? converter.resampleBuffer(buffer), !samples.isEmpty else { return }
+        guard let resampler = AudioResampler(from: format) else {
+            throw NSError(domain: "kikigaki", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "マイクの形式を 16kHz mono へ変換できない: \(format)"])
+        }
+        // 変換器はタップの閉包が持つ。録音のたびに作り直すので、前の会議の状態は残らない
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
+            guard let samples = try? resampler.resample(buffer), !samples.isEmpty else { return }
             onSamples(samples)
         }
         try engine.start()
