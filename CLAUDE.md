@@ -12,7 +12,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 
 - `Sources/KikigakiCore/`: 純粋ロジック層 (Foundation + TOMLKit のみ。ユニットテストの主戦場)
   - `Aligner.swift`: トークン時刻と話者区間の突き合わせ。フレーズ単位の多数決・島の扱い・決定的な同点処理
-  - `SpeakerFreeze.swift`: 8秒より古い話者判定の凍結 (Sortformer の暫定区間が過去へ届いても表示を動かさない)
+  - `SpeakerFreeze.swift`: 文字起こしの確定結果に属する、8秒より古いトークンの話者判定を凍結。暫定結果は凍結しない
   - `SpeakerNames.swift` / `TranscriptRenderer.swift` / `MeetingMarkdown.swift` / `MeetingFiles.swift`: 話者名の枡・行の整形・Markdown 生成・ファイル命名
   - `Config.swift`: 設定ファイルのパースと既定値
   - `RecordingState.swift`: 録音状態とメニュー表題
@@ -88,6 +88,16 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - `--show-window`: 起動直後に書き起こしウィンドウを表示する (見た目の確認用)
 - `--smoke`: UI を起動せず設定の読み込みだけ確認して終了する (CI 用)
 - 環境変数 `KIKIGAKI_DEBUG_LIVE=1`: 停止直前の録音中表示を stderr に出す (録音中と最終結果の差を調べる用)
+- 環境変数 `KIKIGAKI_DEBUG_PHRASES=1`: 停止時のフレーズごとに、トークンの時刻と窓判定から多数決後への話者の変化を stderr に出す
+
+### 表示品質の検証
+
+録音中は確定した文字起こしの古いトークンだけ話者判定を凍結し、停止時は凍結を外して全体を再判定します。文字起こしの確定と話者判定の正しさは別であり、確定した文字列でも話者は誤ることがあります。
+
+- プロトと同じ音声で保存結果が一致することは移植の検証です。精度や録音中の表示の安定性は別に確認します
+- `KIKIGAKI_DEBUG_LIVE` が出すのは停止直前の1回分です。録音中の全時点の検証には、途中の表示と、その時点の確定・暫定トークンを確認する必要があります
+- `KIKIGAKI_DEBUG_PHRASES` の変更前の話者も、前後0.5秒の窓で集計した推定値です。実際の発話者の正解ラベルではありません。相槌の除去を評価するときは、原音と突き合わせ、本文の誤削除も確認します
+- 修正前後を比べるときは、入力音声を揃え、出力先をそれぞれ別の検証用ディレクトリにします。ビルドの終了コードが成功であることを確認してから実行します
 
 FluidAudio の Sortformer モデルは初回起動時に HuggingFace から `~/Library/Application Support/FluidAudio/Models` へ落ちます。Apple Speech の日本語アセットも初回に自動取得されます。
 
