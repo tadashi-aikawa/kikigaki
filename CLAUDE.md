@@ -121,6 +121,7 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - 環境変数 `KIKIGAKI_DEBUG_LIVE_TRACE=1`: 録音中の表示更新時に、音声経過秒と全文を stderr に出す。診断ログに会話本文を含む
 - 環境変数 `KIKIGAKI_DEBUG_PHRASES=1`: 停止時のフレーズごとに、トークンの時刻と窓判定から多数決後への話者の変化を stderr に出す
   - `[segment]` は窓集計前の音声側の話者区間。発話が重なる場合は複数話者の区間も重なる
+- 環境変数 `KIKIGAKI_SORTFORMER=balanced`: 話者判別のプリセットを `balancedV2_1` へ切り替える (既定は `fastV2_1`)。左右比較用でリリース時の既定は変えない。モデルは初回に HuggingFace から落ちる
 
 ### 表示品質の検証
 
