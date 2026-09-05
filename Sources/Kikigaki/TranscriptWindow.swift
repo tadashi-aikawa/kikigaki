@@ -396,7 +396,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let elapsedLabel = Washi.label(color: Washi.muted)
     private let messageLabel = NSTextField(wrappingLabelWithString: "")
     private let rangeLabel = Washi.label(color: Washi.muted)
-    private let handoffLabel = NSTextField(wrappingLabelWithString: "")
+    private var handoffNotice: (text: String, failed: Bool)?
+    private var noticeDismissal: DispatchWorkItem?
+    private var copyRequested = false
     private let emptyView = NSStackView()
     private let emptyLabel = Washi.label(size: 13, color: Washi.muted)
     private let scrollView = NSScrollView()
@@ -456,6 +458,21 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     func apply(_ value: SessionSnapshot) {
         let previous = snapshot
         snapshot = value
+        if previous.state != value.state || previous.timeline.startedAt != value.timeline.startedAt { clearHandoffNotice() }
+        if copyRequested || previous.handoffMessage != value.handoffMessage || previous.handoffFailed != value.handoffFailed {
+            clearHandoffNotice()
+            if let text = value.handoffMessage, !text.isEmpty {
+                handoffNotice = (text, value.handoffFailed)
+                if !value.handoffFailed {
+                    let dismissal = DispatchWorkItem { [weak self] in
+                        self?.handoffNotice = nil
+                        self?.updateRangeLabel()
+                    }
+                    noticeDismissal = dismissal
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: dismissal)
+                }
+            }
+        }
         if value.state == .preparing || previous.timeline.startedAt != value.timeline.startedAt { renamePopover?.close() }
         let startTitle = value.state == .idle && value.markdownURL != nil ? "新しい録音" : value.state.startStopTitle
         symbol(startStopButton, name: value.state.canStart ? "record.circle" : "stop.fill", title: startTitle)
@@ -481,20 +498,32 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             .font: NSFont.systemFont(ofSize: 13), .foregroundColor: copyButton.isEnabled ? NSColor.white : Washi.muted
         ])
         moreButton.isEnabled = value.canShare && (value.hasCopied || !value.utterances.isEmpty)
-        if let preview = value.handoffPreview {
-            let end = value.state == .idle ? "終了" : "現在"
-            let correction = preview.includesCorrections ? "訂正を含む · " : ""
-            rangeLabel.stringValue = correction + value.timeline.clock(at: preview.startTime)
-                + " 〜 " + end + " " + value.timeline.clock(at: value.elapsed)
-        } else { rangeLabel.stringValue = value.hasCopied ? "前回コピーから変更なし" : "発言を待っています" }
-        rangeLabel.toolTip = rangeLabel.stringValue
-        handoffLabel.stringValue = value.handoffMessage ?? ""
-        handoffLabel.isHidden = handoffLabel.stringValue.isEmpty
-        handoffLabel.textColor = value.handoffFailed ? Washi.red : Washi.muted
+        updateRangeLabel()
         emptyView.isHidden = !value.utterances.isEmpty || value.tentativeText != nil
         emptyLabel.stringValue = value.state == .idle ? "録音を開始すると、会話がここに表示されます。" : "発言を待っています…"
         updateRows(previous: previous)
         refreshSearch(reset: previous.timeline.startedAt != value.timeline.startedAt, reveal: false)
+    }
+
+    private func clearHandoffNotice() {
+        noticeDismissal?.cancel()
+        noticeDismissal = nil
+        handoffNotice = nil
+    }
+    private func updateRangeLabel() {
+        if let notice = handoffNotice {
+            rangeLabel.stringValue = notice.text
+            rangeLabel.textColor = notice.failed ? Washi.red : Washi.muted
+        } else {
+            rangeLabel.textColor = Washi.muted
+            if let preview = snapshot.handoffPreview {
+                let end = snapshot.state == .idle ? "終了" : "現在"
+                let correction = preview.includesCorrections ? "訂正を含む · " : ""
+                rangeLabel.stringValue = correction + snapshot.timeline.clock(at: preview.startTime)
+                    + " 〜 " + end + " " + snapshot.timeline.clock(at: snapshot.elapsed)
+            } else { rangeLabel.stringValue = snapshot.hasCopied ? "前回コピーから変更なし" : "発言を待っています" }
+        }
+        rangeLabel.toolTip = rangeLabel.stringValue
     }
 
     private func updateRows(previous: SessionSnapshot) {
@@ -560,8 +589,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         rangeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         rangeLabel.lineBreakMode = .byTruncatingMiddle
         rangeLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        handoffLabel.font = .systemFont(ofSize: 12)
-        handoffLabel.maximumNumberOfLines = 2
         let logoRule = NSView()
         Washi.surface(logoRule, color: Washi.rule)
         logoRule.widthAnchor.constraint(equalToConstant: 1).isActive = true
@@ -600,16 +627,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         let footerTitle = row([title, NSView(), rangeLabel], spacing: 12)
         let buttons = row([copyButton, moreButton], spacing: 12)
         copyButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let notification = NSView()
-        notification.heightAnchor.constraint(equalToConstant: 30).isActive = true
-        notification.addSubview(handoffLabel)
-        handoffLabel.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            handoffLabel.leadingAnchor.constraint(equalTo: notification.leadingAnchor),
-            handoffLabel.trailingAnchor.constraint(equalTo: notification.trailingAnchor),
-            handoffLabel.topAnchor.constraint(equalTo: notification.topAnchor)
-        ])
-        let footer = column([footerTitle, buttons, notification], spacing: 8, inset: 16)
+        let footer = column([footerTitle, buttons], spacing: 8, inset: 16)
         Washi.surface(footer)
         searchField.placeholderString = "会話を検索"
         searchField.setAccessibilityLabel("会話を検索")
@@ -774,9 +792,16 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     @objc private func startStopPressed() { onStartStop?() }
     @objc private func pausePressed() { onPauseResume?() }
     @objc private func openPressed() { onOpenMarkdown?() }
-    @objc private func copyPressed() { onCopy?(false) }
-    @objc private func recopyPressed() { onRecopy?() }
-    @objc private func fullCopyPressed() { onCopy?(true) }
+    private func copyWithNotice(_ action: () -> Void) {
+        clearHandoffNotice()
+        updateRangeLabel()
+        copyRequested = true
+        action()
+        copyRequested = false
+    }
+    @objc private func copyPressed() { copyWithNotice { onCopy?(false) } }
+    @objc private func recopyPressed() { copyWithNotice { onRecopy?() } }
+    @objc private func fullCopyPressed() { copyWithNotice { onCopy?(true) } }
     @objc private func latestPressed() {
         transcriptDocument.scroll(NSPoint(x: 0, y: max(0, transcriptDocument.frame.height - scrollView.contentSize.height)))
         latestButton.isHidden = true
