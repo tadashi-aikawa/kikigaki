@@ -11,6 +11,8 @@
 
 アプリは [AppleのCFBundleIconFile](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleiconfile) でICNSを参照する。
 
+メニューバーの待機中アイコンも同じICNSを18ポイントで表示する。録音中・一時停止中・準備中・保存中は状態を示すシンボルに切り替える。画像を同梱しない `swift run` では待機中も波形シンボルを使う。
+
 ## owleryとparliament
 
 owleryの `shared/images/projects/KIKIGAKI.webp` は元画像から256×256で書き出す。

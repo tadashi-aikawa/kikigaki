@@ -9,6 +9,16 @@ final class StatusItem {
     private let startStopItem: NSMenuItem
     private let pauseResumeItem: NSMenuItem
 
+    // バンドル済みのアイコンを共有する。毎秒の経過更新でディスクから読み直さない。
+    private static let owlIcon: NSImage? = {
+        guard let url = Bundle.main.url(forResource: "kikigaki", withExtension: "icns"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = false
+        image.accessibilityDescription = "KIKIGAKI 待機中"
+        return image
+    }()
+
     var onStartStop: (() -> Void)?
     var onPauseResume: (() -> Void)?
     var onShowWindow: (() -> Void)?
@@ -63,6 +73,7 @@ final class StatusItem {
         pauseResumeItem.title = state.pauseResumeTitle
         pauseResumeItem.isEnabled = state.canPauseOrResume
         item.button?.image = Self.icon(for: state)
+        item.button?.toolTip = "KIKIGAKI \(state.statusLabel)"
     }
 
     @objc private func startStop() { onStartStop?() }
@@ -72,6 +83,9 @@ final class StatusItem {
     @objc private func reloadConfig() { onReloadConfig?() }
 
     private static func icon(for state: RecordingState) -> NSImage? {
+        // 待機中は採用ロゴ。動作中は録音・一時停止などの状態を優先する。
+        // swift run など .app 外での実行には従来のシンボルを残す。
+        if state == .idle, let owlIcon { return owlIcon }
         let name: String
         switch state {
         case .idle: name = "waveform"
