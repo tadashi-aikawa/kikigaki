@@ -67,6 +67,10 @@ public enum Aligner {
         let orderedSegments = segments.filter { $0.start.isFinite && $0.end.isFinite && $0.end > $0.start }
             .sorted { $0.start < $1.start }
         for phrase in phraseRanges(tokens, gapSeconds: gapSeconds) {
+            // 全体が凍結済みのフレーズは、どの経路も書き込まない。語内補正は `word.lowerBound >= frozenCount`
+            // で入らず `correctedWords` は空のまま、島の吸収も `k >= frozenCount` で守られる。
+            // 語境界の解析(NLTokenizer)だけが毎回走るので飛ばす。長い会議の録音中に効く
+            if phrase.upperBound <= frozenCount { continue }
             let words = WordBoundaries(tokens: Array(tokens[phrase]))
             let lexicalRanges = words.tokenRanges.map { ($0.lowerBound + phrase.lowerBound)..<($0.upperBound + phrase.lowerBound) }
             // 語内補正前の時間重みで多数決。長い1文字は検出された声の時間に絞る。
