@@ -43,8 +43,8 @@ public struct MeetingArchive {
         do {
             try MeetingMarkdown.render(displayed).write(to: markdownURL, atomically: true, encoding: .utf8)
             var message = "保存: \(markdownURL.path)"
-            if processed != nil, !omissionDisabledAfterFailure {
-                message += " / 相槌候補\(candidateCount)件を省略。原文: \(MeetingFiles.rawURL(for: markdownURL).path)"
+            if processed != nil, candidateCount > 0, !omissionDisabledAfterFailure {
+                message += " / 相槌候補\(candidateCount)件を省略(原文は .raw.md)"
             }
             if omissionDisabledAfterFailure, warning == nil { warning = "原文を保持。相槌の省略は適用していない" }
             if let warning { message = warning + " / " + message }

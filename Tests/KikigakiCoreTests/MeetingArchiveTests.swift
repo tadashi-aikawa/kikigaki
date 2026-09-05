@@ -22,6 +22,7 @@ private func temporaryDirectory() throws -> URL {
         let saved = archive.save()
         #expect(saved.succeeded)
         #expect(saved.utterances == processed)
+        #expect(saved.message == "保存: \(url.path) / 相槌候補1件を省略(原文は .raw.md)")
         #expect(try String(contentsOf: url, encoding: .utf8) == MeetingMarkdown.render(.init(startedAt: original.startedAt, duration: original.duration, utterances: processed, names: original.names)))
         #expect(try String(contentsOf: MeetingFiles.rawURL(for: url), encoding: .utf8) == MeetingMarkdown.render(original))
         archive.original.names.set("変更した名前", for: 0)
@@ -30,6 +31,17 @@ private func temporaryDirectory() throws -> URL {
         let cleaned = try String(contentsOf: url, encoding: .utf8)
         #expect(raw.contains("変更した名前: うんうん先週"))
         #expect(cleaned.contains("変更した名前: 先週"))
+    }
+
+    @Test func 候補ゼロなら省略通知を出さず原文保存は続ける() throws {
+        let dir = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = try MeetingFiles.reserveMarkdownURL(in: dir, startedAt: original.startedAt)
+        var archive = MeetingArchive(original: original, processed: original.utterances, candidateCount: 0, markdownURL: url)
+        let saved = archive.save()
+        #expect(saved.succeeded)
+        #expect(saved.message == "保存: \(url.path)")
+        #expect(try String(contentsOf: MeetingFiles.rawURL(for: url), encoding: .utf8) == MeetingMarkdown.render(original))
     }
 
     @Test func 原文保存失敗は省略せず改名時に再試行しても省略しない() throws {
