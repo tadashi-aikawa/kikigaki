@@ -118,11 +118,17 @@ public enum Aligner {
                         continue
                     }
                     let span = tokens[j - 1].end - tokens[i].start
-                    if span < keepIslandSeconds {
+                    let local = (i - phrase.lowerBound)..<(j - phrase.lowerBound)
+                    // 不明(どの話者区間にも当たらない)は話者交代ではない。1.5秒以上でも、語の途中を
+                    // 切る不明の島は多数派へ付ける。発話前の間を含んで長くなった語頭の1文字が
+                    // 「欲 / しいなと」「で、/ 具体的には」と不明の行に割れていた(タダシの実録で確認)。
+                    // 語として完結する長い不明の島は、従来どおり不明のまま残す。
+                    // 長さを 0 とみなすので、`keepIslandSeconds` を 0 にして吸収を止める検証は従来どおり効く
+                    let unknownFragment = speakers[i] == nil && !words.containsWholeWords(local)
+                    if (unknownFragment ? 0 : span) < keepIslandSeconds {
                         // 「すごいね。」は0.84秒でも別話者の返答だった。短さだけで吸収せず、
                         // 語境界で完結する塊は残す。上の境界補正でも完結しない部分語は従来通り。
                         if speakers[i] != nil {
-                            let local = (i - phrase.lowerBound)..<(j - phrase.lowerBound)
                             // 多数派の声が区間全体を覆う場合、句点だけを根拠に複数語の島を保護せず、
                             // 1語も相槌・応答の語彙に限って保護する。相槌が重なると音声側の区間が
                             // 0.2〜0.5秒刻みで交互に出て、窓判定が文中の1語(「代表」)を相手へ倒す

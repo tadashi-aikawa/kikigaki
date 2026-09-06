@@ -40,6 +40,23 @@ import Testing
         #expect(Aligner.smoothSpeakers(tokens: tokens, speakers: [0, 1, 0]) == [0, 0, 0])
     }
 
+    // 2026-09-06_1727.wav の再処理ログ。発話前の間を含む長い1文字が、どの話者区間にも当たらず不明になっていた
+    @Test func 語の途中を切る長い不明の島は多数派へ付ける() {
+        let texts = ["欲", "し", "い", "な", "と", "。"]
+        let times = [765.90, 767.82, 767.94, 768.06, 768.18, 768.36, 768.72]
+        let tokens = texts.enumerated().map { TimedToken(text: $0.element, phraseId: 1636, start: times[$0.offset], end: times[$0.offset + 1]) }
+        #expect(Aligner.smoothSpeakers(tokens: tokens, speakers: [nil, 0, 0, 0, 0, 0]) == [0, 0, 0, 0, 0, 0])
+        // 「で、」も同じ。句読点は直前の話者に付くので不明のまま島に含まれる
+        let lead = [TimedToken(text: "で", phraseId: 817, start: 586.20, end: 588.72), TimedToken(text: "、", phraseId: 817, start: 588.72, end: 588.84),
+                    TimedToken(text: "具体的には", phraseId: 817, start: 588.84, end: 589.62)]
+        #expect(Aligner.smoothSpeakers(tokens: lead, speakers: [nil, nil, 0]) == [0, 0, 0])
+    }
+
+    @Test func 語として完結する長い不明の島は不明のまま残す() {
+        let tokens = [TimedToken(text: "はい", phraseId: 1, start: 0, end: 2.0), TimedToken(text: "続いてます", phraseId: 1, start: 2.0, end: 3)]
+        #expect(Aligner.smoothSpeakers(tokens: tokens, speakers: [nil, 0]) == [nil, 0])
+    }
+
     @Test func 不明話者は語境界でも吸収し凍結済みは変えない() {
         let tokens = [TimedToken(text: "はい", phraseId: 1, start: 0, end: 0.3), TimedToken(text: "続いてます", phraseId: 1, start: 0.3, end: 3)]
         #expect(Aligner.smoothSpeakers(tokens: tokens, speakers: [nil, 0]) == [0, 0])
