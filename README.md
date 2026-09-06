@@ -94,6 +94,9 @@ herdrとCodexまたはClaude Codeを導入し、使うCLIで [kikigaki Skill](sk
 cli = "codex" # Claude Codeなら "claude"
 address = "迅雷へ"
 notifySound = false
+# CLIとherdrはPATHのほか ~/.local/bin・miseのshims・Homebrewを探します。見つからないときだけ絶対パスを指定します
+# command = "/opt/homebrew/bin/codex"
+# herdrCommand = "/opt/homebrew/bin/herdr"
 ```
 
 初回の質問で専用herdrペインが作られます。固定の作業場所でも最初は利用者が一度ペインで信頼確認を承認してください。質問欄は空欄なら直近の声の問いを送り、入力した場合はその問いを優先します。回答と確認質問は折りたたみ式のAI領域へ届き、会議Markdownにも残ります。確認カードの「返答する」から続けられます。

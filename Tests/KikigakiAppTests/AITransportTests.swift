@@ -34,6 +34,22 @@ import TOMLKit
             #expect(captured.captured == ["herdr agent start: " + code])
         }
     }
+    @Test func 実行ファイルはPATHに無ければ既知の置き場を探す() throws {
+        // 実測: open や Finder から起動した .app のPATHには mise / Homebrew / ~/.local/bin が無い
+        let home = try testDirectory(); defer { try? FileManager.default.removeItem(at: home) }
+        let bin = home.appendingPathComponent(".local/bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        let tool = bin.appendingPathComponent("kikigaki-fake-tool")
+        try Data("#!/bin/sh\n".utf8).write(to: tool)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+        let found = try AIProcessRunner.executable("kikigaki-fake-tool", environment: ["PATH": "/usr/bin:/bin"], home: home)
+        #expect(found.path == tool.path)
+        #expect(throws: AIProcessError.executableNotFound("kikigaki-missing-tool")) {
+            try AIProcessRunner.executable("kikigaki-missing-tool", environment: ["PATH": "/usr/bin:/bin"], home: home)
+        }
+        // 絶対パスの指定は置き場を探さずそのまま検証する
+        #expect(try AIProcessRunner.executable(tool.path, environment: [:], home: home).path == tool.path)
+    }
     @Test func 成功時に出力の無いherdrコマンドは空の標準出力を成功として扱う() async throws {
         // 実測(herdr 0.8.2): pane report-metadata は成功時に何も出力しない
         let captured = CapturedLog()

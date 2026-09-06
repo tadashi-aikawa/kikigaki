@@ -283,6 +283,7 @@ MVPのMarkdownはアプリが管理する生成物として扱う。外部編集
 [ai]
 cli = "codex"
 # command = "/opt/homebrew/bin/codex"
+# herdrCommand = "/opt/homebrew/bin/herdr"
 # model = "gpt-6-astra"
 address = "迅雷へ"
 # cwd = "/Users/me/work/project"
@@ -298,7 +299,8 @@ key = "a"
 | キー | 既定と検証 |
 | --- | --- |
 | cli | codex。codexまたはclaudeのみ。 |
-| command | 省略時は選択CLIをPATHで解決し、絶対パスと実行可能性を検証する。指定時は空でない絶対パス。見つからなければ送信前に原因を示し、別CLIへ切り替えない。 |
+| command | 省略時は選択CLIをPATHと既知の置き場(下記)で解決し、絶対パスと実行可能性を検証する。指定時は空でない絶対パス。見つからなければ送信前に原因を示し、別CLIへ切り替えない。 |
+| herdrCommand | 省略時は `herdr` をPATHと既知の置き場で解決する。指定時は空でない絶対パス。 |
 | model | 省略時はCLIの既定。指定時は空でない文字列として該当CLIのモデル引数へ渡す。 |
 | address | 迅雷へ。空・改行・制御文字を拒否。起動時の表示名にも使用する。 |
 | cwd | 省略時は固定の `~/Library/Application Support/KIKIGAKI/ai-work/` を作る。指定時は絶対パスまたは先頭の `~/` を解決し、存在するディレクトリであることを確認する。 |
@@ -307,7 +309,7 @@ key = "a"
 | hotkey | ctrl+alt+cmd+A。既存の録音・一時停止のキーと重複を拒否する。 |
 | notifySound | false。trueのときだけアプリから通知音を鳴らす。 |
 
-GUI起動ではPATHに普段のCLIがない場合がある。見つからなければcommandの絶対パス指定を案内し、環境設定を自動変更しない。herdrも実行可能パスを解決し、未導入なら手動コピーは使える状態でAI送信だけを失敗にする。
+GUI起動ではPATHに普段のCLIがない(実測: Finderや `open` から起動した.appは `/usr/bin:/bin:/usr/sbin:/sbin` だけで、miseやHomebrewの herdr・codex・claude を見つけられない)。PATHで見つからなければ `~/.local/bin`、`~/.local/share/mise/shims`、`/opt/homebrew/bin`、`/usr/local/bin` の順に探す。それでも見つからなければ `command` / `herdrCommand` の絶対パス指定を案内し、環境設定を自動変更しない。herdrが未導入なら手動コピーは使える状態でAI送信だけを失敗にする。
 
 段3のextraArgsは、値の個数と意味を確認できる追加指定だけを受け付ける。Codexの `--search`、`--no-alt-screen`、`--strict-config` は値なし、`--sandbox/-s` と `--ask-for-approval/-a` は既知の列挙値、`--add-dir` は絶対パス一つ。Claudeの `--verbose` は値なし、`--effort` と `--permission-mode` は既知の列挙値、`--add-dir` は絶対パス一つを受け付ける。権限モードは利用者が明示した場合だけ渡し、アプリが自動で追加しない。
 

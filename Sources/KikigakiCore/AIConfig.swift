@@ -22,6 +22,8 @@ public enum CodexUserConfig {
 public struct AIConfig: Codable, Equatable, Sendable {
     public var cli: AIProvider?
     public var command: String?
+    /// herdr CLIの絶対パス。GUI起動はシェルのPATHを持たないため、省略時はPATHと既知の置き場を探す
+    public var herdrCommand: String?
     public var model: String?
     public var address: String?
     public var cwd: String?
@@ -30,10 +32,10 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var notifySound: Bool?
     public var hotkey: KikigakiConfig.Hotkey?
 
-    public init(cli: AIProvider? = nil, command: String? = nil, model: String? = nil,
+    public init(cli: AIProvider? = nil, command: String? = nil, herdrCommand: String? = nil, model: String? = nil,
                 address: String? = nil, cwd: String? = nil, extraArgs: [String]? = nil,
                 prompt: String? = nil, notifySound: Bool? = nil, hotkey: KikigakiConfig.Hotkey? = nil) {
-        self.cli = cli; self.command = command; self.model = model; self.address = address
+        self.cli = cli; self.command = command; self.herdrCommand = herdrCommand; self.model = model; self.address = address
         self.cwd = cwd; self.extraArgs = extraArgs; self.prompt = prompt
         self.notifySound = notifySound; self.hotkey = hotkey
     }
@@ -41,6 +43,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public func validate() throws {
         func invalid(_ message: String) -> ConfigError { .invalid(description: "ai: " + message) }
         if let command, !AIValidation.absolutePath(command) { throw invalid("command must be absolute") }
+        if let herdrCommand, !AIValidation.absolutePath(herdrCommand) { throw invalid("herdrCommand must be absolute") }
         if let cwd, !AIValidation.absolutePath(cwd), !(cwd.hasPrefix("~/") && !cwd.contains("\0")) {
             throw invalid("cwd must be absolute or start with ~/")
         }
@@ -60,6 +63,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public static let defaultHotkey = KikigakiConfig.Hotkey(modifiers: ["ctrl", "alt", "cmd"], key: "a")
     public let cli: AIProvider
     public let command: String?
+    public let herdrCommand: String?
     public let model: String?
     public let address: String
     public let cwd: URL
@@ -70,7 +74,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public var participantName: String { address.hasSuffix("へ") ? String(address.dropLast()) : address }
 
     public init(config: AIConfig, home: URL) {
-        cli = config.cli ?? .codex; command = config.command; model = config.model
+        cli = config.cli ?? .codex; command = config.command; herdrCommand = config.herdrCommand; model = config.model
         address = config.address?.trimmingCharacters(in: .whitespaces) ?? "迅雷へ"
         cwd = ResolvedConfig.expand(config.cwd ?? Self.defaultCWD, home: home)
         extraArgs = config.extraArgs ?? []; prompt = config.prompt ?? ""
