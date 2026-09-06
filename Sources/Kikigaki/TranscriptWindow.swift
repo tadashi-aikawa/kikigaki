@@ -52,6 +52,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let copyButton = CopyButton(title: "会話をコピー", target: nil, action: nil)
     private let latestButton = NSButton(title: "最新の発言へ ↓", target: nil, action: nil)
     private var transcriptBottom: NSLayoutConstraint?
+    private var beforeAIToggle: TranscriptDocument.Anchor?
     private let statusDot = RecordingMark()
     private let statusLabel = Washi.label(size: 13, weight: .semibold)
     private let elapsedLabel = Washi.label(color: Washi.muted)
@@ -272,8 +273,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         aiPanel.onCancel = { [weak self] in self?.onCancelAI?($0) }
         aiPanel.onReconnect = { [weak self] in self?.onRecreateAI?() }
         aiPanel.isHidden = true; askButton.isHidden = true
-        askButton.isBordered = false
+        askButton.isBordered = true; askButton.bezelStyle = .rounded
         askButton.setContentHuggingPriority(.required, for: .horizontal)
+        aiPanel.onWillToggle = { [weak self] in self?.beforeAIToggle = self?.transcriptDocument.anchor() }
+        aiPanel.onDidToggle = { [weak self] in
+            guard let self, let anchor = beforeAIToggle else { return }
+            window?.contentView?.layoutSubtreeIfNeeded()
+            transcriptDocument.reflow(anchor: anchor); beforeAIToggle = nil; scrolled()
+        }
         speakerButton.setAccessibilityLabel("話者の統合先")
         for button in [startStopButton, pauseButton, openButton] {
             button.widthAnchor.constraint(equalToConstant: 34).isActive = true
@@ -325,7 +332,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             scrollView.topAnchor.constraint(equalTo: body.topAnchor), bottom,
             scrollView.leadingAnchor.constraint(equalTo: body.leadingAnchor), scrollView.trailingAnchor.constraint(equalTo: body.trailingAnchor),
             emptyView.centerXAnchor.constraint(equalTo: body.centerXAnchor), emptyView.centerYAnchor.constraint(equalTo: body.centerYAnchor),
-            latestButton.trailingAnchor.constraint(equalTo: body.trailingAnchor, constant: -20),
+            latestButton.centerXAnchor.constraint(equalTo: body.centerXAnchor),
             latestButton.bottomAnchor.constraint(equalTo: body.bottomAnchor, constant: -10),
             body.heightAnchor.constraint(greaterThanOrEqualToConstant: 150)
         ])

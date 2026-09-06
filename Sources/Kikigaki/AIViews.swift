@@ -65,6 +65,7 @@ final class AIActionButton: NSButton {
     init(_ title: String, action: @escaping () -> Void) {
         callback = action; super.init(frame: .zero); self.title = title
         isBordered = false; font = .systemFont(ofSize: 11); contentTintColor = Washi.ink
+        alignment = .left
         target = self; self.action = #selector(pressed)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -111,7 +112,7 @@ private final class AIAnswerCard: NSView, DocumentRow {
         else if value.state == .cancelled { text = "取り消しました" }
         else if let failure = value.failure { text = failure }
         else if value.sendAttemptedAt == nil { text = "送信準備中です" }
-        else { text = "\(time.stringValue) 送信 · 回答を待っています" }
+        else { text = "送信済み · 回答を待っています" }
         if body.stringValue != text { body.stringValue = text }
         body.font = .systemFont(ofSize: value.result == nil ? 12 : 15)
         body.textColor = value.result == nil ? Washi.tentative : Washi.ink
@@ -131,14 +132,16 @@ private final class AIAnswerCard: NSView, DocumentRow {
         heading.frame = NSRect(x: 14, y: 10, width: max(0, bounds.width - 108), height: 17)
         time.frame = NSRect(x: bounds.width - 78, y: 10, width: 70, height: 17)
         body.maximumNumberOfLines = expanded ? 0 : 3
+        body.lineBreakMode = expanded ? .byWordWrapping : .byTruncatingTail
         body.frame = NSRect(x: 14, y: 35, width: max(0, bounds.width - 28), height: measuredBody)
         let y = bounds.height - 33
         more.isHidden = !needsMore || question.result == nil
         more.title = expanded ? "閉じる ▴" : "全文を読む ▾"
-        read.isHidden = !question.isUnread || !more.isHidden
+        read.isHidden = !question.isUnread
         cancel.isHidden = question.result != nil || question.state == .cancelled || question.state == .failed
         reply.isHidden = !confirming
         for view in [more, read, cancel] { view.frame = NSRect(x: 12, y: y, width: 102, height: 20) }
+        if !more.isHidden { read.frame.origin.x = 245 }
         pane.frame = NSRect(x: 125, y: y, width: 110, height: 20)
         reply.frame = NSRect(x: bounds.width - 95, y: y, width: 83, height: 20)
     }
@@ -161,6 +164,8 @@ final class AIPanel: NSStackView {
     var onPane: (() -> Void)?
     var onCancel: ((UUID) -> Void)?
     var onReconnect: (() -> Void)?
+    var onWillToggle: (() -> Void)?
+    var onDidToggle: (() -> Void)?
     private let toggle = NSButton(title: "", target: nil, action: nil)
     private let scroll = NSScrollView()
     private let document = TranscriptDocument()
@@ -168,6 +173,7 @@ final class AIPanel: NSStackView {
     private var cards: [UUID: AIAnswerCard] = [:]
     private var expanded = false
     private var state = AIViewState()
+    private var preferredHeight: NSLayoutConstraint?
     init() {
         super.init(frame: .zero); orientation = .vertical; alignment = .leading; spacing = 4
         edgeInsets = NSEdgeInsets(top: 6, left: 16, bottom: 6, right: 16)
@@ -179,6 +185,7 @@ final class AIPanel: NSStackView {
         document.autoresizingMask = [.width]; document.followsBottom = false
         scroll.heightAnchor.constraint(lessThanOrEqualToConstant: 140).isActive = true
         let preferred = scroll.heightAnchor.constraint(equalToConstant: 140); preferred.priority = .defaultHigh; preferred.isActive = true
+        preferredHeight = preferred
         scroll.isHidden = true
         addArrangedSubview(reconnect); reconnect.isHidden = true
     }
@@ -196,11 +203,19 @@ final class AIPanel: NSStackView {
             card.update(question)
             card.onReply = { [weak self] in self?.onReply?(id) }; card.onRead = { [weak self] in self?.onRead?(id) }
             card.onCancel = { [weak self] in self?.onCancel?(id) }; card.onPane = { [weak self] in self?.onPane?() }
-            card.onResize = { [weak self] in guard let self else { return }; document.reflow(anchor: document.anchor()) }
+            card.onResize = { [weak self] in guard let self else { return }; fitHeight(); document.reflow(anchor: document.anchor()) }
             next[id] = card; return card
         }
         cards = next; document.setRows(ordered, anchor: changedMeeting ? .init(candidates: [], y: 0, atBottom: false) : anchor)
+        fitHeight()
+    }
+    private func fitHeight() {
+        let width = max(100, bounds.width - 32)
+        preferredHeight?.constant = min(140, document.rows.reduce(16) { $0 + $1.height(for: width) })
     }
     private func updateHeading() { toggle.title = "\(expanded ? "▾" : "▸") AIとのやりとり   " + state.summary; toggle.toolTip = state.summary; scroll.isHidden = !expanded }
-    @objc private func toggled() { expanded.toggle(); updateHeading(); document.reflow(anchor: document.anchor()) }
+    @objc private func toggled() {
+        onWillToggle?(); expanded.toggle(); updateHeading(); fitHeight()
+        onDidToggle?(); document.reflow(anchor: document.anchor())
+    }
 }

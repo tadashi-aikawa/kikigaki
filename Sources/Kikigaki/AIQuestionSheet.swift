@@ -1,5 +1,15 @@
 import AppKit
 
+private final class AIQuestionWindow: NSWindow {
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, event.keyCode == 36, let editor = firstResponder as? AIQuestionEditor,
+           editor.hasMarkedText() || event.modifierFlags.contains(.shift) {
+            editor.keyDown(with: event); return
+        }
+        super.sendEvent(event)
+    }
+}
+
 private final class AIQuestionEditor: NSTextView {
     var placeholder = ""
     var onSubmit: (() -> Void)?
@@ -7,7 +17,7 @@ private final class AIQuestionEditor: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if string.isEmpty {
-            (placeholder as NSString).draw(in: bounds.insetBy(dx: 8, dy: 8), withAttributes: [
+            (placeholder as NSString).draw(in: bounds.insetBy(dx: 11, dy: 8), withAttributes: [
                 .font: NSFont.systemFont(ofSize: 14), .foregroundColor: Washi.muted])
         }
     }
@@ -28,13 +38,13 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     private let sendButton = NSButton(title: "送信 ⏎", target: nil, action: nil)
     private let hint = NSTextField(wrappingLabelWithString: "")
     private let range = Washi.label(size: 11, color: Washi.muted)
-    private let full = NSButton(checkboxWithTitle: "全文で送り直す", target: nil, action: nil)
+    private let full = NSButton(checkboxWithTitle: "会話を最初から送り直す", target: nil, action: nil)
     private let pane = NSButton(title: "ペインを開く", target: nil, action: nil)
     var onPane: (() -> Void)?
     private var sent = false
 
     init(participant: String, parentNumber: Int?, draft: String, voice: String, range: String, tentative: Bool, canSubmit: Bool, confirmation: String? = nil) {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 504, height: 310), styleMask: [.titled], backing: .buffered, defer: false)
+        window = AIQuestionWindow(contentRect: NSRect(x: 0, y: 0, width: 504, height: 310), styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
         window.appearance = NSAppearance(named: .aqua); window.backgroundColor = Washi.paper
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
@@ -52,6 +62,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         hint.font = .systemFont(ofSize: 11); hint.textColor = Washi.tentative
         hint.stringValue = canSubmit ? (tentative ? "空欄なら声の末尾を送ります。聞き取り中の末尾は最大3秒待ちます" : "空欄なら声の末尾を送ります") : "回答待ちです。下書きは保持されます"
         sendButton.bezelStyle = .rounded; sendButton.target = self; sendButton.action = #selector(submit)
+        sendButton.keyEquivalent = "\r"
         sendButton.isEnabled = canSubmit
         let cancel = NSButton(title: "取消", target: self, action: #selector(cancel)); cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
         pane.isBordered = false; pane.target = self; pane.action = #selector(openPane)
@@ -81,7 +92,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     }
     func textDidChange(_ notification: Notification) { editor.needsDisplay = true; onDraft?(editor.string) }
     @objc private func submit() {
-        guard sendButton.isEnabled else { return }
+        guard sendButton.isEnabled, !editor.hasMarkedText() else { return }
         sent = true; sendButton.isEnabled = false; editor.isEditable = false
         onSubmit?(editor.string, full.state == .on)
     }

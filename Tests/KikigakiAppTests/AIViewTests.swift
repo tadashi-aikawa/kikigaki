@@ -40,7 +40,12 @@ import KikigakiCore
         #expect(state.ai?.summary == "Q1 · 回答待ち")
         #expect(buttons().contains { $0.title == "AIに質問…  ⌃⌥⌘A" })
         try capture("collapsed")
+        content.layoutSubtreeIfNeeded()
+        let transcript = try #require(descendants(content).compactMap { $0 as? TranscriptDocument }.first { $0.rows.contains { $0 is AIMarkRow } })
+        try #require(buttons().first { $0.title == "最新の発言へ ↓" }).performClick(nil)
+        #expect(transcript.anchor().atBottom)
         try #require(buttons().first { $0.title.hasPrefix("▸ AIとのやりとり") }).performClick(nil)
+        #expect(transcript.anchor().atBottom)
         try capture("waiting")
         let longText = "対象者\n開催日時\n会場\n連絡方法\n持ち物\n当日の担当者も決めてください。"
         let result = try AIReceiveEvent(request: request, kind: .answered, recordedAt: started.addingTimeInterval(369), body: longText)
@@ -70,6 +75,7 @@ import KikigakiCore
         #expect(replyID == request.id)
         try capture("clarification")
         let sheet = AIQuestionSheet(participant: "迅雷", parentNumber: 1, draft: "社内だけです", voice: "", range: "直近3発言 · 14:05:20〜14:05:50", tentative: true, canSubmit: true, confirmation: "参加対象は社内だけですか？")
+        #expect(descendants(sheet.window.contentView!).compactMap { $0 as? NSButton }.contains { $0.title == "送信 ⏎" && $0.keyEquivalent == "\r" })
         try capture("sheet", view: sheet.window.contentView!.superview!)
     }
 }
