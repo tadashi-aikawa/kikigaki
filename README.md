@@ -31,14 +31,24 @@
 
 取得が完了するまで、録音開始は準備待ちになります。
 
-## ビルドと起動
+## インストール
 
-Swift 6対応の開発環境で、リポジトリのルートから実行します。
+現在はソースからビルドして利用します。Homebrewでの配布は準備中で、`brew install` 用のCaskと初回リリースはまだ公開していません。
+
+macOS 26のSDKとSwift 6に対応するXcodeまたはCommand Line Toolsを用意し、以下を実行します。
 
 ```bash
+git clone https://github.com/tadashi-aikawa/kikigaku.git
+cd kikigaku
 ./scripts/make-app.sh
 open .build/KIKIGAKI.app
 ```
+
+アプリ名はKIKIGAKIですが、GitHubリポジトリ名は `kikigaku` です。既にチェックアウト済みなら、リポジトリのルートで最後の2コマンドを実行します。
+
+作成された `.build/KIKIGAKI.app` をFinderで「アプリケーション」へコピーすれば、以後は通常のアプリとして起動できます。
+
+## 起動と基本操作
 
 メニューバーから録音を開始すると、書き起こしウィンドウへ発話が順に表示されます。停止すると、既定では `~/Documents/KIKIGAKI` にMarkdownを保存します。
 
