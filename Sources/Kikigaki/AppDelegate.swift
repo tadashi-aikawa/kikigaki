@@ -328,8 +328,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let range = session.aiRangePreview(full: false)
         let sheet = AIQuestionSheet(participant: config.participantName, parentNumber: question?.request.number,
             draft: session.aiDraft, voice: snapshot.tentativeText ?? snapshot.utterances.last?.text ?? "空欄なら会話末尾の問いを送ります",
-            range: range, tentative: snapshot.tentativeText != nil, canSubmit: snapshot.ai?.canSubmit == true, confirmation: question?.result?.body)
+            range: range, tentative: snapshot.tentativeText != nil, canSubmit: snapshot.ai?.canSubmit == true, confirmation: question?.result?.body,
+            workAllowed: session.aiWorkAllowed)
         sheet.onDraft = { session.updateAIDraft($0) }
+        sheet.onWorkAllowedChange = { session.updateAIWorkAllowed($0) }
         sheet.rangePreview = { session.aiRangePreview(full: $0) }
         sheet.onCancel = { [weak self] in session.cancelAIPreparation(); self?.aiSheet = nil }
         sheet.onPane = { session.showAIPane() }

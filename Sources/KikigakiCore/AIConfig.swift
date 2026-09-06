@@ -30,14 +30,16 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var extraArgs: [String]?
     public var prompt: String?
     public var notifySound: Bool?
+    public var allowWork: Bool?
     public var hotkey: KikigakiConfig.Hotkey?
 
     public init(cli: AIProvider? = nil, command: String? = nil, herdrCommand: String? = nil, model: String? = nil,
                 address: String? = nil, cwd: String? = nil, extraArgs: [String]? = nil,
-                prompt: String? = nil, notifySound: Bool? = nil, hotkey: KikigakiConfig.Hotkey? = nil) {
+                prompt: String? = nil, notifySound: Bool? = nil, hotkey: KikigakiConfig.Hotkey? = nil, allowWork: Bool? = nil) {
         self.cli = cli; self.command = command; self.herdrCommand = herdrCommand; self.model = model; self.address = address
         self.cwd = cwd; self.extraArgs = extraArgs; self.prompt = prompt
         self.notifySound = notifySound; self.hotkey = hotkey
+        self.allowWork = allowWork
     }
 
     public func validate() throws {
@@ -70,6 +72,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public let extraArgs: [String]
     public let prompt: String
     public let notifySound: Bool
+    public let allowWork: Bool
     public let hotkey: KikigakiConfig.Hotkey
     public var participantName: String { address.hasSuffix("へ") ? String(address.dropLast()) : address }
 
@@ -79,6 +82,26 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         cwd = ResolvedConfig.expand(config.cwd ?? Self.defaultCWD, home: home)
         extraArgs = config.extraArgs ?? []; prompt = config.prompt ?? ""
         notifySound = config.notifySound ?? false; hotkey = config.hotkey ?? Self.defaultHotkey
+        allowWork = config.allowWork ?? true
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case cli, command, herdrCommand, model, address, cwd, extraArgs, prompt, notifySound, hotkey, allowWork
+    }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        cli = try values.decode(AIProvider.self, forKey: .cli)
+        command = try values.decodeIfPresent(String.self, forKey: .command)
+        herdrCommand = try values.decodeIfPresent(String.self, forKey: .herdrCommand)
+        model = try values.decodeIfPresent(String.self, forKey: .model)
+        address = try values.decode(String.self, forKey: .address)
+        cwd = try values.decode(URL.self, forKey: .cwd)
+        extraArgs = try values.decode([String].self, forKey: .extraArgs)
+        prompt = try values.decode(String.self, forKey: .prompt)
+        notifySound = try values.decode(Bool.self, forKey: .notifySound)
+        hotkey = try values.decode(KikigakiConfig.Hotkey.self, forKey: .hotkey)
+        // 旧会議のmanifestにこのキーが無い場合だけ、以前の作業可能な契約を引き継ぐ。
+        allowWork = try values.contains(.allowWork) ? values.decode(Bool.self, forKey: .allowWork) : true
     }
 }
 

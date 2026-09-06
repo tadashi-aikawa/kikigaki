@@ -85,6 +85,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     public let requestToken: String
     public let question: String
     public let questionSource: QuestionSource
+    public let workAllowed: Bool
     public let capturedAt: Date
     public let audioCutoffSeconds: Double
     public let tentativeTail: AITentativeTail?
@@ -94,11 +95,12 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     public init(streamID: UUID, requestID: UUID, sessionGeneration: Int, participantName: String,
                 cliPath: String, sessionPath: String, requestToken: String, question: String,
                 capturedAt: Date, audioCutoffSeconds: Double, tentativeTail: AITentativeTail? = nil,
-                inReplyToRequestID: UUID? = nil, inReplyToEventID: String? = nil) {
+                inReplyToRequestID: UUID? = nil, inReplyToEventID: String? = nil, workAllowed: Bool = true) {
         schemaVersion = 1; mode = "meeting"; self.streamID = streamID; self.requestID = requestID
         self.sessionGeneration = sessionGeneration; self.participantName = participantName
         self.cliPath = cliPath; self.sessionPath = sessionPath; self.requestToken = requestToken
         self.question = question; questionSource = question.isEmpty ? .voice : .typed
+        self.workAllowed = workAllowed
         self.capturedAt = capturedAt; self.audioCutoffSeconds = audioCutoffSeconds
         self.tentativeTail = tentativeTail; self.inReplyToRequestID = inReplyToRequestID
         self.inReplyToEventID = inReplyToEventID
@@ -128,9 +130,32 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
         case schemaVersion = "schema_version", mode, streamID = "stream_id", requestID = "request_id"
         case sessionGeneration = "session_generation", participantName = "participant_name"
         case cliPath = "cli_path", sessionPath = "session_path", requestToken = "request_token"
-        case question, questionSource = "question_source", capturedAt = "captured_at"
+        case question, questionSource = "question_source", capturedAt = "captured_at", workAllowed = "work_allowed"
         case audioCutoffSeconds = "audio_cutoff_seconds", tentativeTail = "tentative_tail"
         case inReplyToRequestID = "in_reply_to_request_id", inReplyToEventID = "in_reply_to_event_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        mode = try values.decode(String.self, forKey: .mode)
+        streamID = try values.decode(UUID.self, forKey: .streamID)
+        requestID = try values.decode(UUID.self, forKey: .requestID)
+        sessionGeneration = try values.decode(Int.self, forKey: .sessionGeneration)
+        participantName = try values.decode(String.self, forKey: .participantName)
+        cliPath = try values.decode(String.self, forKey: .cliPath)
+        sessionPath = try values.decode(String.self, forKey: .sessionPath)
+        requestToken = try values.decode(String.self, forKey: .requestToken)
+        question = try values.decode(String.self, forKey: .question)
+        questionSource = try values.decode(QuestionSource.self, forKey: .questionSource)
+        capturedAt = try values.decode(Date.self, forKey: .capturedAt)
+        audioCutoffSeconds = try values.decode(Double.self, forKey: .audioCutoffSeconds)
+        tentativeTail = try values.decodeIfPresent(AITentativeTail.self, forKey: .tentativeTail)
+        inReplyToRequestID = try values.decodeIfPresent(UUID.self, forKey: .inReplyToRequestID)
+        inReplyToEventID = try values.decodeIfPresent(String.self, forKey: .inReplyToEventID)
+        // 未指定だけ旧契約のtrue。null・文字列・数値を作業許可へ読み替えない。
+        workAllowed = try values.contains(.workAllowed) ? values.decode(Bool.self, forKey: .workAllowed) : true
+        try validate()
     }
 }
 

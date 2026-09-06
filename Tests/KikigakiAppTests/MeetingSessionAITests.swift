@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Testing
 import KikigakiCore
 @testable import Kikigaki
@@ -29,6 +29,65 @@ import KikigakiCore
     private func submit(_ session: MeetingSession) throws -> Task<Void, Never> {
         session.submitAI(question: "質問", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"))
         return try #require(session.submissionTaskForTesting)
+    }
+
+    private final class NoAudio: AudioSource {
+        func start(onSamples: @escaping ([Float]) -> Void) throws { Issue.record("テストでは音源を起動しない") }
+        func stop() {}
+    }
+    @Test(arguments: [false, true]) func シートの作業許可を会議内で引き継ぎ送信時に固定し新録音で設定へ戻す(defaultAllowed: Bool) async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let store = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
+        var config = try config(root)
+        config.ai = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path, allowWork: defaultAllowed), home: root)
+        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config, aiStore: store)
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        func sheet() -> AIQuestionSheet {
+            let sheet = AIQuestionSheet(participant: "迅雷", parentNumber: nil, draft: "追記してください", voice: "", range: "追加の確定行なし",
+                tentative: false, canSubmit: true, workAllowed: session.aiWorkAllowed)
+            sheet.onWorkAllowedChange = { session.updateAIWorkAllowed($0) }
+            sheet.onSubmit = { text, full in session.submitAI(question: text, full: full, parent: nil, helper: URL(fileURLWithPath: "/bin/echo")) }
+            return sheet
+        }
+        let firstSheet = sheet()
+        let checkbox = try #require(descendants(firstSheet.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title.hasPrefix("作業を許可する") })
+        #expect((checkbox.state == .on) == defaultAllowed)
+        checkbox.performClick(nil)
+        #expect(session.aiWorkAllowed == !defaultAllowed)
+        if let output = ProcessInfo.processInfo.environment["KIKIGAKI_UI_CAPTURE"] {
+            let view = firstSheet.window.contentView!.superview!; view.layoutSubtreeIfNeeded()
+            let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: output).appendingPathComponent("work-allowed-\(!defaultAllowed).png"))
+        }
+        let send = try #require(descendants(firstSheet.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "送信 ⏎" })
+        send.performClick(nil)
+        #expect(!checkbox.isEnabled)
+        let task = try #require(session.submissionTaskForTesting)
+        // 起動が始まる前に次回の値を変えても、今回のrequestはEnter時点の値を使う。
+        session.updateAIWorkAllowed(defaultAllowed)
+        await task.value
+        let first = try #require(session.aiRecord?.controller.conversation.questions.first)
+        #expect(first.state == .submitted && first.request.envelope.participant.workAllowed == !defaultAllowed)
+        let mark = AIMarkRow(mark: .init(question: first, kind: .question), state: AIViewState())
+        mark.toggleExpanded()
+        #expect(descendants(mark).compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains("作業許可: " + (!defaultAllowed ? "あり" : "なし")) })
+        session.updateAIWorkAllowed(!defaultAllowed)
+        session.update(config: config)
+        let secondSheet = sheet()
+        let nextCheckbox = try #require(descendants(secondSheet.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title.hasPrefix("作業を許可する") })
+        #expect((nextCheckbox.state == .on) == !defaultAllowed)
+        session.cancelAI(first.request.id); session.recreateAI()
+        let second = try submit(session); await second.value
+        #expect(session.aiRecord?.controller.conversation.questions.last?.request.envelope.participant.workAllowed == !defaultAllowed)
+        await session.stop()
+        #expect(session.aiWorkAllowed == !defaultAllowed)
+        #expect(try String(contentsOf: root.appendingPathComponent("meeting.md"), encoding: .utf8).contains("- 作業許可: " + (!defaultAllowed ? "あり" : "なし")))
+        // DEBUG fixtureのmodelsはthrowする。録音開始時のリセットだけを本番startで通す。
+        #expect(await !session.start(source: NoAudio()))
+        #expect(session.aiWorkAllowed == defaultAllowed)
     }
 
     @Test func 録音停止は確定待ち中の問いだけを取り消し送信しない() async throws {

@@ -136,6 +136,7 @@ final class AIMarkRow: NSView, DocumentRow {
             let time = question.request.timeRange.map { " · \($0.start)〜\($0.end)" } ?? ""
             notes.append("対象: \(envelope.readLineCount)発言" + time
                 + (envelope.participant.tentativeTail == nil ? "" : " · 暫定末尾を含む"))
+            notes.append("作業許可: " + (envelope.participant.workAllowed ? "あり" : "なし"))
             let status: String
             switch question.state {
             case .prepared: status = "送信準備中"

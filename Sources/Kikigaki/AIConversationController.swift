@@ -65,7 +65,7 @@ final class AIConversationController {
 
     func prepare(lines: [String], question: String, voiceQuestion: String, capturedAt: Date, cutoff: Double,
                  tail: AITentativeTail?, config: ResolvedAIConfig, helper: URL, parent: UUID? = nil,
-                 full: Bool = false) throws -> AIRequest {
+                 full: Bool = false, workAllowed: Bool? = nil) throws -> AIRequest {
         guard canSend else { throw AIHerdrError.notReady }
         if let configuration, configuration != config { throw AIError.mismatch }
         let snapshot = try history.prepare(lines: lines, outputDirectory: outputDirectory, full: full)
@@ -73,7 +73,7 @@ final class AIConversationController {
             participantName: config.participantName, cliPath: helper.path, sessionPath: sessionURL.path,
             requestToken: UUID().uuidString + UUID().uuidString, question: question, capturedAt: capturedAt,
             audioCutoffSeconds: cutoff, tentativeTail: tail, inReplyToRequestID: parent,
-            inReplyToEventID: parent.map { "\($0.uuidString)/result" })
+            inReplyToEventID: parent.map { "\($0.uuidString)/result" }, workAllowed: workAllowed ?? config.allowWork)
         let request = try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant),
             number: conversation.questions.count + 1, voiceQuestion: voiceQuestion, snapshot: snapshot)
         var next = conversation

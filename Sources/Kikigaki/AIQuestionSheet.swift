@@ -34,18 +34,20 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     var onSubmit: ((String, Bool) -> Void)?
     var onCancel: (() -> Void)?
     var onDraft: ((String) -> Void)?
+    var onWorkAllowedChange: ((Bool) -> Void)?
     private let editor = AIQuestionEditor()
     private let sendButton = NSButton(title: "送信 ⏎", target: nil, action: nil)
     private let hint = NSTextField(wrappingLabelWithString: "")
     private let range = Washi.label(size: 11, color: Washi.muted)
     private let full = NSButton(checkboxWithTitle: "会話を最初から送り直す", target: nil, action: nil)
+    private let work = NSButton(checkboxWithTitle: "作業を許可する(ファイル編集・コマンド実行)", target: nil, action: nil)
     private let pane = NSButton(title: "ペインを開く", target: nil, action: nil)
     var onPane: (() -> Void)?
     var rangePreview: ((Bool) -> String)?
     private var sent = false
 
-    init(participant: String, parentNumber: Int?, draft: String, voice: String, range: String, tentative: Bool, canSubmit: Bool, confirmation: String? = nil) {
-        window = AIQuestionWindow(contentRect: NSRect(x: 0, y: 0, width: 504, height: 310), styleMask: [.titled], backing: .buffered, defer: false)
+    init(participant: String, parentNumber: Int?, draft: String, voice: String, range: String, tentative: Bool, canSubmit: Bool, confirmation: String? = nil, workAllowed: Bool = true) {
+        window = AIQuestionWindow(contentRect: NSRect(x: 0, y: 0, width: 504, height: 344), styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
         window.appearance = NSAppearance(named: .aqua); window.backgroundColor = Washi.paper
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
@@ -53,6 +55,8 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         let title = Washi.label(parentNumber.map { "Q\($0)への返答" } ?? "\(participant)に質問", size: 17, weight: .semibold)
         self.range.stringValue = range
         full.target = self; full.action = #selector(updateRange)
+        work.state = workAllowed ? .on : .off
+        work.target = self; work.action = #selector(workChanged)
         editor.placeholder = voice; editor.string = draft; editor.font = .systemFont(ofSize: 14)
         editor.textColor = Washi.ink; editor.backgroundColor = Washi.paper; editor.isRichText = false
         editor.textContainerInset = NSSize(width: 6, height: 8); editor.delegate = self
@@ -75,9 +79,9 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
             context.font = .systemFont(ofSize: 12); context.textColor = Washi.ink
             context.maximumNumberOfLines = 3; context.toolTip = confirmation
             views.append(context)
-            window.setContentSize(NSSize(width: 504, height: 360))
+            window.setContentSize(NSSize(width: 504, height: 394))
         }
-        views += [scroll, hint, full, actions]
+        views += [scroll, hint, full, work, actions]
         for view in views {
             stack.addArrangedSubview(view); view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
         }
@@ -91,13 +95,15 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         hint.stringValue = progress ?? warning ?? (canSubmit ? "空欄なら声の末尾を送ります" : "回答待ちです。下書きは保持されます")
         sendButton.isEnabled = canSubmit && !sent
         editor.isEditable = !sent || progress == nil
+        work.isEnabled = !sent || progress == nil
         if progress == nil { sent = false; sendButton.isEnabled = canSubmit }
     }
     func textDidChange(_ notification: Notification) { editor.needsDisplay = true; onDraft?(editor.string) }
     @objc private func updateRange() { if let rangePreview { range.stringValue = rangePreview(full.state == .on) } }
+    @objc private func workChanged() { onWorkAllowedChange?(work.state == .on) }
     @objc private func submit() {
         guard sendButton.isEnabled, !editor.hasMarkedText() else { return }
-        sent = true; sendButton.isEnabled = false; editor.isEditable = false
+        sent = true; sendButton.isEnabled = false; editor.isEditable = false; work.isEnabled = false
         onSubmit?(editor.string, full.state == .on)
     }
     @objc private func cancel() { onCancel?(); close() }

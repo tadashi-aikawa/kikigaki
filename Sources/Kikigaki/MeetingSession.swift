@@ -70,6 +70,7 @@ final class MeetingSession {
     private var aiProgress: String?
     private var aiWarning: String?
     private(set) var aiDraft = ""
+    private(set) var aiWorkAllowed: Bool
     private var aiCompleted: UUID?
     private var consumedAudioTime: Double = 0
     var aiMeetingID: UUID { handoff.meetingID }
@@ -79,6 +80,7 @@ final class MeetingSession {
     init(config: ResolvedConfig, models: @escaping () async throws -> SortformerModelStore.Loaded, log: @escaping (String) -> Void, aiStore: AIRecordStore? = nil) {
         self.config = config
         self.aiStore = aiStore; meetingAI = config.ai
+        aiWorkAllowed = config.ai?.allowWork ?? true
         self.models = models
         self.log = log
         snapshot.speakers = config.speakers
@@ -105,6 +107,7 @@ final class MeetingSession {
         // 準備中や録音中の再読込で、同じ会議の保存方針を途中から切り替えない。
         let meetingConfig = config
         meetingAI = meetingConfig.ai; aiDraft = ""; aiWarning = nil; aiCompleted = nil
+        aiWorkAllowed = meetingConfig.ai?.allowWork ?? true
         consumedAudioTime = 0
         dropRepeatedBackchannels = meetingConfig.dropRepeatedBackchannels
         snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers, message: "エンジンを準備中...")
@@ -351,6 +354,7 @@ final class MeetingSession {
     }
 
     func updateAIDraft(_ text: String) { aiDraft = text }
+    func updateAIWorkAllowed(_ allowed: Bool) { aiWorkAllowed = allowed }
     func beginAIDraft() { aiCompleted = nil }
     func retryAISaves() { aiStore?.retrySaves() }
 
@@ -386,6 +390,7 @@ final class MeetingSession {
         guard snapshot.canShare, aiTask == nil, let config = meetingAI, let url = snapshot.markdownURL, let aiStore else { return }
         let meetingID = handoff.meetingID, capturedAt = Date(), cutoff = snapshot.state == .idle ? snapshot.elapsed : pause.audioTime
         let names = snapshot.names, timeline = snapshot.timeline
+        let workAllowed = aiWorkAllowed
         aiDraft = question; aiCompleted = nil; aiWarning = nil; aiProgress = "送信の準備中"
         aiPhase = .confirmationWait
         aiTask = Task { [weak self] in
@@ -418,7 +423,7 @@ final class MeetingSession {
                 // prepareの通知から録音停止が始まっても、確定待ちの取消へ戻さない。
                 aiPhase = .preparingAndSending
                 let fixed = try record.controller.prepare(lines: capture.lines, question: question, voiceQuestion: capture.voice,
-                    capturedAt: capturedAt, cutoff: cutoff, tail: capture.tail, config: config, helper: helper, parent: parent, full: full)
+                    capturedAt: capturedAt, cutoff: cutoff, tail: capture.tail, config: config, helper: helper, parent: parent, full: full, workAllowed: workAllowed)
                 request = fixed
                 let executable: URL, arguments: [String]
                 if let launch { (executable, arguments) = try launch(config, helper, record.controller) }
