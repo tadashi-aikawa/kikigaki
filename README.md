@@ -33,7 +33,23 @@
 
 ## インストール
 
-現在はソースからビルドして利用します。Homebrewでの配布は準備中で、`brew install` 用のCaskと初回リリースはまだ公開していません。
+Homebrewで導入します。
+
+```bash
+brew install --cask tadashi-aikawa/tap/kikigaki
+```
+
+更新は次のコマンドです。
+
+```bash
+brew upgrade --cask kikigaki
+```
+
+自己署名(未公証)のアプリです。初回起動がブロックされた場合は、システム設定 → プライバシーとセキュリティ → 「このまま開く」で許可してください。
+
+配布物は [Releases](https://github.com/tadashi-aikawa/kikigaku/releases) の `KIKIGAKI-<バージョン>.zip` からも取得できます。アプリ名はKIKIGAKIですが、GitHubリポジトリ名は `kikigaku` です。
+
+### ソースからビルドする場合
 
 macOS 26のSDKとSwift 6に対応するXcodeまたはCommand Line Toolsを用意し、以下を実行します。
 
@@ -43,8 +59,6 @@ cd kikigaku
 ./scripts/make-app.sh
 open .build/KIKIGAKI.app
 ```
-
-アプリ名はKIKIGAKIですが、GitHubリポジトリ名は `kikigaku` です。既にチェックアウト済みなら、リポジトリのルートで最後の2コマンドを実行します。
 
 作成された `.build/KIKIGAKI.app` をFinderで「アプリケーション」へコピーすれば、以後は通常のアプリとして起動できます。
 
