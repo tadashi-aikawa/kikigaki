@@ -305,7 +305,9 @@ key = "a"
 
 GUI起動ではPATHに普段のCLIがない場合がある。見つからなければcommandの絶対パス指定を案内し、環境設定を自動変更しない。herdrも実行可能パスを解決し、未導入なら手動コピーは使える状態でAI送信だけを失敗にする。
 
-段2で両CLIのhelpを読み、衝突の入口を確認した。Codexの `-c/--config` はnotify・model・cwd等を上書きできるためキー単位で検証し、`-m/--model`、`-C/--cd`、`--remote`、サブコマンドと起動時promptを受け付けない。Claudeは `--settings`、`--setting-sources`、`--model`、`-p/--print`、`-c/--continue`、`-r/--resume`、`--session-id`、`--fork-session`、`--from-pr`、`--teleport`、`--bg/--background`、`--cloud`、`--environment`、`-w/--worktree`、`--tmux`、`--bare`、`--safe-mode`、`--restricted`、`--disable-slash-commands` とサブコマンド・起動時promptを拒否する。`--key=value` や短縮引数の結合も同じ検証を通し、値と位置引数を曖昧に解釈しない。未対応のオプションは送信前に原因を示す。
+段3のextraArgsは、値の個数と意味を確認できる追加指定だけを受け付ける。Codexの `--search`、`--no-alt-screen`、`--strict-config` は値なし、`--sandbox/-s` と `--ask-for-approval/-a` は既知の列挙値、`--add-dir` は絶対パス一つ。Claudeの `--verbose` は値なし、`--effort` と `--permission-mode` は既知の列挙値、`--add-dir` は絶対パス一つを受け付ける。権限モードは利用者が明示した場合だけ渡し、アプリが自動で追加しない。
+
+`--key=value` も同じ検証を通す。その他のオプション、起動時prompt、サブコマンド、結合した短縮引数は送信前に拒否する。Codexの自由な `-c/--config` も、notify等への上書き経路になるため現段では未対応。将来の追加はキーと値の規則をテストしてから行う。
 
 ## 安全性と会議参加モードの指示
 
@@ -349,6 +351,28 @@ GUI起動ではPATHに普段のCLIがない場合がある。見つからなけ�
 | 6 | replayと実herdrで両CLIの往復と障害系を端から端で検証。 | 質問1を待つ間も会話が続き、回答1→質問2→回答2、停止後の改名でも両回答が同じMarkdownに残る。二重返送・終了中返送・返し忘れ・送達不明を確認し、本人が実機検分する。 |
 
 段3〜5でコードを変更したら `swift build && swift test` を成功させてからその成果物で確認する。段4で本番CLIを先取りして作らず、同じ契約の模擬口で確認する。各段を本人へ報告し、レビュー後に次へ進む。
+
+### 段3のCore実装
+
+Coreへはherdr・AppKit・Processを追加しない。接続とUIのための副作用は後続のadapterへ置く。
+
+| 型 | 責務 |
+| --- | --- |
+| AIConfig / ResolvedAIConfig | 有効・無効、既定値、絶対パスの形式、追加引数、既存ホットキーとの衝突検証。PATH探索や実在確認はアプリ側 |
+| AIStreamHistory / AIContextSnapshot | 番号予約と受領基準を分離。未受領の次の送信は全文。同内容の受領済みsnapshotは別質問に再利用 |
+| AIParticipantContext / AIEnvelope / AIRequest | 暫定を付帯データに留め、問いと文脈を固定。JSONと返送パスの整合を検証 |
+| AIReceiveEvent / AIQuestion / AIConversation | 受領・結果の検証、送信試行先行の状態遷移、固定イベントIDによる重複排除、取消・旧世代の結果保持、保存状態の検証付き復元 |
+| AIInbox | 引数で渡された保存先からfdで階層を辿る読み取り値型。基点とenvelopeの照合、所有者・権限・サイズ・通常ファイルを検証 |
+| AIReturnStatus | 接続状態と休止開始時刻を引数で受け、返送未確認の補助判定だけを返す |
+| AIMarkdown / MeetingMarkdown.Meeting.ai | 人間の発話と印を時刻順に合成し、質問・回答の固定データからAI節を生成 |
+
+HandoffHistoryには会議IDの読み出しと任意のID注入だけを追加した。既定は従来どおり新しいUUIDで、手動のJSON・差分・保存・クリップボード成功時更新は変更していない。既存の手動コピーのテストも変更しない。
+
+AIConversationは会議記録の値としてJSONへ保存できる。これはAIセッションの再接続ではない。確認質問の元カードは、続きのrequestを準備しただけでは返答済みにせず、送信を試行した時点で参照を結ぶ。結果の到着前にアプリが落ちても、送信試行はdelivery_unknownとして残る。
+
+AIInboxは書込みも権限変更もしない。hardlinkも拒否するため、段5の完成公開では一時名のlinkを削除してから完成扱いにする。保存・監視・notifyのプロバイダ別解釈、録音停止時のarchive永続化と登録簿は後続の段へ残す。録音中archiveとdigest照合は作っていない。
+
+新規の `AIParticipantTests.swift` が設定、受領基準、特殊文字、状態遷移、再送、保存破損、不正な行番号、リンク・FIFO・所有者・権限・サイズ、深夜の印、通常/rawと改名を検証する。
 
 ## 対象外と後続課題
 

@@ -38,14 +38,16 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     public var dropRepeatedBackchannels: Bool?
     public var hotkeys: Hotkeys?
     public var speakers: [Speaker]?
+    public var ai: AIConfig?
 
     public init(outputDir: String? = nil, saveRecording: Bool? = nil, hotkeys: Hotkeys? = nil, dropRepeatedBackchannels: Bool? = nil,
-                speakers: [Speaker]? = nil) {
+                speakers: [Speaker]? = nil, ai: AIConfig? = nil) {
         self.outputDir = outputDir
         self.saveRecording = saveRecording
         self.hotkeys = hotkeys
         self.dropRepeatedBackchannels = dropRepeatedBackchannels
         self.speakers = speakers
+        self.ai = ai
     }
 }
 
@@ -65,6 +67,7 @@ public struct ResolvedConfig: Equatable, Sendable {
     public var toggleRecording: KikigakiConfig.Hotkey
     public var togglePause: KikigakiConfig.Hotkey
     public var speakers: [KikigakiConfig.Speaker]
+    public var ai: ResolvedAIConfig?
 
     public init(config: KikigakiConfig, home: URL = FileManager.default.homeDirectoryForCurrentUser) {
         outputDir = Self.expand(config.outputDir ?? Self.defaultOutputDir, home: home)
@@ -80,6 +83,7 @@ public struct ResolvedConfig: Equatable, Sendable {
             }
             return speaker
         }
+        ai = config.ai.map { ResolvedAIConfig(config: $0, home: home) }
     }
 
     /// 先頭の `~` をホームに置き換える。`~user` 形式は扱わない
@@ -122,6 +126,7 @@ public enum ConfigLoader {
     public static let modifierNames: Set<String> = ["cmd", "command", "alt", "option", "ctrl", "control", "shift"]
 
     private static func validate(_ config: KikigakiConfig) throws {
+        try config.ai?.validate()
         var speakerNames = Set<String>()
         for speaker in config.speakers ?? [] {
             let name = SpeakerNames.normalized(speaker.name)
@@ -139,7 +144,8 @@ public enum ConfigLoader {
             }
         }
         let resolved = ResolvedConfig(config: config)
-        let hotkeys = [("toggleRecording", resolved.toggleRecording), ("togglePause", resolved.togglePause)]
+        var hotkeys = [("toggleRecording", resolved.toggleRecording), ("togglePause", resolved.togglePause)]
+        if let ai = resolved.ai { hotkeys.append(("ai", ai.hotkey)) }
         for (label, hotkey) in hotkeys {
             if hotkey.key.trimmingCharacters(in: .whitespaces).isEmpty {
                 throw ConfigError.invalid(description: "hotkeys.\(label).key must be a non-empty string")
@@ -151,6 +157,10 @@ public enum ConfigLoader {
         // 2操作に同じキーを割り当てると後の登録が失敗して片方を失うので、読み込み時に止める
         if Self.normalized(resolved.toggleRecording) == Self.normalized(resolved.togglePause) {
             throw ConfigError.invalid(description: "hotkeys.toggleRecording and hotkeys.togglePause must differ")
+        }
+        if let ai = resolved.ai,
+           [resolved.toggleRecording, resolved.togglePause].contains(where: { Self.normalized($0) == Self.normalized(ai.hotkey) }) {
+            throw ConfigError.invalid(description: "ai.hotkey must differ from recording hotkeys")
         }
     }
 

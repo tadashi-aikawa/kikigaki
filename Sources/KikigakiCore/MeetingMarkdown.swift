@@ -10,15 +10,17 @@ public enum MeetingMarkdown {
         public var utterances: [Utterance]
         public var names: SpeakerNames
         public var pauses: [MeetingTimeline.Pause]
+        public var ai: AIConversation?
         public var timeline: MeetingTimeline { MeetingTimeline(startedAt: startedAt, pauses: pauses) }
 
         public init(startedAt: Date, duration: Double, utterances: [Utterance], names: SpeakerNames,
-                    pauses: [MeetingTimeline.Pause] = []) {
+                    pauses: [MeetingTimeline.Pause] = [], ai: AIConversation? = nil) {
             self.startedAt = startedAt
             self.duration = duration
             self.utterances = utterances
             self.names = names
             self.pauses = pauses
+            self.ai = ai
         }
     }
 
@@ -38,8 +40,10 @@ public enum MeetingMarkdown {
         lines.append("## 書き起こし")
         lines.append("")
         // 箇条書きにするのは、素の行を並べると Markdown レンダラが1段落に繋げてしまうため
-        for utterance in meeting.utterances {
-            lines.append("- " + TranscriptRenderer.line(utterance, names: meeting.names, timeline: meeting.timeline, timeZone: timeZone))
+        lines += AIMarkdown.transcriptLines(meeting, timeZone: timeZone)
+        if let ai = meeting.ai, !ai.questions.isEmpty {
+            lines.append("")
+            lines.append(AIMarkdown.section(ai, timeZone: timeZone))
         }
         return lines.joined(separator: "\n") + "\n"
     }

@@ -36,12 +36,15 @@ public enum HandoffError: LocalizedError {
 /// 会議ごとに作り直す。ファイルとクリップボードの両方が成功した時だけ基準を進める。
 public struct HandoffHistory {
     public private(set) var lastCopy: HandoffCopy?
-    private let meetingID = UUID()
+    public let meetingID: UUID
     private var previousLines: [String] = []
     private var previousStarts: [Double] = []
     private let startedAt: Date
 
-    public init(startedAt: Date = Date()) { self.startedAt = startedAt }
+    public init(startedAt: Date = Date(), meetingID: UUID = UUID()) {
+        self.startedAt = startedAt
+        self.meetingID = meetingID
+    }
 
     public func preview(utterances: [Utterance], names: SpeakerNames, timeline: MeetingTimeline? = nil,
                         full: Bool = false) -> HandoffPreview? {
