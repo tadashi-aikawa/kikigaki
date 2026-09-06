@@ -42,7 +42,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onRetryAISave: (() -> Void)?
     var onShowPreviousAI: (() -> Void)?
     private lazy var previousAIButton = AIActionButton("前の会議に回答あり") { [weak self] in self?.onShowPreviousAI?() }
-    private let aiPanel = AIPanel()
+    private let aiBadges = Washi.label(size: 11, color: Washi.muted)
+    private let aiNotice = Washi.label(size: 11, color: Washi.muted)
+    private lazy var reconnectAI = AIActionButton("AIセッションを作り直す") { [weak self] in self?.onRecreateAI?() }
+    private lazy var retryAISave = AIActionButton("保存を再試行") { [weak self] in self?.onRetryAISave?() }
+    private let aiStatusRow = NSStackView()
     private let askButton = NSButton(title: "AIに質問…", target: nil, action: nil)
     private var aiMarks: [String: AIMarkRow] = [:]
     private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
@@ -53,7 +57,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let copyButton = CopyButton(title: "会話をコピー", target: nil, action: nil)
     private let latestButton = NSButton(title: "最新の発言へ ↓", target: nil, action: nil)
     private var transcriptBottom: NSLayoutConstraint?
-    private var beforeAIToggle: TranscriptDocument.Anchor?
     private let statusDot = RecordingMark()
     private let statusLabel = Washi.label(size: 13, weight: .semibold)
     private let elapsedLabel = Washi.label(color: Washi.muted)
@@ -121,10 +124,17 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         previousAIButton.title = value.aiRecoveryWarning == nil ? "前の会議に回答あり" : "AI回答の回収を確認"
         previousAIButton.toolTip = value.aiRecoveryWarning
         transcriptBottom?.constant = value.ai == nil ? 0 : -34
-        aiPanel.isHidden = value.ai == nil
+        aiBadges.stringValue = value.ai?.badges ?? ""
+        aiBadges.isHidden = aiBadges.stringValue.isEmpty
+        aiBadges.toolTip = aiBadges.stringValue
+        aiNotice.stringValue = [value.ai?.progress, value.ai?.warning].compactMap { $0 }.joined(separator: " · ")
+        aiNotice.isHidden = aiNotice.stringValue.isEmpty
+        aiNotice.toolTip = aiNotice.stringValue
+        reconnectAI.isHidden = value.ai?.canRecreate != true
+        retryAISave.isHidden = value.ai?.saveFailed != true
+        aiStatusRow.isHidden = aiNotice.isHidden && reconnectAI.isHidden && retryAISave.isHidden
         askButton.isHidden = value.ai == nil
         if let ai = value.ai {
-            aiPanel.update(ai, newMeeting: previous.timeline.startedAt != value.timeline.startedAt)
             askButton.title = "AIに質問…  " + ai.shortcut
             askButton.isEnabled = value.canShare
         }
@@ -206,16 +216,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             // 回答の到着だけでは末尾へ移動しない。人間の発言が増えたときの追従は従来どおり。
             anchor = .init(candidates: anchor.candidates, y: anchor.y, atBottom: false)
         }
-        var marks: [(String, Date, String, Int, Int)] = []
-        for question in snapshot.ai?.conversation?.questions ?? [] {
-            let name = question.request.envelope.participant.participantName
-            let prefix = "Q\(question.request.number) " + name
-            if let sent = question.sendAttemptedAt { marks.append((question.request.id.uuidString + "/send", sent, prefix + "へ質問" + (question.state == .deliveryUnknown ? "・送達不明" : ""), 1, question.request.number)) }
-            if let arrived = question.resultReceivedAt {
-                marks.append((question.request.id.uuidString + "/result", arrived, prefix + (question.result?.kind == .needsInput ? "の確認" : question.result?.kind == .failed ? "の失敗報告" : "の回答"), 2, question.resultOrder ?? 0))
-            }
-        }
-        marks.sort { $0.1 != $1.1 ? $0.1 < $1.1 : $0.3 != $1.3 ? $0.3 < $1.3 : $0.4 < $1.4 }
+        let marks = AIInlineMark.ordered(snapshot.ai?.conversation)
         var markIndex = 0
         let animated = sameMeeting && !shouldReduceMotion()
         var next: [RowID: TranscriptRow] = [:]
@@ -224,10 +225,10 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         var inserted: [TranscriptRow] = []
         var changed: [TranscriptRow] = []
         for (index, utterance) in snapshot.utterances.enumerated() {
-            while markIndex < marks.count, marks[markIndex].1 < snapshot.timeline.date(at: utterance.start) {
+            while markIndex < marks.count, marks[markIndex].date < snapshot.timeline.date(at: utterance.start) {
                 let mark = marks[markIndex]
                 let view = markView(mark)
-                aiMarks[mark.0] = view; ordered.append(view); markIndex += 1
+                aiMarks[mark.id] = view; ordered.append(view); markIndex += 1
             }
             if snapshot.hasCopied, snapshot.handoffPreview?.startLine == index + 1 { ordered.append(boundary) }
             let occurrence = occurrences[utterance.start, default: 0]
@@ -245,13 +246,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         while markIndex < marks.count {
             let mark = marks[markIndex]
             let view = markView(mark)
-            aiMarks[mark.0] = view; ordered.append(view); markIndex += 1
+            aiMarks[mark.id] = view; ordered.append(view); markIndex += 1
         }
         if let tentative = snapshot.tentativeText {
             tentativeRow.updateTentative(tentative)
             ordered.append(tentativeRow)
         }
         rows = next
+        aiMarks = aiMarks.filter { key, _ in marks.contains { $0.id == key } }
         transcriptDocument.setRows(ordered, anchor: anchor)
         for row in inserted {
             row.appear(animated: animated && snapshot.state == .recording)
@@ -270,21 +272,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         configure(latestButton, #selector(latestPressed))
         configure(speakerButton, #selector(speakerPressed))
         configure(askButton, #selector(askPressed))
-        aiPanel.onReply = { [weak self] in self?.onAskAI?($0) }
-        aiPanel.onRead = { [weak self] in self?.onReadAI?($0) }
-        aiPanel.onPane = { [weak self] in self?.onOpenAIPane?() }
-        aiPanel.onCancel = { [weak self] in self?.onCancelAI?($0) }
-        aiPanel.onReconnect = { [weak self] in self?.onRecreateAI?() }
-        aiPanel.onRetrySave = { [weak self] in self?.onRetryAISave?() }
-        aiPanel.isHidden = true; askButton.isHidden = true
+        askButton.isHidden = true
         askButton.isBordered = true; askButton.bezelStyle = .rounded
         askButton.setContentHuggingPriority(.required, for: .horizontal)
-        aiPanel.onWillToggle = { [weak self] in self?.beforeAIToggle = self?.transcriptDocument.anchor() }
-        aiPanel.onDidToggle = { [weak self] in
-            guard let self, let anchor = beforeAIToggle else { return }
-            window?.contentView?.layoutSubtreeIfNeeded()
-            transcriptDocument.reflow(anchor: anchor); beforeAIToggle = nil; scrolled()
-        }
         speakerButton.setAccessibilityLabel("話者の統合先")
         for button in [startStopButton, pauseButton, openButton] {
             button.widthAnchor.constraint(equalToConstant: 34).isActive = true
@@ -341,10 +331,18 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             body.heightAnchor.constraint(greaterThanOrEqualToConstant: 150)
         ])
         let title = Washi.label("AIへ渡す会話", size: 13, weight: .semibold)
-        let footerTitle = row([title, previousAIButton, NSView(), rangeLabel], spacing: 12)
+        aiBadges.lineBreakMode = .byTruncatingTail
+        aiBadges.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        title.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let footerTitle = row([title, aiBadges, previousAIButton, NSView(), rangeLabel], spacing: 8)
+        aiStatusRow.orientation = .horizontal; aiStatusRow.alignment = .centerY; aiStatusRow.spacing = 12
+        aiNotice.lineBreakMode = .byTruncatingTail
+        aiNotice.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for view in [aiNotice, reconnectAI, retryAISave] { aiStatusRow.addArrangedSubview(view) }
+        aiStatusRow.isHidden = true
         copyButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let footerButtons = row([askButton, copyButton], spacing: 12)
-        let footer = column([footerTitle, footerButtons], spacing: 8, inset: 16)
+        let footer = column([footerTitle, aiStatusRow, footerButtons], spacing: 8, inset: 16)
         Washi.surface(footer)
         searchField.placeholderString = "会話を検索"
         searchField.setAccessibilityLabel("会話を検索")
@@ -367,7 +365,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         for view in [searchField, searchCount, searchPrevious, searchNext, close] { searchBar.addArrangedSubview(view) }
         Washi.surface(searchBar)
         searchBar.isHidden = true
-        return column([header, searchBar, separator(), body, separator(), aiPanel, footer], spacing: 0, inset: 0)
+        return column([header, searchBar, separator(), body, separator(), footer], spacing: 0, inset: 0)
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -413,9 +411,23 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         return view
     }
     @objc private func startStopPressed() { onStartStop?() }
-    private func markView(_ mark: (String, Date, String, Int, Int)) -> AIMarkRow {
-        if let current = aiMarks[mark.0], current.title == mark.2, current.date == mark.1 { return current }
-        return AIMarkRow(title: mark.2, date: mark.1)
+    private func markView(_ mark: AIInlineMark) -> AIMarkRow {
+        let state = snapshot.ai ?? AIViewState()
+        let view = aiMarks[mark.id] ?? AIMarkRow(mark: mark, state: state)
+        view.update(mark, state: state)
+        let id = mark.question.request.id
+        view.onRead = { [weak self] in self?.onReadAI?(id) }
+        view.onReply = { [weak self] in self?.onAskAI?(id) }
+        view.onCancel = { [weak self] in self?.onCancelAI?(id) }
+        view.onPane = { [weak self] in self?.onOpenAIPane?() }
+        view.onToggle = { [weak self, weak view] in
+            guard let self, let view else { return }
+            let y = scrollView.contentView.bounds.minY
+            // 開いた行の見出しをその場に保つ。末尾追従で全文の末尾へ飛ばさない。
+            transcriptDocument.reflow(anchor: .init(candidates: [(view, view.frame.minY - y)], y: y, atBottom: false))
+            scrolled()
+        }
+        return view
     }
     @objc private func askPressed() { onAskAI?(nil) }
     @objc private func pausePressed() { onPauseResume?() }
