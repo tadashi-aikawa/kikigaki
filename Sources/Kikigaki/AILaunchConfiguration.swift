@@ -5,7 +5,8 @@ import KikigakiAIIO
 struct AILaunchConfiguration {
     let executable: URL
     let arguments: [String]
-    @MainActor init(config: ResolvedAIConfig, helper: URL, controller: AIConversationController) throws {
+    @MainActor init(config: ResolvedAIConfig, helper: URL, controller: AIConversationController,
+                    codexConfigURL: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/config.toml")) throws {
         executable = try AIProcessRunner.executable(config.command ?? config.cli.rawValue)
         _ = try AIProcessRunner.executable(helper.path)
         let defaultCWD = ResolvedAIConfig(config: AIConfig(), home: FileManager.default.homeDirectoryForCurrentUser).cwd
@@ -19,6 +20,13 @@ struct AILaunchConfiguration {
         if config.cli == .codex {
             let encoder = JSONEncoder(); encoder.outputFormatting = [.withoutEscapingSlashes]
             args += ["-c", "notify=" + String(decoding: try encoder.encode(notify), as: UTF8.self)]
+            // Codexの workspace-write サンドボックスは cwd と writable_roots 以外へ書けない。同梱CLIが返送を
+            // 保存する会議の `ai/` を許可先へ足す(実測: 保存先が ~/Documents だと unsafe_file で返送に失敗した)。
+            // `-c` は同じキーを置き換えるため、利用者の設定にある許可先を先に写して失わない。
+            let aiDirectory = controller.sessionURL.deletingLastPathComponent().deletingLastPathComponent().path
+            var roots = CodexUserConfig.writableRoots(at: codexConfigURL)
+            if !roots.contains(aiDirectory) { roots.append(aiDirectory) }
+            args += ["-c", "sandbox_workspace_write.writable_roots=" + String(decoding: try encoder.encode(roots), as: UTF8.self)]
         } else {
             // allow規則の構文として解釈される文字を含む配置先は、権限を広げず拒否する。
             guard !helper.path.contains(where: { "*?()\n\r".contains($0) }) else { throw AIError.invalid("helper permission path") }

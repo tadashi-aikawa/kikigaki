@@ -211,6 +211,10 @@ KIKIGAKIのProcess起動は実行ファイルと引数の配列を使い、`sh -
 
 herdr 0.8.2でSwift ProcessからHERDR環境を除去し、信頼済みcwdのagent startはCodex 0.153.4で3.65秒、Claude Code 2.1.263で3.83秒でinteractive_ready trueを返した。promptも両方成功した。ただしworkingでもpromptは成功し、独立turnの待ち行列にはならなかったため、アプリは処理中の追加送信を禁止する。
 
+pane run で起こした直後は herdr がまだagentを検知しておらず、`agent get` は agent_not_found を返す(実測: 初回の質問だけ送信に失敗した)。起動直後の準備待ちに限り、未検知は切断ではなく待ちとして扱い、期限まで観測を続ける。起動後の通常の監視では未検知は切断のまま。また herdr 0.8.2 の `agent get` は pane run で起こしたagentに `interactive_ready` を返さないため、この項目が無い場合は idle をもって入力可能とみなす。
+
+Codexの `workspace-write` サンドボックスは cwd と `sandbox_workspace_write.writable_roots` 以外へ書けない(実測: 保存先が `~/Documents` の会議で同梱CLIの返送が unsafe_file になった)。起動時に `-c sandbox_workspace_write.writable_roots=[...]` で会議の `ai/` ディレクトリを許可先へ足す。`-c` は同じキーを置き換えるため、利用者の `~/.codex/config.toml` にある許可先を読んで先頭に写す(設定ファイルは書き換えない)。Claude Code の Bash には同じ制限が無いことを実測した。
+
 設定commandの絶対パスを守る起動には `herdr pane run <pane> <厳密に引用した起動コマンド>` を使う。段2ではworkspace作成時のPATH差替がペイン内の解決先に反映されず、canonical executableによる起動では指定パスを保証できなかった。pane runで絶対パスを指定すると両CLIが起動した。Codexはagent getがunknownを抜けてidle/doneになるまで、Claudeは新しいagent_sessionが立ちidle/doneになるまで待つ。旧session値やblockedをreadyとしない。起動コマンドにはパスと引数だけを引用して置き、会話本文を含めない。KIKIGAKI自身はherdrを引数配列で起動するが、この起動コマンドは受信先シェルで解釈される。
 
 既定cwdは固定の `~/Library/Application Support/KIKIGAKI/ai-work/`。会議ごとの新規ディレクトリで毎回信頼確認を発生させない。固定cwdでも選択したCLIの初回には利用者の信頼確認が必要である。最初の送信時に「初回設定をherdrで確認」とペインを開く操作を表示し、利用者が内容を見て一度承認する。入力準備完了を再確認してから送信し、ダイアログ中へenvelopeを入力しない。CLI切替・cwd変更時にも必要となり得る。自動承認や信頼設定の自動書き換えはしない。

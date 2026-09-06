@@ -83,6 +83,23 @@ import KikigakiAIIO
             #expect(controller.isReturnUnconfirmed(controller.conversation.questions[0], now: now.addingTimeInterval(10)) == (offset == 2))
         }
     }
+    @Test func 起動直後の未検知は切断とせず入力可能になるまで待つ() async throws {
+        // 実測: command指定の pane run 直後は agent get が agent_not_found を返し、初回の質問だけ失敗していた
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), config = ResolvedAIConfig(config: AIConfig(command: "/tmp/codex"), home: root)
+        await fake.setStatuses(["missing", "missing", "unknown", "idle"])
+        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
+        let request = try prepare(controller, config)
+        try await controller.connect(config: config, label: "会議", executable: URL(fileURLWithPath: "/tmp/codex"), arguments: [], readinessTimeout: 2)
+        #expect(controller.connectionStatus == .idle)
+        #expect(await fake.commands.filter { $0.prefix(2) == ["pane", "run"] }.count == 1)
+        try await controller.send(request, config: config)
+        #expect(controller.conversation.questions[0].state == .submitted)
+        // 起動後の通常の監視では未検知は切断のまま
+        await fake.setStatuses(["missing"])
+        await #expect(throws: AIHerdrError.missing) { try await controller.refreshConnection() }
+        #expect(controller.connectionStatus == .disconnected)
+    }
     @Test func 接続情報を排他保存し状態を見て起動を待つ() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr(), meeting = UUID(), config = ResolvedAIConfig(config: AIConfig(), home: root)

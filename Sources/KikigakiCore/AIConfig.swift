@@ -1,6 +1,22 @@
 import Foundation
+import TOMLKit
 
 public enum AIProvider: String, Codable, Equatable, Sendable { case codex, claude }
+
+/// 利用者のCodex設定のうち、会議セッションの起動で引き継ぐ値だけを読む。設定ファイルは書き換えない。
+public enum CodexUserConfig {
+    private struct File: Decodable {
+        struct Sandbox: Decodable { let writable_roots: [String]? }
+        let sandbox_workspace_write: Sandbox?
+    }
+    /// `[sandbox_workspace_write].writable_roots`。読めない・無い場合は空。
+    /// Codexの `-c` は同じキーを置き換えるため、会議用の受信箱を足すときは既存の許可先を先に写す。
+    public static func writableRoots(at url: URL) -> [String] {
+        guard let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8),
+              let file = try? TOMLDecoder().decode(File.self, from: text) else { return [] }
+        return (file.sandbox_workspace_write?.writable_roots ?? []).filter { $0.hasPrefix("/") && !$0.contains("\0") }
+    }
+}
 
 /// nilと空の[ai]を区別する。環境のPATH探索・実行可能性・ディレクトリ存在確認はアプリ側。
 public struct AIConfig: Codable, Equatable, Sendable {

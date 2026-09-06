@@ -111,14 +111,17 @@ final class AIConversationController {
         do { try await herdr.start(created, executable: executable, arguments: arguments, customCommand: config.command != nil, generation: generation) }
         catch AIHerdrError.server("agent_not_ready") { warning = "初回設定をherdrで確認してください" }
         catch { warning = "起動を確認できません。ペインを確認してください"; throw error }
-        try await waitUntilReady(timeout: readinessTimeout)
+        // pane run で起こした直後は herdr がまだagentを検知しておらず `agent get` が agent_not_found を返す
+        // (実測: 初回の質問だけ「送信を完了できません」になった)。起動直後の待ちに限り、未検知は切断ではなく待ちとして扱う。
+        try await waitUntilReady(timeout: readinessTimeout, tolerateMissing: true)
     }
 
-    private func waitUntilReady(timeout: TimeInterval) async throws {
+    private func waitUntilReady(timeout: TimeInterval, tolerateMissing: Bool = false) async throws {
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
         repeat {
             try Task.checkCancellation()
-            try await refreshConnection()
+            do { try await refreshConnection() }
+            catch AIHerdrError.missing where tolerateMissing { connectionStatus = .unknown }
             if connectionStatus == .idle { return }
             if connectionStatus == .blocked { throw AIHerdrError.notReady }
             let remaining = deadline - ProcessInfo.processInfo.systemUptime
