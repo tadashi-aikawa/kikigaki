@@ -204,7 +204,7 @@ Codexのnotifyの項目とClaudeのStop本文は公式資料に記載がある�
 1. 設定と実行ファイルを解決し、会議・質問を永続化する。
 2. `herdr workspace create --cwd <cwd> --no-focus --label "KIKIGAKI <participant_name> HH:MM"` で作成し、返ったworkspaceとroot paneを保存する。HH:MMは会議開始の実時刻。応答喪失なら作成成否不明として止め、自動で作り直さない。
 3. 作成したpaneへ `report-metadata --source owlery --display-agent <participant_name>` を送る。失敗は名義表示の警告に留め、実行先のIDは変えない。
-4. 下記のcommand経路で解決済みの絶対パスを起動し、pane IDを送信先として保持する。canonical executableを使える場合の `agent start <name> --kind codex|claude --pane <pane> -- <CLI引数>` も実測済みだが、指定commandを無視する代用には使わない。入力準備完了を確認し、固定秒数のsleepで代用しない。
+4. command未指定なら `agent start <name> --kind codex|claude --pane <pane> -- <CLI引数>`、指定時だけ下記のpane run経路で起動し、pane IDを送信先として保持する。入力準備完了は上限30秒の状態観測で確認し、固定秒数のsleepで代用しない。期限切れでも接続を保持し、利用者の初回承認後に同じペインを再確認する。
 5. `agent get` で期待する接続先・CLI種別と送信可能状態を確認し、`agent prompt <target> <envelopeを含む全文>` を一回実行する。`--wait` は通常付けず、Process側の期限と受領イベントで追跡する。`--timeout`だけを付けない。
 
 KIKIGAKIのProcess起動は実行ファイルと引数の配列を使い、`sh -c` やログインシェルを経由しない。**KIKIGAKIが起動する外部プロセスへ渡す環境から、名前が `HERDR_` で始まる項目を全て除く。** workspaceに持ち込む環境も同じにする。herdrが作成先paneのために正しく付与する新しい環境まで除く意味ではない。親paneの名義やsessionを継がせない。

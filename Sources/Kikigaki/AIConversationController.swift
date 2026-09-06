@@ -1,8 +1,17 @@
 import Foundation
 import KikigakiCore
 
-/// 録音寿命より長く保持する、1会議の受信先。UIと音声engineへの依存は持たない。
-/// ファイル保存を先に成功させた値だけを公開する。送信試行はherdr呼出しより先に記録する。
+struct AISessionRecord: Codable {
+    let schemaVersion: Int
+    let meetingID: UUID
+    let generation: Int
+    let provider: AIProvider
+    let token: String
+    var connection: AIHerdrConnection?
+}
+
+/// 1会議の直列トランザクション。外部起動と送信の前に意図を保存し、
+/// 保存が成功するまで公開状態を変えない。回収用インスタンスには送信権限を与えない。
 @MainActor
 final class AIConversationController {
     let meetingID: UUID
@@ -11,189 +20,239 @@ final class AIConversationController {
     private(set) var connection: AIHerdrConnection?
     private(set) var connectionStatus: AIConnectionStatus = .unknown
     private(set) var warning: String?
+    private(set) var invalidInboxFiles: [String] = []
     var onChange: (() -> Void)?
+    var onResult: (() -> Void)?
     private var history: AIStreamHistory
-    private let store: AIFileStore
-    private var monitor: AIInboxMonitor?
-    private var polling = false
-    private var sending = false
-    private var idleSince: Date?
-    private var preparedSnapshots: [UUID: AIContextSnapshot] = [:]
+    private let files: AIFileStore
     private let herdr: AIHerdr
     private let allowsSending: Bool
+    private var configuration: ResolvedAIConfig?
+    private var session: AISessionRecord?
+    private var snapshots: Set<UUID> = []
+    private var monitor: AIInboxMonitor?
+    private var connecting = false
+    private var launchingAttempted = false
+    private var inputAttempted = false
+    private var polling = false
+    private var idleSince: Date?
+    private(set) var isSending = false
 
+    var generation: Int { history.sessionGeneration }
+    var sessionURL: URL { path(["sessions", "\(generation).json"]) }
     private var base: [String] { [".kikigaki-context", meetingID.uuidString, "ai"] }
     var canSend: Bool {
-        allowsSending && !sending && !conversation.questions.contains { $0.isAwaitingResult || $0.state == .prepared }
+        allowsSending && !isSending && !connecting
+            && (connection == nil ? !launchingAttempted : connectionStatus == .idle)
+            && !conversation.questions.contains { $0.request.envelope.participant.sessionGeneration == generation && ($0.isAwaitingResult || $0.state == .prepared) }
     }
 
     init(meetingID: UUID, outputDirectory: URL, herdr: AIHerdr, recovered: AIConversation? = nil) throws {
         self.meetingID = meetingID; self.outputDirectory = outputDirectory; self.herdr = herdr
-        allowsSending = recovered == nil
-        store = AIFileStore(root: outputDirectory)
-        history = try AIStreamHistory(meetingID: meetingID)
+        files = AIFileStore(root: outputDirectory); allowsSending = recovered == nil
         conversation = recovered ?? AIConversation(meetingID: meetingID)
+        history = try AIStreamHistory(meetingID: meetingID)
         guard conversation.meetingID == meetingID else { throw AIError.mismatch }
-        for question in conversation.questions { try question.request.envelope.validatePaths(outputDirectory: outputDirectory) }
+        // Codableの公開入口を通し、呼び手が作った値も復元と同じ整合検証を受ける。
+        _ = try AIJSON.decode(AIConversation.self, from: AIJSON.encode(conversation))
+        for q in conversation.questions { try q.request.envelope.validatePaths(outputDirectory: outputDirectory) }
     }
 
     func watch() throws {
         guard monitor == nil else { return }
-        let inbox = try store.directory(base + ["inbox"])
-        monitor = AIInboxMonitor(directory: inbox) { [weak self] in
-            guard let self else { return }
-            self.scan()
-            self.poll()
-        }
+        let inbox = try files.directory(base + ["inbox"])
+        monitor = AIInboxMonitor(directory: inbox) { [weak self] in self?.scan(); self?.poll() }
     }
 
-    /// 会話本文の切出しと3秒確定待ちは録音controller側。ここへ来る値は全て固定済み。
     func prepare(lines: [String], question: String, voiceQuestion: String, capturedAt: Date, cutoff: Double,
                  tail: AITentativeTail?, config: ResolvedAIConfig, helper: URL, parent: UUID? = nil,
                  full: Bool = false) throws -> AIRequest {
         guard canSend else { throw AIHerdrError.notReady }
+        if let configuration, configuration != config { throw AIError.mismatch }
         let snapshot = try history.prepare(lines: lines, outputDirectory: outputDirectory, full: full)
-        let sessionPath = (base + ["sessions", "\(history.sessionGeneration).json"]).reduce(outputDirectory) { $0.appendingPathComponent($1) }
-        let participant = AIParticipantContext(streamID: history.streamID, requestID: UUID(),
-            sessionGeneration: history.sessionGeneration, participantName: config.participantName,
-            cliPath: helper.path, sessionPath: sessionPath.path, requestToken: UUID().uuidString + UUID().uuidString,
-            question: question, capturedAt: capturedAt, audioCutoffSeconds: cutoff, tentativeTail: tail,
-            inReplyToRequestID: parent, inReplyToEventID: parent.map { "\($0.uuidString)/result" })
+        let participant = AIParticipantContext(streamID: history.streamID, requestID: UUID(), sessionGeneration: generation,
+            participantName: config.participantName, cliPath: helper.path, sessionPath: sessionURL.path,
+            requestToken: UUID().uuidString + UUID().uuidString, question: question, capturedAt: capturedAt,
+            audioCutoffSeconds: cutoff, tentativeTail: tail, inReplyToRequestID: parent,
+            inReplyToEventID: parent.map { "\($0.uuidString)/result" })
         let request = try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant),
             number: conversation.questions.count + 1, voiceQuestion: voiceQuestion, snapshot: snapshot)
-        // 再利用snapshotは内容一致だけを許す。予約したsequenceは保存失敗でも巻き戻さない。
-        if preparedSnapshots[snapshot.id] == nil {
-            try store.write(snapshot.contents, to: [".kikigaki-context", meetingID.uuidString, snapshot.id.uuidString + ".md"], replacing: false)
-            preparedSnapshots[snapshot.id] = snapshot
-        }
-        try store.write(AIJSON.encode(request), to: base + ["requests", request.id.uuidString + ".json"], replacing: false)
         var next = conversation
         try next.append(request)
-        try persist(next)
+        if session == nil {
+            let record = AISessionRecord(schemaVersion: 1, meetingID: meetingID, generation: generation,
+                provider: config.cli, token: UUID().uuidString + UUID().uuidString)
+            session = record; configuration = config
+        }
+        if !snapshots.contains(snapshot.id) {
+            try files.write(snapshot.contents, to: [".kikigaki-context", meetingID.uuidString, snapshot.id.uuidString + ".md"], replacing: false)
+            snapshots.insert(snapshot.id)
+        }
+        try files.write(AIJSON.encode(request), to: base + ["requests", request.id.uuidString + ".json"], replacing: false)
+        try commit(next)
+        onChange?()
         return request
     }
 
-    /// create応答喪失を再作成で補わない。利用者の明示的な再接続は別世代にする。
-    func connect(config: ResolvedAIConfig, label: String, executable: URL, arguments: [String]) async throws {
-        guard allowsSending else { throw AIHerdrError.notReady }
-        guard connection == nil else { return }
-        let attempt = base + ["sessions", "\(history.sessionGeneration).launch.json"]
-        // 排他保存により、応答喪失後に同じ世代を再起動できない。
-        try store.write(Data("{\"attempted\":true}".utf8), to: attempt, replacing: false)
+    func connect(config: ResolvedAIConfig, label: String, executable: URL, arguments: [String], readinessTimeout: TimeInterval = 30) async throws {
+        guard readinessTimeout.isFinite, readinessTimeout > 0 else { throw AIProcessError.invalidInput }
+        guard allowsSending, !connecting, configuration == config, session != nil else { throw AIHerdrError.notReady }
+        if connection != nil { try await waitUntilReady(timeout: readinessTimeout); return }
+        guard !launchingAttempted else { throw AIHerdrError.notReady }
+        connecting = true
+        defer { connecting = false; onChange?() }
+        try files.write(AIJSON.encode(Date()), to: base + ["sessions", "\(generation).launch.json"], replacing: false)
+        launchingAttempted = true
         let created = try await herdr.create(cwd: config.cwd, label: label, provider: config.cli)
-        connection = created
-        try saveConnection()
+        try saveConnection(created, replacing: false)
         do { try await herdr.label(created, participant: config.participantName) }
         catch { warning = "herdrの表示名を設定できません" }
-        try await herdr.start(created, executable: executable, arguments: arguments)
-        poll()
+        try Task.checkCancellation()
+        inputAttempted = true
+        do { try await herdr.start(created, executable: executable, arguments: arguments, customCommand: config.command != nil) }
+        catch AIHerdrError.server("agent_not_ready") { warning = "初回設定をherdrで確認してください" }
+        catch { warning = "起動を確認できません。ペインを確認してください"; throw error }
+        try await waitUntilReady(timeout: readinessTimeout)
     }
 
-    func send(_ request: AIRequest, config: ResolvedAIConfig) async throws {
-        guard allowsSending, !sending, let connection else { throw AIHerdrError.notReady }
-        sending = true
-        defer { sending = false; onChange?() }
-        let observed = try await herdr.observe(connection)
-        apply(observed)
-        guard observed.ready else { throw AIHerdrError.notReady }
-        var next = conversation
-        try next.update(request.id) { try $0.beginSending(at: Date()) }
-        try persist(next)
+    private func waitUntilReady(timeout: TimeInterval) async throws {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        repeat {
+            try Task.checkCancellation()
+            try await refreshConnection()
+            if connectionStatus == .idle { return }
+            if connectionStatus == .blocked { throw AIHerdrError.notReady }
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            if remaining <= 0 { warning = "入力準備を確認できません。herdrで確認してください"; throw AIProcessError.timeout }
+            try await Task.sleep(for: .seconds(min(0.1, remaining)))
+        } while true
+    }
+
+    func refreshConnection() async throws {
+        guard let target = connection, inputAttempted else { throw AIHerdrError.notReady }
+        let revision = generation
         do {
-            try await herdr.prompt(connection, text: request.envelope.prompt(address: config.address, extraPrompt: config.prompt))
-            // 待っている間にresultが届いていてもstateを巻き戻さない。
-            next = conversation
-            try next.update(request.id) { try $0.submitted() }
-            try persist(next)
+            let observed = try await herdr.observe(target)
+            guard revision == generation, target.paneID == connection?.paneID else { return }
+            try apply(observed)
         } catch {
-            warning = "送達を確認できません。ペインを確認してください"
+            guard revision == generation, target.paneID == connection?.paneID else { return }
+            idleSince = nil
+            if error as? AIHerdrError == .replaced || error as? AIHerdrError == .missing { connectionStatus = .disconnected }
+            else { connectionStatus = .unknown }
             throw error
         }
     }
 
-    func cancel(_ id: UUID) throws {
+    func send(_ supplied: AIRequest, config: ResolvedAIConfig) async throws {
+        guard allowsSending, !isSending, !connecting, inputAttempted, configuration == config,
+              let stored = conversation.questions.first(where: { $0.request.id == supplied.id }), stored.request == supplied,
+              stored.state == .prepared, supplied.envelope.participant.sessionGeneration == generation else { throw AIHerdrError.notReady }
+        isSending = true
+        defer { isSending = false; onChange?() }
+        let text = try stored.request.envelope.prompt(address: config.address, extraPrompt: config.prompt)
+        try await refreshConnection()
+        try Task.checkCancellation()
+        guard connectionStatus == .idle, let target = connection else { throw AIHerdrError.notReady }
+        // observeの間の取消も、最新の値で拒否する。外から渡されたenvelopeは送信しない。
         var next = conversation
-        try next.update(id) { try $0.cancel(at: Date()) }
-        try persist(next)
+        try next.update(stored.request.id) { try $0.beginSending(at: Date()) }
+        try commit(next)
+        do {
+            try await herdr.prompt(target, text: text)
+            next = conversation
+            try next.update(stored.request.id) { try $0.submitted() }
+            try commit(next)
+        } catch { warning = "送達を確認できません。ペインを確認してください"; throw error }
     }
 
-    func markRead(_ id: UUID) throws {
-        var next = conversation
-        try next.update(id) { $0.markRead() }
-        try persist(next)
+    func cancel(_ id: UUID) throws { try change(id) { try $0.cancel(at: Date()) } }
+    func markRead(_ id: UUID) throws { try change(id) { $0.markRead() } }
+    func fail(_ id: UUID, reason: String) throws { try change(id) { try $0.failBeforeSending(reason) } }
+    private func change(_ id: UUID, body: (inout AIQuestion) throws -> Void) throws {
+        var next = conversation; try next.update(id, body); try commit(next); onChange?()
     }
+    func showPane() async throws { guard let connection else { throw AIHerdrError.notReady }; try await herdr.show(connection) }
 
-    func showPane() async throws {
-        guard let connection else { throw AIHerdrError.notReady }
-        try await herdr.show(connection)
+    /// 利用者の明示操作からだけ呼ぶ。旧質問は残し、新しいstreamを発行する。
+    func newGeneration() throws {
+        guard allowsSending, !isSending, !connecting, generation < Int.max else { throw AIHerdrError.notReady }
+        let next = try AIStreamHistory(meetingID: meetingID, sessionGeneration: generation + 1)
+        try files.write(AIJSON.encode(next.sessionGeneration), to: base + ["generation.json"])
+        history = next; connection = nil; session = nil; snapshots = []; launchingAttempted = false; inputAttempted = false
+        connectionStatus = .unknown; idleSince = nil; warning = nil; onChange?()
     }
 
     func scan() {
-        let inbox = AIInbox(outputDirectory: outputDirectory)
-        var next = conversation
-        var changed = false
-        for question in conversation.questions where question.sendAttemptedAt != nil {
+        invalidInboxFiles = []
+        var events: [AIReceiveEvent] = []
+        var scanWarning: String?
+        for q in conversation.questions where q.sendAttemptedAt != nil {
             for suffix in ["accept", "result"] {
-                let filename = question.request.id.uuidString + "." + suffix + ".json"
-                let path = (base + ["inbox", filename]).reduce(outputDirectory) { $0.appendingPathComponent($1) }
-                guard FileManager.default.fileExists(atPath: path.path) else { continue }
+                let name = q.request.id.uuidString + "." + suffix + ".json"
                 do {
-                    let event = try inbox.read(filename: filename, for: question.request)
-                    if try next.receive(event, at: Date()) { changed = true }
-                } catch { warning = "受信箱のイベントを検証できません: \(filename)" }
+                    let bytes = try files.read(base + ["inbox", name], limit: AILimits.eventBytes)
+                    events.append(try AIInbox.decode(bytes, filename: name, for: q.request))
+                } catch AIFileError.missing { continue }
+                catch { invalidInboxFiles.append(name); scanWarning = "受信箱のイベントを検証できません" }
             }
+        }
+        events.sort { $0.recordedAt == $1.recordedAt ? $0.eventID < $1.eventID : $0.recordedAt < $1.recordedAt }
+        var next = conversation, received = history
+        var changed = false, resultArrived = false
+        let now = Date()
+        for event in events {
+            do {
+                if try next.receive(event, at: now) {
+                    changed = true; resultArrived = resultArrived || event.kind != .accept
+                    if event.contextReceived, snapshots.contains(event.snapshotID), event.sessionGeneration == generation {
+                        try received.acknowledge(snapshotID: event.snapshotID, streamID: history.streamID, sessionGeneration: generation)
+                    }
+                }
+            } catch { scanWarning = "受信箱の回答が既存記録と競合しています" }
         }
         if changed {
             do {
-                try persist(next)
-                for question in next.questions {
-                    if question.acceptance != nil || question.result?.contextReceived == true {
-                        let envelope = question.request.envelope
-                        // 復元した旧会議は履歴を再接続しない。受信状態とMarkdown回収だけ行う。
-                        if preparedSnapshots[envelope.snapshotID] != nil {
-                            try history.acknowledge(snapshotID: envelope.snapshotID, streamID: envelope.participant.streamID,
-                                sessionGeneration: envelope.participant.sessionGeneration)
-                        }
-                    }
-                }
-            } catch { warning = "回答の取り込み状態を保存できません" }
+                try commit(next); history = received
+                if resultArrived { warning = nil; onResult?() }
+            } catch { scanWarning = "回答の取り込み状態を保存できません" }
         }
+        if let scanWarning { warning = scanWarning }
         onChange?()
     }
-
-    func isReturnUnconfirmed(_ question: AIQuestion, now: Date = Date(), backgroundRunning: Bool = false) -> Bool {
-        AIReturnStatus.isUnconfirmed(question: question, connection: connectionStatus, idleSince: idleSince,
+    func isReturnUnconfirmed(_ q: AIQuestion, now: Date = Date(), backgroundRunning: Bool = false) -> Bool {
+        guard q.request.envelope.participant.sessionGeneration == generation else { return false }
+        return AIReturnStatus.isUnconfirmed(question: q, connection: connectionStatus, idleSince: idleSince,
             now: now, hasRunningBackgroundTasks: backgroundRunning)
     }
-
     private func poll() {
-        guard !polling, let connection else { return }
+        guard !polling, connection != nil, inputAttempted else { return }
         polling = true
         Task { [weak self] in
             guard let self else { return }
-            defer { self.polling = false; self.onChange?() }
-            do { self.apply(try await self.herdr.observe(connection)) }
-            catch { self.connectionStatus = .disconnected; self.idleSince = nil }
+            defer { polling = false; onChange?() }
+            do { try await refreshConnection() } catch { /* 状態分類はrefreshConnectionで行う */ }
         }
     }
-
-    private func apply(_ observation: AIHerdrObservation) {
-        if observation.status != .idle { idleSince = nil }
-        else if idleSince == nil { idleSince = Date() }
-        connectionStatus = observation.status
-        if connection?.sessionID == nil, let session = observation.sessionID {
-            connection?.sessionID = session
-            do { try saveConnection() } catch { warning = "接続先を保存できません" }
-        }
+    private func apply(_ observed: AIHerdrObservation) throws {
+        guard var target = connection else { return }
+        if let expected = target.sessionID, let actual = observed.sessionID, expected != actual { throw AIHerdrError.replaced }
+        if let expected = target.terminalID, let actual = observed.terminalID, expected != actual { throw AIHerdrError.replaced }
+        target.sessionID = target.sessionID ?? observed.sessionID
+        target.terminalID = target.terminalID ?? observed.terminalID
+        if target != connection { try saveConnection(target) }
+        connectionStatus = observed.ready || observed.status != .idle ? observed.status : .unknown
+        idleSince = connectionStatus == .idle ? (idleSince ?? Date()) : nil
     }
-
-    private func saveConnection() throws {
-        try store.write(AIJSON.encode(connection), to: base + ["sessions", "\(history.sessionGeneration).connection.json"])
+    private func saveConnection(_ target: AIHerdrConnection, replacing: Bool = true) throws {
+        guard var record = session else { throw AIHerdrError.notReady }
+        record.connection = target
+        try files.write(AIJSON.encode(record), to: base + ["sessions", "\(generation).json"], replacing: replacing)
+        session = record; connection = target
     }
-
-    private func persist(_ next: AIConversation) throws {
-        try store.write(AIJSON.encode(next), to: base + ["state.json"])
+    private func commit(_ next: AIConversation) throws {
+        try files.write(AIJSON.encode(next), to: base + ["state.json"])
         conversation = next
-        onChange?()
     }
+    private func path(_ parts: [String]) -> URL { (base + parts).reduce(outputDirectory) { $0.appendingPathComponent($1) } }
 }

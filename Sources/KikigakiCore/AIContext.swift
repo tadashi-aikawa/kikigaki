@@ -180,7 +180,8 @@ public struct AIEnvelope: Codable, Equatable, Sendable {
         guard snapshotURL.lastPathComponent == snapshotID.uuidString + ".md",
               meetingURL.lastPathComponent == meetingID.uuidString,
               meetingURL.deletingLastPathComponent().lastPathComponent == ".kikigaki-context",
-              snapshotURL.standardizedFileURL.path == snapshotURL.path,
+              transcriptPath.split(separator: "/", omittingEmptySubsequences: false).dropFirst()
+                .allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
               participant.sessionPath == meetingURL.appendingPathComponent("ai/sessions/\(participant.sessionGeneration).json").path else {
             throw AIError.invalid("context paths")
         }

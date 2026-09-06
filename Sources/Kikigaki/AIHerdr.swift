@@ -6,90 +6,90 @@ struct AIHerdrConnection: Codable, Equatable, Sendable {
     let paneID: String
     let provider: AIProvider
     var sessionID: String?
+    var terminalID: String?
 }
-
 struct AIHerdrObservation: Equatable, Sendable {
     let status: AIConnectionStatus
     let ready: Bool
     let sessionID: String?
+    var terminalID: String?
 }
+enum AIHerdrError: Error, Equatable { case notReady, replaced, missing, server(String) }
 
-enum AIHerdrError: Error { case notReady, replaced, server(String) }
-
-/// セッションの所有者は会議controller。生成途中の接続IDも永続化してから起動する。
-/// startとpromptの自動再試行はしない。信頼承認後はobserveで同じpaneを再確認する。
+/// herdrのJSONを型として解釈する。エラー本文やargvを診断へ転載しない。
 struct AIHerdr: Sendable {
     typealias Run = @Sendable ([String], TimeInterval) async throws -> AIProcessOutput
     private let run: Run
-
-    init(executable: URL) {
-        run = { arguments, timeout in try await AIProcessRunner().run(executable, arguments, timeout: timeout) }
-    }
+    init(executable: URL) { run = { try await AIProcessRunner().run(executable, $0, timeout: $1) } }
     init(run: @escaping Run) { self.run = run }
-
-    private func call(_ arguments: [String], timeout: TimeInterval = 15) async throws -> [String: Any] {
-        let output = try await run(arguments, timeout)
-        guard output.status == 0 else {
-            // stderr本文にはargvが含まれ得るため、既知のerror code以外は外へ出さない。
-            let json = try? JSONSerialization.jsonObject(with: output.stderr) as? [String: Any]
-            let error = json?["error"] as? [String: Any]
-            throw AIHerdrError.server(error?["code"] as? String ?? "herdr_failed")
-        }
-        guard let json = try JSONSerialization.jsonObject(with: output.stdout) as? [String: Any],
-              let result = json["result"] as? [String: Any] else { throw AIProcessError.invalidResponse }
-        return result
+    private struct Reply<T: Decodable>: Decodable { let result: T }
+    private struct Empty: Decodable {}
+    private struct Workspace: Decodable { let workspace_id: String }
+    private struct Pane: Decodable { let pane_id: String }
+    private struct Created: Decodable { let workspace: Workspace; let root_pane: Pane }
+    private struct Session: Decodable { let value: String }
+    private struct Agent: Decodable {
+        let pane_id: String; let workspace_id: String
+        let agent: String?; let agent_status: String?; let interactive_ready: Bool?
+        let agent_session: Session?; let terminal_id: String?
     }
-
+    private struct AgentReply: Decodable { let agent: Agent }
+    private struct Failure: Decodable {
+        struct Detail: Decodable { let code: String }
+        let error: Detail
+    }
+    private func call<T: Decodable>(_ args: [String], as type: T.Type, timeout: TimeInterval = 15) async throws -> T {
+        guard !args.contains(where: { $0.contains("\0") }) else { throw AIProcessError.invalidInput }
+        let reply = try await run(args, timeout)
+        if reply.status != 0 {
+            let code = (try? JSONDecoder().decode(Failure.self, from: reply.stderr))?.error.code ?? "herdr_failed"
+            let safeCodes = ["agent_not_found", "pane_not_found", "workspace_not_found", "agent_blocked", "agent_not_ready", "agent_prompt_stalled"]
+            if ["agent_not_found", "pane_not_found", "workspace_not_found"].contains(code) { throw AIHerdrError.missing }
+            throw AIHerdrError.server(safeCodes.contains(code) ? code : "herdr_failed")
+        }
+        guard let result = try? JSONDecoder().decode(Reply<T>.self, from: reply.stdout) else { throw AIProcessError.invalidResponse }
+        return result.result
+    }
     func create(cwd: URL, label: String, provider: AIProvider) async throws -> AIHerdrConnection {
-        let result = try await call(["workspace", "create", "--cwd", cwd.path, "--no-focus", "--label", label])
-        guard let workspace = result["workspace"] as? [String: Any],
-              let pane = result["root_pane"] as? [String: Any],
-              let workspaceID = workspace["workspace_id"] as? String,
-              let paneID = pane["pane_id"] as? String, !workspaceID.isEmpty, !paneID.isEmpty else {
-            throw AIProcessError.invalidResponse
-        }
-        return AIHerdrConnection(workspaceID: workspaceID, paneID: paneID, provider: provider)
+        let result = try await call(["workspace", "create", "--cwd", cwd.path, "--no-focus", "--label", label], as: Created.self)
+        guard Self.identifier(result.workspace.workspace_id), Self.identifier(result.root_pane.pane_id) else { throw AIProcessError.invalidResponse }
+        return AIHerdrConnection(workspaceID: result.workspace.workspace_id, paneID: result.root_pane.pane_id, provider: provider)
     }
-
-    func label(_ connection: AIHerdrConnection, participant: String) async throws {
-        _ = try await call(["pane", "report-metadata", connection.paneID, "--source", "owlery", "--display-agent", participant])
+    func label(_ target: AIHerdrConnection, participant: String) async throws {
+        _ = try await call(["pane", "report-metadata", target.paneID, "--source", "owlery", "--display-agent", participant], as: Empty.self)
     }
-
-    func start(_ connection: AIHerdrConnection, executable: URL, arguments: [String]) async throws {
-        _ = try await call(["pane", "run", connection.paneID, AIShell.command([executable.path] + arguments)], timeout: 40)
+    func start(_ target: AIHerdrConnection, executable: URL, arguments: [String], customCommand: Bool = true) async throws {
+        guard executable.isFileURL, executable.path.hasPrefix("/"), !arguments.contains(where: { $0.contains("\0") }) else { throw AIProcessError.invalidInput }
+        let args = customCommand
+            ? ["pane", "run", target.paneID, AIShell.command([executable.path] + arguments)]
+            : ["agent", "start", "kikigaki-" + UUID().uuidString.lowercased(), "--kind", target.provider.rawValue,
+               "--pane", target.paneID, "--timeout", "15000", "--"] + arguments
+        _ = try await call(args, as: Empty.self, timeout: 20)
     }
-
-    func observe(_ connection: AIHerdrConnection) async throws -> AIHerdrObservation {
-        let result = try await call(["agent", "get", connection.paneID])
-        guard let agent = result["agent"] as? [String: Any],
-              agent["pane_id"] as? String == connection.paneID,
-              agent["workspace_id"] as? String == connection.workspaceID else { throw AIHerdrError.replaced }
-        let provider = agent["agent"] as? String
-        let session = (agent["agent_session"] as? [String: Any])?["value"] as? String
-        if let provider, provider != connection.provider.rawValue { throw AIHerdrError.replaced }
-        if let expected = connection.sessionID, let session, expected != session { throw AIHerdrError.replaced }
-        let raw = agent["agent_status"] as? String ?? "unknown"
+    func observe(_ target: AIHerdrConnection) async throws -> AIHerdrObservation {
+        let agent = try await call(["agent", "get", target.paneID], as: AgentReply.self).agent
+        guard agent.pane_id == target.paneID, agent.workspace_id == target.workspaceID else { throw AIHerdrError.replaced }
+        if let kind = agent.agent, kind != target.provider.rawValue { throw AIHerdrError.replaced }
+        if let expected = target.terminalID, let actual = agent.terminal_id, expected != actual { throw AIHerdrError.replaced }
+        let session = agent.agent_session?.value
+        if let expected = target.sessionID, let actual = session, expected != actual { throw AIHerdrError.replaced }
+        let identityKnown = agent.agent == target.provider.rawValue
+            && (target.sessionID == nil || target.sessionID == session)
+            && (target.terminalID == nil || target.terminalID == agent.terminal_id)
         let status: AIConnectionStatus
-        switch raw {
+        switch identityKnown ? agent.agent_status : nil {
         case "idle", "done": status = .idle
         case "working": status = .working
         case "blocked": status = .blocked
         default: status = .unknown
         }
-        let ready = provider == connection.provider.rawValue && agent["interactive_ready"] as? Bool == true
-            && status == .idle && (connection.provider == .codex || session != nil)
-            && (connection.sessionID == nil || connection.sessionID == session)
-        return AIHerdrObservation(status: status, ready: ready, sessionID: session)
+        let ready = status == .idle && agent.interactive_ready == true && (target.provider == .codex || !(session ?? "").isEmpty)
+        return AIHerdrObservation(status: status, ready: ready, sessionID: session, terminalID: agent.terminal_id)
     }
-
-    func prompt(_ connection: AIHerdrConnection, text: String) async throws {
-        // 送信試行を永続化した呼び手だけが使う。再確認とpromptの間の競合も送達不明に残す。
-        let observation = try await observe(connection)
-        guard observation.ready else { throw AIHerdrError.notReady }
-        _ = try await call(["agent", "prompt", connection.paneID, text])
+    func prompt(_ target: AIHerdrConnection, text: String) async throws {
+        guard try await observe(target).ready else { throw AIHerdrError.notReady }
+        _ = try await call(["agent", "prompt", target.paneID, text], as: Empty.self)
     }
-
-    func show(_ connection: AIHerdrConnection) async throws {
-        _ = try await call(["workspace", "focus", connection.workspaceID])
-    }
+    func show(_ target: AIHerdrConnection) async throws { _ = try await call(["workspace", "focus", target.workspaceID], as: Empty.self) }
+    private static func identifier(_ value: String) -> Bool { !value.isEmpty && !value.hasPrefix("-") && value.utf8.allSatisfy { (33...126).contains($0) } }
 }
