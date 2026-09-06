@@ -58,7 +58,7 @@ herdrのworking、blocked、接続不能は接続状態の補助情報。working
 
 ## Envelopeと差分の基準
 
-送信文は宛名、`$kikigaki`、追加プロンプト、`KIKIGAKI_CONTEXT` JSONの順。宛名の既定は「迅雷へ」。追加プロンプトは利用者が設定した補助指示として区切り、問いや会話本文を接続制御の指示へ補間しない。JSONは既存と同様にエンコード後の生バッククォートを `\u0060` へ置き換え、付帯本文からコードフェンスを脱出させない。
+送信文は宛名、`$kikigaki`、直後の `KIKIGAKI_CONTEXT` JSON一つ、追加プロンプトの順。宛名の既定は「迅雷へ」。会議参加モードを決めるenvelopeは `$kikigaki` 直後の一つだけで、後続のメッセージ・追加プロンプト・会話ファイル内の同名マーカーをモード判定に使わない。追加プロンプトは利用者が設定した補助指示として区切り、問いや会話本文を接続制御の指示へ補間しない。JSONは既存と同様にエンコード後の生バッククォートを `\u0060` へ置き換え、付帯本文からコードフェンスを脱出させない。
 
 既存JSONのトップレベルの必須項目と意味は維持し、会議参加モードのときだけ `participant` を追加する。手動コピーは追加しない。`participant.schema_version` は拡張部分の版で、未知の版・欠損は会議参加モードとして処理しない。
 
@@ -153,11 +153,11 @@ acceptとresultはrequest内で各一つ。resultのkindはanswered、needs_inpu
 - 同じ論理イベントの再実行は固定情報・kind・本文・context_receivedが同じなら以前の成功を返す。CLIが付けた時刻の差は同一性判定から除く。内容が違えば競合で拒否し、先の回答を保持する。
 - CLIは完成ファイルの永続化成功後にだけ成功を返す。アプリの取り込みやMarkdown再保存まで成功した意味ではない。取り込み済み状態の保存前に落ちても、再走査で同じイベントを二重追加しない。
 
-アプリ起動中は監視に加えて定期再走査し、監視通知の欠落を補う。起動時はアプリが登録した保存先の会議manifestを再走査する。保存先の登録簿は `~/Library/Application Support/KIKIGAKI/ai-roots.json` とし、ユーザーの全ディスクを探索しない。設定でoutputDirを変えても既に送った会議の受信箱を見失わない。アクセスできない保存先は警告に残す。
+アプリ起動中は監視に加えて定期再走査し、監視通知の欠落を補う。起動時の再走査は登録済みで未完了の質問を持つ会議だけに限る。保存先と未完了会議の登録簿は `~/Library/Application Support/KIKIGAKI/ai-roots.json` とし、ユーザーの全ディスクや全過去会議を探索しない。未取り込みのresultも未完了に含め、受信箱の回収とMarkdown保存が終わるまで登録を残す。設定でoutputDirを変えても既に送った会議の受信箱を見失わない。アクセスできない保存先は警告に残す。
 
 アプリ終了中も同梱CLIは受信箱へ保存できる。次回起動では記録の取り込みと会議Markdownの更新だけ行い、CLIの起動・再接続・質問再送は行わない。既存AIの以後の返送も、登録済みの会議記録として回収する。これをセッション復元とは呼ばない。
 
-archiveは最終保存・改名・統合時に更新し、同じ会議の遅延回答を描く元データにする。録音中もAI送信時に保存用データをチェックポイントとして残す。異常終了時は最後のチェックポイント以降の音声本文の回復を保証せず、「途中までの記録」と表示する。archiveが欠落・不正なら既存Markdownを推測で組み直さず、回答を受信箱に保ったまま保存失敗を表示する。
+archiveは録音停止時と停止後の改名・統合時だけに更新し、同じ会議の遅延回答を描く元データにする。録音中には書かない。archiveが欠落・不正なら既存Markdownを推測で組み直さず、回答を受信箱に保ったまま保存失敗を表示する。録音中の異常終了から音声本文を回復する機能は追加しない。
 
 ## 同梱CLI
 
@@ -182,32 +182,40 @@ replyは通常 `context_received: true`。文脈を読めなかったcontext_mis
 
 Codexには引数配列で `-c` と、TOMLとして正しくエンコードした `notify=["<同梱CLI>","notify","--provider","codex","--session","<path>","--token","<token>"]` を渡す。引用符やバッククォートをシェルへ解釈させない。当該会議セッションの既存notifyを差し替え、元の通知スクリプトは連鎖して呼ばない。既存の通知音・本文通知が会議用途の既定無効を破るため。グローバル設定ファイルは変更せず、通常のCodexセッションには影響させない。
 
-Claudeには専用の0600のJSON設定ファイルを作り、`--settings <絶対パス>` を渡す。Stopのcommandフックが同梱CLIのnotifyを呼ぶ。commandフック自体がシェル文字列を必要とする場合は、固定コマンドと引用済みのパス・トークンだけで組み立てる。会話・回答本文はコマンド文字列へ埋めず、stdinで受け取る。**このフックが既存 `~/.claude/settings.json` のフックと併合されるか置換されるかは段2で実測する。** 既存の承認・名義報告フックを壊す形で黙って置換しない。
+Claudeには専用の0600のJSON設定ファイルを作り、`--settings <絶対パス>` を渡す。Stopのcommandフックが同梱CLIのnotifyを呼ぶ。commandフックは、固定コマンドと引用済みのパス・トークンだけで組み立てる。会話・回答本文はコマンド文字列へ埋めず、stdinで受け取る。Claude Code 2.1.263では生成JSONのSessionStartと既存のherdr SessionStartが両方動き、同じイベントのhooksが併合された。既存フックをコピーしたり置換したりしない。詳細は [段2の実測](ai-participant-spike.md)。
+
+同じ生成JSONの `permissions.allow` に `Bash(<同梱CLIの絶対パス> *)` だけを追加する。既定autoでは未知のMach-Oとして拒否されたが、このルールを渡したセッションではautoのまま返送できた。`--permission-mode` は追加せず、利用者の設定を保つ。これは本番の返送経路にも必要な設定で、検証専用の緩和ではない。グローバルのsettingsは変更しない。ask・denyや組織ポリシーが優先して返送できない場合はペインで確認してもらい、自動で権限を拡大しない。[^permissions]
 
 | Provider | 使う項目 |
 | --- | --- |
 | Codex | typeがagent-turn-completeか確認し、thread-id・turn-id・input-messages・last-assistant-messageを取得できる範囲で保存する。 |
-| Claude | hook_event_name、session_id、last_assistant_message、stop_hook_activeを取得する。バックグラウンド継続情報があれば補助情報として保持する。 |
+| Claude | hook_event_name、session_id、prompt_id、last_assistant_message、stop_hook_active、background_tasksを取得する。 |
 
-フックイベントは「ターンが応答を終えた」証拠で、質問への回答の正本ではない。requestとの厳密な相関ができたときだけ「回答の返送がありません」を当該カードへ出す。Codexではinput-messagesに含むトップレベルenvelopeのrequest IDとsession情報を照合する。単なる部分文字列一致で、引用された過去requestへ結び付けない。相関後はinput-messagesの全文を捨て、IDと本文など必要な観測値だけを保存し、envelope内のトークンをイベントへ複製しない。ClaudeのStopだけで相関できない場合は世代単位の「未連携の応答」として出す。現在activeなrequest IDだけで相関させない。
+フックは応答の区切りの観測であり、質問への回答や作業完了の正本ではない。Codex 0.153.4では本回答に加えてタイトル生成の別thread・別turnからもnotifyが届いた。タイトル側のinput-messagesにも元入力の一部が入り、通常の後続turnでは過去入力が累積した。envelopeやrequest IDの存在だけで当該質問の完了へ結び付けない。
 
-reply保存がフックより遅れてアプリへ見える可能性を考え、フックを取り込む前に完成済みresultを再走査する。未連携本文は診断表示で読めるが、answeredへ自動変換しない。フック欠落でもherdrが休止したのにresultがなければ「返送未確認」を表示できるが、返し忘れと断定しない。自動再プロンプトでCLI呼び出しを強制しない。
+Codexの本threadはherdrのagent_session、またはaccept/reply実行環境の `CODEX_THREAD_ID` から取得し、notifyのthread-idと照合する。モデルにIDを記入させない。取得前のnotifyは相関不能として保持する。turn-idは重複排除には使えるが、herdr promptの応答には対応するturn-idがないため、MVPでは質問との厳密な相関に使わない。タイトル本文の形を推測して選別しない。Claudeもprompt_idとrequestの対応は未確定であり、Stopの本文を現在の質問へ自動転記しない。input-messagesの全文は照合後に捨て、必要な識別子だけを保存し、トークンをイベントへ複製しない。
 
-Codexのnotifyの項目とClaudeのStop本文は公式資料に記載がある。Claudeの中断時はStopが発火せず、APIエラーには別イベントがある。インストール済み版の実際のpayload、失敗時挙動、権限、通知の共存は段2の検証対象とする。[^hooks]
+返し忘れの検知はMVPでは「返送未確認」の補助表示に留める。対象世代に未完了質問があり、完成済みresultを再走査しても未着で、herdrのidle/doneが5秒続いた場合に表示する。blocked・unknown・切断は別表示とする。Claude Stopに実行中background_tasksがあれば休止とは扱わず、次の状態観測を待つ。背景処理を完全に検出できる保証はなく、5秒は初期値である。これをfailed・answeredへ変換せず、自動再プロンプトもしない。後着resultで警告を消す。未連携本文を診断表示で読める場合も、質問への確定回答とは表示しない。
+
+Codexのnotifyの項目とClaudeのStop本文は公式資料に記載がある。Claudeの中断時はStopが発火せず、APIエラーには別イベントがある。実測でも背景sleepが継続中のStopが届いた。全payload項目と試験の限界は段2の記録へ残す。[^hooks]
 
 ## herdrセッションの管理
 
 1. 設定と実行ファイルを解決し、会議・質問を永続化する。
-2. `herdr workspace create --cwd <cwd> --no-focus` で作成し、返ったworkspaceとroot paneを保存する。応答喪失なら作成成否不明として止め、自動で作り直さない。
+2. `herdr workspace create --cwd <cwd> --no-focus --label "KIKIGAKI <participant_name> HH:MM"` で作成し、返ったworkspaceとroot paneを保存する。HH:MMは会議開始の実時刻。応答喪失なら作成成否不明として止め、自動で作り直さない。
 3. 作成したpaneへ `report-metadata --source owlery --display-agent <participant_name>` を送る。失敗は名義表示の警告に留め、実行先のIDは変えない。
-4. UUIDから生成した一意な英数字名で `herdr agent start <name> --kind codex|claude --pane <pane> -- <CLI引数>` を実行する。入力準備完了を確認する。固定秒数のsleepで代用しない。
+4. 下記のcommand経路で解決済みの絶対パスを起動し、pane IDを送信先として保持する。canonical executableを使える場合の `agent start <name> --kind codex|claude --pane <pane> -- <CLI引数>` も実測済みだが、指定commandを無視する代用には使わない。入力準備完了を確認し、固定秒数のsleepで代用しない。
 5. `agent get` で期待する接続先・CLI種別と送信可能状態を確認し、`agent prompt <target> <envelopeを含む全文>` を一回実行する。`--wait` は通常付けず、Process側の期限と受領イベントで追跡する。`--timeout`だけを付けない。
 
 KIKIGAKIのProcess起動は実行ファイルと引数の配列を使い、`sh -c` やログインシェルを経由しない。**KIKIGAKIが起動する外部プロセスへ渡す環境から、名前が `HERDR_` で始まる項目を全て除く。** workspaceに持ち込む環境も同じにする。herdrが作成先paneのために正しく付与する新しい環境まで除く意味ではない。親paneの名義やsessionを継がせない。
 
-Codexのagent start→promptは発注元が現行herdrとCodex 0.153.4で実測済み。Claude側は未検証。段2でready保証が満たせなければ、既存parliamentのCLI別準備判定を参考にadapterを修正する。文書の実測をSwift Processからの試験の代わりにはしない。
+herdr 0.8.2でSwift ProcessからHERDR環境を除去し、信頼済みcwdのagent startはCodex 0.153.4で3.65秒、Claude Code 2.1.263で3.83秒でinteractive_ready trueを返した。promptも両方成功した。ただしworkingでもpromptは成功し、独立turnの待ち行列にはならなかったため、アプリは処理中の追加送信を禁止する。
 
-herdrのagent startはcanonical executableを起動する契約のため、設定commandの絶対パスを指定どおり実行する経路は未確認。段2で検証し、指定パスの実行を保証できる経路がなければ本人へ報告して設計を確定する。設定を無視してPATH上の別バイナリを起動する、会話本文をpane runのシェルコマンドへ埋める、といった代用はしない。
+設定commandの絶対パスを守る起動には `herdr pane run <pane> <厳密に引用した起動コマンド>` を使う。段2ではworkspace作成時のPATH差替がペイン内の解決先に反映されず、canonical executableによる起動では指定パスを保証できなかった。pane runで絶対パスを指定すると両CLIが起動した。Codexはagent getがunknownを抜けてidle/doneになるまで、Claudeは新しいagent_sessionが立ちidle/doneになるまで待つ。旧session値やblockedをreadyとしない。起動コマンドにはパスと引数だけを引用して置き、会話本文を含めない。KIKIGAKI自身はherdrを引数配列で起動するが、この起動コマンドは受信先シェルで解釈される。
+
+既定cwdは固定の `~/Library/Application Support/KIKIGAKI/ai-work/`。会議ごとの新規ディレクトリで毎回信頼確認を発生させない。固定cwdでも選択したCLIの初回には利用者の信頼確認が必要である。最初の送信時に「初回設定をherdrで確認」とペインを開く操作を表示し、利用者が内容を見て一度承認する。入力準備完了を再確認してから送信し、ダイアログ中へenvelopeを入力しない。CLI切替・cwd変更時にも必要となり得る。自動承認や信頼設定の自動書き換えはしない。
+
+段2では初回に両CLIがagent_not_readyとなり、信頼ダイアログを表示した。承認後、Codexはconfig.tomlのprojectsへtrust_level、Claudeは.claude.jsonのprojectsへhasTrustDialogAcceptedを保存した。これらはCLIが保存する利用者設定であり、KIKIGAKIは編集・削除しない。固定cwd外の本番outputDirへのアクセス許可は段6で確認する。段2の返送成功は試験cwd配下への保存であり、任意の保存先への権限を保証しない。
 
 - 後続送信前もagent getで生存を確認する。blockedなら入力せず「herdrで確認」を表示する。権限ダイアログのEnterを代行しない。
 - herdrへ接続できない場合は接続不能。正常な一覧・getから対象消失を確認できたときだけ切断とする。別CLIや別sessionへの置換が分かった場合も切断する。
@@ -221,7 +229,7 @@ herdrのagent startはcanonical executableを起動する契約のため、設�
 
 到着時はウィンドウ内の未読の印だけを更新し、カードの自動展開、ウィンドウの前面化、スクロール移動をしない。全文を開いたときに既読にする。新会議中の旧会議への到着は「前の会議に回答あり」と示し、旧会議の回答一覧を開けるようにする。新会議の書き起こしへ挿入しない。
 
-notifySoundがtrueのときだけ、新しいモデル回答・確認質問の取り込みで一回鳴らす。再走査、重複返送、起動時回収では鳴らさない。外部バナーはMVPでは作らない。CLI自身や既存Claude hooksの通知まで無音にできる保証は段2で確認し、共存できない通知は制限として明記する。
+notifySoundがtrueのときだけ、新しいモデル回答・確認質問の取り込みで一回鳴らす。再走査、重複返送、起動時回収では鳴らさない。外部バナーはMVPでは作らない。既存Claude hooksは併合されるため、CLI自身や既存hooksによる通知まで無音にする保証はない。KIKIGAKIからの通知だけを制御する。
 
 保存形式の例:
 
@@ -229,9 +237,9 @@ notifySoundがtrueのときだけ、新しいモデル回答・確認質問の�
 ## 書き起こし
 
 - [14:05:00] 田中: 迅雷、さっきの案を直して。
-- [14:05:03] AIへ質問 Q1 → [やりとり](#ai-q1)
+- [14:05:03] AIへ質問 Q1 → AIとのやりとり
 - [14:05:10] 松村: その間に次の件へ進みましょう。
-- [14:06:02] AI回答 Q1 → [やりとり](#ai-q1)
+- [14:06:02] AI回答 Q1 → AIとのやりとり
 
 ## AIとのやりとり
 
@@ -239,14 +247,10 @@ notifySoundがtrueのときだけ、新しいモデル回答・確認質問の�
 
 - 送信: 2026-09-06 14:05:03 +09:00
 - 宛先: 迅雷
-- 問い: 会話末尾の問い
+- 問い: 「迅雷、さっきの案を直して。」
 - 対象: snapshot UUIDの3〜6行。暫定末尾を含む
 - 受領: 2026-09-06 14:05:08 +09:00
 - 回答: 2026-09-06 14:06:02 +09:00
-
-#### 送信時の問い
-
-> 迅雷、さっきの案を直して。
 
 #### 回答
 
@@ -255,7 +259,7 @@ notifySoundがtrueのときだけ、新しいモデル回答・確認質問の�
 - 変更内容と確認結果です。
 ```
 
-Q番号は会議内の送信順の表示番号で、対応付けにはrequest IDを使う。アンカーは固定の `AI Q<番号>` 見出しから生成する。書き起こしの印は送信試行時とモデルresult受領時の各一行とし、送達不明や確認質問の場合はその状態を表す文言にする。acceptやフックごとの印は増やさない。
+Q番号は会議内の送信順の表示番号で、対応付けにはrequest IDを使う。印は平文にし、読み手ごとに異なる見出しアンカーの生成規則へ依存しない。AI節の見出しは `### AI Q<番号>`。問いは `- 問い:` の一行だけに入力内容または末尾発話の引用を置き、複数行入力はこの表示に限って改行を空白へ変える。元の入力はrequestへ保持する。書き起こしの印は送信試行時とモデルresult受領時の各一行とし、送達不明や確認質問の場合はその状態を表す文言にする。acceptやフックごとの印は増やさない。
 
 人間の発話と印は実時刻で合成する。同時刻は人間の発話、印の順、印同士は記録順で決定的に並べる。録音停止後の回答印は末尾へ置き、日をまたぐ場合は日付も付ける。話者統合・改名・相槌省略で人間の行が増減しても、印をその行番号へ固定しない。
 
@@ -265,7 +269,7 @@ AI節は送信時の問い・固定snapshot参照・暫定末尾・結果イベ�
 
 Markdownの書き手はKIKIGAKIだけ。録音中のAI受領では受信箱と画面を先に更新し、会議Markdownは従来どおり録音停止時に生成する。停止後の回答や改名では両出力を再生成する。保存用archiveを先に永続化し、Markdownは再生成できる状態を作ってから置き換える。両ファイルの更新途中に失敗してもAIイベントは失わず、保存状態をファイルごとに保持して再試行できるようにする。
 
-起動時回収では最後にアプリが書いたMarkdownのdigestも照合する。外部編集・移動・削除があれば自動で上書き・復活させず、AI回答は保存済み、会議Markdownへの反映は要確認として表示する。再起動後の過去会議の話者再編集UIは追加しない。
+MVPのMarkdownはアプリが管理する生成物として扱う。外部編集の自動検知は段3では実装しない。再起動後の過去会議の話者再編集UIも追加しない。
 
 ## 設定
 
@@ -293,13 +297,15 @@ key = "a"
 | command | 省略時は選択CLIをPATHで解決し、絶対パスと実行可能性を検証する。指定時は空でない絶対パス。見つからなければ送信前に原因を示し、別CLIへ切り替えない。 |
 | model | 省略時はCLIの既定。指定時は空でない文字列として該当CLIのモデル引数へ渡す。 |
 | address | 迅雷へ。空・改行・制御文字を拒否。起動時の表示名にも使用する。 |
-| cwd | 省略時は会議専用の `ai/work/` を作る。指定時は絶対パスまたは先頭の `~/` を解決し、存在するディレクトリであることを確認する。 |
-| extraArgs | 空配列。引数の配列でありシェル文字列ではない。NUL、対話モードを変えるprint/exec、resume、接続先・model・hooksを上書きする衝突指定は拒否する。詳細のCLI別一覧は段2で確認する。 |
+| cwd | 省略時は固定の `~/Library/Application Support/KIKIGAKI/ai-work/` を作る。指定時は絶対パスまたは先頭の `~/` を解決し、存在するディレクトリであることを確認する。 |
+| extraArgs | 空配列。引数の配列でありシェル文字列ではない。NUL、対話モードを変えるprint/exec、resume、接続先・model・hooksを上書きする衝突指定は拒否する。下記の別名も含め、段3で検証する。 |
 | prompt | 空文字列。利用者が指定する追加指示。32 KiBまで。接続プロトコルを上書きする位置へ置かない。 |
 | hotkey | ctrl+alt+cmd+A。既存の録音・一時停止のキーと重複を拒否する。 |
 | notifySound | false。trueのときだけアプリから通知音を鳴らす。 |
 
 GUI起動ではPATHに普段のCLIがない場合がある。見つからなければcommandの絶対パス指定を案内し、環境設定を自動変更しない。herdrも実行可能パスを解決し、未導入なら手動コピーは使える状態でAI送信だけを失敗にする。
+
+段2で両CLIのhelpを読み、衝突の入口を確認した。Codexの `-c/--config` はnotify・model・cwd等を上書きできるためキー単位で検証し、`-m/--model`、`-C/--cd`、`--remote`、サブコマンドと起動時promptを受け付けない。Claudeは `--settings`、`--setting-sources`、`--model`、`-p/--print`、`-c/--continue`、`-r/--resume`、`--session-id`、`--fork-session`、`--from-pr`、`--teleport`、`--bg/--background`、`--cloud`、`--environment`、`-w/--worktree`、`--tmux`、`--bare`、`--safe-mode`、`--restricted`、`--disable-slash-commands` とサブコマンド・起動時promptを拒否する。`--key=value` や短縮引数の結合も同じ検証を通し、値と位置引数を曖昧に解釈しない。未対応のオプションは送信前に原因を示す。
 
 ## 安全性と会議参加モードの指示
 
@@ -320,14 +326,14 @@ GUI起動ではPATHに普段のCLIがない場合がある。見つからなけ�
 - 暫定なし、3秒以内の確定、期限超過、境界をまたぐトークン、確定後の文字訂正、一時停止、待ち中の録音停止・取消
 - 音声の問い、明示入力の優先、問いなし、曖昧な対象、確認質問への返答、文脈不足からの全文要求
 - 日本語入力のEnter、Shift+Enter、Esc、連打、処理中の下書き、停止後の新質問
-- CodexとClaudeの非フォーカス起動、ready確認、二回目送信、HERDR環境の非継承、command指定どおりの実行
+- CodexとClaudeの非フォーカス起動とラベル、ready確認、初回信頼ダイアログ、二回目送信、HERDR環境の非継承、command指定どおりの実行
 - workspace作成応答喪失、prompt応答喪失、blocked、herdr停止、ペイン消失・置換、送信直前にCLIが終了する競合
 - 受領前の回答、二重返送、同じIDの異なる本文、取消後・旧世代・旧会議の回答
 - 欠損・不正JSON、未知版、サイズ上限前後、マルチバイト境界、symlink、通常ファイルでない入力、権限設定失敗
 - inbox完成前の監視、書込み・公開・取り込みの各境界での失敗、アプリ終了中の返送、起動時再走査、outputDir変更
 - フックの正本返送済み・未返送・後着・欠落・重複・相関不能、Claude既存hooksとの併合、Codex既存notifyの非連鎖
-- CLIからの返送権限、承認待ちの可視化、返送失敗のペイン報告。権限を緩和して試験を通さないこと
-- 通常とrawの同一AI節、停止後の改名・統合・相槌省略、深夜の日付跨ぎ、到着後の保存失敗、外部編集の検知
+- CLIからの返送権限、承認待ちの可視化、返送失敗のペイン報告。Claudeは本番と同じ生成JSONの同梱CLI限定allowを使い、検証のために追加の権限を広げないこと
+- 通常とrawの同一AI節、停止後の改名・統合・相槌省略、深夜の日付跨ぎ、到着後の保存失敗
 - 未読・既読、音の既定無効と一回性、長文展開、リンク・コード・HTMLを含む回答、フォーカス・スクロール保持
 - `[ai]`なし・空・不正、hotkey重複、command未発見、extraArgs衝突、設定再読込
 
@@ -344,4 +350,11 @@ GUI起動ではPATHに普段のCLIがない場合がある。見つからなけ�
 
 段3〜5でコードを変更したら `swift build && swift test` を成功させてからその成果物で確認する。段4で本番CLIを先取りして作らず、同じ契約の模擬口で確認する。各段を本人へ報告し、レビュー後に次へ進む。
 
-[^hooks]: [OpenAI公式のnotify仕様](https://learn.chatgpt.com/docs/config-file/config-advanced#notifications)、[Claude Code公式のStop仕様](https://code.claude.com/docs/en/hooks#stop)、[Claude Code公式のCLI設定](https://code.claude.com/docs/en/cli-reference)。前段の設計調査で本文を確認済み。対応版の実測結果は段2で本書へ追記する。
+## 対象外と後続課題
+
+- 録音中のarchiveチェックポイントと異常終了からの本文回復、「途中までの記録」の表示。段6以降の課題とし、今回のMVPには入れない。
+- Markdownのdigest照合による外部編集の検知。段3では作らず、段6までに必要か本人が判断する。
+- 完了済み会議の全件再走査。起動時は未完了の質問を持つ登録会議だけを回収する。
+
+[^hooks]: [OpenAI公式のnotify仕様](https://learn.chatgpt.com/docs/config-file/config-advanced#notifications)、[Claude Code公式のStop仕様](https://code.claude.com/docs/en/hooks#stop)、[Claude Code公式のCLI設定](https://code.claude.com/docs/en/cli-reference)。実測は [段2の記録](ai-participant-spike.md)。
+[^permissions]: [Claude Code公式の権限ルール](https://code.claude.com/docs/en/permissions)。allowは同梱CLIの起動に限定し、返送先・requestの制限は同梱CLIで検証する。
