@@ -35,7 +35,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onOpenMarkdown: (() -> Void)?
     var onSpeakerLimitChange: ((Int?) -> Void)?
     var onSpeakerMappingChange: ((Int, Int?) -> Void)?
-    private let speakerButton = NSButton(title: "話者…", target: nil, action: nil)
+    private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
     private let speakerWarningLabel = NSTextField(wrappingLabelWithString: "")
     private var speakerSettingsPopover: SpeakerSettingsPopover?
     private let startStopButton = NSButton()
@@ -142,6 +142,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         messageLabel.textColor = value.state == .idle && !value.saved && !message.isEmpty ? Washi.red : Washi.muted
         speakerWarningLabel.stringValue = value.speakerWarning ?? ""
         speakerWarningLabel.isHidden = speakerWarningLabel.stringValue.isEmpty
+        speakerButton.update(snapshot: value)
         speakerSettingsPopover?.update(snapshot: value)
         copyButton.title = value.hasCopied ? "前回コピー以降をコピー" : "会話をコピー"
         copyButton.isEnabled = value.canShare && value.handoffPreview != nil

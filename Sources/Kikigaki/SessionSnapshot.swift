@@ -20,6 +20,8 @@ struct SessionSnapshot {
     var handoffFailed = false
     /// 次の録音の人数上限。録音開始時に会議用の値へコピーする。
     var maxSpeakers: Int?
+    /// 現在の会議の枠数。停止後に次の録音の上限を変えても、この値は変えない。
+    var meetingSpeakerCapacity: Int?
     var detectedSpeakerSlots: [Int] = []
     var speakerMapping: [Int: Int] = [:]
     var speakerOverrides: [Int: Int] = [:]

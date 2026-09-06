@@ -92,6 +92,7 @@ final class MeetingSession {
         dropRepeatedBackchannels = meetingConfig.dropRepeatedBackchannels
         snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers, message: "エンジンを準備中...")
         snapshot.maxSpeakers = maximum
+        snapshot.meetingSpeakerCapacity = maximum ?? SpeakerNames.slotCount
         speakerMapping = SpeakerMapping(limited: maximum != nil)
         liveSource = SpeakerTranscript()
         finalTokens = []
