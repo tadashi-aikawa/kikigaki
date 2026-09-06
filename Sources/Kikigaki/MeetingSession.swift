@@ -347,7 +347,8 @@ final class MeetingSession {
                 let elapsed = Double(result.fedSamples) / 16000
                 let speakers = Aligner.speakers(for: tokens, segments: segments, frozen: result.frozen)
                 result.frozen = SpeakerFreeze.advance(
-                    frozen: result.frozen, speakers: speakers, tokens: tokens, elapsed: elapsed, finalCount: finalCount)
+                    frozen: result.frozen, speakers: speakers, tokens: tokens, elapsed: elapsed, finalCount: finalCount,
+                    judgedUntil: diarizer.finalizedDuration)
                 let live = SpeakerTranscript(tokens: tokens, speakers: speakers, finalCount: finalCount, frozenCount: result.frozen.count)
                 await MainActor.run {
                     self.receiveSpeakerState(segments: segments)

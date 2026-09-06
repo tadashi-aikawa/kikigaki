@@ -10,6 +10,7 @@ public enum SpeakerFreeze {
 
     /// `frozen` を、`elapsed` から猶予を引いた時刻より前に終わるトークンまで伸ばした配列を返す。
     /// 伸ばす分の値は今回の判定 `speakers` から取る。
+    /// `judgedUntil` は音声モデルの確定予測範囲。未判定部分を不明のまま凍結しない。
     ///
     /// - finalCount: 先頭から何個までが文字起こしの確定結果に属するか。暫定結果のトークンは
     ///   猶予を過ぎていても凍結しない。話者の多数決はフレーズ単位で、暫定のうちはフレーズが途中で
@@ -17,11 +18,11 @@ public enum SpeakerFreeze {
     ///   (タダシの実録で確認。停止時の判定し直しでは消えるのに録音中だけ出ていた)
     public static func advance(
         frozen: [Int?], speakers: [Int?], tokens: [TimedToken], elapsed: Double, finalCount: Int,
-        grace: Double = graceSeconds
+        grace: Double = graceSeconds, judgedUntil: Double = .infinity
     ) -> [Int?] {
         let limit = min(tokens.count, max(finalCount, 0))
         var count = min(frozen.count, limit)
-        while count < limit, tokens[count].end < elapsed - grace {
+        while count < limit, tokens[count].end < elapsed - grace, tokens[count].end <= judgedUntil {
             // 長い1文字は後続文字で尾部の話者を確認する。次の確定結果がまだ無い時点で
             // 凍結すると、停止後にしか語頭を直せなくなるため、その文字から先を保留する。
             if tokens[count].duration > 0.8,

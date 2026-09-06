@@ -3,6 +3,19 @@ import Testing
 @testable import KikigakiCore
 
 @Suite struct SpeakerFreezeTests {
+    @Test func 猶予を過ぎてもモデル未判定のトークンを固定しない() {
+        let token = TimedToken(text: "はい", phraseId: 0, start: 0, end: 0.1)
+        let waiting = SpeakerFreeze.advance(frozen: [], speakers: [nil], tokens: [token], elapsed: 30.2,
+                                           finalCount: 1, judgedUntil: 0)
+        #expect(waiting.isEmpty)
+        let judged = SpeakerFreeze.advance(frozen: waiting, speakers: [1], tokens: [token], elapsed: 31,
+                                          finalCount: 1, judgedUntil: 27.2)
+        #expect(judged == [1])
+        let silent = SpeakerFreeze.advance(frozen: [], speakers: [nil], tokens: [token], elapsed: 31,
+                                          finalCount: 1, judgedUntil: 27.2)
+        #expect(silent.count == 1)
+    }
+
     @Test func 後続確定結果が来るまで長い語頭の凍結を待つ() {
         let first = TimedToken(text: "僕", phraseId: 1, start: 185.46, end: 187.20)
         let next = TimedToken(text: "の", phraseId: 2, start: 187.20, end: 188.04)
