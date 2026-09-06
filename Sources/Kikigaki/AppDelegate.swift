@@ -64,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onCancelAI = { session.cancelAI($0) }
         window.onOpenAIPane = { session.showAIPane() }
         window.onRecreateAI = { session.recreateAI() }
+        window.onRetryAISave = { session.retryAISaves() }
         window.onShowPreviousAI = { [weak self] in self?.showPreviousAI() }
         window.onOpenMarkdown = {
             if session.snapshot.saved, let url = session.snapshot.markdownURL { NSWorkspace.shared.open(url) }
@@ -87,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let sheet = self.aiSheet {
                 if self.aiSheetMeetingID != session.aiMeetingID || !snapshot.canShare || snapshot.ai?.submissionID != nil {
                     sheet.close(); self.aiSheet = nil
-                } else { sheet.update(progress: snapshot.ai?.progress ?? snapshot.ai?.warning, canSubmit: snapshot.ai?.canSubmit == true) }
+                } else { sheet.update(progress: snapshot.ai?.progress, canSubmit: snapshot.ai?.canSubmit == true, warning: snapshot.ai?.warning) }
             }
             if self.terminateWhenIdle, snapshot.state == .idle {
                 self.terminateWhenIdle = false
@@ -205,7 +206,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             (config.toggleRecording, { [weak self] in self?.toggleRecording() }),
             (config.togglePause, { [weak self] in self?.session?.togglePause() }),
         ]
-        if let ai = session?.aiConfiguration ?? config.ai { bindings.append((ai.hotkey, { [weak self] in self?.showAISheet(parent: nil) })) }
+        let meetingAI = session == nil ? config.ai : session?.aiConfiguration
+        if let ai = meetingAI { bindings.append((ai.hotkey, { [weak self] in self?.showAISheet(parent: nil) })) }
         var registered: [Hotkey] = []
         for (hotkey, handler) in bindings {
             guard let one = Hotkey(modifiers: hotkey.modifiers, key: hotkey.key, handler: handler) else {
@@ -216,7 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             registered.append(one)
         }
         hotkeys = registered
-        registeredAIHotkey = (session?.aiConfiguration ?? config.ai)?.hotkey
+        registeredAIHotkey = meetingAI?.hotkey
         return true
     }
 
@@ -233,12 +235,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         session.beginAIDraft()
         let snapshot = session.snapshot
         let question = parent.flatMap { id in session.aiRecord?.controller.conversation.questions.first { $0.request.id == id } }
-        let rows = snapshot.utterances.suffix(4)
-        let range = rows.first.map { "直近\(rows.count)発言 · \(snapshot.timeline.clock(at: $0.start, seconds: true))〜\(snapshot.timeline.clock(at: rows.last!.end, seconds: true))" } ?? "確定した会話はまだありません"
+        let range = session.aiRangePreview(full: false)
         let sheet = AIQuestionSheet(participant: config.participantName, parentNumber: question?.request.number,
-            draft: session.aiDraft, voice: snapshot.tentativeText ?? rows.last?.text ?? "空欄なら会話末尾の問いを送ります",
+            draft: session.aiDraft, voice: snapshot.tentativeText ?? snapshot.utterances.last?.text ?? "空欄なら会話末尾の問いを送ります",
             range: range, tentative: snapshot.tentativeText != nil, canSubmit: snapshot.ai?.canSubmit == true, confirmation: question?.result?.body)
         sheet.onDraft = { session.updateAIDraft($0) }
+        sheet.rangePreview = { session.aiRangePreview(full: $0) }
         sheet.onCancel = { [weak self] in session.cancelAIPreparation(); self?.aiSheet = nil }
         sheet.onPane = { session.showAIPane() }
         sheet.onSubmit = { text, full in

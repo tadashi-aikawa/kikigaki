@@ -39,6 +39,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onOpenAIPane: (() -> Void)?
     var onCancelAI: ((UUID) -> Void)?
     var onRecreateAI: (() -> Void)?
+    var onRetryAISave: (() -> Void)?
     var onShowPreviousAI: (() -> Void)?
     private lazy var previousAIButton = AIActionButton("前の会議に回答あり") { [weak self] in self?.onShowPreviousAI?() }
     private let aiPanel = AIPanel()
@@ -116,7 +117,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     func apply(_ value: SessionSnapshot) {
         let previous = snapshot
         snapshot = value
-        previousAIButton.isHidden = value.previousAIUnread == 0
+        previousAIButton.isHidden = value.previousAIUnread == 0 && value.aiRecoveryWarning == nil
+        previousAIButton.title = value.aiRecoveryWarning == nil ? "前の会議に回答あり" : "AI回答の回収を確認"
+        previousAIButton.toolTip = value.aiRecoveryWarning
         transcriptBottom?.constant = value.ai == nil ? 0 : -34
         aiPanel.isHidden = value.ai == nil
         askButton.isHidden = value.ai == nil
@@ -203,16 +206,16 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             // 回答の到着だけでは末尾へ移動しない。人間の発言が増えたときの追従は従来どおり。
             anchor = .init(candidates: anchor.candidates, y: anchor.y, atBottom: false)
         }
-        var marks: [(String, Date, String)] = []
+        var marks: [(String, Date, String, Int, Int)] = []
         for question in snapshot.ai?.conversation?.questions ?? [] {
             let name = question.request.envelope.participant.participantName
             let prefix = "Q\(question.request.number) " + name
-            if let sent = question.sendAttemptedAt { marks.append((question.request.id.uuidString + "/send", sent, prefix + "へ質問")) }
+            if let sent = question.sendAttemptedAt { marks.append((question.request.id.uuidString + "/send", sent, prefix + "へ質問" + (question.state == .deliveryUnknown ? "・送達不明" : ""), 1, question.request.number)) }
             if let arrived = question.resultReceivedAt {
-                marks.append((question.request.id.uuidString + "/result", arrived, prefix + (question.result?.kind == .needsInput ? "の確認" : "の回答")))
+                marks.append((question.request.id.uuidString + "/result", arrived, prefix + (question.result?.kind == .needsInput ? "の確認" : question.result?.kind == .failed ? "の失敗報告" : "の回答"), 2, question.resultOrder ?? 0))
             }
         }
-        marks = marks.enumerated().sorted { $0.element.1 == $1.element.1 ? $0.offset < $1.offset : $0.element.1 < $1.element.1 }.map(\.element)
+        marks.sort { $0.1 != $1.1 ? $0.1 < $1.1 : $0.3 != $1.3 ? $0.3 < $1.3 : $0.4 < $1.4 }
         var markIndex = 0
         let animated = sameMeeting && !shouldReduceMotion()
         var next: [RowID: TranscriptRow] = [:]
@@ -272,6 +275,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         aiPanel.onPane = { [weak self] in self?.onOpenAIPane?() }
         aiPanel.onCancel = { [weak self] in self?.onCancelAI?($0) }
         aiPanel.onReconnect = { [weak self] in self?.onRecreateAI?() }
+        aiPanel.onRetrySave = { [weak self] in self?.onRetryAISave?() }
         aiPanel.isHidden = true; askButton.isHidden = true
         askButton.isBordered = true; askButton.bezelStyle = .rounded
         askButton.setContentHuggingPriority(.required, for: .horizontal)
@@ -409,7 +413,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         return view
     }
     @objc private func startStopPressed() { onStartStop?() }
-    private func markView(_ mark: (String, Date, String)) -> AIMarkRow {
+    private func markView(_ mark: (String, Date, String, Int, Int)) -> AIMarkRow {
         if let current = aiMarks[mark.0], current.title == mark.2, current.date == mark.1 { return current }
         return AIMarkRow(title: mark.2, date: mark.1)
     }

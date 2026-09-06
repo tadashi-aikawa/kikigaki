@@ -12,6 +12,11 @@ struct AIViewState {
     var canSubmit = true
     var submissionID: UUID?
     var draft = ""
+    var readOnly = false
+    var canOpenPane = true
+    var canRecreate = false
+    var saveFailed = false
+    var generation = 1
     var summary: String {
         let questions = conversation?.questions ?? []
         var parts: [String] = []
@@ -74,6 +79,9 @@ final class AIActionButton: NSButton {
 
 /// テキストとビューを保持し、後着acceptや既読操作だけで本文の選択を消さない。
 private final class AIAnswerCard: NSView, DocumentRow {
+    var readOnly = false
+    var canOpenPane = true
+    var generation = 1
     var onRead: (() -> Void)?
     var onReply: (() -> Void)?
     var onCancel: (() -> Void)?
@@ -104,7 +112,12 @@ private final class AIAnswerCard: NSView, DocumentRow {
     required init?(coder: NSCoder) { fatalError() }
     func update(_ value: AIQuestion) {
         question = value
-        heading.stringValue = "Q\(value.request.number)  " + value.request.displayQuestion.replacingOccurrences(of: "\n", with: " ")
+        var notes: [String] = []
+        if value.result != nil, value.cancelledAt != nil { notes.append("取消後の回答") }
+        if value.result != nil, value.request.envelope.participant.sessionGeneration < generation { notes.append("旧接続からの回答") }
+        if value.answeredByRequestID != nil { notes.append("返答済み") }
+        heading.stringValue = (["Q\(value.request.number)"] + notes + [value.request.displayQuestion.replacingOccurrences(of: "\n", with: " ")]).joined(separator: "  ")
+        heading.toolTip = heading.stringValue
         let format = DateFormatter(); format.dateFormat = "HH:mm:ss"
         time.stringValue = (value.resultReceivedAt ?? value.sendAttemptedAt).map { format.string(from: $0) } ?? ""
         let text: String
@@ -138,8 +151,9 @@ private final class AIAnswerCard: NSView, DocumentRow {
         more.isHidden = !needsMore || question.result == nil
         more.title = expanded ? "閉じる ▴" : "全文を読む ▾"
         read.isHidden = !question.isUnread
-        cancel.isHidden = question.result != nil || question.state == .cancelled || question.state == .failed
-        reply.isHidden = !confirming
+        cancel.isHidden = readOnly || question.result != nil || question.state == .cancelled || question.state == .failed
+        reply.isHidden = readOnly || !confirming
+        pane.isHidden = !canOpenPane
         for view in [more, read, cancel] { view.frame = NSRect(x: 12, y: y, width: 102, height: 20) }
         if !more.isHidden { read.frame.origin.x = 245 }
         pane.frame = NSRect(x: 125, y: y, width: 110, height: 20)
@@ -164,12 +178,14 @@ final class AIPanel: NSStackView {
     var onPane: (() -> Void)?
     var onCancel: ((UUID) -> Void)?
     var onReconnect: (() -> Void)?
+    var onRetrySave: (() -> Void)?
     var onWillToggle: (() -> Void)?
     var onDidToggle: (() -> Void)?
     private let toggle = NSButton(title: "", target: nil, action: nil)
     private let scroll = NSScrollView()
     private let document = TranscriptDocument()
     private lazy var reconnect = AIActionButton("AIセッションを作り直す") { [weak self] in self?.onReconnect?() }
+    private lazy var retrySave = AIActionButton("保存を再試行") { [weak self] in self?.onRetrySave?() }
     private var cards: [UUID: AIAnswerCard] = [:]
     private var expanded = false
     private var state = AIViewState()
@@ -188,18 +204,22 @@ final class AIPanel: NSStackView {
         preferredHeight = preferred
         scroll.isHidden = true
         addArrangedSubview(reconnect); reconnect.isHidden = true
+        addArrangedSubview(retrySave); retrySave.isHidden = true
     }
     required init?(coder: NSCoder) { fatalError() }
     func update(_ value: AIViewState, newMeeting: Bool) {
         let changedMeeting = newMeeting || state.conversation?.meetingID != value.conversation?.meetingID
         if changedMeeting { expanded = false; cards = [:] }
         state = value; updateHeading()
-        reconnect.isHidden = value.connection != .disconnected && value.warning == nil
+        reconnect.isHidden = !value.canRecreate
+        retrySave.isHidden = !value.saveFailed
         let anchor = document.anchor()
         var next: [UUID: AIAnswerCard] = [:]
         let ordered = (value.conversation?.questions ?? []).map { question -> any DocumentRow in
             let id = question.request.id
             let card = cards[id] ?? AIAnswerCard(question)
+            card.readOnly = value.readOnly; card.canOpenPane = value.canOpenPane
+            card.generation = value.generation
             card.update(question)
             card.onReply = { [weak self] in self?.onReply?(id) }; card.onRead = { [weak self] in self?.onRead?(id) }
             card.onCancel = { [weak self] in self?.onCancel?(id) }; card.onPane = { [weak self] in self?.onPane?() }

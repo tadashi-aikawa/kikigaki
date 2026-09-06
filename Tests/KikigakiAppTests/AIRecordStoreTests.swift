@@ -4,6 +4,27 @@ import KikigakiCore
 @testable import Kikigaki
 
 @Suite @MainActor struct AIRecordStoreTests {
+    @Test func archive保存失敗ではMarkdownを変えず回復後に再保存する() throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let registry = try testDirectory(); defer { try? FileManager.default.removeItem(at: registry) }
+        let config = ResolvedAIConfig(config: AIConfig(), home: root)
+        let store = AIRecordStore(directory: registry, makeHerdr: { AIHerdr(run: { _, _ in throw AIHerdrError.notReady }) })
+        let id = UUID(), markdown = root.appendingPathComponent("meeting.md")
+        try "既存本文".write(to: markdown, atomically: true, encoding: .utf8)
+        let record = try store.begin(meetingID: id, markdownURL: markdown, config: config)
+        let base = [".kikigaki-context", id.uuidString, "ai"]
+        let archivePath = (base + ["archive.json"]).reduce(root) { $0.appendingPathComponent($1) }
+        try FileManager.default.createSymbolicLink(at: archivePath, withDestinationURL: root.appendingPathComponent("absent"))
+        var archive = MeetingArchive(original: .init(startedAt: Date(), duration: 1, utterances: [], names: SpeakerNames()), processed: nil, candidateCount: 0, markdownURL: markdown)
+        #expect(!store.save(&archive, for: id).succeeded)
+        #expect(try String(contentsOf: markdown, encoding: .utf8) == "既存本文")
+        #expect(record.needsRecovery)
+        try FileManager.default.removeItem(at: archivePath)
+        store.retrySaves()
+        #expect(record.saveResult?.succeeded == true)
+        #expect(record.saveWarning == nil)
+        #expect(try String(contentsOf: markdown, encoding: .utf8).contains("# KIKIGAKI"))
+    }
     @Test func 新会議中の旧会議への回答を元の両Markdownへ保存する() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let registry = try testDirectory(); defer { try? FileManager.default.removeItem(at: registry) }

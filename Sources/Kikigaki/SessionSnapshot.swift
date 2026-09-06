@@ -5,6 +5,7 @@ import KikigakiCore
 struct SessionSnapshot {
     var ai: AIViewState?
     var previousAIUnread = 0
+    var aiRecoveryWarning: String?
     var state: RecordingState = .idle
     var utterances: [Utterance] = []
     var tentativeText: String?

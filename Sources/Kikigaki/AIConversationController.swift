@@ -65,6 +65,11 @@ final class AIConversationController {
         monitor = AIInboxMonitor(directory: inbox) { [weak self] in self?.scan(); self?.poll() }
     }
 
+    func preview(lines: [String], full: Bool) throws -> AIContextSnapshot {
+        var copy = history
+        return try copy.prepare(lines: lines, outputDirectory: outputDirectory, full: full)
+    }
+
     func prepare(lines: [String], question: String, voiceQuestion: String, capturedAt: Date, cutoff: Double,
                  tail: AITentativeTail?, config: ResolvedAIConfig, helper: URL, parent: UUID? = nil,
                  full: Bool = false) throws -> AIRequest {
@@ -155,13 +160,14 @@ final class AIConversationController {
         try await refreshConnection()
         try Task.checkCancellation()
         guard connectionStatus == .idle, let target = connection else { throw AIHerdrError.notReady }
-        // observeの間の取消も、最新の値で拒否する。外から渡されたenvelopeは送信しない。
-        var next = conversation
-        try next.update(stored.request.id) { try $0.beginSending(at: Date()) }
-        try commit(next)
         do {
-            try await herdr.prompt(target, text: text)
-            next = conversation
+            try await herdr.prompt(target, text: text) { @MainActor [self] in
+                // 最後の生存確認中の取消まで反映し、prompt直前に送信試行を保存する。
+                var next = conversation
+                try next.update(stored.request.id) { try $0.beginSending(at: Date()) }
+                try commit(next)
+            }
+            var next = conversation
             try next.update(stored.request.id) { try $0.submitted() }
             try commit(next)
         } catch { warning = "送達を確認できません。ペインを確認してください"; throw error }
@@ -200,12 +206,13 @@ final class AIConversationController {
         }
         events.sort { $0.recordedAt == $1.recordedAt ? $0.eventID < $1.eventID : $0.recordedAt < $1.recordedAt }
         var next = conversation, received = history
-        var changed = false, resultArrived = false
+        var changed = false, resultArrived = false, notifyResult = false
         let now = Date()
         for event in events {
             do {
                 if try next.receive(event, at: now) {
                     changed = true; resultArrived = resultArrived || event.kind != .accept
+                    notifyResult = notifyResult || event.kind == .answered || event.kind == .needsInput
                     if event.contextReceived, snapshots.contains(event.snapshotID), event.sessionGeneration == generation {
                         try received.acknowledge(snapshotID: event.snapshotID, streamID: history.streamID, sessionGeneration: generation)
                     }
@@ -215,7 +222,8 @@ final class AIConversationController {
         if changed {
             do {
                 try commit(next); history = received
-                if resultArrived { warning = nil; onResult?() }
+                if resultArrived { warning = nil }
+                if notifyResult { onResult?() }
             } catch { scanWarning = "回答の取り込み状態を保存できません" }
         }
         if let scanWarning { warning = scanWarning }

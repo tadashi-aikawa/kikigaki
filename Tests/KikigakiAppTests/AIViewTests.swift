@@ -4,6 +4,23 @@ import KikigakiCore
 @testable import Kikigaki
 
 @Suite @MainActor struct AIViewTests {
+    @Test func 旧会議画面は新規送信を出さず未読を読む操作だけをつなぐ() throws {
+        _ = NSApplication.shared
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let registry = try testDirectory(); defer { try? FileManager.default.removeItem(at: registry) }
+        let store = AIRecordStore(directory: registry, makeHerdr: { AIHerdr(run: { _, _ in throw AIHerdrError.notReady }) })
+        let record = try store.begin(meetingID: UUID(), markdownURL: root.appendingPathComponent("old.md"), config: .init(config: AIConfig(), home: root))
+        _ = try record.controller.prepare(lines: [], question: "明示質問", voiceQuestion: "", capturedAt: Date(), cutoff: 0,
+            tail: nil, config: record.manifest.config, helper: root.appendingPathComponent("helper"))
+        let window = AIPastMeetingsWindow(store: store, current: { UUID() }); window.update()
+        let content = window.window!.contentView!
+        content.layoutSubtreeIfNeeded()
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let buttons = descendants(content).compactMap { $0 as? NSButton }
+        #expect(!buttons.contains { $0.title.hasPrefix("AIに質問") })
+        #expect(buttons.filter { ["取消", "返答する", "ペインを開く"].contains($0.title) }.allSatisfy { $0.isHidden })
+        #expect(descendants(content).compactMap { $0 as? NSPopUpButton }.first?.titleOfSelectedItem == "old")
+    }
     @Test func 実ビューで状態と返答導線と到着印を検証する() throws {
         let app = NSApplication.shared; app.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }

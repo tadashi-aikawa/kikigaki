@@ -5,17 +5,19 @@ import AppKit
     private let current: () -> UUID?
     private let picker = NSPopUpButton()
     private let panel = AIPanel()
+    private let warning = NSTextField(wrappingLabelWithString: "")
     private var ids: [UUID] = []
     init(store: AIRecordStore, current: @escaping () -> UUID?) {
         self.store = store; self.current = current
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 280), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.title = "前の会議のAI回答"; window.isReleasedWhenClosed = false
         super.init(window: window)
-        let stack = NSStackView(views: [picker, panel]); stack.orientation = .vertical; stack.alignment = .leading
+        let stack = NSStackView(views: [picker, warning, panel]); stack.orientation = .vertical; stack.alignment = .leading
         stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
-        for view in [picker, panel] { view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32).isActive = true }
+        for view in [picker, warning, panel] { view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32).isActive = true }
         window.contentView = stack; window.backgroundColor = Washi.paper
         picker.target = self; picker.action = #selector(selected)
+        panel.onRetrySave = { [weak store] in store?.retrySaves() }
         panel.onRead = { [weak self] id in
             guard let self, let record = selectedRecord else { return }
             try? record.controller.markRead(id)
@@ -31,6 +33,7 @@ import AppKit
         return store.records[ids[picker.indexOfSelectedItem]]
     }
     func update() {
+        warning.stringValue = store.warnings.joined(separator: "\n"); warning.isHidden = store.warnings.isEmpty
         let selectedID = selectedRecord?.manifest.meetingID
         ids = store.records.keys.filter { $0 != current() }.sorted { $0.uuidString < $1.uuidString }
         picker.removeAllItems()
@@ -42,6 +45,7 @@ import AppKit
         guard let record = selectedRecord else { panel.isHidden = true; return }
         panel.isHidden = false
         panel.update(AIViewState(conversation: record.controller.conversation, participant: record.manifest.config.participantName,
-            warning: record.saveWarning, canSubmit: false), newMeeting: false)
+            warning: record.saveWarning, canSubmit: false, readOnly: true, canOpenPane: record.controller.connection != nil,
+            saveFailed: record.saveWarning != nil), newMeeting: false)
     }
 }

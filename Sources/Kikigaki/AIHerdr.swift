@@ -86,8 +86,11 @@ struct AIHerdr: Sendable {
         let ready = status == .idle && agent.interactive_ready == true && (target.provider == .codex || !(session ?? "").isEmpty)
         return AIHerdrObservation(status: status, ready: ready, sessionID: session, terminalID: agent.terminal_id)
     }
-    func prompt(_ target: AIHerdrConnection, text: String) async throws {
+    func prompt(_ target: AIHerdrConnection, text: String, beforeSend: @Sendable () async throws -> Void = {}) async throws {
         guard try await observe(target).ready else { throw AIHerdrError.notReady }
+        try Task.checkCancellation()
+        try await beforeSend()
+        try Task.checkCancellation()
         _ = try await call(["agent", "prompt", target.paneID, text], as: Empty.self)
     }
     func show(_ target: AIHerdrConnection) async throws { _ = try await call(["workspace", "focus", target.workspaceID], as: Empty.self) }

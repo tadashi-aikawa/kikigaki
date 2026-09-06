@@ -321,13 +321,17 @@ final class MeetingSession {
         snapshot.hasCopied = handoff.lastCopy != nil
         snapshot.previousAIUnread = aiStore?.records.values.filter { $0.manifest.meetingID != handoff.meetingID }
             .reduce(0) { $0 + $1.controller.conversation.questions.filter(\.isUnread).count } ?? 0
+        snapshot.aiRecoveryWarning = aiStore?.warnings.first
         if let config = meetingAI {
             let controller = aiRecord?.controller
             snapshot.ai = AIViewState(conversation: controller?.conversation, hotkey: config.hotkey,
                 participant: config.participantName, connection: controller?.connectionStatus ?? .unknown,
                 warning: aiWarning ?? aiRecord?.saveWarning ?? controller?.warning, progress: aiProgress,
                 unconfirmed: Set(controller?.conversation.questions.filter { controller!.isReturnUnconfirmed($0) }.map { $0.request.id } ?? []),
-                canSubmit: snapshot.canShare && aiTask == nil && (controller?.canSend ?? true), submissionID: aiCompleted, draft: aiDraft)
+                canSubmit: snapshot.canShare && aiTask == nil && (controller?.canSend ?? true), submissionID: aiCompleted, draft: aiDraft,
+                canOpenPane: controller?.connection != nil,
+                canRecreate: controller != nil && aiTask == nil && (aiWarning != nil || controller?.connectionStatus == .disconnected),
+                saveFailed: aiRecord?.saveWarning != nil, generation: controller?.generation ?? 1)
         } else { snapshot.ai = nil }
         onChange?(snapshot)
     }
@@ -344,6 +348,7 @@ final class MeetingSession {
 
     func updateAIDraft(_ text: String) { aiDraft = text }
     func beginAIDraft() { aiCompleted = nil }
+    func retryAISaves() { aiStore?.retrySaves() }
 
     func cancelAIPreparation() {
         aiTask?.cancel(); aiTask = nil; aiProgress = nil
@@ -356,6 +361,20 @@ final class MeetingSession {
     func readAI(_ id: UUID) { do { try aiRecord?.controller.markRead(id) } catch { aiWarning = "既読を保存できません" }; emit() }
     func recreateAI() { do { try aiRecord?.controller.newGeneration(); aiWarning = nil } catch { aiWarning = "接続を作り直せません" }; emit() }
     func showAIPane() { Task { do { try await aiRecord?.controller.showPane() } catch { aiWarning = "herdrのペインを開けません"; emit() } } }
+
+    func aiRangePreview(full: Bool) -> String {
+        let lines = TranscriptRenderer.lines(snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
+        guard let url = snapshot.markdownURL else { return "確定した会話はまだありません" }
+        let context: AIContextSnapshot?
+        if let controller = aiRecord?.controller { context = try? controller.preview(lines: lines, full: full) }
+        else {
+            var history = try? AIStreamHistory(meetingID: aiMeetingID)
+            context = try? history?.prepare(lines: lines, outputDirectory: url.deletingLastPathComponent(), full: full)
+        }
+        guard let context, context.readLineCount > 0 else { return "追加の確定行なし · 送信時点で範囲を確定" }
+        let time = context.timeRange.map { " · \($0.start)〜\($0.end)" } ?? ""
+        return "対象: \(context.readStartLine)〜\(context.lines.count)行\(time) · 送信時に確定"
+    }
 
     /// シートのEnterだけが入口。収録位置・宛先・問いは最初に固定し、待ち中の追加発話を混ぜない。
     func submitAI(question: String, full: Bool, parent: UUID?, helper: URL,
@@ -373,24 +392,22 @@ final class MeetingSession {
             do {
                 let record = try aiStore.begin(meetingID: meetingID, markdownURL: url, config: config)
                 guard record.controller.canSend else { throw AIHerdrError.notReady }
-                let deadline = ProcessInfo.processInfo.systemUptime + 3
-                var capture: AICapture
-                repeat {
-                    try Task.checkCancellation()
-                    guard handoff.meetingID == meetingID, snapshot.canShare else { throw CancellationError() }
-                    if let transcriber {
+                if snapshot.state == .idle, var archive, record.archive == nil {
+                    let saved = aiStore.save(&archive, for: meetingID); self.archive = archive
+                    guard saved.succeeded else { throw AIError.unsafeFile }
+                }
+                let capture = try await AIConfirmationWait.capture(latest: {
+                    guard self.handoff.meetingID == meetingID, self.snapshot.canShare else { throw CancellationError() }
+                    if let transcriber = self.transcriber {
                         let (tokens, count) = await transcriber.snapshot()
-                        let speakers = speakerMapping.apply(Aligner.speakers(for: tokens, segments: diarizer?.segments() ?? []))
-                        capture = try AICapture(tokens: tokens, speakers: speakers, finalCount: count, processedUntil: consumedAudioTime,
+                        let speakers = self.speakerMapping.apply(Aligner.speakers(for: tokens, segments: self.diarizer?.segments() ?? []))
+                        return try AICapture(tokens: tokens, speakers: speakers, finalCount: count, processedUntil: self.consumedAudioTime,
                             cutoff: cutoff, names: names, timeline: timeline)
                     } else {
-                        capture = try AICapture(tokens: finalTokens, speakers: speakerMapping.apply(Aligner.speakers(for: finalTokens, segments: finalSegments)),
-                            finalCount: finalTokens.count, processedUntil: snapshot.elapsed, cutoff: cutoff, names: names, timeline: timeline)
+                        return try AICapture(tokens: self.finalTokens, speakers: self.speakerMapping.apply(Aligner.speakers(for: self.finalTokens, segments: self.finalSegments)),
+                            finalCount: self.finalTokens.count, processedUntil: self.snapshot.elapsed, cutoff: cutoff, names: names, timeline: timeline)
                     }
-                    if !capture.needsConfirmation || ProcessInfo.processInfo.systemUptime >= deadline { break }
-                    aiProgress = "聞き取りの確定待ち · あと\(max(1, Int(ceil(deadline - ProcessInfo.processInfo.systemUptime))))秒"; emit()
-                    try await Task.sleep(for: .milliseconds(100))
-                } while true
+                }, progress: { seconds in self.aiProgress = "聞き取りの確定待ち · あと\(seconds)秒"; self.emit() })
                 try Task.checkCancellation()
                 guard consumedAudioTime >= cutoff else { throw AIError.invalid("audio not processed") }
                 let fixed = try record.controller.prepare(lines: capture.lines, question: question, voiceQuestion: capture.voice,

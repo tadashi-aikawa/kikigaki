@@ -4,6 +4,26 @@ import Testing
 import KikigakiCore
 
 @Suite @MainActor struct AIConversationControllerTests {
+    @MainActor private final class CancelOnObserve {
+        var action: (() throws -> Void)?
+        func run() throws { try action?() }
+    }
+    @Test(arguments: [1, 2]) func 生存確認の応答待ち中の取消を送信前に検出する(cancelAt: Int) async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), hook = CancelOnObserve(), config = ResolvedAIConfig(config: AIConfig(), home: root)
+        let adapter = AIHerdr(run: { args, timeout in
+            if args.prefix(2) == ["agent", "get"] { try await hook.run() }
+            return try await fake.run(args, timeout)
+        })
+        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: adapter)
+        let request = try prepare(controller, config)
+        try await controller.connect(config: config, label: "test", executable: URL(fileURLWithPath: "/tmp/fake"), arguments: [])
+        var observations = 0
+        hook.action = { observations += 1; if observations == cancelAt { try controller.cancel(request.id) } }
+        await #expect(throws: AIError.invalidTransition) { try await controller.send(request, config: config) }
+        #expect(controller.conversation.questions[0].state == .cancelled)
+        #expect(await fake.commands.filter { $0.prefix(2) == ["agent", "prompt"] }.isEmpty)
+    }
     private func prepare(_ controller: AIConversationController, _ config: ResolvedAIConfig, lines: [String] = ["[12:00:00] A: 会話"]) throws -> AIRequest {
         try controller.prepare(lines: lines, question: "質問", voiceQuestion: "", capturedAt: Date(), cutoff: 1,
             tail: nil, config: config, helper: URL(fileURLWithPath: "/tmp/helper"))

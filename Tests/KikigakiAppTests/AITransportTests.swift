@@ -5,6 +5,21 @@ import Testing
 import KikigakiCore
 
 @Suite struct AITransportTests {
+    @Test @MainActor func 生成設定は指定helperだけを許可しセッションへ限定する() throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let config = ResolvedAIConfig(config: AIConfig(cli: .claude, command: "/bin/echo", model: "test-model", cwd: root.path), home: root)
+        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { _, _ in throw AIHerdrError.notReady }))
+        _ = try controller.prepare(lines: [], question: "質問", voiceQuestion: "", capturedAt: Date(), cutoff: 0, tail: nil,
+            config: config, helper: URL(fileURLWithPath: "/bin/echo"))
+        let launch = try AILaunchConfiguration(config: config, helper: URL(fileURLWithPath: "/bin/echo"), controller: controller)
+        #expect(launch.arguments.prefix(2) == ["--model", "test-model"])
+        #expect(launch.arguments[2] == "--settings")
+        let bytes = try AIFileStore(root: root).read([".kikigaki-context", controller.meetingID.uuidString, "ai", "sessions", "1.settings.json"])
+        let settings = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        #expect((settings["permissions"] as? [String: [String]])?["allow"] == ["Bash(/bin/echo *)"])
+        #expect(!launch.arguments.contains("--permission-mode"))
+        #expect(String(decoding: bytes, as: UTF8.self).contains(controller.sessionToken!))
+    }
     @Test @MainActor func 監視先を置換しても再走査を続ける() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let inbox = root.appendingPathComponent("inbox")

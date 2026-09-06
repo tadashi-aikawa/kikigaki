@@ -41,6 +41,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     private let full = NSButton(checkboxWithTitle: "会話を最初から送り直す", target: nil, action: nil)
     private let pane = NSButton(title: "ペインを開く", target: nil, action: nil)
     var onPane: (() -> Void)?
+    var rangePreview: ((Bool) -> String)?
     private var sent = false
 
     init(participant: String, parentNumber: Int?, draft: String, voice: String, range: String, tentative: Bool, canSubmit: Bool, confirmation: String? = nil) {
@@ -51,6 +52,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         let title = Washi.label(parentNumber.map { "Q\($0)への返答" } ?? "\(participant)に質問", size: 17, weight: .semibold)
         self.range.stringValue = range
+        full.target = self; full.action = #selector(updateRange)
         editor.placeholder = voice; editor.string = draft; editor.font = .systemFont(ofSize: 14)
         editor.textColor = Washi.ink; editor.backgroundColor = Washi.paper; editor.isRichText = false
         editor.textContainerInset = NSSize(width: 6, height: 8); editor.delegate = self
@@ -84,13 +86,15 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     }
     func present(on parent: NSWindow) { parent.beginSheet(window); window.makeFirstResponder(editor) }
     func close() { if let parent = window.sheetParent { parent.endSheet(window) }; window.orderOut(nil) }
-    func update(progress: String?, canSubmit: Bool) {
-        if let progress { hint.stringValue = progress }
+    func update(progress: String?, canSubmit: Bool, warning: String? = nil) {
+        if progress == nil { updateRange() }
+        hint.stringValue = progress ?? warning ?? (canSubmit ? "空欄なら声の末尾を送ります" : "回答待ちです。下書きは保持されます")
         sendButton.isEnabled = canSubmit && !sent
         editor.isEditable = !sent || progress == nil
         if progress == nil { sent = false; sendButton.isEnabled = canSubmit }
     }
     func textDidChange(_ notification: Notification) { editor.needsDisplay = true; onDraft?(editor.string) }
+    @objc private func updateRange() { if let rangePreview { range.stringValue = rangePreview(full.state == .on) } }
     @objc private func submit() {
         guard sendButton.isEnabled, !editor.hasMarkedText() else { return }
         sent = true; sendButton.isEnabled = false; editor.isEditable = false

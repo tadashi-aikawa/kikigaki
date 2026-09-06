@@ -41,10 +41,14 @@ final class AIRecordStore {
     private let makeHerdr: () throws -> AIHerdr
     private var unresolved: [AIRegistration] = []
     private var registryHealthy = true
+    private var recovering = false
     init(directory: URL, makeHerdr: @escaping () throws -> AIHerdr = { AIHerdr(executable: try AIProcessRunner.executable("herdr")) }) {
         registry = AIFileStore(root: directory); self.makeHerdr = makeHerdr
     }
     func recover() {
+        guard !recovering, records.isEmpty else { return }
+        recovering = true
+        defer { recovering = false }
         do {
             let entries = try AIJSON.decode([AIRegistration].self, from: registry.read(["ai-roots.json"]))
             guard Set(entries.map(\.meetingID)).count == entries.count else { throw AIError.conflict }
@@ -67,8 +71,9 @@ final class AIRecordStore {
                     bind(record)
                     try controller.watch()
                     changed(record)
-                } catch { unresolved.append(entry); warnings.append("会議 \(entry.meetingID) の保存先を回収できません") }
+                } catch { records[entry.meetingID] = nil; unresolved.append(entry); warnings.append("会議 \(entry.meetingID) の保存先を回収できません") }
             }
+            recovering = false
             try persistRegistry()
         } catch AIFileError.missing { }
         catch { registryHealthy = false; warnings.append("AI会議の登録簿を読めません") }
@@ -97,8 +102,18 @@ final class AIRecordStore {
         return record.saveResult ?? .init(utterances: archive.original.utterances, message: record.saveWarning ?? "保存できません", succeeded: false)
     }
     func retrySaves() {
-        for record in records.values where record.hasUnpersistedChanges { persistArchive(record) }
+        for record in records.values where record.hasUnpersistedChanges {
+            if record.archive == nil {
+                do {
+                    let archive = try AIJSON.decode(MeetingArchive.self, from: AIFileStore(root: record.controller.outputDirectory)
+                        .read(Self.base(record.manifest.meetingID) + ["archive.json"]))
+                    try validate(archive, manifest: record.manifest); record.archive = archive
+                } catch { record.saveWarning = "保存用の会議データを読めません。回答は受信箱に保持します" }
+            }
+            persistArchive(record)
+        }
         do { try persistRegistry() } catch { warnings.append("AI会議の登録簿を保存できません") }
+        warnings = Array(Set(warnings)).sorted()
         onChange?()
     }
     private func bind(_ record: Record) {
@@ -116,6 +131,7 @@ final class AIRecordStore {
             if record.archive != nil { persistArchive(record) }
         }
         do { try persistRegistry() } catch { warnings.append("AI会議の登録簿を保存できません") }
+        warnings = Array(Set(warnings)).sorted()
         onChange?()
     }
     private func persistArchive(_ record: Record) {
@@ -137,6 +153,7 @@ final class AIRecordStore {
     }
     private func persistRegistry() throws {
         guard registryHealthy else { throw AIError.invalid("registry unavailable") }
+        guard !recovering else { return }
         let active = records.values.filter(\.needsRecovery).map {
             AIRegistration(meetingID: $0.manifest.meetingID, outputDirectory: $0.controller.outputDirectory)
         }
