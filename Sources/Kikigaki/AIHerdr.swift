@@ -9,12 +9,24 @@ struct AIHerdrObservation: Equatable, Sendable {
 }
 enum AIHerdrError: Error, Equatable { case notReady, replaced, missing, server(String) }
 
+/// 同じ操作の同じ失敗を連続して記録しない。成功したら次の失敗はまた記録する。
+actor AIHerdrLogGate {
+    private var lastCode: [String: String] = [:]
+    func shouldLog(operation: String, code: String) -> Bool {
+        guard lastCode[operation] != code else { return false }
+        lastCode[operation] = code
+        return true
+    }
+    func recovered(operation: String) { lastCode[operation] = nil }
+}
+
 /// herdrのJSONを型として解釈する。エラー本文やargvを診断へ転載しない。
 struct AIHerdr: Sendable {
     typealias Run = @Sendable ([String], TimeInterval) async throws -> AIProcessOutput
     typealias Log = @Sendable (String) -> Void
     private let run: Run
     private let log: Log
+    private let gate = AIHerdrLogGate()
     init(executable: URL) {
         self.init(run: { try await AIProcessRunner().run(executable, $0, timeout: $1) })
     }
@@ -51,9 +63,15 @@ struct AIHerdr: Sendable {
             let rawCode = (try? JSONDecoder().decode(Failure.self, from: reply.stderr))?.error.code
                 ?? (try? JSONDecoder().decode(Failure.self, from: reply.stdout))?.error.code ?? "herdr_failed"
             let code = rawCode.range(of: "^[a-z][a-z0-9_-]{0,63}$", options: .regularExpression) == rawCode.startIndex..<rawCode.endIndex ? rawCode : "herdr_failed"
-            log("herdr \(operation): \(code)")
+            // 切断後の定期監視は同じ失敗を繰り返すため、同じ操作で同じcodeが続く間は1回だけ記録する(段6の実測: agent_not_found が2秒ごとに出続けた)。
+            if await gate.shouldLog(operation: operation, code: code) { log("herdr \(operation): \(code)") }
             if ["agent_not_found", "pane_not_found", "workspace_not_found"].contains(code) { throw AIHerdrError.missing }
             throw AIHerdrError.server(code)
+        }
+        await gate.recovered(operation: operation)
+        // report-metadata のように成功時に何も出力しないコマンドは、空の標準出力を成功として扱う(段6の実測: herdr 0.8.2)。
+        if let empty = Empty() as? T, reply.stdout.allSatisfy({ $0 == 0x0A || $0 == 0x0D || $0 == 0x20 || $0 == 0x09 }) {
+            return empty
         }
         guard let result = try? JSONDecoder().decode(Reply<T>.self, from: reply.stdout) else {
             log("herdr \(operation): invalid_response"); throw AIProcessError.invalidResponse

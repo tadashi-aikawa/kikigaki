@@ -34,6 +34,22 @@ import TOMLKit
             #expect(captured.captured == ["herdr agent start: " + code])
         }
     }
+    @Test func 成功時に出力の無いherdrコマンドは空の標準出力を成功として扱う() async throws {
+        // 実測(herdr 0.8.2): pane report-metadata は成功時に何も出力しない
+        let captured = CapturedLog()
+        let adapter = AIHerdr(run: { _, _ in AIProcessOutput(status: 0, stdout: Data("\n".utf8), stderr: Data()) }, log: { captured.append($0) })
+        try await adapter.label(.init(workspaceID: "w", paneID: "p", provider: .codex), participant: "迅雷")
+        #expect(captured.captured.isEmpty)
+    }
+    @Test func 同じ失敗が続く間はログを1回に留め成功後は再び記録する() async throws {
+        let captured = CapturedLog()
+        let failing = AIHerdr(run: { _, _ in
+            AIProcessOutput(status: 1, stdout: Data(), stderr: try JSONSerialization.data(withJSONObject: ["error": ["code": "agent_not_found"]]))
+        }, log: { captured.append($0) })
+        let target = AIHerdrConnection(workspaceID: "w", paneID: "p", provider: .codex)
+        for _ in 0..<3 { await #expect(throws: AIHerdrError.missing) { try await failing.observe(target) } }
+        #expect(captured.captured == ["herdr agent get: agent_not_found"])
+    }
     @Test @MainActor func Codex通知引数はTOMLの文字列配列として復元できる() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let config = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path), home: root)
