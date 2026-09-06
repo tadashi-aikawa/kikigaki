@@ -16,7 +16,8 @@ struct AILaunchConfiguration {
         var args: [String] = []
         if let model = config.model { args += [config.cli == .codex ? "-m" : "--model", model] }
         if config.cli == .codex {
-            args += ["-c", "notify=" + String(decoding: try JSONEncoder().encode(notify), as: UTF8.self)]
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.withoutEscapingSlashes]
+            args += ["-c", "notify=" + String(decoding: try encoder.encode(notify), as: UTF8.self)]
         } else {
             let settings: [String: Any] = [
                 "permissions": ["allow": ["Bash(\(helper.path) *)"]],

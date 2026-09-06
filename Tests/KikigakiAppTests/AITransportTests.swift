@@ -3,8 +3,19 @@ import Foundation
 import Testing
 @testable import Kikigaki
 import KikigakiCore
+import TOMLKit
 
 @Suite struct AITransportTests {
+    @Test @MainActor func Codex通知引数はTOMLの文字列配列として復元できる() throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let config = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path), home: root)
+        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { _, _ in throw AIHerdrError.notReady }))
+        _ = try controller.prepare(lines: [], question: "質問", voiceQuestion: "", capturedAt: Date(), cutoff: 0, tail: nil, config: config, helper: URL(fileURLWithPath: "/bin/echo"))
+        let launch = try AILaunchConfiguration(config: config, helper: URL(fileURLWithPath: "/bin/echo"), controller: controller)
+        struct Settings: Decodable { let notify: [String] }
+        let settings = try TOMLDecoder().decode(Settings.self, from: launch.arguments[1])
+        #expect(settings.notify == ["/bin/echo", "notify", "--provider", "codex", "--session", controller.sessionURL.path, "--token", controller.sessionToken!])
+    }
     @Test @MainActor func 生成設定は指定helperだけを許可しセッションへ限定する() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let config = ResolvedAIConfig(config: AIConfig(cli: .claude, command: "/bin/echo", model: "test-model", cwd: root.path), home: root)
