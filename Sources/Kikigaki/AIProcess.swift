@@ -11,11 +11,21 @@ struct AIProcessRunner: Sendable {
     static func environment(_ values: [String: String]) -> [String: String] {
         values.filter { !$0.key.hasPrefix("HERDR_") }
     }
-    static func executable(_ name: String, environment: [String: String] = ProcessInfo.processInfo.environment) throws -> URL {
+    /// PATHに無いときに探す置き場。Finderや `open` から起動した.appは `/usr/bin:/bin:/usr/sbin:/sbin` しか持たず、
+    /// mise・Homebrew・`~/.local/bin` に入れた herdr / codex / claude を見つけられない(実測)。
+    static func fallbackDirectories(home: URL) -> [String] {
+        [home.appendingPathComponent(".local/bin").path,
+         home.appendingPathComponent(".local/share/mise/shims").path,
+         "/opt/homebrew/bin", "/usr/local/bin"]
+    }
+    static func executable(_ name: String, environment: [String: String] = ProcessInfo.processInfo.environment,
+                           home: URL = FileManager.default.homeDirectoryForCurrentUser) throws -> URL {
         let candidates: [String]
         if name.hasPrefix("/") { candidates = [name] }
         else if !name.isEmpty && !name.contains("/") {
-            candidates = (environment["PATH"] ?? "").split(separator: ":").filter { $0.hasPrefix("/") }.map { String($0) + "/" + name }
+            let directories = (environment["PATH"] ?? "").split(separator: ":").filter { $0.hasPrefix("/") }.map(String.init)
+                + fallbackDirectories(home: home)
+            candidates = directories.map { $0 + "/" + name }
         } else { candidates = [] }
         for path in candidates where !path.contains("\0") {
             var info = stat()

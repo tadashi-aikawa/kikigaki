@@ -95,7 +95,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/KIKIGAKI")
         do { try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true) }
         catch { Self.log("AI会議の登録先を作成できません") }
-        let aiStore = AIRecordStore(directory: support); self.aiStore = aiStore
+        // herdrはPATHか既知の置き場で探し、設定 `[ai] herdrCommand` があればそれを使う(GUI起動のPATH不足への備え)
+        let aiStore = AIRecordStore(directory: support, makeHerdr: { [weak self] in
+            AIHerdr(executable: try AIProcessRunner.executable(self?.config?.ai?.herdrCommand ?? "herdr"))
+        })
+        self.aiStore = aiStore
         aiStore.recover()
         aiStore.onNewResult = { [weak self] id in
             if self?.aiStore?.records[id]?.manifest.config.notifySound == true { NSSound(named: "Glass")?.play() }
