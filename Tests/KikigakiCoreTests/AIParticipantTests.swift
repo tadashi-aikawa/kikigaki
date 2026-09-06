@@ -15,10 +15,33 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         sessionPath: root.appendingPathComponent(".kikigaki-context/\(meeting.uuidString)/ai/sessions/\(generation).json").path,
         requestToken: "test-only-token", question: question, capturedAt: epoch, audioCutoffSeconds: 10,
         tentativeTail: tail, inReplyToRequestID: parent, inReplyToEventID: parent.map { "\($0.uuidString)/result" })
-    return try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant), number: number, voiceQuestion: "声の問い")
+    return try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant), number: number, voiceQuestion: "声の問い", snapshot: snapshot)
 }
 
 @Suite struct AIConfigTests {
+    @Test func 対象時刻は範囲両端から固定しUUIDを表示しない() throws {
+        var history = try AIStreamHistory(meetingID: UUID())
+        let first = try history.prepare(lines: ["[14:00:00] A: 前回"], outputDirectory: URL(fileURLWithPath: "/tmp/ai-test"))
+        try history.acknowledge(snapshotID: first.id, streamID: first.streamID, sessionGeneration: 1)
+        let next = try history.prepare(lines: first.lines + ["[23:59:59] A: 前", "[00:00:01] B: 後"], outputDirectory: URL(fileURLWithPath: "/tmp/ai-test"))
+        #expect(next.timeRange?.start == "23:59:59")
+        #expect(next.timeRange?.end == "00:00:01")
+        let r = try request()
+        var conversation = AIConversation(meetingID: r.envelope.meetingID)
+        try conversation.append(r)
+        let markdown = AIMarkdown.section(conversation)
+        #expect(markdown.contains("対象: 1〜1行(00:00:00〜00:00:00)"))
+        #expect(!markdown.contains(r.envelope.snapshotID.uuidString))
+        #expect(try AIJSON.decode(AIRequest.self, from: AIJSON.encode(r)) == r)
+    }
+
+    @Test(arguments: ["", "[24:00:00] A", "[00:60:00] A", "[00:00:60] A", "[0:00:00] A", "本文 [12:00:00]"])
+    func 不正時刻は範囲へ補完しない(_ line: String) throws {
+        var history = try AIStreamHistory(meetingID: UUID())
+        let snapshot = try history.prepare(lines: [line, "[12:01:00] A: 有効"], outputDirectory: URL(fileURLWithPath: "/tmp/ai-test"))
+        #expect(snapshot.timeRange == nil)
+    }
+
     @Test func 未設定は無効で空テーブルは既定値で有効() throws {
         #expect(try ConfigLoader.parse(toml: "").ai == nil)
         let config = try ConfigLoader.parse(toml: "[ai]")
@@ -347,7 +370,7 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         let root = URL(fileURLWithPath: "/tmp/日本語 空白 \" ```\n")
         let r = try request(question: "```\n$() `command`", root: root)
         let prompt = try r.envelope.prompt(extraPrompt: "追加の指示")
-        #expect(prompt.hasPrefix("迅雷へ\n\n$kikigaki\n\nKIKIGAKI_CONTEXT"))
+        #expect(prompt.hasPrefix("$kikigaki\n迅雷へ\n\nKIKIGAKI_CONTEXT"))
         #expect(prompt.components(separatedBy: "```").count == 3)
         #expect(prompt.hasSuffix("追加プロンプト:\n追加の指示"))
         let json = prompt.components(separatedBy: "```json\n")[1].components(separatedBy: "\n```")[0]

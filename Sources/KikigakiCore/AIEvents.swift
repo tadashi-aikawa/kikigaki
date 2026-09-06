@@ -10,16 +10,22 @@ public struct AIRequest: Codable, Equatable, Sendable {
     public let envelope: AIEnvelope
     public let number: Int
     public let displayQuestion: String
+    public let timeRange: AIContextTimeRange?
     public var id: UUID { envelope.participant.requestID }
 
-    public init(envelope: AIEnvelope, number: Int, voiceQuestion: String = "") throws {
+    public init(envelope: AIEnvelope, number: Int, voiceQuestion: String = "", snapshot: AIContextSnapshot? = nil) throws {
         self.envelope = envelope; self.number = number
+        if let snapshot {
+            guard try AIEnvelope(snapshot: snapshot, participant: envelope.participant) == envelope else { throw AIError.mismatch }
+        }
+        timeRange = snapshot?.timeRange
         displayQuestion = envelope.participant.questionSource == .typed ? envelope.participant.question : voiceQuestion
         try validate()
     }
 
     public func validate() throws {
         try envelope.validate()
+        try timeRange?.validate()
         guard number > 0 else { throw AIError.invalid("question number") }
         try AIValidation.text(displayQuestion, limit: AILimits.questionBytes)
         if envelope.participant.questionSource == .typed, displayQuestion != envelope.participant.question {

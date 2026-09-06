@@ -50,7 +50,8 @@ public enum AIMarkdown {
             lines.append("- 宛先: " + oneLine(participant.participantName))
             lines.append("- 問い: 「" + oneLine(request.displayQuestion.isEmpty ? "会話末尾の問い" : request.displayQuestion) + "」")
             let range = envelope.readLineCount == 0 ? "読む行数0" : "\(envelope.readStartLine)〜\(envelope.totalLineCount)行"
-            lines.append("- 対象: \(envelope.snapshotID.uuidString)の\(range)" + (participant.tentativeTail == nil ? "" : "。暫定末尾を含む"))
+            let times = request.timeRange.map { "(\($0.start)〜\($0.end))" } ?? ""
+            lines.append("- 対象: \(range)\(times)" + (participant.tentativeTail == nil ? "" : "。暫定末尾を含む"))
             if let accepted = question.acceptance { lines.append("- 受領: " + date(accepted.recordedAt, timeZone: timeZone)) }
             if let result = question.result {
                 lines.append("- 回答: " + date(result.recordedAt, timeZone: timeZone))

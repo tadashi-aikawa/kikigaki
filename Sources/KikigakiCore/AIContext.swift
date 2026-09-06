@@ -200,7 +200,7 @@ public struct AIEnvelope: Codable, Equatable, Sendable {
         guard AIValidation.singleLine(address) else { throw AIError.invalid("address") }
         try AIValidation.text(extraPrompt, limit: AILimits.questionBytes)
         let json = String(decoding: try AIJSON.encode(self), as: UTF8.self).replacingOccurrences(of: "`", with: "\\u0060")
-        return "\(address)\n\n$kikigaki\n\nKIKIGAKI_CONTEXT\n```json\n\(json)\n```"
+        return "$kikigaki\n\(address)\n\nKIKIGAKI_CONTEXT\n```json\n\(json)\n```"
             + (extraPrompt.isEmpty ? "" : "\n\n追加プロンプト:\n\(extraPrompt)")
     }
 
@@ -228,6 +228,40 @@ public struct AIContextSnapshot: Codable, Equatable, Sendable {
         return lines.count - (readStartLine - 1)
     }
     public var contents: Data { Data((lines.isEmpty ? "" : lines.joined(separator: "\n") + "\n").utf8) }
+
+    /// 指定範囲の端の時刻だけを採る。欠損時に範囲内の別の行で補わない。
+    public var timeRange: AIContextTimeRange? {
+        guard readLineCount > 0,
+              let first = AIContextTimeRange.timestamp(lines[readStartLine - 1]),
+              let last = AIContextTimeRange.timestamp(lines[lines.count - 1]) else { return nil }
+        return AIContextTimeRange(start: first, end: last)
+    }
+}
+
+public struct AIContextTimeRange: Codable, Equatable, Sendable {
+    public let start: String
+    public let end: String
+
+    static func timestamp(_ line: String) -> String? {
+        let bytes = Array(line.utf8.prefix(10))
+        guard bytes.count == 10, bytes[0] == 91, bytes[9] == 93,
+              bytes[3] == 58, bytes[6] == 58,
+              [1, 2, 4, 5, 7, 8].allSatisfy({ (48...57).contains(bytes[$0]) }) else { return nil }
+        let numbers: [Int] = [1, 4, 7].map { index in
+            let tens = Int(bytes[index]) - 48
+            let units = Int(bytes[index + 1]) - 48
+            return tens * 10 + units
+        }
+        guard numbers[0] < 24, numbers[1] < 60, numbers[2] < 60 else { return nil }
+        return String(decoding: bytes[1...8], as: UTF8.self)
+    }
+
+    func validate() throws {
+        guard start.utf8.count == 8, end.utf8.count == 8,
+              Self.timestamp("[\(start)]") != nil, Self.timestamp("[\(end)]") != nil else {
+            throw AIError.invalid("context time range")
+        }
+    }
 }
 
 /// 手動HandoffHistoryとは独立。prepareは番号を予約し、acknowledgeだけが受領基準を進める。
