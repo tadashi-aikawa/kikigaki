@@ -1,5 +1,6 @@
 import Foundation
 import KikigakiCore
+import KikigakiAIIO
 
 struct AIMeetingManifest: Codable {
     let schemaVersion: Int

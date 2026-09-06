@@ -1,6 +1,6 @@
 # 会議参加モードのSkill改訂案
 
-段1のレビュー用。段5で `skills/kikigaki/SKILL.md` へ反映する。現在配布中のSkillはこの文書では変更しない。envelope・CLIの正本は [AI参加者の設計](ai-participant.md)。
+段1でレビューした改訂案。段5で [配布用Skill](../skills/kikigaki/SKILL.md) と [会議参加モード](../skills/kikigaki/references/meeting.md) へ反映した。現行の手順は配布用Skill、envelope・CLIの正本は [AI参加者の設計](ai-participant.md) を参照する。
 
 ## 変更箇所
 

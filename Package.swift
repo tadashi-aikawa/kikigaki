@@ -5,6 +5,7 @@ let package = Package(
     name: "Kikigaki",
     // SpeechTranscriber(Speech framework の新API)が macOS 26 以降のため
     platforms: [.macOS("26.0")],
+    products: [.executable(name: "kikigaki-cli", targets: ["KikigakiCLI"])],
     dependencies: [
         // Command Line Tools のみの環境には Swift Testing の内部モジュールが同梱されないため依存で供給
         .package(url: "https://github.com/swiftlang/swift-testing.git", exact: "0.12.0"),
@@ -14,6 +15,9 @@ let package = Package(
         .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.15.6"),
     ],
     targets: [
+        .target(name: "KikigakiAIIO", dependencies: ["KikigakiCore"]),
+        .executableTarget(name: "KikigakiCLI", dependencies: ["KikigakiCore", "KikigakiAIIO"]),
+        .testTarget(name: "KikigakiCLITests", dependencies: ["KikigakiCLI", "KikigakiAIIO", .product(name: "Testing", package: "swift-testing")]),
         // ロジック層(Foundation + NaturalLanguage + TOMLKit。ユニットテストの主戦場)
         .target(
             name: "KikigakiCore",
@@ -28,6 +32,7 @@ let package = Package(
             name: "Kikigaki",
             dependencies: [
                 "KikigakiCore",
+                "KikigakiAIIO",
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ],
             path: "Sources/Kikigaki",
@@ -35,7 +40,7 @@ let package = Package(
         ),
         .testTarget(
             name: "KikigakiAppTests",
-            dependencies: ["Kikigaki", .product(name: "Testing", package: "swift-testing")],
+            dependencies: ["Kikigaki", "KikigakiAIIO", .product(name: "Testing", package: "swift-testing")],
             path: "Tests/KikigakiAppTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),

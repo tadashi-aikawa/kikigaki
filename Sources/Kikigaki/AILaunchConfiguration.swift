@@ -1,5 +1,6 @@
 import Foundation
 import KikigakiCore
+import KikigakiAIIO
 
 struct AILaunchConfiguration {
     let executable: URL
@@ -19,6 +20,8 @@ struct AILaunchConfiguration {
             let encoder = JSONEncoder(); encoder.outputFormatting = [.withoutEscapingSlashes]
             args += ["-c", "notify=" + String(decoding: try encoder.encode(notify), as: UTF8.self)]
         } else {
+            // allow規則の構文として解釈される文字を含む配置先は、権限を広げず拒否する。
+            guard !helper.path.contains(where: { "*?()\n\r".contains($0) }) else { throw AIError.invalid("helper permission path") }
             let settings: [String: Any] = [
                 "permissions": ["allow": ["Bash(\(helper.path) *)"]],
                 "hooks": ["Stop": [["hooks": [["type": "command", "command": AIShell.command(notify), "timeout": 10]]]]]

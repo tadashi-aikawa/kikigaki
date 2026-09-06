@@ -23,6 +23,8 @@ if [[ "${CI:-}" == "true" ]]; then
   CODESIGN_INFO="$(codesign -dvv "$APP" 2>&1)"
   echo "$CODESIGN_INFO"
   grep -q "Authority=kikigaki-dev" <<<"$CODESIGN_INFO"
+  HELPER_CODESIGN_INFO="$(codesign -dvv "$APP/Contents/Helpers/kikigaki-cli" 2>&1)"
+  grep -q "Authority=kikigaki-dev" <<<"$HELPER_CODESIGN_INFO"
 fi
 
 rm -rf "$DIST_DIR"
@@ -36,5 +38,6 @@ unzip -tq "$ARCHIVE"
 # grep -q だと SIGPIPE で unzip が exit 141 になり pipefail に拾われうる(-q なしの
 # grep は入力を最後まで読むため安全)
 unzip -Z1 "$ARCHIVE" | grep -x "KIKIGAKI.app/Contents/Info.plist" >/dev/null
+unzip -Z1 "$ARCHIVE" | grep -x "KIKIGAKI.app/Contents/Helpers/kikigaki-cli" >/dev/null
 
 echo "Built and validated $ARCHIVE (version $VERSION)"

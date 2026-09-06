@@ -3,6 +3,7 @@ import Foundation
 import Testing
 @testable import Kikigaki
 import KikigakiCore
+import KikigakiAIIO
 import TOMLKit
 
 @Suite struct AITransportTests {

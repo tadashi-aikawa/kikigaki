@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import Kikigaki
 import KikigakiCore
+import KikigakiAIIO
 
 @Suite @MainActor struct AIConversationControllerTests {
     @MainActor private final class CancelOnObserve {
@@ -27,6 +28,27 @@ import KikigakiCore
     private func prepare(_ controller: AIConversationController, _ config: ResolvedAIConfig, lines: [String] = ["[12:00:00] A: 会話"]) throws -> AIRequest {
         try controller.prepare(lines: lines, question: "質問", voiceQuestion: "", capturedAt: Date(), cutoff: 1,
             tail: nil, config: config, helper: URL(fileURLWithPath: "/tmp/helper"))
+    }
+    @Test func Claude背景処理の観測中は返送未確認を出さず別sessionを混ぜない() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(); await fake.setProvider("claude"); await fake.setSession("main")
+        let config = ResolvedAIConfig(config: AIConfig(cli: .claude), home: root)
+        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
+        let request = try prepare(controller, config)
+        try await controller.connect(config: config, label: "test", executable: URL(fileURLWithPath: "/tmp/fake"), arguments: [])
+        try await controller.send(request, config: config)
+        let base = [".kikigaki-context", controller.meetingID.uuidString, "ai"]
+        let files = AIFileStore(root: root)
+        let session = try AIJSON.decode(AISessionRecord.self, from: files.read(base + ["sessions", "1.json"]))
+        let now = Date()
+        #expect(controller.isReturnUnconfirmed(controller.conversation.questions[0], now: now.addingTimeInterval(10)))
+        for (id, running, offset) in [("main", true, 0.0), ("other", false, 1.0), ("main", false, 2.0)] {
+            let payload = Data("{\"hook_event_name\":\"Stop\",\"session_id\":\"\(id)\",\"prompt_id\":\"p\",\"background_tasks\":[{\"status\":\"\(running ? "running" : "completed")\"}]}".utf8)
+            let observation = try AIHookObservation(payload: payload, session: session, now: now.addingTimeInterval(offset))
+            try files.write(AIJSON.encode(observation), to: base + ["inbox", observation.filename], replacing: false)
+            controller.scan()
+            #expect(controller.isReturnUnconfirmed(controller.conversation.questions[0], now: now.addingTimeInterval(10)) == (offset == 2))
+        }
     }
     @Test func 接続情報を排他保存し状態を見て起動を待つ() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }

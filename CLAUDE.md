@@ -81,6 +81,15 @@ avatar = "https://example.com/jinrai.webp"
 
 会議中・停止後の「会話をコピー」は、固定したローカル会話ファイルへの参照と読む範囲をコピーします。AI側には `skills/kikigaki` を導入します。続きのコピー、訂正、再コピーの契約は [AIへの受け渡し](docs/ai-handoff.md) を参照してください。話者名はウィンドウ上部の「話者名…」でまとめて変更できます。
 
+`[ai]` を設定すると、herdrの専用ペインへ質問を送り、回答を同じ会議へ回収できます。既定はCodex・宛名「迅雷へ」・通知音なし・ショートカット `ctrl+alt+cmd+A`。CLI種別や設定は会議開始時に固定し、変更は次の会議から反映します。初回は固定cwdへの信頼を利用者がherdrペインで承認します。詳細は [AI参加者の設計](docs/ai-participant.md) を参照してください。
+
+- `KikigakiCore`: AI設定、独立stream履歴、envelope、質問と受信イベント、Markdown。herdr・AppKit・Processを置かない
+- `KikigakiAIIO`: アプリと返送CLIが共有するfd検証、原子的な保存、sessionとフック観測の型
+- `KikigakiCLI`: `accept`・`reply`・`notify`。reply本文はstdinから読み、固定requestの受信箱へ排他公開する。会議Markdownへ直接書かない
+- `scripts/make-app.sh`: `Contents/Helpers/kikigaki-cli` を同梱し、helperを先に署名してから.appを署名する。配布ZIPでもhelperの存在と署名を検証する
+
+Claudeのフック設定はセッション専用の `--settings` JSONへ生成し、同梱CLIの絶対パスだけをallowします。利用者のグローバルsettingsは編集しません。Codexのnotifyはセッション限定で差し替え、TOMLで読める配列を渡します。フックは回答の正本にせず、未返送の補助表示に留めます。
+
 ## コミットメッセージ
 
 Conventional Commits 形式で日本語で書く。

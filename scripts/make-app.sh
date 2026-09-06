@@ -13,8 +13,9 @@ swift build --package-path "$ROOT" -c "$CONFIG"
 BIN="$ROOT/.build/$CONFIG/Kikigaki"
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Helpers"
 cp "$BIN" "$APP/Contents/MacOS/KIKIGAKI"
+cp "$ROOT/.build/$CONFIG/kikigaki-cli" "$APP/Contents/Helpers/kikigaki-cli"
 cp "$ROOT/Resources/kikigaki.icns" "$APP/Contents/Resources/"
 sed "s/0\.0\.0-development/$VERSION/" "$ROOT/Resources/Info.plist" >"$APP/Contents/Info.plist"
 
@@ -26,12 +27,17 @@ sed "s/0\.0\.0-development/$VERSION/" "$ROOT/Resources/Info.plist" >"$APP/Conten
 # --timestamp=none: 自己署名は Apple のタイムスタンプサーバを使えない
 IDENTITY="${CODESIGN_IDENTITY:-kikigaki-dev}"
 if security find-identity -p codesigning 2>/dev/null | grep -q "$IDENTITY" &&
+  codesign --force --timestamp=none --sign "$IDENTITY" "$APP/Contents/Helpers/kikigaki-cli" 2>/dev/null &&
   codesign --force --timestamp=none --sign "$IDENTITY" "$APP" 2>/dev/null; then
   echo "Signed with: $IDENTITY"
 else
+  codesign --force --sign - "$APP/Contents/Helpers/kikigaki-cli"
   codesign --force --sign - "$APP"
   echo "Signed with: ad-hoc"
 fi
+
+codesign --verify --strict "$APP/Contents/Helpers/kikigaki-cli"
+codesign --verify --deep --strict "$APP"
 
 echo "Built: $APP"
 echo "Run:   open '$APP'"

@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import KikigakiCore
+import KikigakiAIIO
 @testable import Kikigaki
 
 @Suite @MainActor struct AIRecordStoreTests {

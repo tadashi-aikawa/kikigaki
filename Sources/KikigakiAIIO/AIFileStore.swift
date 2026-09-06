@@ -2,17 +2,24 @@ import Darwin
 import Foundation
 import KikigakiCore
 
-enum AIFileError: Error { case missing }
+public enum AIFileError: Error { case missing }
 
 /// 専用階層は0700、通常ファイルは0600。既存ファイルへの追記はせず、
 /// 完成した一時ファイルをcloseしてから公開する。outputDir自体の権限は変えない。
-struct AIFileStore: Sendable {
-    let root: URL
-    func directory(_ parts: [String], create: Bool = true) throws -> URL {
+public struct AIFileStore: Sendable {
+    public let root: URL
+    public init(root: URL) { self.root = root }
+    /// 排他公開の再実行でも、先行プロセスのfsync前に成功を返さない。
+    public func syncDirectory(_ parts: [String]) throws {
+        try withDirectory(parts, create: false) { fd in
+            guard fsync(fd) == 0 else { throw AIError.unsafeFile }
+        }
+    }
+    public func directory(_ parts: [String], create: Bool = true) throws -> URL {
         try withDirectory(parts, create: create) { _ in }
         return parts.reduce(root) { $0.appendingPathComponent($1) }
     }
-    func read(_ parts: [String], limit: Int = 32 * 1024 * 1024) throws -> Data {
+    public func read(_ parts: [String], limit: Int = 32 * 1024 * 1024) throws -> Data {
         guard let name = parts.last, limit >= 0 else { throw AIError.unsafeFile }
         try checkName(name)
         return try withDirectory(Array(parts.dropLast()), create: false) { parent in
@@ -32,7 +39,7 @@ struct AIFileStore: Sendable {
             }
         }
     }
-    func write(_ bytes: Data, to parts: [String], replacing: Bool = true) throws {
+    public func write(_ bytes: Data, to parts: [String], replacing: Bool = true) throws {
         guard let name = parts.last else { throw AIError.unsafeFile }
         try checkName(name)
         try withDirectory(Array(parts.dropLast()), create: true) { parent in

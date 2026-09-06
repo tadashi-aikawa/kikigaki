@@ -1,13 +1,6 @@
 import Foundation
 import KikigakiCore
-
-struct AIHerdrConnection: Codable, Equatable, Sendable {
-    let workspaceID: String
-    let paneID: String
-    let provider: AIProvider
-    var sessionID: String?
-    var terminalID: String?
-}
+import KikigakiAIIO
 struct AIHerdrObservation: Equatable, Sendable {
     let status: AIConnectionStatus
     let ready: Bool

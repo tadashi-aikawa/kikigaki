@@ -1,14 +1,6 @@
 import Foundation
 import KikigakiCore
-
-struct AISessionRecord: Codable {
-    let schemaVersion: Int
-    let meetingID: UUID
-    let generation: Int
-    let provider: AIProvider
-    let token: String
-    var connection: AIHerdrConnection?
-}
+import KikigakiAIIO
 
 /// 1会議の直列トランザクション。外部起動と送信の前に意図を保存し、
 /// 保存が成功するまで公開状態を変えない。回収用インスタンスには送信権限を与えない。
@@ -36,6 +28,7 @@ final class AIConversationController {
     private var inputAttempted = false
     private var polling = false
     private var idleSince: Date?
+    private var hookBackgroundRunning = false
     private(set) var isSending = false
 
     var generation: Int { history.sessionGeneration }
@@ -192,6 +185,7 @@ final class AIConversationController {
 
     func scan() {
         invalidInboxFiles = []
+        scanHooks()
         var events: [AIReceiveEvent] = []
         var scanWarning: String?
         for q in conversation.questions where q.sendAttemptedAt != nil {
@@ -232,7 +226,30 @@ final class AIConversationController {
     func isReturnUnconfirmed(_ q: AIQuestion, now: Date = Date(), backgroundRunning: Bool = false) -> Bool {
         guard q.request.envelope.participant.sessionGeneration == generation else { return false }
         return AIReturnStatus.isUnconfirmed(question: q, connection: connectionStatus, idleSince: idleSince,
-            now: now, hasRunningBackgroundTasks: backgroundRunning)
+            now: now, hasRunningBackgroundTasks: backgroundRunning || hookBackgroundRunning)
+    }
+    private func scanHooks() {
+        hookBackgroundRunning = false
+        guard let session else { return }
+        do {
+            let inbox = try files.directory(base + ["inbox"], create: false)
+            let names = try FileManager.default.contentsOfDirectory(atPath: inbox.path)
+            let identity = connection?.sessionID ?? (try? AIJSON.decode(String.self,
+                from: files.read(base + ["sessions", "\(generation).identity.json"], limit: 2048)))
+            var latest: AIHookObservation?
+            for name in names where name.hasPrefix("notify-") && name.hasSuffix(".json") {
+                do {
+                    let event = try AIJSON.decode(AIHookObservation.self, from: files.read(base + ["inbox", name], limit: AILimits.eventBytes))
+                    // 旧世代の診断も残すが、現世代の休止判定へ混ぜない。
+                    guard event.generation == generation else { continue }
+                    try event.validate(session: session)
+                    guard event.filename == name else { throw AIError.mismatch }
+                    guard let identity, event.sessionID == identity else { continue }
+                    if latest == nil || event.recordedAt > latest!.recordedAt { latest = event }
+                } catch { invalidInboxFiles.append(name) }
+            }
+            hookBackgroundRunning = latest?.runningBackgroundTasks == true
+        } catch { warning = "フック観測を確認できません" }
     }
     private func poll() {
         guard !polling, connection != nil, inputAttempted else { return }

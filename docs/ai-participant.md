@@ -1,6 +1,6 @@
 # 会議中のAI参加者との往復連携
 
-設計段階の契約。コードと現行Skillへの反映は後続の段で行う。手動コピーの契約は [AIへの受け渡し](ai-handoff.md)、Skillへの変更案は [会議参加モードのSkill改訂案](ai-participant-skill.md) を参照する。
+会議参加モードの契約と実装記録。手動コピーの契約は [AIへの受け渡し](ai-handoff.md)、配布用Skillは [kikigaki](../skills/kikigaki/SKILL.md) を参照する。
 
 ## 採用する操作と範囲
 
@@ -188,8 +188,8 @@ Claudeには専用の0600のJSON設定ファイルを作り、`--settings <絶�
 
 | Provider | 使う項目 |
 | --- | --- |
-| Codex | typeがagent-turn-completeか確認し、thread-id・turn-id・input-messages・last-assistant-messageを取得できる範囲で保存する。 |
-| Claude | hook_event_name、session_id、prompt_id、last_assistant_message、stop_hook_active、background_tasksを取得する。 |
+| Codex | typeがagent-turn-completeか確認し、thread-id・turn-idを保存する。本文は保存しない。 |
+| Claude | hook_event_nameがStopか確認し、session_id・prompt_id・背景処理の実行中フラグを保存する。本文は保存しない。 |
 
 フックは応答の区切りの観測であり、質問への回答や作業完了の正本ではない。Codex 0.153.4では本回答に加えてタイトル生成の別thread・別turnからもnotifyが届いた。タイトル側のinput-messagesにも元入力の一部が入り、通常の後続turnでは過去入力が累積した。envelopeやrequest IDの存在だけで当該質問の完了へ結び付けない。
 
@@ -349,7 +349,7 @@ GUI起動ではPATHに普段のCLIがない場合がある。見つからなけ�
 | 2 | Swift Processから実herdr、両CLI、フック、返送権限を検証するスパイク。使い捨ての入出力と専用workspaceを使う。 | 両CLIのready、command経路、payloadと相関の限界、Claude hooks併合、sandbox、処理中promptの挙動を実測記録。失敗は未解決として本人へ戻し、仕様を黙って緩めない。 |
 | 3 | Coreの設定、会議IDと履歴、envelope、質問・イベント、重複排除、Markdown生成、永続化契約。 | 純粋な状態遷移と失敗系をテストし、既存手動コピー・通常/rawの保存契約を維持。 |
 | 4 | アプリの接続管理、確定待ち、送信シート、チップ、カード、受信箱監視と旧会議回収。 | 実装前にモックを本人へ出し、本人経由でクロディーヌのレビューを受ける。模擬CLI・イベントで録音との直交とUIの全状態を確認する。 |
-| 5 | 同梱CLI、フックadapter、Skill反映、make-app.sh・リリース同梱、CLAUDE.md・README・ai-handoff.md更新。 | Helpersの署名と同梱、両CLIで本物のaccept/reply、返送漏れ検知、通常Skillとの分岐を確認する。 |
+| 5 | 同梱CLI、フックadapter、Skill反映、make-app.sh・リリース同梱、CLAUDE.md・README・ai-handoff.md更新。 | Helpersの署名と同梱、実バイナリのaccept/reply入口と排他公開、返送未確認の補助判定、通常Skillとの分岐を検証する。両AI CLIからの往復は本人が段6で確認する。 |
 | 6 | replayと実herdrで両CLIの往復と障害系を端から端で検証。 | 質問1を待つ間も会話が続き、回答1→質問2→回答2、停止後の改名でも両回答が同じMarkdownに残る。二重返送・終了中返送・返し忘れ・送達不明を確認し、本人が実機検分する。 |
 
 段3〜5でコードを変更したら `swift build && swift test` を成功させてからその成果物で確認する。段4で本番CLIを先取りして作らず、同じ契約の模擬口で確認する。各段を本人へ報告し、レビュー後に次へ進む。
@@ -387,6 +387,16 @@ AIInboxは書込みも権限変更もしない。hardlinkも拒否するため�
 AI領域は既定で折りたたむ。到着した回答の印は到着時刻へ置き、到着だけでは画面をスクロールさせない。領域の開閉直前が最下部なら開閉後も最下部を保つ。送信シートの範囲表示はAI専用履歴から計算した予告で、送信時に確定する。手動コピーの履歴には触れない。
 
 検証は `swift build && swift test` とcacheDisplayによる実ビュー確認で行う。217テストが成功し、確定待ちの取消、二段階の生存確認中の取消、archive保存失敗からの再試行、旧会議の隔離と再起動回収、生成settingsの同梱CLI限定allowを含む。既存の手動コピーのテストは変更していない。本番の同梱CLIは段5、実herdrと録音を合わせた往復の検証は段6に残す。
+
+### 段5の返送実装
+
+`kikigaki-cli` はAppKit・herdr実行への依存を持たない独立ターゲット。アプリと `KikigakiAIIO` のfd検証・排他保存を共有する。sessionパスから既知の基点を定め、版・会議・世代・provider・request・tokenを照合する。stdinはUTF-8とバイト上限を検証し、完成イベントをclose後にlinkで排他公開する。同じ内容の再実行は既存の成功を返し、異なる内容や不正な既存ファイルは拒否する。再実行でも親ディレクトリのfsyncを確認する。
+
+notifyは本文と入力メッセージを残さず、識別子と背景処理の状態を診断用に保存する。Codexはthreadとturnを組にして識別する。Claudeのprompt_idは複数のStopで共通になり得るため、一意なイベントIDとして使わず正規化payloadのdigestを使う。Codex実行環境のthreadは世代別identityファイルに排他保存し、アプリはherdr側のsession IDを優先して照合する。相関不能・別sessionの観測で質問の状態を変えない。Claudeの背景処理中フラグがある同sessionの観測は、返送未確認の表示を抑える。
+
+make-appはhelperをContents/Helpersへ同梱して先に署名し、親.appの署名後に両方を検証する。releaseではhelperのZIP同梱も検証する。Skillは通常手動コピーと会議参加モードを先頭envelopeで分け、会議参加モードの詳細を専用referenceへ置く。配布用Skillの更新は利用する各CLIの導入先へ反映してから使う。
+
+段5では全225テスト、Skill検証器、シェル構文検査を確認した。空白を含む隔離.appと `CODESIGN_IDENTITY=none` のmake-appによるbundleの両方で、ad-hoc署名と同梱helperの別プロセス返送が成功した。kikigaki-dev証明書での署名はKeychain待ちとなったため、本人の実機検分へ引き継ぐ。実CLI両種でのSkill発動・承認・往復と配布署名の検分は段6で行う。
 
 ## 対象外と後続課題
 
