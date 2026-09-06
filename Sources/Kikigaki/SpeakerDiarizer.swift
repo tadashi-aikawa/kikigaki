@@ -5,13 +5,13 @@ import KikigakiCore
 /// Sortformer(FluidAudio)のモデル。初回は HuggingFace から
 /// ~/Library/Application Support/FluidAudio/Models へ落ちるため、起動時に一度だけ読み込んで使い回す
 enum SortformerModelStore {
-    /// プリセットは fast(遅延 ≈1.0秒)。プロトの読み比べで使った構成をそのまま採る。
+    /// 品質を優先し、既定は High Context(出力遅延 ≈30.4秒)。
     /// 環境変数で比較用モデルを選ぶ。各モデルは初回に HuggingFace から取得する。
     static let config: SortformerConfig = {
         switch ProcessInfo.processInfo.environment["KIKIGAKI_SORTFORMER"] {
         case "balanced": return .balancedV2_1
-        case "high-context": return .highContextV2_1
-        default: return .fastV2_1
+        case "fast": return .fastV2_1
+        default: return .highContextV2_1
         }
     }()
 

@@ -142,8 +142,8 @@ final class TranscriptRow: NSView, DocumentRow {
         if !tentative && self.speakerPending != speakerPending {
             self.speakerPending = speakerPending
             shade.isHidden = !speakerPending
-            hint.stringValue = "話者確認中"
-            hint.toolTip = "文字起こしは確定していますが、話者は変わることがあります。"
+            hint.stringValue = "話者未確定"
+            hint.toolTip = "文字起こしは確定していますが、話者の割り当てはまだ固定していません。"
             hint.isHidden = !speakerPending
             needsLayout = true
         }
