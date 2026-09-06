@@ -16,6 +16,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var replayURL: URL?
     /// 停止処理(最終判定と保存)の最中に終了操作を受けたら、保存が終わってから終了する
     private var terminateWhenIdle = false
+    private var aiStore: AIRecordStore?
+    private var aiSheet: AIQuestionSheet?
+    private var aiSheetMeetingID: UUID?
+    private var previousAI: AIPastMeetingsWindow?
+    private var registeredAIHotkey: KikigakiConfig.Hotkey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = ApplicationMenu.make()
@@ -36,7 +41,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let modelsTask = Task { try await SortformerModelStore.load() }
         self.modelsTask = modelsTask
-        let session = MeetingSession(config: config, models: { try await modelsTask.value }, log: Self.log)
+        let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/KIKIGAKI")
+        do { try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true) }
+        catch { Self.log("AI会議の登録先を作成できません") }
+        let aiStore = AIRecordStore(directory: support); self.aiStore = aiStore
+        aiStore.recover()
+        aiStore.onNewResult = { [weak self] id in
+            if self?.aiStore?.records[id]?.manifest.config.notifySound == true { NSSound(named: "Glass")?.play() }
+        }
+        let session = MeetingSession(config: config, models: { try await modelsTask.value }, log: Self.log, aiStore: aiStore)
         self.session = session
 
         let window = TranscriptWindowController()
@@ -46,6 +59,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onPauseResume = { session.togglePause() }
         window.onCopy = { full in session.copyContext(full: full, writeClipboard: Self.writeClipboard) }
         window.onRecopy = { session.recopyContext(writeClipboard: Self.writeClipboard) }
+        window.onAskAI = { [weak self] in self?.showAISheet(parent: $0) }
+        window.onReadAI = { session.readAI($0) }
+        window.onCancelAI = { session.cancelAI($0) }
+        window.onOpenAIPane = { session.showAIPane() }
+        window.onRecreateAI = { session.recreateAI() }
+        window.onShowPreviousAI = { [weak self] in self?.showPreviousAI() }
         window.onOpenMarkdown = {
             if session.snapshot.saved, let url = session.snapshot.markdownURL { NSWorkspace.shared.open(url) }
         }
@@ -63,6 +82,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.statusItem?.update(state: snapshot.state, elapsed: snapshot.elapsed)
             self.window?.apply(snapshot)
+            self.previousAI?.update()
+            if self.registeredAIHotkey != session.aiConfiguration?.hotkey, let config = self.config { _ = self.registerHotkeys(config) }
+            if let sheet = self.aiSheet {
+                if self.aiSheetMeetingID != session.aiMeetingID || !snapshot.canShare || snapshot.ai?.submissionID != nil {
+                    sheet.close(); self.aiSheet = nil
+                } else { sheet.update(progress: snapshot.ai?.progress ?? snapshot.ai?.warning, canSubmit: snapshot.ai?.canSubmit == true) }
+            }
             if self.terminateWhenIdle, snapshot.state == .idle {
                 self.terminateWhenIdle = false
                 NSApp.reply(toApplicationShouldTerminate: true)
@@ -175,10 +201,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func registerHotkeys(_ config: ResolvedConfig) -> Bool {
         hotkeys.forEach { $0.unregister() }
         hotkeys = []
-        let bindings: [(KikigakiConfig.Hotkey, () -> Void)] = [
+        var bindings: [(KikigakiConfig.Hotkey, () -> Void)] = [
             (config.toggleRecording, { [weak self] in self?.toggleRecording() }),
             (config.togglePause, { [weak self] in self?.session?.togglePause() }),
         ]
+        if let ai = session?.aiConfiguration ?? config.ai { bindings.append((ai.hotkey, { [weak self] in self?.showAISheet(parent: nil) })) }
         var registered: [Hotkey] = []
         for (hotkey, handler) in bindings {
             guard let one = Hotkey(modifiers: hotkey.modifiers, key: hotkey.key, handler: handler) else {
@@ -189,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             registered.append(one)
         }
         hotkeys = registered
+        registeredAIHotkey = (session?.aiConfiguration ?? config.ai)?.hotkey
         return true
     }
 
@@ -197,6 +225,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.messageText = message
         alert.informativeText = detail
         alert.runModal()
+    }
+
+    private func showAISheet(parent: UUID?) {
+        guard let session, session.snapshot.canShare, let config = session.aiConfiguration, let window = window?.window else { return }
+        if let aiSheet { aiSheet.window.makeFirstResponder(aiSheet.window.firstResponder); return }
+        session.beginAIDraft()
+        let snapshot = session.snapshot
+        let question = parent.flatMap { id in session.aiRecord?.controller.conversation.questions.first { $0.request.id == id } }
+        let rows = snapshot.utterances.suffix(4)
+        let range = rows.first.map { "直近\(rows.count)発言 · \(snapshot.timeline.clock(at: $0.start, seconds: true))〜\(snapshot.timeline.clock(at: rows.last!.end, seconds: true))" } ?? "確定した会話はまだありません"
+        let sheet = AIQuestionSheet(participant: config.participantName, parentNumber: question?.request.number,
+            draft: session.aiDraft, voice: snapshot.tentativeText ?? rows.last?.text ?? "空欄なら会話末尾の問いを送ります",
+            range: range, tentative: snapshot.tentativeText != nil, canSubmit: snapshot.ai?.canSubmit == true, confirmation: question?.result?.body)
+        sheet.onDraft = { session.updateAIDraft($0) }
+        sheet.onCancel = { [weak self] in session.cancelAIPreparation(); self?.aiSheet = nil }
+        sheet.onPane = { session.showAIPane() }
+        sheet.onSubmit = { text, full in
+            let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
+            session.submitAI(question: text, full: full, parent: parent, helper: helper)
+        }
+        aiSheet = sheet; aiSheetMeetingID = session.aiMeetingID
+        self.window?.show(); sheet.present(on: window)
+    }
+    private func showPreviousAI() {
+        guard let aiStore, let session else { return }
+        if previousAI == nil { previousAI = AIPastMeetingsWindow(store: aiStore, current: { [weak session] in session?.aiMeetingID }) }
+        previousAI?.update(); previousAI?.showWindow(nil)
     }
 
     // MARK: - 補助

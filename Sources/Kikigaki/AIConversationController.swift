@@ -40,6 +40,7 @@ final class AIConversationController {
 
     var generation: Int { history.sessionGeneration }
     var sessionURL: URL { path(["sessions", "\(generation).json"]) }
+    var sessionToken: String? { session?.token }
     private var base: [String] { [".kikigaki-context", meetingID.uuidString, "ai"] }
     var canSend: Bool {
         allowsSending && !isSending && !connecting

@@ -164,6 +164,7 @@ final class AIPanel: NSStackView {
     private let toggle = NSButton(title: "", target: nil, action: nil)
     private let scroll = NSScrollView()
     private let document = TranscriptDocument()
+    private lazy var reconnect = AIActionButton("AIセッションを作り直す") { [weak self] in self?.onReconnect?() }
     private var cards: [UUID: AIAnswerCard] = [:]
     private var expanded = false
     private var state = AIViewState()
@@ -179,12 +180,14 @@ final class AIPanel: NSStackView {
         scroll.heightAnchor.constraint(lessThanOrEqualToConstant: 140).isActive = true
         let preferred = scroll.heightAnchor.constraint(equalToConstant: 140); preferred.priority = .defaultHigh; preferred.isActive = true
         scroll.isHidden = true
+        addArrangedSubview(reconnect); reconnect.isHidden = true
     }
     required init?(coder: NSCoder) { fatalError() }
     func update(_ value: AIViewState, newMeeting: Bool) {
         let changedMeeting = newMeeting || state.conversation?.meetingID != value.conversation?.meetingID
         if changedMeeting { expanded = false; cards = [:] }
         state = value; updateHeading()
+        reconnect.isHidden = value.connection != .disconnected && value.warning == nil
         let anchor = document.anchor()
         var next: [UUID: AIAnswerCard] = [:]
         let ordered = (value.conversation?.questions ?? []).map { question -> any DocumentRow in

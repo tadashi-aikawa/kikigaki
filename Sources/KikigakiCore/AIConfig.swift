@@ -39,7 +39,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
     }
 }
 
-public struct ResolvedAIConfig: Equatable, Sendable {
+public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public static let defaultCWD = "~/Library/Application Support/KIKIGAKI/ai-work/"
     public static let defaultHotkey = KikigakiConfig.Hotkey(modifiers: ["ctrl", "alt", "cmd"], key: "a")
     public let cli: AIProvider

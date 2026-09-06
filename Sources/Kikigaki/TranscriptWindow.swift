@@ -38,6 +38,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onReadAI: ((UUID) -> Void)?
     var onOpenAIPane: (() -> Void)?
     var onCancelAI: ((UUID) -> Void)?
+    var onRecreateAI: (() -> Void)?
+    var onShowPreviousAI: (() -> Void)?
+    private lazy var previousAIButton = AIActionButton("前の会議に回答あり") { [weak self] in self?.onShowPreviousAI?() }
     private let aiPanel = AIPanel()
     private let askButton = NSButton(title: "AIに質問…", target: nil, action: nil)
     private var aiMarks: [String: AIMarkRow] = [:]
@@ -48,6 +51,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let openButton = NSButton()
     private let copyButton = CopyButton(title: "会話をコピー", target: nil, action: nil)
     private let latestButton = NSButton(title: "最新の発言へ ↓", target: nil, action: nil)
+    private var transcriptBottom: NSLayoutConstraint?
     private let statusDot = RecordingMark()
     private let statusLabel = Washi.label(size: 13, weight: .semibold)
     private let elapsedLabel = Washi.label(color: Washi.muted)
@@ -111,6 +115,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     func apply(_ value: SessionSnapshot) {
         let previous = snapshot
         snapshot = value
+        previousAIButton.isHidden = value.previousAIUnread == 0
+        transcriptBottom?.constant = value.ai == nil ? 0 : -34
         aiPanel.isHidden = value.ai == nil
         askButton.isHidden = value.ai == nil
         if let ai = value.ai {
@@ -264,6 +270,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         aiPanel.onRead = { [weak self] in self?.onReadAI?($0) }
         aiPanel.onPane = { [weak self] in self?.onOpenAIPane?() }
         aiPanel.onCancel = { [weak self] in self?.onCancelAI?($0) }
+        aiPanel.onReconnect = { [weak self] in self?.onRecreateAI?() }
         aiPanel.isHidden = true; askButton.isHidden = true
         askButton.isBordered = false
         askButton.setContentHuggingPriority(.required, for: .horizontal)
@@ -312,8 +319,10 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         emptyView.addArrangedSubview(Washi.label("会話を、ここに書き留める。", size: 17))
         emptyView.addArrangedSubview(emptyLabel)
         for view in [scrollView, emptyView, latestButton] { view.translatesAutoresizingMaskIntoConstraints = false }
+        let bottom = scrollView.bottomAnchor.constraint(equalTo: body.bottomAnchor)
+        transcriptBottom = bottom
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: body.topAnchor), scrollView.bottomAnchor.constraint(equalTo: body.bottomAnchor),
+            scrollView.topAnchor.constraint(equalTo: body.topAnchor), bottom,
             scrollView.leadingAnchor.constraint(equalTo: body.leadingAnchor), scrollView.trailingAnchor.constraint(equalTo: body.trailingAnchor),
             emptyView.centerXAnchor.constraint(equalTo: body.centerXAnchor), emptyView.centerYAnchor.constraint(equalTo: body.centerYAnchor),
             latestButton.trailingAnchor.constraint(equalTo: body.trailingAnchor, constant: -20),
@@ -321,7 +330,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             body.heightAnchor.constraint(greaterThanOrEqualToConstant: 150)
         ])
         let title = Washi.label("AIへ渡す会話", size: 13, weight: .semibold)
-        let footerTitle = row([title, NSView(), rangeLabel], spacing: 12)
+        let footerTitle = row([title, previousAIButton, NSView(), rangeLabel], spacing: 12)
         copyButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let footerButtons = row([askButton, copyButton], spacing: 12)
         let footer = column([footerTitle, footerButtons], spacing: 8, inset: 16)

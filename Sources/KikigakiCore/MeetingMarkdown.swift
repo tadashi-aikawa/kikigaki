@@ -3,7 +3,7 @@ import Foundation
 /// 1会議1ファイルの Markdown。停止時に保存し、話者名を付け直したら同じ内容構造で保存し直す
 public enum MeetingMarkdown {
     /// 会議の基本情報。Markdown の見出しとメタ行に使う
-    public struct Meeting: Equatable, Sendable {
+    public struct Meeting: Codable, Equatable, Sendable {
         public var startedAt: Date
         /// 実際に音声を流した長さ(秒)。一時停止中は含まない
         public var duration: Double

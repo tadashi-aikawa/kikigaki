@@ -2,7 +2,7 @@ import Foundation
 
 /// 音声上の位置を壁時計へ変換する。一時停止の境界は表示側ではなく収録側で記録する。
 public struct MeetingTimeline: Equatable, Sendable {
-    public struct Pause: Equatable, Sendable {
+    public struct Pause: Codable, Equatable, Sendable {
         public let audioTime: Double
         public let duration: TimeInterval
 

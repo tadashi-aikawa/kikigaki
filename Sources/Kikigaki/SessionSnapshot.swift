@@ -4,6 +4,7 @@ import KikigakiCore
 /// 画面に渡す状態。保存先の予約と保存成功は別の情報として扱う。
 struct SessionSnapshot {
     var ai: AIViewState?
+    var previousAIUnread = 0
     var state: RecordingState = .idle
     var utterances: [Utterance] = []
     var tentativeText: String?

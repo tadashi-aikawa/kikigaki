@@ -36,7 +36,7 @@ public struct SpeakerSegment: Equatable, Sendable {
 }
 
 /// 話者ごとにまとめた発話行
-public struct Utterance: Equatable, Sendable {
+public struct Utterance: Codable, Equatable, Sendable {
     /// nil = どの話者区間にも当たらなかった
     public var speaker: Int?
     public var start: Double

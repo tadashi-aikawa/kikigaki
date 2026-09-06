@@ -2,7 +2,7 @@ import Foundation
 
 /// 話者スロット(Sortformer の出力 0〜3 = 枡 A〜D)に付ける名前。
 /// 名前を付けていない枡は「話者A」のように枡の記号で表示する
-public struct SpeakerNames: Equatable, Sendable {
+public struct SpeakerNames: Codable, Equatable, Sendable {
     public static let letters = ["A", "B", "C", "D"]
     public static var slotCount: Int { letters.count }
 
