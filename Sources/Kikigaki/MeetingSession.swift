@@ -231,6 +231,8 @@ final class MeetingSession {
         }
 
         snapshot.state = .idle
+        // 会議の表示・訂正に使う設定は残し、次の録音の人数上限だけ初期値へ戻す。
+        snapshot.maxSpeakers = config.maxSpeakers
         snapshot.utterances = final.utterances
         snapshot.tentativeText = nil
         snapshot.elapsed = duration
