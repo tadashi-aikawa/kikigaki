@@ -4,6 +4,7 @@ import Foundation
 public struct AICapture: Equatable, Sendable {
     public let lines: [String]
     public let voice: String
+    public let voiceUtteranceStart: Double?
     public let tail: AITentativeTail?
     public let needsConfirmation: Bool
 
@@ -24,5 +25,6 @@ public struct AICapture: Equatable, Sendable {
         } else { tail = nil }
         needsConfirmation = !pending.isEmpty || processedUntil < cutoff
         voice = (utterances.last?.text ?? "") + text
+        voiceUtteranceStart = utterances.last?.start
     }
 }

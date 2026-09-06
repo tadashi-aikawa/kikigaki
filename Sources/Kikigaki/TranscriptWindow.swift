@@ -41,8 +41,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onRecreateAI: (() -> Void)?
     var onRetryAISave: (() -> Void)?
     var onShowPreviousAI: (() -> Void)?
-    private lazy var previousAIButton = AIActionButton("前の会議に回答あり") { [weak self] in self?.onShowPreviousAI?() }
-    private let aiBadges = Washi.label(size: 11, color: Washi.muted)
+    private lazy var previousAIButton = AIBadgeButton("前の会議に回答あり") { [weak self] in self?.onShowPreviousAI?() }
+    private let aiBadges = AIBadgeBar()
     private let aiNotice = Washi.label(size: 11, color: Washi.muted)
     private lazy var reconnectAI = AIActionButton("AIセッションを作り直す") { [weak self] in self?.onRecreateAI?() }
     private lazy var retryAISave = AIActionButton("保存を再試行") { [weak self] in self?.onRetryAISave?() }
@@ -124,9 +124,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         previousAIButton.title = value.aiRecoveryWarning == nil ? "前の会議に回答あり" : "AI回答の回収を確認"
         previousAIButton.toolTip = value.aiRecoveryWarning
         transcriptBottom?.constant = value.ai == nil ? 0 : -34
-        aiBadges.stringValue = value.ai?.badges ?? ""
-        aiBadges.isHidden = aiBadges.stringValue.isEmpty
-        aiBadges.toolTip = aiBadges.stringValue
+        aiBadges.update(value.ai)
         aiNotice.stringValue = [value.ai?.progress, value.ai?.warning].compactMap { $0 }.joined(separator: " · ")
         aiNotice.isHidden = aiNotice.stringValue.isEmpty
         aiNotice.toolTip = aiNotice.stringValue
@@ -216,7 +214,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             // 回答の到着だけでは末尾へ移動しない。人間の発言が増えたときの追従は従来どおり。
             anchor = .init(candidates: anchor.candidates, y: anchor.y, atBottom: false)
         }
-        let marks = AIInlineMark.ordered(snapshot.ai?.conversation)
+        let allMarks = AIInlineMark.ordered(snapshot.ai?.conversation)
+        var attached: [Int: [AIInlineMark]] = [:]
+        let marks = allMarks.filter { mark in
+            if mark.kind == .question, let index = mark.question.request.voiceAnchorIndex(in: snapshot.utterances) {
+                attached[index, default: []].append(mark); return false
+            }
+            return true
+        }
         var markIndex = 0
         let animated = sameMeeting && !shouldReduceMotion()
         var next: [RowID: TranscriptRow] = [:]
@@ -242,6 +247,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             row.onRename = { [weak self] slot, view in self?.showRename(slot: slot, relativeTo: view) }
             next[id] = row
             ordered.append(row)
+            for mark in attached[index, default: []] {
+                let view = markView(mark); aiMarks[mark.id] = view; ordered.append(view)
+            }
         }
         while markIndex < marks.count {
             let mark = marks[markIndex]
@@ -253,7 +261,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             ordered.append(tentativeRow)
         }
         rows = next
-        aiMarks = aiMarks.filter { key, _ in marks.contains { $0.id == key } }
+        let markIDs = Set(allMarks.map(\.id))
+        aiMarks = aiMarks.filter { markIDs.contains($0.key) }
         transcriptDocument.setRows(ordered, anchor: anchor)
         for row in inserted {
             row.appear(animated: animated && snapshot.state == .recording)
@@ -331,8 +340,10 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             body.heightAnchor.constraint(greaterThanOrEqualToConstant: 150)
         ])
         let title = Washi.label("AIへ渡す会話", size: 13, weight: .semibold)
-        aiBadges.lineBreakMode = .byTruncatingTail
-        aiBadges.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        aiBadges.onSelect = { [weak self] id in
+            guard let self, let view = aiMarks[id] else { return }
+            view.scrollToVisible(view.bounds); scrolled()
+        }
         title.setContentCompressionResistancePriority(.required, for: .horizontal)
         let footerTitle = row([title, aiBadges, previousAIButton, NSView(), rangeLabel], spacing: 8)
         aiStatusRow.orientation = .horizontal; aiStatusRow.alignment = .centerY; aiStatusRow.spacing = 12

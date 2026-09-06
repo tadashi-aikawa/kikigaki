@@ -423,7 +423,8 @@ final class MeetingSession {
                 // prepareの通知から録音停止が始まっても、確定待ちの取消へ戻さない。
                 aiPhase = .preparingAndSending
                 let fixed = try record.controller.prepare(lines: capture.lines, question: question, voiceQuestion: capture.voice,
-                    capturedAt: capturedAt, cutoff: cutoff, tail: capture.tail, config: config, helper: helper, parent: parent, full: full, workAllowed: workAllowed)
+                    capturedAt: capturedAt, cutoff: cutoff, tail: capture.tail, config: config, helper: helper, parent: parent, full: full,
+                    workAllowed: workAllowed, voiceUtteranceStart: capture.voiceUtteranceStart)
                 request = fixed
                 let executable: URL, arguments: [String]
                 if let launch { (executable, arguments) = try launch(config, helper, record.controller) }

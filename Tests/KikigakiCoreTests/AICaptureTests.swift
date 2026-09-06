@@ -9,14 +9,18 @@ import Testing
         let waiting = try AICapture(tokens: tokens, speakers: [0, 0, 0], finalCount: 1, processedUntil: 3, cutoff: 2, names: SpeakerNames(), timeline: timeline)
         #expect(waiting.lines.count == 1 && waiting.tail?.text == "質問")
         #expect(waiting.needsConfirmation)
+        #expect(waiting.voiceUtteranceStart == 0)
         let ready = try AICapture(tokens: tokens, speakers: [0, 0, 0], finalCount: 3, processedUntil: 3, cutoff: 2, names: SpeakerNames(), timeline: timeline)
         #expect(!ready.needsConfirmation && ready.tail == nil)
+        // 同じ話者の連続発話は結合されるので、その発話の先頭を保持する。
+        #expect(ready.voiceUtteranceStart == 0)
         #expect(!ready.lines.joined().contains("後の発言"))
     }
     @Test func 境界をまたぐ語は確定snapshotに入れない() throws {
         let capture = try AICapture(tokens: [.init(text: "確認する", phraseId: 0, start: 1, end: 3)], speakers: [0], finalCount: 1,
             processedUntil: 3, cutoff: 2, names: SpeakerNames(), timeline: .init(startedAt: Date()))
         #expect(capture.lines.isEmpty && capture.tail?.text == "確認する")
+        #expect(capture.voiceUtteranceStart == nil)
         #expect(capture.tail?.endSeconds == 2 && capture.needsConfirmation)
     }
     @Test func 消費側が追いつかない場合と壊れた境界を区別する() throws {

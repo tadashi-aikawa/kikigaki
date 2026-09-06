@@ -11,14 +11,18 @@ public struct AIRequest: Codable, Equatable, Sendable {
     public let number: Int
     public let displayQuestion: String
     public let timeRange: AIContextTimeRange?
+    /// 声の問いに使った確定済み末尾発話の位置。表示名や停止後の再分割に依存しない。
+    public let voiceUtteranceStart: Double?
     public var id: UUID { envelope.participant.requestID }
 
-    public init(envelope: AIEnvelope, number: Int, voiceQuestion: String = "", snapshot: AIContextSnapshot? = nil) throws {
+    public init(envelope: AIEnvelope, number: Int, voiceQuestion: String = "", snapshot: AIContextSnapshot? = nil,
+                voiceUtteranceStart: Double? = nil) throws {
         self.envelope = envelope; self.number = number
         if let snapshot {
             guard try AIEnvelope(snapshot: snapshot, participant: envelope.participant) == envelope else { throw AIError.mismatch }
         }
         timeRange = snapshot?.timeRange
+        self.voiceUtteranceStart = envelope.participant.questionSource == .voice ? voiceUtteranceStart : nil
         displayQuestion = envelope.participant.questionSource == .typed ? envelope.participant.question : voiceQuestion
         try validate()
     }
@@ -28,8 +32,21 @@ public struct AIRequest: Codable, Equatable, Sendable {
         try timeRange?.validate()
         guard number > 0 else { throw AIError.invalid("question number") }
         try AIValidation.text(displayQuestion, limit: AILimits.questionBytes)
+        if let start = voiceUtteranceStart {
+            guard envelope.participant.questionSource == .voice, start.isFinite, start >= 0,
+                  start <= envelope.participant.audioCutoffSeconds else { throw AIError.invalid("voice utterance start") }
+        }
         if envelope.participant.questionSource == .typed, displayQuestion != envelope.participant.question {
             throw AIError.mismatch
+        }
+    }
+
+    /// 再分割で同じ開始位置がなくなったら、その位置以下の最も近い発話へ置く。
+    /// 旧requestや確定行がない問いは、従来の送信時刻で配置する。
+    public func voiceAnchorIndex(in utterances: [Utterance]) -> Int? {
+        guard envelope.participant.questionSource == .voice, let start = voiceUtteranceStart else { return nil }
+        return utterances.indices.filter { utterances[$0].start <= start }.max {
+            utterances[$0].start == utterances[$1].start ? $0 < $1 : utterances[$0].start < utterances[$1].start
         }
     }
 }

@@ -6,7 +6,7 @@ import AppKit
     private let picker = NSPopUpButton()
     private let scroll = NSScrollView()
     private let transcript = TranscriptDocument()
-    private let badges = Washi.label(size: 11, color: Washi.muted)
+    private let badges = AIBadgeBar()
     private lazy var retry = AIActionButton("保存を再試行") { [weak self] in self?.store.retrySaves(); self?.update() }
     private var marks: [String: AIMarkRow] = [:]
     private var displayedMeeting: UUID?
@@ -25,6 +25,9 @@ import AppKit
         scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
         window.contentView = stack; window.backgroundColor = Washi.paper
         picker.target = self; picker.action = #selector(selected)
+        badges.onSelect = { [weak self] id in
+            guard let view = self?.marks[id] else { return }; view.scrollToVisible(view.bounds)
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
     private var selectedRecord: AIRecordStore.Record? {
@@ -52,7 +55,7 @@ import AppKit
         let state = AIViewState(conversation: record.controller.conversation, participant: record.manifest.config.participantName,
             warning: record.saveWarning, canSubmit: false, readOnly: true, canOpenPane: record.controller.connection != nil,
             saveFailed: record.saveWarning != nil, generation: record.controller.generation)
-        badges.stringValue = state.badges; badges.isHidden = state.badges.isEmpty
+        badges.update(state)
         warning.stringValue = (store.warnings + [record.saveWarning].compactMap { $0 }).joined(separator: "\n")
         warning.isHidden = warning.stringValue.isEmpty
         retry.isHidden = !state.saveFailed

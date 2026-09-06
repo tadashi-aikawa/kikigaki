@@ -1,6 +1,75 @@
 import AppKit
 import KikigakiCore
 
+enum AIBadgeKind: String, CaseIterable {
+    case unread = "未読", confirmation = "確認待ち", waiting = "回答待ち", unknown = "送達不明", failed = "失敗"
+    func matches(_ question: AIQuestion) -> Bool {
+        switch self {
+        case .unread: return question.isUnread && question.result?.kind != .needsInput
+        case .confirmation: return question.state == .needsInput && question.answeredByRequestID == nil
+        case .waiting: return question.isAwaitingResult && question.state != .deliveryUnknown
+        case .unknown: return question.state == .deliveryUnknown
+        case .failed: return question.state == .failed
+        }
+    }
+    func markID(_ question: AIQuestion) -> String {
+        question.request.id.uuidString + ((self == .unread || self == .confirmation || (self == .failed && question.result != nil)) ? "/result" : "/send")
+    }
+}
+
+final class AIBadgeButton: NSButton {
+    let kind: AIBadgeKind?
+    var callback: (() -> Void)?
+    init(_ title: String, kind: AIBadgeKind? = nil, action: @escaping () -> Void) {
+        self.kind = kind; callback = action
+        super.init(frame: .zero); self.title = title
+        isBordered = false; font = .systemFont(ofSize: 11, weight: .bold)
+        target = self; self.action = #selector(pressed)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        heightAnchor.constraint(equalToConstant: 24).isActive = true
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: ceil((title as NSString).size(withAttributes: [.font: font!]).width) + 16, height: 24)
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        let color = kind == .confirmation ? Washi.color(0xC4801F) : kind == .unread || kind == .failed ? Washi.red : Washi.muted
+        let filled = kind == .unread || kind == .confirmation || kind == nil
+        let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 1), xRadius: 6, yRadius: 6)
+        if filled { (kind == nil ? Washi.rule : color).setFill(); pill.fill() }
+        else { color.setStroke(); pill.lineWidth = 1; pill.stroke() }
+        let attributes: [NSAttributedString.Key: Any] = [.font: font!, .foregroundColor: filled && kind != nil ? NSColor.white : color]
+        let size = (title as NSString).size(withAttributes: attributes)
+        (title as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2), withAttributes: attributes)
+    }
+    @objc private func pressed() { callback?() }
+}
+
+final class AIBadgeBar: NSStackView {
+    var onSelect: ((String) -> Void)?
+    private var buttons: [AIBadgeKind: AIBadgeButton] = [:]
+    init() {
+        super.init(frame: .zero); orientation = .horizontal; alignment = .centerY; spacing = 6
+        for kind in AIBadgeKind.allCases {
+            let button = AIBadgeButton(kind.rawValue, kind: kind, action: {})
+            buttons[kind] = button; addArrangedSubview(button); button.isHidden = true
+        }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    func update(_ state: AIViewState?) {
+        let questions = state?.conversation?.questions ?? []
+        for kind in AIBadgeKind.allCases {
+            let matching = questions.filter(kind.matches), button = buttons[kind]!
+            button.isHidden = matching.isEmpty
+            button.title = "\(kind.rawValue) \(matching.count)"; button.invalidateIntrinsicContentSize(); button.needsDisplay = true
+            button.setAccessibilityLabel(button.title + "、最初の印へ移動")
+            let firstMark = AIInlineMark.ordered(state?.conversation).first { kind.matches($0.question) && $0.id == kind.markID($0.question) }
+            button.callback = { [weak self] in if let firstMark { self?.onSelect?(firstMark.id) } }
+        }
+        isHidden = buttons.values.allSatisfy { $0.isHidden }
+    }
+}
+
 struct AIViewState {
     var conversation: AIConversation?
     var hotkey = ResolvedAIConfig.defaultHotkey
@@ -19,13 +88,7 @@ struct AIViewState {
     var generation = 1
     var badges: String {
         let questions = conversation?.questions ?? []
-        let counts = [
-            ("未読", questions.filter { $0.isUnread && $0.result?.kind != .needsInput }.count),
-            ("確認待ち", questions.filter { $0.state == .needsInput && $0.answeredByRequestID == nil }.count),
-            ("回答待ち", questions.filter { $0.isAwaitingResult && $0.state != .deliveryUnknown }.count),
-            ("送達不明", questions.filter { $0.state == .deliveryUnknown }.count),
-            ("失敗", questions.filter { $0.state == .failed }.count)
-        ]
+        let counts = AIBadgeKind.allCases.map { kind in (kind.rawValue, questions.filter(kind.matches).count) }
         return counts.filter { $0.1 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
     }
     var shortcut: String {
@@ -90,12 +153,14 @@ final class AIMarkRow: NSView, DocumentRow {
     var onToggle: (() -> Void)?
     private let body = NSTextField(wrappingLabelWithString: "")
     private let detail = NSTextField(wrappingLabelWithString: "")
+    private let questionText = NSTextField(wrappingLabelWithString: "")
     private lazy var toggle = AIActionButton("") { [weak self] in self?.toggleExpanded() }
     private lazy var reply = AIActionButton("返答する") { [weak self] in self?.onReply?() }
     private lazy var cancel = AIActionButton("取消") { [weak self] in self?.onCancel?() }
     private lazy var pane = AIActionButton("ペインを開く") { [weak self] in self?.onPane?() }
     private var measuredBody: CGFloat = 0
     private var measuredDetail: CGFloat = 0
+    private var measuredQuestion: CGFloat = 0
     private var confirming: Bool { mark.question.state == .needsInput && mark.question.answeredByRequestID == nil }
     var accent: Accent {
         guard mark.kind == .result else { return .muted }
@@ -112,7 +177,10 @@ final class AIMarkRow: NSView, DocumentRow {
     override var isFlipped: Bool { true }
     init(mark: AIInlineMark, state: AIViewState) {
         self.mark = mark; self.state = state; super.init(frame: .zero)
-        for view in [toggle, body, detail, reply, cancel, pane] { addSubview(view) }
+        for view in [toggle, questionText, body, detail, reply, cancel, pane] { addSubview(view) }
+        toggle.cell?.lineBreakMode = .byTruncatingTail
+        questionText.isSelectable = true; questionText.maximumNumberOfLines = 0
+        questionText.lineBreakMode = .byWordWrapping
         body.isSelectable = true; detail.isSelectable = true
         body.maximumNumberOfLines = 0; detail.maximumNumberOfLines = 0
         body.lineBreakMode = .byWordWrapping; detail.lineBreakMode = .byWordWrapping
@@ -123,6 +191,12 @@ final class AIMarkRow: NSView, DocumentRow {
         self.mark = mark; self.state = state
         let question = mark.question
         let paragraph = NSMutableParagraphStyle(); paragraph.lineSpacing = 4
+        let originalQuestion = "問い: " + question.request.displayQuestion
+        if questionText.stringValue != originalQuestion {
+            questionText.attributedStringValue = NSAttributedString(string: originalQuestion, attributes: [
+                .font: NSFont.systemFont(ofSize: 12), .foregroundColor: Washi.muted, .paragraphStyle: paragraph
+            ])
+        }
         let text = mark.kind == .question ? question.request.displayQuestion
             : (question.result?.kind == .needsInput ? "? " : "") + (question.result?.body ?? "")
         if body.stringValue != text {
@@ -176,10 +250,12 @@ final class AIMarkRow: NSView, DocumentRow {
         if expanded && mark.kind == .result && mark.question.isUnread { onRead?() }
     }
     private func updateVisibility() {
-        toggle.title = (expanded ? "▾ " : "▸ ") + title
+        let excerpt = mark.kind == .result ? " · " + mark.question.request.displayQuestion.components(separatedBy: .newlines).joined(separator: " ") : ""
+        toggle.title = (expanded ? "▾ " : "▸ ") + title + excerpt
         toggle.contentTintColor = Washi.muted
         toggle.setAccessibilityLabel(title + (expanded ? "、折りたたむ" : "、展開する"))
-        toggle.toolTip = title
+        toggle.toolTip = title + excerpt
+        questionText.isHidden = !expanded || mark.kind != .result
         body.isHidden = !expanded; detail.isHidden = !expanded
         reply.isHidden = !expanded || mark.kind != .result || !confirming || state.readOnly
         cancel.isHidden = !expanded || mark.kind != .question || !mark.question.isAwaitingResult || state.readOnly
@@ -191,13 +267,15 @@ final class AIMarkRow: NSView, DocumentRow {
         let bounds = NSRect(x: 0, y: 0, width: max(44, width - 90), height: .greatestFiniteMagnitude)
         measuredBody = ceil(body.cell?.cellSize(forBounds: bounds).height ?? 0)
         measuredDetail = ceil(detail.cell?.cellSize(forBounds: bounds).height ?? 0)
+        measuredQuestion = mark.kind == .result ? ceil(questionText.cell?.cellSize(forBounds: bounds).height ?? 0) + 10 : 0
         let actions = [reply, cancel, pane].contains { !$0.isHidden } ? 30.0 : 0
-        return 36 + measuredBody + 10 + measuredDetail + actions + 12
+        return 36 + measuredQuestion + measuredBody + 10 + measuredDetail + actions + 12
     }
     override func layout() {
         super.layout()
         toggle.frame = NSRect(x: 64, y: 2, width: max(0, bounds.width - 158), height: 24)
-        body.frame = NSRect(x: 68, y: 36, width: max(44, bounds.width - 90), height: measuredBody)
+        questionText.frame = NSRect(x: 68, y: 36, width: max(44, bounds.width - 90), height: max(0, measuredQuestion - 10))
+        body.frame = NSRect(x: 68, y: 36 + measuredQuestion, width: max(44, bounds.width - 90), height: measuredBody)
         detail.frame = NSRect(x: 68, y: body.frame.maxY + 10, width: body.frame.width, height: measuredDetail)
         var x: CGFloat = 68
         for button in [reply, cancel, pane] where !button.isHidden {
