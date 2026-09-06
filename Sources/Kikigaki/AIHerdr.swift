@@ -12,9 +12,15 @@ enum AIHerdrError: Error, Equatable { case notReady, replaced, missing, server(S
 /// herdrのJSONを型として解釈する。エラー本文やargvを診断へ転載しない。
 struct AIHerdr: Sendable {
     typealias Run = @Sendable ([String], TimeInterval) async throws -> AIProcessOutput
+    typealias Log = @Sendable (String) -> Void
     private let run: Run
-    init(executable: URL) { run = { try await AIProcessRunner().run(executable, $0, timeout: $1) } }
-    init(run: @escaping Run) { self.run = run }
+    private let log: Log
+    init(executable: URL) {
+        self.init(run: { try await AIProcessRunner().run(executable, $0, timeout: $1) })
+    }
+    init(run: @escaping Run, log: @escaping Log = { FileHandle.standardError.write(Data(("Kikigaki: " + $0 + "\n").utf8)) }) {
+        self.run = run; self.log = log
+    }
     private struct Reply<T: Decodable>: Decodable { let result: T }
     private struct Empty: Decodable {}
     private struct Workspace: Decodable { let workspace_id: String }
@@ -33,14 +39,25 @@ struct AIHerdr: Sendable {
     }
     private func call<T: Decodable>(_ args: [String], as type: T.Type, timeout: TimeInterval = 15) async throws -> T {
         guard !args.contains(where: { $0.contains("\0") }) else { throw AIProcessError.invalidInput }
-        let reply = try await run(args, timeout)
-        if reply.status != 0 {
-            let code = (try? JSONDecoder().decode(Failure.self, from: reply.stderr))?.error.code ?? "herdr_failed"
-            let safeCodes = ["agent_not_found", "pane_not_found", "workspace_not_found", "agent_blocked", "agent_not_ready", "agent_prompt_stalled"]
-            if ["agent_not_found", "pane_not_found", "workspace_not_found"].contains(code) { throw AIHerdrError.missing }
-            throw AIHerdrError.server(safeCodes.contains(code) ? code : "herdr_failed")
+        let operation = args.prefix(2).joined(separator: " ")
+        let reply: AIProcessOutput
+        do { reply = try await run(args, timeout) }
+        catch {
+            let code = error as? AIProcessError == .timeout ? "timeout" : error is CancellationError ? "cancelled" : "transport_failed"
+            log("herdr \(operation): \(code)")
+            throw error
         }
-        guard let result = try? JSONDecoder().decode(Reply<T>.self, from: reply.stdout) else { throw AIProcessError.invalidResponse }
+        if reply.status != 0 {
+            let rawCode = (try? JSONDecoder().decode(Failure.self, from: reply.stderr))?.error.code
+                ?? (try? JSONDecoder().decode(Failure.self, from: reply.stdout))?.error.code ?? "herdr_failed"
+            let code = rawCode.range(of: "^[a-z][a-z0-9_-]{0,63}$", options: .regularExpression) == rawCode.startIndex..<rawCode.endIndex ? rawCode : "herdr_failed"
+            log("herdr \(operation): \(code)")
+            if ["agent_not_found", "pane_not_found", "workspace_not_found"].contains(code) { throw AIHerdrError.missing }
+            throw AIHerdrError.server(code)
+        }
+        guard let result = try? JSONDecoder().decode(Reply<T>.self, from: reply.stdout) else {
+            log("herdr \(operation): invalid_response"); throw AIProcessError.invalidResponse
+        }
         return result.result
     }
     func create(cwd: URL, label: String, provider: AIProvider) async throws -> AIHerdrConnection {
@@ -51,11 +68,16 @@ struct AIHerdr: Sendable {
     func label(_ target: AIHerdrConnection, participant: String) async throws {
         _ = try await call(["pane", "report-metadata", target.paneID, "--source", "owlery", "--display-agent", participant], as: Empty.self)
     }
-    func start(_ target: AIHerdrConnection, executable: URL, arguments: [String], customCommand: Bool = true) async throws {
+    static func agentName(generation: Int, id: UUID = UUID()) throws -> String {
+        guard generation > 0 else { throw AIProcessError.invalidInput }
+        // 最大のInt世代でも32文字に収めるため、世代は36進で表す。
+        return "kikigaki-" + id.uuidString.prefix(8).lowercased() + "-g" + String(generation, radix: 36)
+    }
+    func start(_ target: AIHerdrConnection, executable: URL, arguments: [String], customCommand: Bool = true, generation: Int = 1) async throws {
         guard executable.isFileURL, executable.path.hasPrefix("/"), !arguments.contains(where: { $0.contains("\0") }) else { throw AIProcessError.invalidInput }
         let args = customCommand
             ? ["pane", "run", target.paneID, AIShell.command([executable.path] + arguments)]
-            : ["agent", "start", "kikigaki-" + UUID().uuidString.lowercased(), "--kind", target.provider.rawValue,
+            : ["agent", "start", try Self.agentName(generation: generation), "--kind", target.provider.rawValue,
                "--pane", target.paneID, "--timeout", "15000", "--"] + arguments
         _ = try await call(args, as: Empty.self, timeout: 20)
     }

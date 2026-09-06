@@ -29,6 +29,39 @@ import KikigakiAIIO
         try controller.prepare(lines: lines, question: "質問", voiceQuestion: "", capturedAt: Date(), cutoff: 1,
             tail: nil, config: config, helper: URL(fileURLWithPath: "/tmp/helper"))
     }
+    @Test(arguments: [false, true]) func 開発用の次問は失敗や取消で送信不可でも旧問を再送せず進む(cancelled: Bool) async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), config = ResolvedAIConfig(config: AIConfig(), home: root)
+        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
+        let first = try prepare(controller, config)
+        if cancelled {
+            try await controller.connect(config: config, label: "test", executable: URL(fileURLWithPath: "/tmp/fake"), arguments: [])
+            try await controller.send(first, config: config)
+            await fake.setStatuses(["working"]); try await controller.refreshConnection()
+            try controller.cancel(first.id)
+        } else {
+            await fake.rejectNextStart()
+            await #expect(throws: AIHerdrError.server("invalid_agent_name")) {
+                try await controller.connect(config: config, label: "test", executable: URL(fileURLWithPath: "/tmp/fake"), arguments: [])
+            }
+            try controller.fail(first.id, reason: "入力前に停止しました")
+        }
+        #expect(!controller.canSend)
+        try ReplayDebugOptions.recoverForNextQuestion(controller, preparing: true)
+        #expect(controller.generation == 1)
+        try ReplayDebugOptions.recoverForNextQuestion(controller, preparing: false)
+        #expect(controller.generation == 2 && controller.canSend)
+        let second = try prepare(controller, config)
+        await fake.setStatuses(["idle"])
+        try await controller.connect(config: config, label: "test", executable: URL(fileURLWithPath: "/tmp/fake"), arguments: [])
+        try await controller.send(second, config: config)
+        #expect(controller.conversation.questions[0].state == (cancelled ? .cancelled : .failed))
+        #expect(controller.conversation.questions[1].state == .submitted)
+        let starts = await fake.commands.filter { $0.prefix(2) == ["agent", "start"] }
+        #expect(starts.last?[2].hasSuffix("-g2") == true)
+        #expect(starts.allSatisfy { $0[2].utf8.count <= 32 })
+        #expect(await fake.commands.filter { $0.prefix(2) == ["agent", "prompt"] }.count == (cancelled ? 2 : 1))
+    }
     @Test func Claude背景処理の観測中は返送未確認を出さず別sessionを混ぜない() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr(); await fake.setProvider("claude"); await fake.setSession("main")

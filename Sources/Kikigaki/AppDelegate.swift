@@ -8,6 +8,12 @@ struct ReplayDebugOptions {
     var questions: [Question] = []
     var hold: Double = 0
     var rename: (slot: Int, name: String)?
+    @MainActor static func recoverForNextQuestion(_ controller: AIConversationController?, preparing: Bool) throws {
+        guard !preparing, let controller, !controller.canSend,
+              let previous = controller.conversation.questions.last,
+              previous.state == .failed || previous.state == .cancelled else { return }
+        try controller.newGeneration()
+    }
     static func load() throws -> Self {
         guard CommandLine.arguments.contains("--replay") else { return Self() }
         let env = ProcessInfo.processInfo.environment
@@ -241,7 +247,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard nextDebugQuestion < replayDebug.questions.count, let session else { return }
         let question = replayDebug.questions[nextDebugQuestion]
-        guard snapshot.elapsed >= question.seconds, snapshot.ai?.canSubmit == true else { return }
+        guard snapshot.elapsed >= question.seconds else { return }
+        do { try ReplayDebugOptions.recoverForNextQuestion(session.aiRecord?.controller, preparing: snapshot.ai?.progress != nil) }
+        catch { Self.log("replay AI次質問の接続準備待ち"); return }
+        guard session.snapshot.ai?.canSubmit == true else { return }
         // callbackの再入や回答待ちで二重送信しない。送信可能になるまで順番を保って待つ。
         nextDebugQuestion += 1
         Self.log("replay AI質問\(nextDebugQuestion): 指定\(question.seconds)秒、音声\(snapshot.elapsed)秒で送信開始")

@@ -7,6 +7,33 @@ import KikigakiAIIO
 import TOMLKit
 
 @Suite struct AITransportTests {
+    @Test(arguments: [1, 2, 100, Int.max]) func agent名は全世代でherdrの32文字制約を満たす(generation: Int) throws {
+        let name = try AIHerdr.agentName(generation: generation)
+        #expect(name.utf8.count <= 32)
+        #expect(name.range(of: "^[a-z][a-z0-9_-]{0,31}$", options: .regularExpression) != nil)
+        #expect(name.hasSuffix("-g" + String(generation, radix: 36)))
+        #expect(throws: AIProcessError.invalidInput) { try AIHerdr.agentName(generation: 0) }
+    }
+    private final class CapturedLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var lines: [String] = []
+        func append(_ line: String) { lock.lock(); defer { lock.unlock() }; lines.append(line) }
+        var captured: [String] { lock.lock(); defer { lock.unlock() }; return lines }
+    }
+    @Test func herdr失敗はエラーコードだけをログへ残す() async throws {
+        for raw in ["invalid_agent_name", "invalid_agent_name\n"] {
+            let captured = CapturedLog()
+            let adapter = AIHerdr(run: { _, _ in
+                AIProcessOutput(status: 1, stdout: Data(), stderr: try JSONSerialization.data(withJSONObject:
+                    ["error": ["code": raw, "message": "本文とtokenは表示しない"]]))
+            }, log: { captured.append($0) })
+            let code = raw.contains("\n") ? "herdr_failed" : raw
+            await #expect(throws: AIHerdrError.server(code)) {
+                try await adapter.start(.init(workspaceID: "w", paneID: "p", provider: .codex), executable: URL(fileURLWithPath: "/tmp/fake"), arguments: [], customCommand: false)
+            }
+            #expect(captured.captured == ["herdr agent start: " + code])
+        }
+    }
     @Test @MainActor func Codex通知引数はTOMLの文字列配列として復元できる() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let config = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path), home: root)
@@ -137,15 +164,20 @@ actor FakeHerdr {
     var session: String?
     var provider = "codex"
     var promptFailure = false
+    var startFailure = false
     var beforePrompt: (@Sendable () throws -> Void)?
     func setStatuses(_ value: [String]) { statuses = value }
     func setSession(_ value: String?) { session = value }
     func setProvider(_ value: String) { provider = value }
+    func rejectNextStart() { startFailure = true }
     func failPrompt(_ check: @escaping @Sendable () throws -> Void) { promptFailure = true; beforePrompt = check }
     func run(_ args: [String], _ timeout: TimeInterval) throws -> AIProcessOutput {
         commands.append(args)
         let response: [String: Any]
         switch Array(args.prefix(2)) {
+        case ["agent", "start"] where startFailure:
+            startFailure = false
+            return AIProcessOutput(status: 1, stdout: Data(), stderr: Data("{\"error\":{\"code\":\"invalid_agent_name\"}}".utf8))
         case ["workspace", "create"]: response = ["workspace": ["workspace_id": "w"], "root_pane": ["pane_id": "p"]]
         case ["agent", "get"]:
             let status = statuses.count > 1 ? statuses.removeFirst() : statuses[0]

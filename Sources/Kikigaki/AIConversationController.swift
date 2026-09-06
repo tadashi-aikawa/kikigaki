@@ -108,7 +108,7 @@ final class AIConversationController {
         catch { warning = "herdrの表示名を設定できません" }
         try Task.checkCancellation()
         inputAttempted = true
-        do { try await herdr.start(created, executable: executable, arguments: arguments, customCommand: config.command != nil) }
+        do { try await herdr.start(created, executable: executable, arguments: arguments, customCommand: config.command != nil, generation: generation) }
         catch AIHerdrError.server("agent_not_ready") { warning = "初回設定をherdrで確認してください" }
         catch { warning = "起動を確認できません。ペインを確認してください"; throw error }
         try await waitUntilReady(timeout: readinessTimeout)
