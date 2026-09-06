@@ -99,5 +99,22 @@ struct WordBoundaries {
             .contains(where: value.hasSuffix)
     }
 
+    /// 相槌・応答の語彙。多数派の声が島を覆っていても保護する1語で、消す一覧ではない。
+    /// 重なった相手の「うん」が文字になったとき、主話者の本文へ混ぜないためのもの。
+    /// 品詞(NLTagger の lexicalClass)は日本語で提供されないため、語彙で限定する
+    static let backchannelWords: Set<String> = [
+        "はい", "はいはい", "うん", "うんうん", "ええ", "そう", "そうそう", "そうですね", "そうなんですね",
+        "なるほど", "いや", "いいえ", "確かに", "本当", "ほんと", "本当に", "ほんとに", "ですね", "ですよね",
+        "おお", "へえ", "ふーん", "了解", "了解です", "オッケー", "はーい", "いえ", "まあ", "うーん",
+    ]
+
+    /// 空白・句読点を除いた本文が相槌・応答の語彙に一致するか
+    func isBackchannel(_ range: Range<Int>) -> Bool {
+        let text = tokens[range].map(\.text).joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: .punctuationCharacters)
+        return Self.backchannelWords.contains(text)
+    }
+
     private static func ignored(_ char: Character) -> Bool { char.isWhitespace || char.isPunctuation }
 }

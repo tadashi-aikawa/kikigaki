@@ -123,8 +123,12 @@ public enum Aligner {
                         // 語境界で完結する塊は残す。上の境界補正でも完結しない部分語は従来通り。
                         if speakers[i] != nil {
                             let local = (i - phrase.lowerBound)..<(j - phrase.lowerBound)
-                            // 多数派の声が区間全体を覆う場合、句点だけを根拠に複数語の島を
-                            // 保護しない。一語の返答と、境界から始まる質問の保護は残す。
+                            // 多数派の声が区間全体を覆う場合、句点だけを根拠に複数語の島を保護せず、
+                            // 1語も相槌・応答の語彙に限って保護する。相槌が重なると音声側の区間が
+                            // 0.2〜0.5秒刻みで交互に出て、窓判定が文中の1語(「代表」)を相手へ倒す
+                            // (タダシの実録で確認。「代表」自体は多数派の区間の中に収まっていた)。
+                            // 多数派が黙って聞いた「はい」は区間が途切れるので、従来どおり残る。
+                            // 境界から始まる質問の保護は変えない。
                             var coveredUntil = tokens[i].start
                             for segment in orderedSegments where segment.speaker == major {
                                 if segment.end <= coveredUntil { continue }
@@ -132,8 +136,9 @@ public enum Aligner {
                                 coveredUntil = segment.end
                             }
                             let coveredByMajor = coveredUntil >= tokens[j - 1].end
-                            if words.containsWholeWords(local, sentenceEndAllowed: !coveredByMajor)
-                                || (span >= 0.6 && words.containsMeaningfulReply(local)) { i = j; continue }
+                            // 語彙は島の本文全体との一致で見る。「確かに」は語境界では「確か / に」に割れるため
+                            let keepsWholeWords = coveredByMajor ? words.isBackchannel(local) : words.containsWholeWords(local)
+                            if keepsWholeWords || (span >= 0.6 && words.containsMeaningfulReply(local)) { i = j; continue }
                         }
                         for k in i..<j where k >= frozenCount { speakers[k] = major }
                     }

@@ -50,4 +50,75 @@ import Testing
         let tokens = [TimedToken(text: "😀続いてまして", phraseId: 1, start: 0, end: 3), TimedToken(text: " すごいね。 ", phraseId: 1, start: 3, end: 3.8)]
         #expect(Aligner.smoothSpeakers(tokens: tokens, speakers: [0, 1]) == [0, 1])
     }
+
+    // 2026-09-06_1416_2.wav の再処理ログ(24.60〜26.82秒)。相槌が重なり、音声側の区間が交互に出る場面。
+    // 「代表」(25.62〜25.92)は多数派(1)の区間 25.44〜25.92 に収まるのに、窓判定は 0 に倒れていた
+    private static let overlapTokens: [TimedToken] = {
+        let texts = ["は", "い", "管", "理", "の", "プ", "ロ", "代", "表", "の", "松", "村", "で", "す", "。"]
+        let times = [24.60, 24.78, 24.90, 25.14, 25.32, 25.44, 25.56, 25.62, 25.80, 25.92, 26.10, 26.28, 26.46, 26.64, 26.70, 26.82]
+        return texts.enumerated().map { TimedToken(text: $0.element, phraseId: 81, start: times[$0.offset], end: times[$0.offset + 1]) }
+    }()
+    private static let overlapSegments = [
+        SpeakerSegment(speaker: 0, start: 20.32, end: 24.96), SpeakerSegment(speaker: 1, start: 24.96, end: 25.20),
+        SpeakerSegment(speaker: 0, start: 25.04, end: 25.44), SpeakerSegment(speaker: 1, start: 25.44, end: 25.92),
+        SpeakerSegment(speaker: 0, start: 25.92, end: 26.40), SpeakerSegment(speaker: 1, start: 26.40, end: 26.88),
+    ]
+    private static let overlapRaw: [Int?] = [0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1]
+
+    @Test func 実録の多数派に覆われた文中の1語は吸収する() {
+        let speakers = Aligner.smoothSpeakers(tokens: Self.overlapTokens, speakers: Self.overlapRaw, segments: Self.overlapSegments)
+        #expect(speakers == Array(repeating: 1, count: Self.overlapTokens.count))
+        #expect(Aligner.utterances(tokens: Self.overlapTokens, speakers: speakers).map(\.text) == ["はい管理のプロ代表の松村です。"])
+    }
+
+    @Test func 音声区間がなければ文中の1語は従来通り残す() {
+        // 区間を渡さない判定(旧経路)では「代表」の保護が続く。区間の有無で挙動が変わることを明示する
+        #expect(Aligner.smoothSpeakers(tokens: Self.overlapTokens, speakers: Self.overlapRaw)[7...8] == [0, 0])
+    }
+
+    /// 主話者(1)が喋り続ける最中に、相手(0)の1語が文字として出た形。主話者の区間が島を覆う
+    private static func coveredIsland(_ word: String) -> (tokens: [TimedToken], raw: [Int?], segments: [SpeakerSegment]) {
+        let texts = ["今日", "は", "、", word, "資料", "を", "説明", "し", "ます", "。"]
+        let tokens = texts.enumerated().map {
+            TimedToken(text: $0.element, phraseId: 1, start: Double($0.offset) * 0.2, end: Double($0.offset + 1) * 0.2)
+        }
+        let raw: [Int?] = [1, 1, 1, 0, 1, 1, 1, 1, 1, 1]
+        let segments = [SpeakerSegment(speaker: 1, start: 0, end: 2.2), SpeakerSegment(speaker: 0, start: 0.5, end: 0.9)]
+        return (tokens, raw, segments)
+    }
+
+    @Test(arguments: ["はい", "うん", "なるほど", "確かに", "そうですね"])
+    func 多数派に覆われていても相槌の語彙は残す(_ word: String) {
+        let island = Self.coveredIsland(word)
+        let speakers = Aligner.smoothSpeakers(tokens: island.tokens, speakers: island.raw, segments: island.segments)
+        #expect(speakers == island.raw, "\(word) が吸収された")
+    }
+
+    @Test(arguments: ["代表", "反対"])
+    func 多数派に覆われた語彙にない1語は吸収する(_ word: String) {
+        let island = Self.coveredIsland(word)
+        let speakers = Aligner.smoothSpeakers(tokens: island.tokens, speakers: island.raw, segments: island.segments)
+        #expect(speakers == Array(repeating: 1, count: island.tokens.count), "\(word) が残った")
+        // 区間を渡さなければ従来どおり残す
+        #expect(Aligner.smoothSpeakers(tokens: island.tokens, speakers: island.raw)[3] == 0)
+    }
+
+    @Test func 多数派の声が途切れた1語は語彙に関係なく残す() {
+        // 2026-09-05_1529.wav の「はい」と同じ形。多数派(0)の区間が島の前で切れ、後で再開する
+        let tokens: [TimedToken] = [
+            .init(text: "一応経過報告させていただきますと", phraseId: 1146, start: 180.12, end: 182.82),
+            .init(text: "は", phraseId: 1146, start: 182.82, end: 183.06),
+            .init(text: "い", phraseId: 1146, start: 183.06, end: 183.18),
+            .init(text: "それから毎日続いてまして", phraseId: 1146, start: 183.18, end: 185.22),
+        ]
+        let segments = [
+            SpeakerSegment(speaker: 0, start: 180.48, end: 182.88), SpeakerSegment(speaker: 1, start: 182.72, end: 183.28),
+            SpeakerSegment(speaker: 0, start: 183.36, end: 185.36),
+        ]
+        #expect(Aligner.smoothSpeakers(tokens: tokens, speakers: [0, 1, 1, 0], segments: segments) == [0, 1, 1, 0])
+        // 語彙にない1語でも、多数派が黙って聞いた場面なら残す
+        let noun = tokens.enumerated().map { i, t in i == 1 ? TimedToken(text: "代", phraseId: 1146, start: t.start, end: t.end)
+            : i == 2 ? TimedToken(text: "表", phraseId: 1146, start: t.start, end: t.end) : t }
+        #expect(Aligner.smoothSpeakers(tokens: noun, speakers: [0, 1, 1, 0], segments: segments) == [0, 1, 1, 0])
+    }
 }
