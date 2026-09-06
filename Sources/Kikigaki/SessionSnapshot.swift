@@ -6,6 +6,7 @@ struct SessionSnapshot {
     var state: RecordingState = .idle
     var utterances: [Utterance] = []
     var tentativeText: String?
+    var pendingSpeakerRows: Set<Int> = []
     var timeline = MeetingTimeline(startedAt: Date())
     var names = SpeakerNames()
     var speakers: [KikigakiConfig.Speaker] = []
@@ -18,14 +19,9 @@ struct SessionSnapshot {
     var hasCopied = false
     var handoffMessage: String?
     var handoffFailed = false
-    /// 次の録音の人数上限。録音開始時に会議用の値へコピーする。
-    var maxSpeakers: Int?
-    /// 現在の会議の枠数。停止後に次の録音の上限を変えても、この値は変えない。
-    var meetingSpeakerCapacity: Int?
     var detectedSpeakerSlots: [Int] = []
     var speakerMapping: [Int: Int] = [:]
     var speakerOverrides: [Int: Int] = [:]
-    var speakerWarning: String?
 
     var canShare: Bool {
         markdownURL != nil && (state == .recording || state == .paused || state == .idle)

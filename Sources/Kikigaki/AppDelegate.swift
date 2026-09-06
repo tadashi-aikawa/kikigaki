@@ -41,7 +41,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let window = TranscriptWindowController()
         window.onRename = { session.rename(slot: $0, to: $1) }
-        window.onSpeakerLimitChange = { session.setSpeakerLimit($0) }
         window.onSpeakerMappingChange = { session.setSpeakerMapping(source: $0, target: $1) }
         window.onStartStop = { [weak self] in self?.toggleRecording() }
         window.onPauseResume = { session.togglePause() }

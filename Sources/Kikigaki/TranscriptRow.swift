@@ -90,6 +90,7 @@ final class TranscriptRow: NSView, DocumentRow {
         let currentName: NSRange?; let currentText: NSRange?
     }
     private let tentative: Bool
+    private var speakerPending = false
 
     init(tentative: Bool = false) {
         self.tentative = tentative
@@ -101,6 +102,7 @@ final class TranscriptRow: NSView, DocumentRow {
             addSubview(view)
         }
         shade.isHidden = !tentative
+        if !tentative { Washi.surface(shade, color: Washi.shade.withAlphaComponent(0.45)) }
         flash.layer?.opacity = 0
         avatar.tentative = tentative
         body.font = .systemFont(ofSize: 15)
@@ -112,6 +114,7 @@ final class TranscriptRow: NSView, DocumentRow {
         nameLabel.lineBreakMode = .byTruncatingTail
         if tentative { nameLabel.font = .systemFont(ofSize: 12) }
         hint.isHidden = !tentative
+        hint.alignment = .right
         for view in [avatar, nameLabel, timeLabel, hint, body] { addSubview(view) }
         speakerButton.isBordered = false
         speakerButton.title = ""
@@ -133,9 +136,17 @@ final class TranscriptRow: NSView, DocumentRow {
         speakerButton.setAccessibilityLabel(speakerButton.toolTip)
     }
 
-    /// 本文・話者変更だけを点灯対象とする。時刻の再描画では点灯しない。
+    /// 本文・話者変更だけを点灯対象とする。時刻や話者固定待ちの変化では点灯しない。
     @discardableResult
-    func update(_ value: Utterance, names: SpeakerNames, timeline: MeetingTimeline) -> Bool {
+    func update(_ value: Utterance, names: SpeakerNames, timeline: MeetingTimeline, speakerPending: Bool = false) -> Bool {
+        if !tentative && self.speakerPending != speakerPending {
+            self.speakerPending = speakerPending
+            shade.isHidden = !speakerPending
+            hint.stringValue = "話者確認中"
+            hint.toolTip = "文字起こしは確定していますが、話者は変わることがあります。"
+            hint.isHidden = !speakerPending
+            needsLayout = true
+        }
         let name = names.name(for: value.speaker)
         guard utterance != value || displayedName != name || displayedTimeline != timeline else { return false }
         let changed = utterance != nil && (utterance?.text != value.text || utterance?.speaker != value.speaker || displayedName != name)
@@ -198,7 +209,8 @@ final class TranscriptRow: NSView, DocumentRow {
         flash.frame = shade.frame
         avatar.frame = NSRect(x: 20, y: 8, width: 25, height: 26)
         // 太字の字形が計測幅の右端へ届くため、端数の丸めと描画の余白を確保する。
-        let nameWidth = min(ceil(nameLabel.intrinsicContentSize.width) + 4, max(70, bounds.width - 220))
+        let nameWidth = min(ceil(nameLabel.intrinsicContentSize.width) + 4,
+                            max(70, bounds.width - (hint.isHidden ? 220 : 300)))
         nameLabel.frame = NSRect(x: 54, y: 8, width: nameWidth, height: 18)
         speakerButton.frame = NSRect(x: 18, y: 5, width: nameWidth + 40, height: 29)
         timeLabel.frame = NSRect(x: 54 + nameWidth + 12, y: 8, width: 62, height: 18)

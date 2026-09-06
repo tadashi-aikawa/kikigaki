@@ -6,12 +6,12 @@ import Testing
     @Test func 後続確定結果が来るまで長い語頭の凍結を待つ() {
         let first = TimedToken(text: "僕", phraseId: 1, start: 185.46, end: 187.20)
         let next = TimedToken(text: "の", phraseId: 2, start: 187.20, end: 188.04)
-        #expect(SpeakerFreeze.advance(frozen: [], speakers: [1], tokens: [first], elapsed: 200, finalCount: 1).isEmpty)
-        #expect(SpeakerFreeze.advance(frozen: [], speakers: [1, 2], tokens: [first, next], elapsed: 200, finalCount: 1).isEmpty)
+        #expect(SpeakerFreeze.advance(frozen: [], speakers: [1], tokens: [first], elapsed: 220, finalCount: 1).isEmpty)
+        #expect(SpeakerFreeze.advance(frozen: [], speakers: [1, 2], tokens: [first, next], elapsed: 220, finalCount: 1).isEmpty)
         let segments: [SpeakerSegment] = [.init(speaker: 1, start: 185.36, end: 185.84),
                                          .init(speaker: 2, start: 186.96, end: 188.20)]
         let speakers = Aligner.speakers(for: [first, next], segments: segments)
-        #expect(SpeakerFreeze.advance(frozen: [], speakers: speakers, tokens: [first, next], elapsed: 200, finalCount: 2).first == 2)
+        #expect(SpeakerFreeze.advance(frozen: [], speakers: speakers, tokens: [first, next], elapsed: 220, finalCount: 2).first == 2)
     }
 
     private let toks = (0..<5).map { i in
@@ -20,8 +20,8 @@ import Testing
     private let judged: [Int?] = [0, 1, 0, 1, 0]
 
     @Test func 猶予より前に終わるトークンまで凍結する() {
-        // elapsed 11 - grace 8 = 3.0 より前に終わるのは end=1,2 の2個(end < 3.0 なので end=3 は含まない)
-        let result = SpeakerFreeze.advance(frozen: [], speakers: judged, tokens: toks, elapsed: 11, finalCount: 5)
+        // elapsed 33 - grace 30 = 3.0 より前に終わるのは end=1,2 の2個(end < 3.0 なので end=3 は含まない)
+        let result = SpeakerFreeze.advance(frozen: [], speakers: judged, tokens: toks, elapsed: 33, finalCount: 5)
         #expect(result == [0, 1])
     }
 

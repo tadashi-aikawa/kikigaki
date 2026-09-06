@@ -219,19 +219,26 @@ public enum Aligner {
 
     /// トークン列と話者列を発話行にまとめる。同じ話者でもトークン間が `gap` 秒以上空けば行を分ける
     public static func utterances(tokens: [TimedToken], speakers: [Int?], gap: Double = utteranceGapSeconds) -> [Utterance] {
-        var result: [Utterance] = []
-        for (tok, spk) in zip(tokens, speakers) {
-            if var last = result.last, last.speaker == spk, tok.start - last.end < gap {
-                last.text += tok.text
-                last.end = tok.end
-                result[result.count - 1] = last
-            } else {
-                result.append(Utterance(speaker: spk, start: tok.start, end: tok.end, text: tok.text))
+        utteranceTokenRanges(tokens: tokens, speakers: speakers, gap: gap).map { range in
+            Utterance(speaker: speakers[range.lowerBound], start: tokens[range.lowerBound].start,
+                      end: tokens[range.upperBound - 1].end,
+                      text: tokens[range].map(\.text).joined().trimmingCharacters(in: .whitespaces))
+        }
+    }
+
+    /// 表示と固定待ちの判定で同じ行境界を使う。時刻が重なるトークンも添字で区別する。
+    static func utteranceTokenRanges(tokens: [TimedToken], speakers: [Int?], gap: Double = utteranceGapSeconds) -> [Range<Int>] {
+        let count = min(tokens.count, speakers.count)
+        guard count > 0 else { return [] }
+        var result: [Range<Int>] = []
+        var start = 0
+        for index in 1..<count {
+            if speakers[index] != speakers[index - 1] || !(tokens[index].start - tokens[index - 1].end < gap) {
+                result.append(start..<index)
+                start = index
             }
         }
-        for i in result.indices {
-            result[i].text = result[i].text.trimmingCharacters(in: .whitespaces)
-        }
+        result.append(start..<count)
         return result
     }
 }
