@@ -34,6 +34,12 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
+            name: "KikigakiAppTests",
+            dependencies: ["Kikigaki", .product(name: "Testing", package: "swift-testing")],
+            path: "Tests/KikigakiAppTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .testTarget(
             name: "KikigakiCoreTests",
             dependencies: [
                 "KikigakiCore",
