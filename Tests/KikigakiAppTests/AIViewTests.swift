@@ -67,8 +67,10 @@ import KikigakiAIIO
         let waiting = try #require(marks().first { $0.title == "Q3 迅雷へ質問" })
         #expect(answer.accent == .unread && answer.accentColor == Washi.red)
         #expect(confirmation.accent == .confirmation)
+        #expect(answer.statusPill == "未読" && confirmation.statusPill == "確認待ち")
         #expect(answer.date == started.addingTimeInterval(370))
         try capture("collapsed", view: content.superview!)
+        try capture("unread-emphasis", view: content.superview!)
         state.previousAIUnread = 1; apply()
         var previousOpened = false
         window.onShowPreviousAI = { previousOpened = true }
@@ -88,10 +90,12 @@ import KikigakiAIIO
         #expect(descendants(answer).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "問い: " + requests[0].displayQuestion && !$0.isHidden })
         #expect(readIDs == [requests[0].id])
         #expect(answer.expanded && answer.accent == .muted)
+        #expect(answer.statusPill == nil)
         #expect(abs(answer.frame.minY - window.scrollView.contentView.bounds.minY - position) < 1)
         #expect(descendants(answer).compactMap { $0 as? NSTextField }.contains { $0.stringValue == body && $0.maximumNumberOfLines == 0 })
         #expect(!state.ai!.badges.contains("未読"))
         try capture("answer-expanded", view: content.superview!)
+        try capture("read-emphasis", view: content.superview!)
         state.names = SpeakerNames([0: "相川", 1: "松村"])
         state.utterances.append(Utterance(speaker: 1, start: 380, end: 385, text: "担当者は明日決めましょう。"))
         apply()
@@ -102,7 +106,7 @@ import KikigakiAIIO
         var replied: UUID?
         window.onAskAI = { replied = $0 }
         try click(confirmation); content.layoutSubtreeIfNeeded()
-        #expect(confirmation.accent == .confirmation)
+        #expect(confirmation.accent == .muted && confirmation.statusPill == nil)
         #expect(descendants(confirmation).compactMap { $0 as? NSTextField }.contains { $0.stringValue.hasPrefix("? 参加対象") })
         let reply = try #require(descendants(confirmation).compactMap { $0 as? NSButton }.first { $0.title == "返答する" })
         #expect(!reply.isHidden); reply.performClick(nil)

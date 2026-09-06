@@ -164,7 +164,7 @@ final class AIMarkRow: NSView, DocumentRow {
     private var confirming: Bool { mark.question.state == .needsInput && mark.question.answeredByRequestID == nil }
     var accent: Accent {
         guard mark.kind == .result else { return .muted }
-        if mark.question.result?.kind == .needsInput { return confirming ? .confirmation : .muted }
+        if mark.question.result?.kind == .needsInput { return confirming && mark.question.isUnread ? .confirmation : .muted }
         return mark.question.isUnread ? .unread : .muted
     }
     var accentColor: NSColor {
@@ -173,6 +173,17 @@ final class AIMarkRow: NSView, DocumentRow {
         case .unread: return Washi.red
         case .confirmation: return Washi.color(0xC4801F)
         }
+    }
+    var statusPill: String? {
+        switch accent {
+        case .unread: return "未読"
+        case .confirmation: return "確認待ち"
+        case .muted: return nil
+        }
+    }
+    private var pillWidth: CGFloat {
+        guard let statusPill else { return 0 }
+        return ceil((statusPill as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .bold)]).width) + 12
     }
     override var isFlipped: Bool { true }
     init(mark: AIInlineMark, state: AIViewState) {
@@ -251,9 +262,18 @@ final class AIMarkRow: NSView, DocumentRow {
     }
     private func updateVisibility() {
         let excerpt = mark.kind == .result ? " · " + mark.question.request.displayQuestion.components(separatedBy: .newlines).joined(separator: " ") : ""
-        toggle.title = (expanded ? "▾ " : "▸ ") + title + excerpt
-        toggle.contentTintColor = Washi.muted
-        toggle.setAccessibilityLabel(title + (expanded ? "、折りたたむ" : "、展開する"))
+        let heading = (expanded ? "▾ " : "▸ ") + title
+        let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byTruncatingTail
+        let label = NSMutableAttributedString(string: heading, attributes: [
+            .font: NSFont.systemFont(ofSize: 13, weight: accent == .muted ? .regular : .bold),
+            .foregroundColor: accentColor, .paragraphStyle: paragraph
+        ])
+        label.append(NSAttributedString(string: excerpt, attributes: [
+            .font: NSFont.systemFont(ofSize: 13), .foregroundColor: Washi.muted, .paragraphStyle: paragraph
+        ]))
+        toggle.contentTintColor = nil
+        toggle.attributedTitle = label
+        toggle.setAccessibilityLabel(title + (statusPill.map { "、" + $0 } ?? "") + (expanded ? "、折りたたむ" : "、展開する"))
         toggle.toolTip = title + excerpt
         questionText.isHidden = !expanded || mark.kind != .result
         body.isHidden = !expanded; detail.isHidden = !expanded
@@ -273,7 +293,7 @@ final class AIMarkRow: NSView, DocumentRow {
     }
     override func layout() {
         super.layout()
-        toggle.frame = NSRect(x: 64, y: 2, width: max(0, bounds.width - 158), height: 24)
+        toggle.frame = NSRect(x: 64, y: 2, width: max(0, bounds.width - 158 - (statusPill == nil ? 0 : pillWidth + 8)), height: 24)
         questionText.frame = NSRect(x: 68, y: 36, width: max(44, bounds.width - 90), height: max(0, measuredQuestion - 10))
         body.frame = NSRect(x: 68, y: 36 + measuredQuestion, width: max(44, bounds.width - 90), height: measuredBody)
         detail.frame = NSRect(x: 68, y: body.frame.maxY + 10, width: body.frame.width, height: measuredDetail)
@@ -287,8 +307,18 @@ final class AIMarkRow: NSView, DocumentRow {
         else { super.mouseDown(with: event) }
     }
     override func draw(_ dirtyRect: NSRect) {
+        if accent != .muted {
+            accentColor.withAlphaComponent(0.11).setFill(); bounds.fill()
+        }
         accentColor.setFill()
         NSRect(x: 56, y: 7, width: 1, height: expanded ? max(14, bounds.height - 19) : 14).fill()
+        if let statusPill {
+            let pill = NSRect(x: bounds.width - 88 - pillWidth, y: 3, width: pillWidth, height: 22)
+            NSBezierPath(roundedRect: pill, xRadius: 6, yRadius: 6).fill()
+            (statusPill as NSString).draw(at: NSPoint(x: pill.minX + 6, y: 7), withAttributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .bold), .foregroundColor: NSColor.white
+            ])
+        }
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "HH:mm:ss"
         (formatter.string(from: date) as NSString).draw(at: NSPoint(x: bounds.width - 80, y: 7), withAttributes: [
             .font: NSFont.systemFont(ofSize: 11), .foregroundColor: Washi.muted
