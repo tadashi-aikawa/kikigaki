@@ -20,14 +20,14 @@ public struct MeetingResult: Equatable, Sendable {
     }
 
     public static func make(tokens: [TimedToken], segments: [SpeakerSegment],
-                            dropRepeatedBackchannels: Bool) -> MeetingResult {
-        let speakers = Aligner.speakers(for: tokens, segments: segments)
+                            dropRepeatedBackchannels: Bool, mapping: SpeakerMapping = SpeakerMapping()) -> MeetingResult {
+        let speakers = mapping.apply(Aligner.speakers(for: tokens, segments: segments))
         let utterances = Aligner.utterances(tokens: tokens, speakers: speakers)
         guard dropRepeatedBackchannels else {
             return MeetingResult(speakers: speakers, utterances: utterances, processed: nil, candidates: [])
         }
         // 多数決前の窓判定も渡す。多数決で吸収された相槌を、元の話者で拾い直すため
-        let raw = tokens.map { Aligner.speaker(at: $0.midpoint, segments: segments, tiesAreUnknown: true) }
+        let raw = tokens.map { mapping.destination(for: Aligner.speaker(at: $0.midpoint, segments: segments, tiesAreUnknown: true)) }
         let candidates = RepeatedBackchannels.candidates(tokens: tokens, rawSpeakers: raw, speakers: speakers)
         let processed = RepeatedBackchannels.utterances(tokens: tokens, speakers: speakers, omitting: candidates)
         return MeetingResult(speakers: speakers, utterances: utterances, processed: processed, candidates: candidates)

@@ -76,6 +76,27 @@ import Testing
         #expect(try json(next)["previous_snapshot_id"] as? String == full.snapshotID.uuidString)
     }
 
+    @Test func 統合と解除で結合行が変わってもAIへ訂正として渡す() throws {
+        let dir = try directory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var history = HandoffHistory()
+        let tokens = [TimedToken(text: "前半", phraseId: 1, start: 1, end: 2),
+                      TimedToken(text: "後半", phraseId: 1, start: 2, end: 3)]
+        let raw: [Int?] = [0, 2]
+        let firstLines = Aligner.utterances(tokens: tokens, speakers: raw)
+        let first = try #require(history.copy(utterances: firstLines, names: .init(), outputDirectory: dir) { _ in true })
+        let merged = Aligner.utterances(tokens: tokens, speakers: SpeakerMapping(overrides: [2: 0]).apply(raw))
+        let correction = try #require(history.copy(utterances: merged, names: .init(), outputDirectory: dir) { _ in true })
+        #expect(correction.preview.includesCorrections)
+        #expect(correction.preview.startLine == 1)
+        #expect(correction.preview.totalLineCount == 1)
+        #expect(try String(contentsOf: correction.fileURL, encoding: .utf8).contains("話者A: 前半後半"))
+        let restored = try #require(history.copy(utterances: firstLines, names: .init(), outputDirectory: dir) { _ in true })
+        #expect(restored.preview.includesCorrections)
+        #expect(restored.preview.totalLineCount == 2)
+        #expect(try String(contentsOf: first.fileURL, encoding: .utf8).contains("話者C: 後半"))
+    }
+
     @Test func 空の初回は無効で末尾削除と全削除はゼロ行更新になる() throws {
         let dir = try directory()
         defer { try? FileManager.default.removeItem(at: dir) }

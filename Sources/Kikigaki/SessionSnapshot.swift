@@ -18,6 +18,12 @@ struct SessionSnapshot {
     var hasCopied = false
     var handoffMessage: String?
     var handoffFailed = false
+    /// 次の録音の人数上限。録音開始時に会議用の値へコピーする。
+    var maxSpeakers: Int?
+    var detectedSpeakerSlots: [Int] = []
+    var speakerMapping: [Int: Int] = [:]
+    var speakerOverrides: [Int: Int] = [:]
+    var speakerWarning: String?
 
     var canShare: Bool {
         markdownURL != nil && (state == .recording || state == .paused || state == .idle)

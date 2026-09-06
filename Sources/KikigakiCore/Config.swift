@@ -36,16 +36,19 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     public var saveRecording: Bool?
     /// 停止時に短い繰り返し相槌を省き、省略前のMarkdownも残す実験機能
     public var dropRepeatedBackchannels: Bool?
+    /// 会議の人数上限。省略すると従来の話者判別だけを使う。
+    public var maxSpeakers: Int?
     public var hotkeys: Hotkeys?
     public var speakers: [Speaker]?
 
     public init(outputDir: String? = nil, saveRecording: Bool? = nil, hotkeys: Hotkeys? = nil, dropRepeatedBackchannels: Bool? = nil,
-                speakers: [Speaker]? = nil) {
+                speakers: [Speaker]? = nil, maxSpeakers: Int? = nil) {
         self.outputDir = outputDir
         self.saveRecording = saveRecording
         self.hotkeys = hotkeys
         self.dropRepeatedBackchannels = dropRepeatedBackchannels
         self.speakers = speakers
+        self.maxSpeakers = maxSpeakers
     }
 }
 
@@ -62,6 +65,7 @@ public struct ResolvedConfig: Equatable, Sendable {
     /// 別エンジンでの再処理のとき(タダシの決定)
     public var saveRecording: Bool
     public var dropRepeatedBackchannels: Bool
+    public var maxSpeakers: Int?
     public var toggleRecording: KikigakiConfig.Hotkey
     public var togglePause: KikigakiConfig.Hotkey
     public var speakers: [KikigakiConfig.Speaker]
@@ -70,6 +74,7 @@ public struct ResolvedConfig: Equatable, Sendable {
         outputDir = Self.expand(config.outputDir ?? Self.defaultOutputDir, home: home)
         saveRecording = config.saveRecording ?? false
         dropRepeatedBackchannels = config.dropRepeatedBackchannels ?? false
+        maxSpeakers = config.maxSpeakers
         toggleRecording = config.hotkeys?.toggleRecording ?? Self.defaultToggleRecording
         togglePause = config.hotkeys?.togglePause ?? Self.defaultTogglePause
         speakers = (config.speakers ?? []).map { speaker in
@@ -122,6 +127,9 @@ public enum ConfigLoader {
     public static let modifierNames: Set<String> = ["cmd", "command", "alt", "option", "ctrl", "control", "shift"]
 
     private static func validate(_ config: KikigakiConfig) throws {
+        if let maximum = config.maxSpeakers, !(1...4).contains(maximum) {
+            throw ConfigError.invalid(description: "maxSpeakers must be between 1 and 4")
+        }
         var speakerNames = Set<String>()
         for speaker in config.speakers ?? [] {
             let name = SpeakerNames.normalized(speaker.name)

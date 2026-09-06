@@ -44,6 +44,22 @@ private func temporaryDirectory() throws -> URL {
         #expect(try String(contentsOf: MeetingFiles.rawURL(for: url), encoding: .utf8) == MeetingMarkdown.render(original))
     }
 
+    @Test func 統合訂正で省略された本文を両保存先へ復元する() throws {
+        let dir = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = try MeetingFiles.reserveMarkdownURL(in: dir, startedAt: original.startedAt)
+        var archive = MeetingArchive(original: original, processed: processed, candidateCount: 1, markdownURL: url)
+        #expect(archive.save().succeeded)
+        var utterances = original.utterances
+        utterances[0].speaker = 1
+        archive.replaceResult(.init(speakers: [1], utterances: utterances, processed: utterances, candidates: []))
+        #expect(archive.save().utterances == utterances)
+        let raw = try String(contentsOf: MeetingFiles.rawURL(for: url), encoding: .utf8)
+        let displayed = try String(contentsOf: url, encoding: .utf8)
+        #expect(raw == displayed)
+        #expect(raw.contains("話者B: うんうん先週"))
+    }
+
     @Test func 原文保存失敗は省略せず改名時に再試行しても省略しない() throws {
         let dir = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }

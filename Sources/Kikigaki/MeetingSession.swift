@@ -26,6 +26,12 @@ private struct PipelineResult {
     var frozen: [Int?] = []
 }
 
+private struct SpeakerTranscript {
+    var tokens: [TimedToken] = []
+    var speakers: [Int?] = []
+    var finalCount = 0
+}
+
 /// 会議1本の録音〜保存の流れ。音源→(WAV)+話者判別+文字起こし→突き合わせ→表示、停止で Markdown を保存
 @MainActor
 final class MeetingSession {
@@ -47,6 +53,12 @@ final class MeetingSession {
     /// 停止後に話者名を付け直して保存し直すために持つ
     private var archive: MeetingArchive?
     private var dropRepeatedBackchannels = false
+    private var speakerMapping = SpeakerMapping()
+    private var voiceMatcher: SpeakerVoiceMatcher?
+    private var liveSource = SpeakerTranscript()
+    private var finalTokens: [TimedToken] = []
+    private var finalSegments: [SpeakerSegment] = []
+    private var preparationID = UUID()
     private var handoff = HandoffHistory()
     private let diagnostics = Diagnostics()
 
@@ -55,12 +67,14 @@ final class MeetingSession {
         self.models = models
         self.log = log
         snapshot.speakers = config.speakers
+        snapshot.maxSpeakers = config.maxSpeakers
     }
 
     /// 設定の再読込。次の会議から反映する(進行中の会議の保存先は開始時に確定済み)
     func update(config: ResolvedConfig) {
         self.config = config
         snapshot.speakers = config.speakers
+        if snapshot.state == .idle { snapshot.maxSpeakers = config.maxSpeakers }
         emit()
     }
 
@@ -70,10 +84,19 @@ final class MeetingSession {
     @discardableResult
     func start(source: AudioSource) async -> Bool {
         guard snapshot.state.canStart else { return false }
+        let preparation = UUID()
+        preparationID = preparation
         // 準備中や録音中の再読込で、同じ会議の保存方針を途中から切り替えない。
         let meetingConfig = config
+        let maximum = snapshot.maxSpeakers
         dropRepeatedBackchannels = meetingConfig.dropRepeatedBackchannels
         snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers, message: "エンジンを準備中...")
+        snapshot.maxSpeakers = maximum
+        speakerMapping = SpeakerMapping(limited: maximum != nil)
+        liveSource = SpeakerTranscript()
+        finalTokens = []
+        finalSegments = []
+        voiceMatcher = nil
         handoff = HandoffHistory()
         archive = nil
         emit()
@@ -85,7 +108,22 @@ final class MeetingSession {
             let models = try await models()
             let transcriber = try await AppleTranscriber(log: log)
             let diarizer = SpeakerDiarizer(models: models)
-            guard snapshot.state == .preparing else { return false }  // 準備中に停止や終了が走った
+            guard snapshot.state == .preparing, preparationID == preparation else { return false }
+            if let maximum {
+                snapshot.message = "声の照合を準備中…初回は追加モデルを取得します"
+                emit()
+                do {
+                    let matcher = try await SpeakerVoiceMatcher.load(limit: maximum)
+                    guard snapshot.state == .preparing, preparationID == preparation else { return false }
+                    voiceMatcher = matcher
+                }
+                catch {
+                    guard snapshot.state == .preparing, preparationID == preparation else { return false }
+                    snapshot.speakerWarning = "声の照合を準備できませんでした。統合先を手動で指定してください: \(error.localizedDescription)"
+                    log(snapshot.speakerWarning!)
+                }
+            }
+            guard snapshot.state == .preparing, preparationID == preparation else { return false }
 
             startedAt = Date()
             pause.reset(startedAt: startedAt)
@@ -105,7 +143,7 @@ final class MeetingSession {
             // SpeechTranscriber は実時間に十分追いつく。プロトで実測)
             let (stream, continuation) = AsyncStream<[Float]>.makeStream()
             samplesIn = continuation
-            consumer = makeConsumer(stream: stream, transcriber: transcriber, diarizer: diarizer, wav: wav)
+            consumer = makeConsumer(stream: stream, transcriber: transcriber, diarizer: diarizer, wav: wav, matcher: voiceMatcher)
             let pause = self.pause
             // 一時停止の判定は収録時(音声スレッド)に行う。消費側で判定すると、処理が遅れている間に
             // 収録した分が利用者の操作した境界とずれる
@@ -120,6 +158,7 @@ final class MeetingSession {
             emit()
             return true
         } catch {
+            guard preparationID == preparation, snapshot.state == .preparing else { return false }
             log("開始に失敗: \(error)")
             await tearDown()
             // 自分が確保した空の予約だけを片付ける。WAVや書き込み済みの本文は残す。
@@ -127,6 +166,8 @@ final class MeetingSession {
                 do { try FileManager.default.removeItem(at: reservation) } catch { log("予約ファイルの片付けに失敗: \(error)") }
             }
             snapshot = SessionSnapshot(state: .idle, message: "開始に失敗: \(error.localizedDescription)")
+            snapshot.maxSpeakers = maximum
+            snapshot.speakers = config.speakers
             emit()
             return false
         }
@@ -163,14 +204,19 @@ final class MeetingSession {
         if let diarizer {
             do { try diarizer.finish() } catch { log("話者判別の終了に失敗: \(error)") }
             segments = diarizer.segments()
+            await voiceMatcher?.finish(segments: segments)
+            receiveSpeakerState(segments: segments, automatic: voiceMatcher?.identity.mapping ?? [:], warning: voiceMatcher?.warning)
             diarizer.cleanup()
         }
         transcriber = nil
         diarizer = nil
+        voiceMatcher = nil
+        finalTokens = tokens
+        finalSegments = segments
 
         diagnostics.liveLines(snapshot.utterances, names: snapshot.names).forEach(log)
         let final = MeetingResult.make(tokens: tokens, segments: segments,
-                                       dropRepeatedBackchannels: dropRepeatedBackchannels)
+                                       dropRepeatedBackchannels: dropRepeatedBackchannels, mapping: speakerMapping)
         diagnostics.backchannelLines(tokens: tokens, candidates: final.candidates).forEach(log)
         diagnostics.phraseLines(tokens: tokens, segments: segments, speakers: final.speakers).forEach(log)
 
@@ -216,6 +262,28 @@ final class MeetingSession {
         if archive != nil {
             archive?.original.names = names
             save()
+        }
+        emit()
+    }
+
+    func setSpeakerLimit(_ maximum: Int?) {
+        guard snapshot.state == .idle, maximum == nil || (1...4).contains(maximum!) else { return }
+        snapshot.maxSpeakers = maximum
+        emit()
+    }
+
+    func setSpeakerMapping(source: Int, target: Int?) {
+        guard snapshot.canShare, snapshot.detectedSpeakerSlots.contains(source),
+              target == nil || snapshot.detectedSpeakerSlots.contains(target!) else { return }
+        speakerMapping.overrides[source] = target
+        refreshSpeakerMapping()
+        if archive != nil {
+            let result = MeetingResult.make(tokens: finalTokens, segments: finalSegments,
+                dropRepeatedBackchannels: dropRepeatedBackchannels, mapping: speakerMapping)
+            archive?.replaceResult(result)
+            save()
+        } else {
+            refreshLive()
         }
         emit()
     }
@@ -282,12 +350,13 @@ final class MeetingSession {
         diarizer?.cleanup()
         diarizer = nil
         transcriber = nil
+        voiceMatcher = nil
     }
 
     /// 音声を1本の消費タスクで処理する。WAV書き出し→話者判別→文字起こしの順に同じチャンクを流し、
     /// 0.5秒ごとに突き合わせて表示へ渡す。話者判定は `SpeakerFreeze` の猶予を過ぎた分から凍結する
     private func makeConsumer(
-        stream: AsyncStream<[Float]>, transcriber: AppleTranscriber, diarizer: SpeakerDiarizer, wav: WavWriter?
+        stream: AsyncStream<[Float]>, transcriber: AppleTranscriber, diarizer: SpeakerDiarizer, wav: WavWriter?, matcher: SpeakerVoiceMatcher?
     ) -> Task<PipelineResult, Never> {
         let log = self.log
         // self を強く持つ。stop() が消費タスクの終了を待つので、タスクの寿命は会議の間だけ
@@ -299,6 +368,8 @@ final class MeetingSession {
                 do { try wav?.write(chunk) } catch { log("WAV書き出しに失敗: \(error)") }
                 do { try diarizer.process(chunk) } catch { log("話者判別に失敗: \(error)") }
                 do { try transcriber.feed(chunk) } catch { log("文字起こしへの入力に失敗: \(error)") }
+                matcher?.append(chunk)
+                if let matcher, matcher.needsUpdate { matcher.update(segments: diarizer.segments()) }
 
                 guard Date().timeIntervalSince(lastDraw) >= 0.5 else { continue }
                 lastDraw = Date()
@@ -308,19 +379,44 @@ final class MeetingSession {
                 let speakers = Aligner.speakers(for: tokens, segments: segments, frozen: result.frozen)
                 result.frozen = SpeakerFreeze.advance(
                     frozen: result.frozen, speakers: speakers, tokens: tokens, elapsed: elapsed, finalCount: finalCount)
-                let live = LiveTranscript(tokens: tokens, speakers: speakers, finalCount: finalCount)
-                await MainActor.run { self.publishLive(live, elapsed: elapsed) }
+                let live = SpeakerTranscript(tokens: tokens, speakers: speakers, finalCount: finalCount)
+                let automatic = matcher?.identity.mapping ?? [:]
+                let warning = matcher?.warning
+                await MainActor.run {
+                    self.receiveSpeakerState(segments: segments, automatic: automatic, warning: warning)
+                    self.publishLive(live, elapsed: elapsed)
+                }
             }
             return result
         }
     }
 
-    private func publishLive(_ live: LiveTranscript, elapsed: Double) {
-        guard snapshot.state == .recording || snapshot.state == .paused else { return }
+    private func receiveSpeakerState(segments: [SpeakerSegment], automatic: [Int: Int], warning: String?) {
+        snapshot.detectedSpeakerSlots = Set(segments.map(\.speaker).filter { (0..<4).contains($0) }).sorted()
+        speakerMapping.automatic = automatic
+        if let warning { snapshot.speakerWarning = warning }
+        refreshSpeakerMapping()
+    }
+
+    private func refreshSpeakerMapping() {
+        snapshot.speakerOverrides = speakerMapping.overrides
+        snapshot.speakerMapping = Dictionary(uniqueKeysWithValues: snapshot.detectedSpeakerSlots.compactMap { source in
+            speakerMapping.destination(for: source).map { (source, $0) }
+        })
+    }
+
+    private func refreshLive() {
+        let live = LiveTranscript(tokens: liveSource.tokens, speakers: speakerMapping.apply(liveSource.speakers), finalCount: liveSource.finalCount)
         snapshot.utterances = live.utterances
         snapshot.tentativeText = live.tentativeText
+    }
+
+    private func publishLive(_ live: SpeakerTranscript, elapsed: Double) {
+        guard snapshot.state == .recording || snapshot.state == .paused else { return }
+        liveSource = live
+        refreshLive()
         snapshot.elapsed = elapsed
-        diagnostics.liveTraceLines(live.utterances, names: snapshot.names, elapsed: elapsed).forEach(log)
+        diagnostics.liveTraceLines(snapshot.utterances, names: snapshot.names, elapsed: elapsed).forEach(log)
         emit()
     }
 }

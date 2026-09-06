@@ -32,7 +32,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 
 ## 設定
 
-`~/.config/kikigaki/config.toml` (TOML)。設定UIはありません。すべて省略可で、省略時は既定値です。
+`~/.config/kikigaki/config.toml` (TOML)。すべて省略可で、省略時は既定値です。話者の人数上限と統合先は画面からも操作できます。
 
 ```toml
 # Markdown (と録音WAV) の保存先。既定: ~/Documents/KIKIGAKI
@@ -41,6 +41,8 @@ outputDir = "~/Documents/KIKIGAKI"
 saveRecording = false
 # 実験機能: 停止時に短い繰り返し相槌の候補を省く。原文を .raw.md にも保存する。既定: false
 dropRepeatedBackchannels = false
+# 任意: 話者の人数上限。1〜4。省略すると従来の自動判別のみ
+# maxSpeakers = 2
 
 # グローバルショートカット。既定は ctrl+alt+cmd+K (開始/停止) と ctrl+alt+cmd+P (一時停止/再開)
 [hotkeys.toggleRecording]
@@ -62,6 +64,8 @@ avatar = "https://example.com/jinrai.webp"
 ```
 
 話者名かアバターをクリックすると、台帳の候補選択・自由入力・既定名へのリセットができます。同じ枡の全発言に反映し、停止後は保存も更新します。別の枡で使用中の候補は選べません。台帳の名前は空と重複を認めません。
+
+ウィンドウ上部の「話者…」で次の録音の人数上限を選べます。人数指定時はWeSpeakerで声を照合し、同一人物として分裂した話者を統合します。判定材料が不足する枠は話者不明として残し、同じ画面から統合先の手動訂正・分離・自動への復帰ができます。停止後の変更は通常Markdownと省略前Markdownにも反映します。詳しい条件は [人数上限と話者統合](docs/speaker-limit.md) を参照してください。
 
 画像はローカルパスとHTTP・HTTPSのURLに対応します。取得できない画像はイニシャルで表示し、URL画像は `~/Library/Caches/kikigaki/avatars/` へキャッシュします。台帳の変更は既存の設定再読込で反映します。
 

@@ -33,6 +33,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onCopy: ((Bool) -> Void)?
     var onRecopy: (() -> Void)?
     var onOpenMarkdown: (() -> Void)?
+    var onSpeakerLimitChange: ((Int?) -> Void)?
+    var onSpeakerMappingChange: ((Int, Int?) -> Void)?
+    private let speakerButton = NSButton(title: "話者…", target: nil, action: nil)
+    private let speakerWarningLabel = NSTextField(wrappingLabelWithString: "")
+    private var speakerSettingsPopover: SpeakerSettingsPopover?
     private let startStopButton = NSButton()
     private let pauseButton = NSButton()
     private let openButton = NSButton()
@@ -135,6 +140,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         messageLabel.stringValue = message
         messageLabel.isHidden = message.isEmpty
         messageLabel.textColor = value.state == .idle && !value.saved && !message.isEmpty ? Washi.red : Washi.muted
+        speakerWarningLabel.stringValue = value.speakerWarning ?? ""
+        speakerWarningLabel.isHidden = speakerWarningLabel.stringValue.isEmpty
+        speakerSettingsPopover?.update(snapshot: value)
         copyButton.title = value.hasCopied ? "前回コピー以降をコピー" : "会話をコピー"
         copyButton.isEnabled = value.canShare && value.handoffPreview != nil
         copyButton.attributedTitle = NSAttributedString(string: copyButton.title, attributes: [
@@ -213,6 +221,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         configure(openButton, #selector(openPressed))
         configure(copyButton, #selector(copyPressed))
         configure(latestButton, #selector(latestPressed))
+        configure(speakerButton, #selector(speakerPressed))
+        speakerButton.setAccessibilityLabel("話者の人数上限と統合先")
         for button in [startStopButton, pauseButton, openButton] {
             button.widthAnchor.constraint(equalToConstant: 34).isActive = true
             button.heightAnchor.constraint(equalToConstant: 28).isActive = true
@@ -228,6 +238,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         elapsedLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         messageLabel.font = .systemFont(ofSize: 12)
         messageLabel.maximumNumberOfLines = 3
+        speakerWarningLabel.font = .systemFont(ofSize: 12)
+        speakerWarningLabel.textColor = Washi.red
+        speakerWarningLabel.setAccessibilityLabel("話者判別の警告")
         rangeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         rangeLabel.lineBreakMode = .byTruncatingMiddle
         rangeLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -236,8 +249,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         logoRule.widthAnchor.constraint(equalToConstant: 1).isActive = true
         logoRule.heightAnchor.constraint(equalToConstant: 20).isActive = true
         let status = row([statusDot, statusLabel, elapsedLabel], spacing: 8)
-        let controls = row([Washi.logoView(size: 26), logoRule, status, NSView(), pauseButton, startStopButton, openButton], spacing: 12)
-        let header = column([controls, messageLabel], spacing: 8, inset: 12)
+        let controls = row([Washi.logoView(size: 26), logoRule, status, NSView(), speakerButton, pauseButton, startStopButton, openButton], spacing: 12)
+        let header = column([controls, messageLabel, speakerWarningLabel], spacing: 8, inset: 12)
         Washi.surface(header)
         scrollView.documentView = transcriptDocument
         transcriptDocument.wantsLayer = true
@@ -339,6 +352,15 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     @objc private func startStopPressed() { onStartStop?() }
     @objc private func pausePressed() { onPauseResume?() }
     @objc private func openPressed() { onOpenMarkdown?() }
+    @objc private func speakerPressed() {
+        if let popover = speakerSettingsPopover, popover.isShown { popover.close(); return }
+        renamePopover?.close()
+        let popover = SpeakerSettingsPopover(snapshot: snapshot)
+        popover.onLimitChange = { [weak self] limit in self?.onSpeakerLimitChange?(limit) }
+        popover.onMappingChange = { [weak self] slot, target in self?.onSpeakerMappingChange?(slot, target) }
+        speakerSettingsPopover = popover
+        popover.present(relativeTo: speakerButton.bounds, of: speakerButton)
+    }
     private func copyWithNotice(_ action: () -> Void) {
         clearHandoffNotice()
         updateRangeLabel()
@@ -384,6 +406,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     }
     private func showRename(slot: Int, relativeTo view: NSView) {
         guard snapshot.canShare, (0..<SpeakerNames.slotCount).contains(slot) else { return }
+        speakerSettingsPopover?.close()
         renamePopover?.close()
         let popover = SpeakerPopover(slot: slot, names: snapshot.names, speakers: snapshot.speakers, avatars: avatars)
         popover.onRename = { [weak self] name in self?.onRename?(slot, name) }

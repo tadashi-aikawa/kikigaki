@@ -44,6 +44,15 @@ import Testing
         #expect(result.processed?.first?.start == 75.06)
     }
 
+    @Test func 統合後は同じ人の相槌を消さず解除すると原判定から再計算する() {
+        let mapping = SpeakerMapping(overrides: [1: 0])
+        let merged = MeetingResult.make(tokens: tokens, segments: segments, dropRepeatedBackchannels: true, mapping: mapping)
+        #expect(merged.candidates.isEmpty)
+        #expect(merged.processed?.map(\.text) == ["うんうん先週も言ってました。"])
+        let restored = MeetingResult.make(tokens: tokens, segments: segments, dropRepeatedBackchannels: true)
+        #expect(restored.candidates == [0..<4])
+    }
+
     @Test func 発話がなければどちらも空() {
         for drop in [false, true] {
             let result = MeetingResult.make(tokens: [], segments: [], dropRepeatedBackchannels: drop)

@@ -4,8 +4,8 @@ import Foundation
 public struct MeetingArchive {
     public var original: MeetingMarkdown.Meeting
     public let markdownURL: URL
-    private let processed: [Utterance]?
-    private let candidateCount: Int
+    private var processed: [Utterance]?
+    private var candidateCount: Int
     private var ownsRawFile = false
     private var omissionDisabledAfterFailure = false
 
@@ -20,6 +20,13 @@ public struct MeetingArchive {
         public var utterances: [Utterance]
         public var message: String
         public var succeeded: Bool
+    }
+
+    /// 統合訂正は原トークンから再計算した結果を入れる。raw所有権と省略失敗状態は維持する。
+    public mutating func replaceResult(_ result: MeetingResult) {
+        original.utterances = result.utterances
+        processed = result.processed
+        candidateCount = result.candidates.count
     }
 
     public mutating func save() -> SaveResult {
