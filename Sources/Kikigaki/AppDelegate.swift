@@ -2,6 +2,45 @@ import AppKit
 import FluidAudio
 import KikigakiCore
 
+/// replayだけで使う開発用入力。通常起動では環境変数自体を解釈しない。
+struct ReplayDebugOptions {
+    struct Question { let seconds: Double; let text: String }
+    var questions: [Question] = []
+    var hold: Double = 0
+    var rename: (slot: Int, name: String)?
+    static func load() throws -> Self {
+        guard CommandLine.arguments.contains("--replay") else { return Self() }
+        let env = ProcessInfo.processInfo.environment
+        var result = Self()
+        if let input = env["KIKIGAKI_DEBUG_AI_ASK"], !input.isEmpty {
+            for entry in input.split(separator: ";", omittingEmptySubsequences: false) {
+                let pair = entry.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+                guard pair.count == 2, let seconds = Double(pair[0]), seconds.isFinite, seconds >= 0 else {
+                    throw AIError.invalid("KIKIGAKI_DEBUG_AI_ASK")
+                }
+                result.questions.append(Question(seconds: seconds, text: String(pair[1])))
+            }
+            result.questions = result.questions.enumerated().sorted {
+                $0.element.seconds == $1.element.seconds ? $0.offset < $1.offset : $0.element.seconds < $1.element.seconds
+            }.map(\.element)
+        }
+        if let input = env["KIKIGAKI_DEBUG_REPLAY_HOLD"] {
+            guard let seconds = Double(input), seconds.isFinite, (0...86400).contains(seconds) else {
+                throw AIError.invalid("KIKIGAKI_DEBUG_REPLAY_HOLD")
+            }
+            result.hold = seconds
+        }
+        if let input = env["KIKIGAKI_DEBUG_AI_RENAME"] {
+            let pair = input.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard pair.count == 2, let slot = Int(pair[0]), (0..<SpeakerNames.slotCount).contains(slot) else {
+                throw AIError.invalid("KIKIGAKI_DEBUG_AI_RENAME")
+            }
+            result.rename = (slot, String(pair[1]))
+        }
+        return result
+    }
+}
+
 /// 全体の配線。設定の読み込み、モデルの先読み、メニュー・ウィンドウ・ショートカットとセッションの接続
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -21,6 +60,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var aiSheetMeetingID: UUID?
     private var previousAI: AIPastMeetingsWindow?
     private var registeredAIHotkey: KikigakiConfig.Hotkey?
+    private let replayDebug: ReplayDebugOptions
+    private var nextDebugQuestion = 0
+    private var replayHolding = false
+    private var debugRenamed = false
+    private var performingReplayDebug = false
+    init(replayDebug: ReplayDebugOptions = .init()) { self.replayDebug = replayDebug; super.init() }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = ApplicationMenu.make()
@@ -84,6 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.statusItem?.update(state: snapshot.state, elapsed: snapshot.elapsed)
             self.window?.apply(snapshot)
             self.previousAI?.update()
+            self.performReplayDebugActions(snapshot)
             if self.registeredAIHotkey != session.aiConfiguration?.hotkey, let config = self.config { _ = self.registerHotkeys(config) }
             if let sheet = self.aiSheet {
                 if self.aiSheetMeetingID != session.aiMeetingID || !snapshot.canShare || snapshot.ai?.submissionID != nil {
@@ -152,6 +198,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     Task { @MainActor in
                         await self?.session?.stop()
                         Self.log("replay 完了: \(self?.session?.snapshot.markdownURL?.path ?? "-")")
+                        if let self, self.replayDebug.hold > 0 {
+                            self.replayHolding = true
+                            Self.log("replay HOLD開始: \(self.replayDebug.hold)秒")
+                            if let snapshot = self.session?.snapshot { self.performReplayDebugActions(snapshot) }
+                            try? await Task.sleep(nanoseconds: UInt64(self.replayDebug.hold * 1_000_000_000))
+                            self.performReplayRename()
+                            self.replayHolding = false
+                        }
                         NSApp.terminate(nil)
                     }
                 }
@@ -176,6 +230,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let dir = config?.outputDir else { return }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         NSWorkspace.shared.open(dir)
+    }
+
+    private func performReplayDebugActions(_ snapshot: SessionSnapshot) {
+        guard replayURL != nil, !performingReplayDebug, snapshot.state == .recording || replayHolding else { return }
+        performingReplayDebug = true
+        defer { performingReplayDebug = false }
+        if replayHolding, snapshot.ai?.conversation?.questions.contains(where: { $0.result != nil }) == true {
+            performReplayRename()
+        }
+        guard nextDebugQuestion < replayDebug.questions.count, let session else { return }
+        let question = replayDebug.questions[nextDebugQuestion]
+        guard snapshot.elapsed >= question.seconds, snapshot.ai?.canSubmit == true else { return }
+        // callbackの再入や回答待ちで二重送信しない。送信可能になるまで順番を保って待つ。
+        nextDebugQuestion += 1
+        Self.log("replay AI質問\(nextDebugQuestion): 指定\(question.seconds)秒、音声\(snapshot.elapsed)秒で送信開始")
+        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
+        session.submitAI(question: question.text, full: false, parent: nil, helper: helper)
+    }
+    private func performReplayRename() {
+        guard replayHolding, !debugRenamed, let rename = replayDebug.rename, let session else { return }
+        debugRenamed = true
+        Self.log("replay AI改名: 枡\(rename.slot)")
+        session.rename(slot: rename.slot, to: rename.name)
     }
 
     private func reloadConfig() {
