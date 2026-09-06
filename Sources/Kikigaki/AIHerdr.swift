@@ -116,7 +116,9 @@ struct AIHerdr: Sendable {
         case "blocked": status = .blocked
         default: status = .unknown
         }
-        let ready = status == .idle && agent.interactive_ready == true && (target.provider == .codex || !(session ?? "").isEmpty)
+        // `interactive_ready` は `agent start` で起こしたagentにしか付かない(実測: herdr 0.8.2 の `agent get` は
+        // `pane run` で起こしたCodexにこの項目を返さない)。無い場合は idle をもって入力可能とみなす。
+        let ready = status == .idle && agent.interactive_ready != false && (target.provider == .codex || !(session ?? "").isEmpty)
         return AIHerdrObservation(status: status, ready: ready, sessionID: session, terminalID: agent.terminal_id)
     }
     func prompt(_ target: AIHerdrConnection, text: String, beforeSend: @Sendable () async throws -> Void = {}) async throws {

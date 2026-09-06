@@ -41,6 +41,22 @@ import TOMLKit
         try await adapter.label(.init(workspaceID: "w", paneID: "p", provider: .codex), participant: "迅雷")
         #expect(captured.captured.isEmpty)
     }
+    @Test func interactive_readyが無いagentはidleなら入力可能とみなす() async throws {
+        // 実測(herdr 0.8.2): command指定で pane run から起こしたCodexは agent get に interactive_ready を返さない
+        for (status, expected) in [("idle", true), ("working", false), ("unknown", false)] {
+            let adapter = AIHerdr(run: { _, _ in
+                let agent: [String: Any] = ["workspace_id": "w", "pane_id": "p", "agent": "codex", "agent_status": status]
+                return AIProcessOutput(status: 0, stdout: try JSONSerialization.data(withJSONObject: ["result": ["agent": agent]]), stderr: Data())
+            })
+            let observed = try await adapter.observe(.init(workspaceID: "w", paneID: "p", provider: .codex))
+            #expect(observed.ready == expected, "status=\(status)")
+        }
+        let falseReady = AIHerdr(run: { _, _ in
+            let agent: [String: Any] = ["workspace_id": "w", "pane_id": "p", "agent": "codex", "agent_status": "idle", "interactive_ready": false]
+            return AIProcessOutput(status: 0, stdout: try JSONSerialization.data(withJSONObject: ["result": ["agent": agent]]), stderr: Data())
+        })
+        #expect(try await falseReady.observe(.init(workspaceID: "w", paneID: "p", provider: .codex)).ready == false)
+    }
     @Test func 同じ失敗が続く間はログを1回に留め成功後は再び記録する() async throws {
         let captured = CapturedLog()
         let failing = AIHerdr(run: { _, _ in
