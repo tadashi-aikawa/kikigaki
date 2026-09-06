@@ -34,6 +34,13 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onRecopy: (() -> Void)?
     var onOpenMarkdown: (() -> Void)?
     var onSpeakerMappingChange: ((Int, Int?) -> Void)?
+    var onAskAI: ((UUID?) -> Void)?
+    var onReadAI: ((UUID) -> Void)?
+    var onOpenAIPane: (() -> Void)?
+    var onCancelAI: ((UUID) -> Void)?
+    private let aiPanel = AIPanel()
+    private let askButton = NSButton(title: "AIに質問…", target: nil, action: nil)
+    private var aiMarks: [String: AIMarkRow] = [:]
     private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
     private var speakerSettingsPopover: SpeakerSettingsPopover?
     private let startStopButton = NSButton()
@@ -104,6 +111,13 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     func apply(_ value: SessionSnapshot) {
         let previous = snapshot
         snapshot = value
+        aiPanel.isHidden = value.ai == nil
+        askButton.isHidden = value.ai == nil
+        if let ai = value.ai {
+            aiPanel.update(ai, newMeeting: previous.timeline.startedAt != value.timeline.startedAt)
+            askButton.title = "AIに質問…  " + ai.shortcut
+            askButton.isEnabled = value.canShare
+        }
         if previous.state != value.state || previous.timeline.startedAt != value.timeline.startedAt { clearHandoffNotice() }
         if copyRequested || previous.handoffMessage != value.handoffMessage || previous.handoffFailed != value.handoffFailed {
             clearHandoffNotice()
@@ -147,7 +161,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         ])
         copyButton.menu = handoffMenu()
         updateRangeLabel()
-        emptyView.isHidden = !value.utterances.isEmpty || value.tentativeText != nil
+        emptyView.isHidden = !value.utterances.isEmpty || value.tentativeText != nil || !(value.ai?.conversation?.questions.isEmpty ?? true)
         emptyLabel.stringValue = value.state == .idle ? "録音を開始すると、会話がここに表示されます。" : "発言を待っています…"
         updateRows(previous: previous)
         refreshSearch(reset: previous.timeline.startedAt != value.timeline.startedAt, reveal: false)
@@ -177,7 +191,22 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private func updateRows(previous: SessionSnapshot) {
         var anchor = transcriptDocument.anchor()
         let sameMeeting = previous.timeline.startedAt == snapshot.timeline.startedAt
-        if !sameMeeting { rows.removeAll(); anchor = .init(candidates: [], y: 0, atBottom: true) }
+        if !sameMeeting { rows.removeAll(); aiMarks.removeAll(); anchor = .init(candidates: [], y: 0, atBottom: true) }
+        if sameMeeting, previous.utterances == snapshot.utterances, previous.ai?.conversation != snapshot.ai?.conversation {
+            // 回答の到着だけでは末尾へ移動しない。人間の発言が増えたときの追従は従来どおり。
+            anchor = .init(candidates: anchor.candidates, y: anchor.y, atBottom: false)
+        }
+        var marks: [(String, Date, String)] = []
+        for question in snapshot.ai?.conversation?.questions ?? [] {
+            let name = question.request.envelope.participant.participantName
+            let prefix = "Q\(question.request.number) " + name
+            if let sent = question.sendAttemptedAt { marks.append((question.request.id.uuidString + "/send", sent, prefix + "へ質問")) }
+            if let arrived = question.resultReceivedAt {
+                marks.append((question.request.id.uuidString + "/result", arrived, prefix + (question.result?.kind == .needsInput ? "の確認" : "の回答")))
+            }
+        }
+        marks = marks.enumerated().sorted { $0.element.1 == $1.element.1 ? $0.offset < $1.offset : $0.element.1 < $1.element.1 }.map(\.element)
+        var markIndex = 0
         let animated = sameMeeting && !shouldReduceMotion()
         var next: [RowID: TranscriptRow] = [:]
         var ordered: [any DocumentRow] = []
@@ -185,6 +214,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         var inserted: [TranscriptRow] = []
         var changed: [TranscriptRow] = []
         for (index, utterance) in snapshot.utterances.enumerated() {
+            while markIndex < marks.count, marks[markIndex].1 < snapshot.timeline.date(at: utterance.start) {
+                let mark = marks[markIndex]
+                let view = markView(mark)
+                aiMarks[mark.0] = view; ordered.append(view); markIndex += 1
+            }
             if snapshot.hasCopied, snapshot.handoffPreview?.startLine == index + 1 { ordered.append(boundary) }
             let occurrence = occurrences[utterance.start, default: 0]
             occurrences[utterance.start] = occurrence + 1
@@ -197,6 +231,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             row.onRename = { [weak self] slot, view in self?.showRename(slot: slot, relativeTo: view) }
             next[id] = row
             ordered.append(row)
+        }
+        while markIndex < marks.count {
+            let mark = marks[markIndex]
+            let view = markView(mark)
+            aiMarks[mark.0] = view; ordered.append(view); markIndex += 1
         }
         if let tentative = snapshot.tentativeText {
             tentativeRow.updateTentative(tentative)
@@ -220,6 +259,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         configure(copyButton, #selector(copyPressed))
         configure(latestButton, #selector(latestPressed))
         configure(speakerButton, #selector(speakerPressed))
+        configure(askButton, #selector(askPressed))
+        aiPanel.onReply = { [weak self] in self?.onAskAI?($0) }
+        aiPanel.onRead = { [weak self] in self?.onReadAI?($0) }
+        aiPanel.onPane = { [weak self] in self?.onOpenAIPane?() }
+        aiPanel.onCancel = { [weak self] in self?.onCancelAI?($0) }
+        aiPanel.isHidden = true; askButton.isHidden = true
+        askButton.isBordered = false
+        askButton.setContentHuggingPriority(.required, for: .horizontal)
         speakerButton.setAccessibilityLabel("話者の統合先")
         for button in [startStopButton, pauseButton, openButton] {
             button.widthAnchor.constraint(equalToConstant: 34).isActive = true
@@ -276,7 +323,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         let title = Washi.label("AIへ渡す会話", size: 13, weight: .semibold)
         let footerTitle = row([title, NSView(), rangeLabel], spacing: 12)
         copyButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let footer = column([footerTitle, copyButton], spacing: 8, inset: 16)
+        let footerButtons = row([askButton, copyButton], spacing: 12)
+        let footer = column([footerTitle, footerButtons], spacing: 8, inset: 16)
         Washi.surface(footer)
         searchField.placeholderString = "会話を検索"
         searchField.setAccessibilityLabel("会話を検索")
@@ -299,7 +347,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         for view in [searchField, searchCount, searchPrevious, searchNext, close] { searchBar.addArrangedSubview(view) }
         Washi.surface(searchBar)
         searchBar.isHidden = true
-        return column([header, searchBar, separator(), body, separator(), footer], spacing: 0, inset: 0)
+        return column([header, searchBar, separator(), body, separator(), aiPanel, footer], spacing: 0, inset: 0)
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -345,6 +393,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         return view
     }
     @objc private func startStopPressed() { onStartStop?() }
+    private func markView(_ mark: (String, Date, String)) -> AIMarkRow {
+        if let current = aiMarks[mark.0], current.title == mark.2, current.date == mark.1 { return current }
+        return AIMarkRow(title: mark.2, date: mark.1)
+    }
+    @objc private func askPressed() { onAskAI?(nil) }
     @objc private func pausePressed() { onPauseResume?() }
     @objc private func openPressed() { onOpenMarkdown?() }
     @objc private func speakerPressed() {

@@ -176,8 +176,8 @@ final class AIPanel: NSStackView {
         toggle.heightAnchor.constraint(equalToConstant: 24).isActive = true
         scroll.hasVerticalScroller = true; scroll.drawsBackground = false; scroll.documentView = document
         document.autoresizingMask = [.width]; document.followsBottom = false
-        scroll.heightAnchor.constraint(lessThanOrEqualToConstant: 174).isActive = true
-        let preferred = scroll.heightAnchor.constraint(equalToConstant: 174); preferred.priority = .defaultHigh; preferred.isActive = true
+        scroll.heightAnchor.constraint(lessThanOrEqualToConstant: 140).isActive = true
+        let preferred = scroll.heightAnchor.constraint(equalToConstant: 140); preferred.priority = .defaultHigh; preferred.isActive = true
         scroll.isHidden = true
     }
     required init?(coder: NSCoder) { fatalError() }
