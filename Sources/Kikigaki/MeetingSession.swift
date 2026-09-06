@@ -65,6 +65,8 @@ final class MeetingSession {
     private let aiStore: AIRecordStore?
     private var meetingAI: ResolvedAIConfig?
     private var aiTask: Task<Void, Never>?
+    private enum AIPhase { case confirmationWait, preparingAndSending }
+    private var aiPhase: AIPhase?
     private var aiProgress: String?
     private var aiWarning: String?
     private(set) var aiDraft = ""
@@ -172,7 +174,9 @@ final class MeetingSession {
 
     func stop() async {
         guard snapshot.state.canStop else { return }
-        cancelAIPreparation()
+        // 録音の停止で破棄するのは、まだ会話を確定していない問いだけ。
+        // prepare以降は固定済みの会話を使い、最終保存と並行して接続・送信を続ける。
+        if aiPhase == .confirmationWait { cancelAIPreparation() }
         snapshot.state = .finishing
         snapshot.message = "最終判定と保存中..."
         emit()
@@ -351,7 +355,7 @@ final class MeetingSession {
     func retryAISaves() { aiStore?.retrySaves() }
 
     func cancelAIPreparation() {
-        aiTask?.cancel(); aiTask = nil; aiProgress = nil
+        aiTask?.cancel(); aiTask = nil; aiPhase = nil; aiProgress = nil
         if let controller = aiRecord?.controller {
             for q in controller.conversation.questions where q.state == .prepared { try? controller.cancel(q.request.id) }
         }
@@ -383,11 +387,12 @@ final class MeetingSession {
         let meetingID = handoff.meetingID, capturedAt = Date(), cutoff = snapshot.state == .idle ? snapshot.elapsed : pause.audioTime
         let names = snapshot.names, timeline = snapshot.timeline
         aiDraft = question; aiCompleted = nil; aiWarning = nil; aiProgress = "送信の準備中"
+        aiPhase = .confirmationWait
         aiTask = Task { [weak self] in
             guard let self else { return }
             var request: AIRequest?
             defer {
-                if meetingID == handoff.meetingID, !Task.isCancelled { aiTask = nil; aiProgress = nil; emit() }
+                if meetingID == handoff.meetingID, !Task.isCancelled { aiTask = nil; aiPhase = nil; aiProgress = nil; emit() }
             }
             do {
                 let record = try aiStore.begin(meetingID: meetingID, markdownURL: url, config: config)
@@ -410,6 +415,8 @@ final class MeetingSession {
                 }, progress: { seconds in self.aiProgress = "聞き取りの確定待ち · あと\(seconds)秒"; self.emit() })
                 try Task.checkCancellation()
                 guard consumedAudioTime >= cutoff else { throw AIError.invalid("audio not processed") }
+                // prepareの通知から録音停止が始まっても、確定待ちの取消へ戻さない。
+                aiPhase = .preparingAndSending
                 let fixed = try record.controller.prepare(lines: capture.lines, question: question, voiceQuestion: capture.voice,
                     capturedAt: capturedAt, cutoff: cutoff, tail: capture.tail, config: config, helper: helper, parent: parent, full: full)
                 request = fixed
@@ -420,7 +427,7 @@ final class MeetingSession {
                 let format = DateFormatter(); format.dateFormat = "HH:mm"
                 try await record.controller.connect(config: config, label: "KIKIGAKI \(config.participantName) \(format.string(from: startedAt))", executable: executable, arguments: arguments)
                 try Task.checkCancellation()
-                guard handoff.meetingID == meetingID, snapshot.canShare else { throw CancellationError() }
+                guard handoff.meetingID == meetingID else { throw CancellationError() }
                 aiProgress = "質問を送信中"; emit()
                 try await record.controller.send(fixed, config: config)
                 aiDraft = ""; aiCompleted = fixed.id
@@ -442,6 +449,25 @@ final class MeetingSession {
         }
         emit()
     }
+
+#if DEBUG
+    /// 音声エンジンを起動せず、送信と録音終了の競合を本番メソッドで検証するための初期状態。
+    convenience init(testingRecordingAt url: URL, config: ResolvedConfig, aiStore: AIRecordStore,
+                     recordedSamples: Int = 0, finishAudio: @escaping () async -> Void = {}) {
+        self.init(config: config, models: { throw CancellationError() }, log: { _ in }, aiStore: aiStore)
+        snapshot.state = .recording; snapshot.markdownURL = url
+        let (stream, continuation) = AsyncStream<[Float]>.makeStream()
+        pause.accept(Array(repeating: 0, count: recordedSamples), into: continuation)
+        continuation.finish()
+        consumer = Task {
+            for await _ in stream { }
+            await finishAudio()
+            return PipelineResult(fedSamples: recordedSamples)
+        }
+        emit()
+    }
+    var submissionTaskForTesting: Task<Void, Never>? { aiTask }
+#endif
 
     private func tearDown() async {
         source?.stop()
