@@ -2,7 +2,7 @@ import AppKit
 import KikigakiCore
 
 enum AIBadgeKind: String, CaseIterable {
-    case unread = "未読", confirmation = "確認待ち", waiting = "回答待ち", unknown = "送達不明", failed = "失敗"
+    case unread = "未読", confirmation = "確認待ち", waiting = "返事待ち", unknown = "送達不明", failed = "失敗"
     func matches(_ question: AIQuestion) -> Bool {
         switch self {
         case .unread: return question.isUnread && question.result?.kind != .needsInput
@@ -102,19 +102,24 @@ struct AIInlineMark {
     enum Kind { case question, result }
     let question: AIQuestion
     let kind: Kind
+    var parentNumber: Int? = nil
     var id: String { question.request.id.uuidString + (kind == .question ? "/send" : "/result") }
     var date: Date {
         kind == .question ? question.sendAttemptedAt ?? question.request.envelope.participant.capturedAt
             : question.resultReceivedAt ?? question.request.envelope.participant.capturedAt
     }
     var title: String {
-        let prefix = "Q\(question.request.number) " + question.request.envelope.participant.participantName
-        if kind == .question { return prefix + "へ質問" + (question.state == .deliveryUnknown ? "・送達不明" : "") }
-        return prefix + (question.result?.kind == .needsInput ? "の確認" : question.result?.kind == .failed ? "の失敗報告" : "の回答")
+        let prefix = "#\(question.request.number) " + question.request.envelope.participant.participantName
+        if kind == .question {
+            let label = parentNumber.map { "#\(question.request.number) #\($0)への返答" } ?? prefix + "へ"
+            return label + (question.state == .deliveryUnknown ? "・送達不明" : "")
+        }
+        return prefix + (question.result?.kind == .needsInput ? "の確認" : question.result?.kind == .failed ? "の失敗報告" : "から")
     }
     static func ordered(_ conversation: AIConversation?) -> [Self] {
         (conversation?.questions ?? []).flatMap { question -> [Self] in
-            var marks = [Self(question: question, kind: .question)]
+            let parent = conversation?.questions.first { $0.request.id == question.request.envelope.participant.inReplyToRequestID }?.request.number
+            var marks = [Self(question: question, kind: .question, parentNumber: parent)]
             if question.resultReceivedAt != nil { marks.append(Self(question: question, kind: .result)) }
             return marks
         }.sorted {
@@ -202,7 +207,7 @@ final class AIMarkRow: NSView, DocumentRow {
         self.mark = mark; self.state = state
         let question = mark.question
         let paragraph = NSMutableParagraphStyle(); paragraph.lineSpacing = 4
-        let originalQuestion = "問い: " + question.request.displayQuestion
+        let originalQuestion = "送信文: " + question.request.displayQuestion
         if questionText.stringValue != originalQuestion {
             questionText.attributedStringValue = NSAttributedString(string: originalQuestion, attributes: [
                 .font: NSFont.systemFont(ofSize: 12), .foregroundColor: Washi.muted, .paragraphStyle: paragraph
@@ -229,19 +234,19 @@ final class AIMarkRow: NSView, DocumentRow {
             case .cancelled: status = "取消"
             case .failed: status = "失敗" + ((question.failure ?? question.result?.body).map { " · " + $0 } ?? "")
             case .needsInput: status = confirming ? "確認待ち" : "返答済み"
-            case .answered: status = "回答済み"
+            case .answered: status = "返事済み"
             case .submitted, .accepted:
-                if state.connection == .blocked { status = "回答待ち · ペインで確認してください" }
-                else if state.connection == .disconnected { status = "回答待ち · 接続が切れています" }
-                else if state.unconfirmed.contains(question.request.id) { status = "回答待ち · 返送未確認" }
-                else { status = "送信済み · 回答を待っています" }
+                if state.connection == .blocked { status = "返事待ち · ペインで確認してください" }
+                else if state.connection == .disconnected { status = "返事待ち · 接続が切れています" }
+                else if state.unconfirmed.contains(question.request.id) { status = "返事待ち · 返送未確認" }
+                else { status = "送信済み · 返事を待っています" }
             }
             notes.append(status)
         } else {
             let formatter = DateFormatter(); formatter.dateFormat = "HH:mm:ss"
             notes.append("到着: " + formatter.string(from: date))
-            if question.cancelledAt != nil { notes.append("取消後の回答") }
-            if question.request.envelope.participant.sessionGeneration < state.generation { notes.append("旧接続からの回答") }
+            if question.cancelledAt != nil { notes.append("取消後の返事") }
+            if question.request.envelope.participant.sessionGeneration < state.generation { notes.append("旧接続からの返事") }
             if question.answeredByRequestID != nil { notes.append("返答済み") }
         }
         let details = notes.joined(separator: "\n")
@@ -261,7 +266,8 @@ final class AIMarkRow: NSView, DocumentRow {
         if expanded && mark.kind == .result && mark.question.isUnread { onRead?() }
     }
     private func updateVisibility() {
-        let excerpt = mark.kind == .result ? " · " + mark.question.request.displayQuestion.components(separatedBy: .newlines).joined(separator: " ") : ""
+        let showExcerpt = mark.kind == .result || mark.parentNumber != nil || mark.question.request.envelope.participant.questionSource == .typed
+        let excerpt = showExcerpt ? " · " + mark.question.request.displayQuestion.components(separatedBy: .newlines).joined(separator: " ") : ""
         let heading = (expanded ? "▾ " : "▸ ") + title
         let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byTruncatingTail
         let label = NSMutableAttributedString(string: heading, attributes: [

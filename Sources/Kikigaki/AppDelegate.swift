@@ -327,7 +327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let question = parent.flatMap { id in session.aiRecord?.controller.conversation.questions.first { $0.request.id == id } }
         let range = session.aiRangePreview(full: false)
         let sheet = AIQuestionSheet(participant: config.participantName, parentNumber: question?.request.number,
-            draft: session.aiDraft, voice: snapshot.tentativeText ?? snapshot.utterances.last?.text ?? "空欄なら会話末尾の問いを送ります",
+            draft: session.aiDraft, voice: snapshot.tentativeText ?? snapshot.utterances.last?.text ?? "空欄なら会話末尾を送ります",
             range: range, tentative: snapshot.tentativeText != nil, canSubmit: snapshot.ai?.canSubmit == true, confirmation: question?.result?.body,
             workAllowed: session.aiWorkAllowed)
         sheet.onDraft = { session.updateAIDraft($0) }

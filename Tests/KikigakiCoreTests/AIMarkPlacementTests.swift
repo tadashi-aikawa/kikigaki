@@ -24,10 +24,10 @@ import KikigakiCore
         let lines = MeetingMarkdown.render(meeting, timeZone: TimeZone(secondsFromGMT: 0)!).components(separatedBy: "\n")
         let questionLine = try #require(lines.firstIndex { $0.contains("改名後: 問い") })
         let laterLine = try #require(lines.firstIndex { $0.contains("後続の発言") })
-        let mark = try #require(lines.firstIndex { $0.contains("AIへ質問 Q1") })
+        let mark = try #require(lines.firstIndex { $0.contains("AIへ #1") })
         #expect(mark == (typed ? laterLine : questionLine) + 1)
         #expect(lines[mark].contains("[00:00:30]"))
-        #expect(try #require(lines.firstIndex { $0.contains("[00:00:41] AI回答 Q1") }) > laterLine)
+        #expect(try #require(lines.firstIndex { $0.contains("[00:00:41] AIから #1") }) > laterLine)
         #expect(try AIJSON.decode(AIRequest.self, from: AIJSON.encode(request)).voiceUtteranceStart == (typed ? nil : 10))
     }
     @Test func 旧requestと対象なしは時刻へ戻り不正な位置を拒否する() throws {

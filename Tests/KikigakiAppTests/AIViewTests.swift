@@ -18,14 +18,58 @@ import KikigakiAIIO
         try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: output).appendingPathComponent(name + ".png"))
     }
     private let started = Date(timeIntervalSince1970: 1_788_759_600)
-    private func request(_ number: Int, history: inout AIStreamHistory, root: URL, question: String = "抜けている観点はありますか", voiceStart: Double? = nil) throws -> AIRequest {
+    private func request(_ number: Int, history: inout AIStreamHistory, root: URL, question: String = "抜けている観点はありますか", voiceStart: Double? = nil, parent: UUID? = nil) throws -> AIRequest {
         let snapshot = try history.prepare(lines: ["[14:05:20] 田中: 社内で体験会を開きます。", "[14:05:30] 松村: 抜けている観点はありますか。"], outputDirectory: root)
         let participant = AIParticipantContext(streamID: history.streamID, requestID: UUID(), sessionGeneration: 1,
             participantName: "迅雷", cliPath: root.appendingPathComponent("helper").path,
             sessionPath: root.appendingPathComponent(".kikigaki-context/\(snapshot.meetingID.uuidString)/ai/sessions/1.json").path, requestToken: UUID().uuidString,
-            question: question, capturedAt: started.addingTimeInterval(Double(320 + number * 5)), audioCutoffSeconds: 330)
+            question: question, capturedAt: started.addingTimeInterval(Double(320 + number * 5)), audioCutoffSeconds: 330,
+            inReplyToRequestID: parent, inReplyToEventID: parent.map { "\($0.uuidString)/result" })
         return try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant), number: number,
             voiceQuestion: "うんうん、悪くはないかな。ありがとう。", snapshot: snapshot, voiceUtteranceStart: voiceStart)
+    }
+
+    @Test func 宛名と親番号で送信と返事を表示する() throws {
+        _ = NSApplication.shared
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
+        let first = try request(1, history: &history, root: root, question: "案内文をファイルへ追記して")
+        var conversation = AIConversation(meetingID: meeting)
+        try conversation.append(first)
+        try conversation.update(first.id) { try $0.beginSending(at: started.addingTimeInterval(325)); try $0.submitted() }
+        _ = try conversation.receive(AIReceiveEvent(request: first, kind: .needsInput, recordedAt: started.addingTimeInterval(326), body: "社内向けの案内でよいですか？", reason: "clarification"), at: started.addingTimeInterval(326))
+        let followup = try request(2, history: &history, root: root, question: "はい、社内向けでお願いします", parent: first.id)
+        try conversation.append(followup)
+        try conversation.update(followup.id) { try $0.beginSending(at: started.addingTimeInterval(330)); try $0.submitted() }
+        _ = try conversation.receive(AIReceiveEvent(request: followup, kind: .answered, recordedAt: started.addingTimeInterval(331), body: "案内文を追記しました。"), at: started.addingTimeInterval(331))
+        let marks = AIInlineMark.ordered(conversation)
+        #expect(marks.map(\.title) == ["#1 迅雷へ", "#1 迅雷の確認", "#2 #1への返答", "#2 迅雷から"])
+        #expect(AIMarkdown.section(conversation).contains("### AI #1"))
+        var state = SessionSnapshot(ai: AIViewState(conversation: conversation), state: .recording,
+            utterances: [.init(speaker: 0, start: 320, end: 322, text: "案内は社内向けで進めましょう。")],
+            timeline: .init(startedAt: started), elapsed: 340, markdownURL: root.appendingPathComponent("meeting.md"))
+        state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
+        let window = TranscriptWindowController(shouldReduceMotion: { true })
+        window.window!.setFrameAutosaveName("")
+        window.window!.setFrame(NSRect(x: 20000, y: 20000, width: 680, height: 620), display: false)
+        window.apply(state)
+        let content = window.window!.contentView!; content.layoutSubtreeIfNeeded()
+        let labels = descendants(content).compactMap { $0 as? NSButton }.map(\.title)
+        #expect(labels.contains("▸ #1 迅雷へ · 案内文をファイルへ追記して"))
+        #expect(labels.contains("▸ #2 #1への返答 · はい、社内向けでお願いします"))
+        try capture("wording-marks", view: content.superview!)
+        let sheet = AIQuestionSheet(participant: "迅雷", parentNumber: nil, draft: "次の案内も整えてください", voice: "", range: "直近1発言", tentative: false, canSubmit: true)
+        #expect(descendants(sheet.window.contentView!).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "迅雷へ" })
+        let footer = try #require(descendants(content).compactMap { $0 as? NSTextField }.first { $0.stringValue == "AIへ渡す会話" }?.superview?.superview)
+        let bitmap = try #require(footer.bitmapImageRepForCachingDisplay(in: footer.bounds)); footer.cacheDisplay(in: footer.bounds, to: bitmap)
+        let footerImage = NSImage(size: footer.bounds.size); footerImage.addRepresentation(bitmap)
+        let sheetContent = sheet.window.contentView!
+        let composite = NSBox(frame: NSRect(x: 0, y: 0, width: 680, height: 470))
+        composite.boxType = .custom; composite.borderType = .noBorder; composite.fillColor = Washi.paper
+        let footerView = NSImageView(frame: NSRect(x: 0, y: 0, width: 680, height: footer.bounds.height)); footerView.image = footerImage
+        composite.addSubview(footerView); composite.addSubview(sheetContent)
+        sheetContent.frame = NSRect(x: 88, y: 110, width: 504, height: 344)
+        try capture("wording-sheet-footer", view: composite)
     }
 
     @Test func 印をその場で展開し既読と件数と更新後の展開を保つ() throws {
@@ -57,14 +101,14 @@ import KikigakiAIIO
         func apply() { state.ai?.conversation = conversation; window.apply(state); content.layoutSubtreeIfNeeded() }
         func marks() -> [AIMarkRow] { window.transcriptDocument.rows.compactMap { $0 as? AIMarkRow } }
         apply()
-        #expect(state.ai?.badges == "未読 1 · 確認待ち 1 · 回答待ち 1 · 失敗 1")
-        #expect(descendants(content).compactMap { $0 as? AIBadgeButton }.filter { !$0.isHidden }.map(\.title) == ["未読 1", "確認待ち 1", "回答待ち 1", "失敗 1"])
+        #expect(state.ai?.badges == "未読 1 · 確認待ち 1 · 返事待ち 1 · 失敗 1")
+        #expect(descendants(content).compactMap { $0 as? AIBadgeButton }.filter { !$0.isHidden }.map(\.title) == ["未読 1", "確認待ち 1", "返事待ち 1", "失敗 1"])
         #expect(descendants(content).compactMap { $0 as? NSScrollView }.count == 1)
         #expect(!descendants(content).compactMap { $0 as? NSButton }.contains { $0.title.contains("AIとのやりとり") || $0.title == "既読にする" })
         #expect(marks().count == 6 && marks().allSatisfy { !$0.expanded && $0.height(for: 680) == 28 })
-        let answer = try #require(marks().first { $0.title == "Q1 迅雷の回答" })
-        let confirmation = try #require(marks().first { $0.title == "Q2 迅雷の確認" })
-        let waiting = try #require(marks().first { $0.title == "Q3 迅雷へ質問" })
+        let answer = try #require(marks().first { $0.title == "#1 迅雷から" })
+        let confirmation = try #require(marks().first { $0.title == "#2 迅雷の確認" })
+        let waiting = try #require(marks().first { $0.title == "#3 迅雷へ" })
         #expect(answer.accent == .unread && answer.accentColor == Washi.red)
         #expect(confirmation.accent == .confirmation)
         #expect(answer.statusPill == "未読" && confirmation.statusPill == "確認待ち")
@@ -74,7 +118,7 @@ import KikigakiAIIO
         state.previousAIUnread = 1; apply()
         var previousOpened = false
         window.onShowPreviousAI = { previousOpened = true }
-        let previous = try #require(descendants(content).compactMap { $0 as? AIBadgeButton }.first { $0.title == "前の会議に回答あり" })
+        let previous = try #require(descendants(content).compactMap { $0 as? AIBadgeButton }.first { $0.title == "前の会議に返事あり" })
         previous.performClick(nil); #expect(previousOpened)
         let footer = try #require(descendants(content).compactMap { $0 as? NSTextField }.first { $0.stringValue == "AIへ渡す会話" }?.superview?.superview)
         try capture("footer-badges", view: footer)
@@ -87,7 +131,7 @@ import KikigakiAIIO
         let position = answer.frame.minY - window.scrollView.contentView.bounds.minY
         try click(answer)
         content.layoutSubtreeIfNeeded()
-        #expect(descendants(answer).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "問い: " + requests[0].displayQuestion && !$0.isHidden })
+        #expect(descendants(answer).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "送信文: " + requests[0].displayQuestion && !$0.isHidden })
         #expect(readIDs == [requests[0].id])
         #expect(answer.expanded && answer.accent == .muted)
         #expect(answer.statusPill == nil)
@@ -122,7 +166,7 @@ import KikigakiAIIO
         try capture("question-expanded", view: content.superview!)
         state.state = .idle; apply()
         #expect(waiting.expanded && answer.accent == .muted)
-        let failed = try #require(marks().first { $0.title == "Q4 迅雷へ質問" })
+        let failed = try #require(marks().first { $0.title == "#4 迅雷へ" })
         try click(failed)
         #expect(descendants(failed).compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains("失敗 · 接続先を確認してください") })
         #expect(descendants(failed).compactMap { $0 as? NSButton }.filter { $0.title == "取消" }.allSatisfy { $0.isHidden })
@@ -161,7 +205,7 @@ import KikigakiAIIO
         try click(question)
         let answer = try #require(rows.compactMap { $0 as? AIMarkRow }.first { $0.mark.kind == .result })
         let toggle = try #require(descendants(answer).compactMap { $0 as? NSButton }.first { $0.title.hasPrefix("▸ ") })
-        #expect(toggle.title == "▸ Q1 迅雷の回答 · " + request.displayQuestion)
+        #expect(toggle.title == "▸ #1 迅雷から · " + request.displayQuestion)
         #expect(toggle.cell?.lineBreakMode == .byTruncatingTail)
         #expect(toggle.frame.maxX <= answer.bounds.width - 80)
         try capture("fb3-answer-collapsed", view: content.superview!)
@@ -247,7 +291,7 @@ import KikigakiAIIO
         window.update()
         #expect(descendants(content).compactMap { $0 as? AIMarkRow }.contains { $0 === answer && $0.expanded })
         let buttons = descendants(content).compactMap { $0 as? NSButton }
-        #expect(!buttons.contains { $0.title.hasPrefix("AIに質問") })
+        #expect(!buttons.contains { $0.title.hasPrefix("AIへ") })
         #expect(buttons.filter { ["取消", "返答する"].contains($0.title) }.allSatisfy { $0.isHidden })
         #expect(descendants(content).compactMap { $0 as? NSPopUpButton }.first?.titleOfSelectedItem == "old")
         try capture("previous-meeting", view: content.superview!)

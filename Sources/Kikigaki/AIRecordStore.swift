@@ -68,7 +68,7 @@ final class AIRecordStore {
                         let archive = try AIJSON.decode(MeetingArchive.self, from: files.read(base + ["archive.json"]))
                         try validate(archive, manifest: manifest)
                         record.archive = archive
-                    } catch { record.saveWarning = "保存用の会議データを読めません。回答は受信箱に保持します" }
+                    } catch { record.saveWarning = "保存用の会議データを読めません。返事は受信箱に保持します" }
                     bind(record)
                     try controller.watch()
                     changed(record)
@@ -109,7 +109,7 @@ final class AIRecordStore {
                     let archive = try AIJSON.decode(MeetingArchive.self, from: AIFileStore(root: record.controller.outputDirectory)
                         .read(Self.base(record.manifest.meetingID) + ["archive.json"]))
                     try validate(archive, manifest: record.manifest); record.archive = archive
-                } catch { record.saveWarning = "保存用の会議データを読めません。回答は受信箱に保持します" }
+                } catch { record.saveWarning = "保存用の会議データを読めません。返事は受信箱に保持します" }
             }
             persistArchive(record)
         }
@@ -150,7 +150,7 @@ final class AIRecordStore {
             record.hasUnpersistedChanges = !result.succeeded || !result.rawSucceeded
             record.saveWarning = record.hasUnpersistedChanges ? result.message : nil
             if !record.hasUnpersistedChanges { record.savedConversation = record.controller.conversation }
-        } catch { record.hasUnpersistedChanges = true; record.saveResult = nil; record.saveWarning = "会議データの保存に失敗。回答は受信箱に保持します" }
+        } catch { record.hasUnpersistedChanges = true; record.saveResult = nil; record.saveWarning = "会議データの保存に失敗。返事は受信箱に保持します" }
     }
     private func persistRegistry() throws {
         guard registryHealthy else { throw AIError.invalid("registry unavailable") }

@@ -21,16 +21,16 @@ public enum AIMarkdown {
         for question in ai.questions {
             let number = question.request.number
             if let sent = question.sendAttemptedAt {
-                let label = question.state == .deliveryUnknown ? "AIへ質問・送達不明" : "AIへ質問"
+                let label = question.state == .deliveryUnknown ? "AIへ・送達不明" : "AIへ"
                 let line = Line(date: sent, kind: 1, order: number,
-                    text: "- [\(stamp(sent, relativeTo: meeting.startedAt, timeZone: timeZone))] \(label) Q\(number) → AIとのやりとり")
+                    text: "- [\(stamp(sent, relativeTo: meeting.startedAt, timeZone: timeZone))] \(label) #\(number) → AIとのやりとり")
                 if let index = question.request.voiceAnchorIndex(in: meeting.utterances) { attached[index, default: []].append(line) }
                 else { lines.append(line) }
             }
             if let result = question.result, let received = question.resultReceivedAt {
-                let label = result.kind == .needsInput ? "AI確認質問" : result.kind == .failed ? "AI失敗" : "AI回答"
+                let label = result.kind == .needsInput ? "AIからの確認" : result.kind == .failed ? "AI失敗" : "AIから"
                 lines.append(Line(date: received, kind: 2, order: question.resultOrder ?? 0,
-                    text: "- [\(stamp(received, relativeTo: meeting.startedAt, timeZone: timeZone))] \(label) Q\(number) → AIとのやりとり"))
+                    text: "- [\(stamp(received, relativeTo: meeting.startedAt, timeZone: timeZone))] \(label) #\(number) → AIとのやりとり"))
             }
         }
         return lines.sorted {
@@ -50,26 +50,26 @@ public enum AIMarkdown {
             let request = question.request
             let envelope = request.envelope
             let participant = envelope.participant
-            lines += ["", "### AI Q\(request.number)", ""]
+            lines += ["", "### AI #\(request.number)", ""]
             if let sent = question.sendAttemptedAt { lines.append("- 送信: " + date(sent, timeZone: timeZone)) }
             lines.append("- 宛先: " + oneLine(participant.participantName))
-            lines.append("- 問い: 「" + oneLine(request.displayQuestion.isEmpty ? "会話末尾の問い" : request.displayQuestion) + "」")
+            lines.append("- 送信文: 「" + oneLine(request.displayQuestion.isEmpty ? "会話末尾の送信文" : request.displayQuestion) + "」")
             let range = envelope.readLineCount == 0 ? "読む行数0" : "\(envelope.readStartLine)〜\(envelope.totalLineCount)行"
             let times = request.timeRange.map { "(\($0.start)〜\($0.end))" } ?? ""
             lines.append("- 対象: \(range)\(times)" + (participant.tentativeTail == nil ? "" : "。暫定末尾を含む"))
             lines.append("- 作業許可: " + (participant.workAllowed ? "あり" : "なし"))
             if let accepted = question.acceptance { lines.append("- 受領: " + date(accepted.recordedAt, timeZone: timeZone)) }
             if let result = question.result {
-                lines.append("- 回答: " + date(result.recordedAt, timeZone: timeZone))
-                if question.cancelledAt != nil { lines.append("- 補足: 取消後の回答") }
-                if participant.sessionGeneration < generation { lines.append("- 補足: 旧接続からの回答") }
+                lines.append("- 返事: " + date(result.recordedAt, timeZone: timeZone))
+                if question.cancelledAt != nil { lines.append("- 補足: 取消後の返事") }
+                if participant.sessionGeneration < generation { lines.append("- 補足: 旧接続からの返事") }
                 if question.answeredByRequestID != nil { lines.append("- 確認: 返答済み") }
                 if result.kind == .needsInput { lines.append("- 状態: 確認待ち") }
                 if result.kind == .failed { lines.append("- 状態: 失敗") }
-                lines += ["", "#### 回答", "", result.body ?? ""]
+                lines += ["", "#### 返事", "", result.body ?? ""]
             } else {
                 lines.append("- 状態: " + label(question.state))
-                if let failure = question.failure { lines += ["", "#### 回答", "", failure] }
+                if let failure = question.failure { lines += ["", "#### 返事", "", failure] }
             }
         }
         return lines.joined(separator: "\n")
@@ -79,9 +79,9 @@ public enum AIMarkdown {
         switch state {
         case .prepared: return "送信準備済み"
         case .submitted: return "受領未確認"
-        case .accepted: return "回答待ち"
+        case .accepted: return "返事待ち"
         case .needsInput: return "確認待ち"
-        case .answered: return "回答済み"
+        case .answered: return "返事済み"
         case .failed: return "失敗"
         case .deliveryUnknown: return "送達不明"
         case .cancelled: return "取消"

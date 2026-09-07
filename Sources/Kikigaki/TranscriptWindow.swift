@@ -41,13 +41,13 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onRecreateAI: (() -> Void)?
     var onRetryAISave: (() -> Void)?
     var onShowPreviousAI: (() -> Void)?
-    private lazy var previousAIButton = AIBadgeButton("前の会議に回答あり") { [weak self] in self?.onShowPreviousAI?() }
+    private lazy var previousAIButton = AIBadgeButton("前の会議に返事あり") { [weak self] in self?.onShowPreviousAI?() }
     private let aiBadges = AIBadgeBar()
     private let aiNotice = Washi.label(size: 11, color: Washi.muted)
     private lazy var reconnectAI = AIActionButton("AIセッションを作り直す") { [weak self] in self?.onRecreateAI?() }
     private lazy var retryAISave = AIActionButton("保存を再試行") { [weak self] in self?.onRetryAISave?() }
     private let aiStatusRow = NSStackView()
-    private let askButton = NSButton(title: "AIに質問…", target: nil, action: nil)
+    private let askButton = NSButton(title: "AIへ…", target: nil, action: nil)
     private var aiMarks: [String: AIMarkRow] = [:]
     private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
     private var speakerSettingsPopover: SpeakerSettingsPopover?
@@ -121,7 +121,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         let previous = snapshot
         snapshot = value
         previousAIButton.isHidden = value.previousAIUnread == 0 && value.aiRecoveryWarning == nil
-        previousAIButton.title = value.aiRecoveryWarning == nil ? "前の会議に回答あり" : "AI回答の回収を確認"
+        previousAIButton.title = value.aiRecoveryWarning == nil ? "前の会議に返事あり" : "AIの返事の回収を確認"
         previousAIButton.toolTip = value.aiRecoveryWarning
         transcriptBottom?.constant = value.ai == nil ? 0 : -34
         aiBadges.update(value.ai)
@@ -133,7 +133,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         aiStatusRow.isHidden = aiNotice.isHidden && reconnectAI.isHidden && retryAISave.isHidden
         askButton.isHidden = value.ai == nil
         if let ai = value.ai {
-            askButton.title = "AIに質問…  " + ai.shortcut
+            askButton.title = "AIへ…  " + ai.shortcut
             askButton.isEnabled = value.canShare
         }
         if previous.state != value.state || previous.timeline.startedAt != value.timeline.startedAt { clearHandoffNotice() }

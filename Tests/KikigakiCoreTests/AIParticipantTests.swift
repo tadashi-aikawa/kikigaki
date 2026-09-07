@@ -218,10 +218,11 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         let m = MeetingMarkdown.Meeting(startedAt: epoch, duration: 2,
             utterances: [.init(speaker: 0, start: 0, end: 1, text: "声")], names: .init(), ai: c)
         let rendered = MeetingMarkdown.render(m, timeZone: TimeZone(secondsFromGMT: 0)!)
-        #expect(rendered.contains("- [00:00:00] 話者A: 声\n- [00:00:00] AIへ質問 Q1 → AIとのやりとり"))
-        #expect(rendered.contains("- [00:00:02] AI回答 Q1 → AIとのやりとり"))
-        #expect(rendered.components(separatedBy: "- 問い:").count == 2)
-        #expect(rendered.contains("- 問い: 「問い 続き」"))
+        #expect(rendered.contains("- [00:00:00] 話者A: 声\n- [00:00:00] AIへ #1 → AIとのやりとり"))
+        #expect(rendered.contains("- [00:00:02] AIから #1 → AIとのやりとり"))
+        #expect(rendered.components(separatedBy: "- 送信文:").count == 2)
+        #expect(rendered.contains("- 送信文: 「問い 続き」"))
+        #expect(rendered.contains("### AI #1\n") && rendered.contains("#### 返事\n"))
         #expect(rendered.hasSuffix("本文\n\n## 回答内の見出し\n"))
         #expect(!rendered.contains("test-only-token") && !rendered.contains("Helpers"))
     }
@@ -237,7 +238,7 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
             pauses: [.init(audioTime: 1, duration: 86400)], ai: c)
         m.names = SpeakerNames([0: "新しい名前"])
         let rendered = MeetingMarkdown.render(m, timeZone: TimeZone(secondsFromGMT: 0)!)
-        #expect(rendered.contains("- [1970-01-02 00:00:01] AIへ質問"))
+        #expect(rendered.contains("- [1970-01-02 00:00:01] AIへ"))
         #expect(rendered.contains("新しい名前: 発話"))
         #expect(rendered.contains("話者Aの案"))
     }
@@ -423,8 +424,8 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         try c.receive(AIReceiveEvent(request: r, kind: .answered, recordedAt: epoch, body: "旧回答"), at: epoch)
         #expect(c.questions[0].state == .cancelled && c.questions[0].result?.body == "旧回答")
         #expect(c.questions[1].state == .prepared && c.questions[1].result == nil)
-        #expect(AIMarkdown.section(c).contains("取消後の回答"))
-        #expect(AIMarkdown.section(c).contains("旧接続からの回答"))
+        #expect(AIMarkdown.section(c).contains("取消後の返事"))
+        #expect(AIMarkdown.section(c).contains("旧接続からの返事"))
     }
 
     @Test func 確認質問への返答を新requestで結び元の結果を上書きしない() throws {

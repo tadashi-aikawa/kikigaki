@@ -52,7 +52,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         window.appearance = NSAppearance(named: .aqua); window.backgroundColor = Washi.paper
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
-        let title = Washi.label(parentNumber.map { "Q\($0)への返答" } ?? "\(participant)に質問", size: 17, weight: .semibold)
+        let title = Washi.label(parentNumber.map { "#\($0)への返答" } ?? "\(participant)へ", size: 17, weight: .semibold)
         self.range.stringValue = range
         full.target = self; full.action = #selector(updateRange)
         work.state = workAllowed ? .on : .off
@@ -66,7 +66,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         scroll.borderType = .bezelBorder; scroll.heightAnchor.constraint(equalToConstant: 86).isActive = true
         editor.frame = NSRect(x: 0, y: 0, width: 460, height: 86)
         hint.font = .systemFont(ofSize: 11); hint.textColor = Washi.tentative
-        hint.stringValue = canSubmit ? (tentative ? "空欄なら声の末尾を送ります。聞き取り中の末尾は最大3秒待ちます" : "空欄なら声の末尾を送ります") : "回答待ちです。下書きは保持されます"
+        hint.stringValue = canSubmit ? (tentative ? "空欄なら声の末尾を送ります。聞き取り中の末尾は最大3秒待ちます" : "空欄なら声の末尾を送ります") : "返事待ちです。下書きは保持されます"
         sendButton.bezelStyle = .rounded; sendButton.target = self; sendButton.action = #selector(submit)
         sendButton.keyEquivalent = "\r"
         sendButton.isEnabled = canSubmit
@@ -92,7 +92,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     func close() { if let parent = window.sheetParent { parent.endSheet(window) }; window.orderOut(nil) }
     func update(progress: String?, canSubmit: Bool, warning: String? = nil) {
         if progress == nil { updateRange() }
-        hint.stringValue = progress ?? warning ?? (canSubmit ? "空欄なら声の末尾を送ります" : "回答待ちです。下書きは保持されます")
+        hint.stringValue = progress ?? warning ?? (canSubmit ? "空欄なら声の末尾を送ります" : "返事待ちです。下書きは保持されます")
         sendButton.isEnabled = canSubmit && !sent
         editor.isEditable = !sent || progress == nil
         work.isEnabled = !sent || progress == nil

@@ -214,14 +214,14 @@ final class AIConversationController {
                         try received.acknowledge(snapshotID: event.snapshotID, streamID: history.streamID, sessionGeneration: generation)
                     }
                 }
-            } catch { scanWarning = "受信箱の回答が既存記録と競合しています" }
+            } catch { scanWarning = "受信箱の返事が既存記録と競合しています" }
         }
         if changed {
             do {
                 try commit(next); history = received
                 if resultArrived { warning = nil }
                 if notifyResult { onResult?() }
-            } catch { scanWarning = "回答の取り込み状態を保存できません" }
+            } catch { scanWarning = "返事の取り込み状態を保存できません" }
         }
         if let scanWarning { warning = scanWarning }
         onChange?()

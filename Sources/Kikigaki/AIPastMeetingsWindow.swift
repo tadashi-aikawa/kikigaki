@@ -15,7 +15,7 @@ import AppKit
     init(store: AIRecordStore, current: @escaping () -> UUID?) {
         self.store = store; self.current = current
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 480), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-        window.title = "前の会議のAI回答"; window.isReleasedWhenClosed = false
+        window.title = "前の会議のAIの返事"; window.isReleasedWhenClosed = false
         super.init(window: window)
         let stack = NSStackView(views: [picker, warning, badges, retry, scroll]); stack.orientation = .vertical; stack.alignment = .leading
         stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)

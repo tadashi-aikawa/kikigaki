@@ -434,7 +434,7 @@ final class MeetingSession {
                 try await record.controller.connect(config: config, label: "KIKIGAKI \(config.participantName) \(format.string(from: startedAt))", executable: executable, arguments: arguments)
                 try Task.checkCancellation()
                 guard handoff.meetingID == meetingID else { throw CancellationError() }
-                aiProgress = "質問を送信中"; emit()
+                aiProgress = "送信中"; emit()
                 try await record.controller.send(fixed, config: config)
                 aiDraft = ""; aiCompleted = fixed.id
             } catch is CancellationError {
