@@ -70,6 +70,9 @@ final class RecordingStatusChip: NSStackView {
     required init?(coder: NSCoder) { fatalError() }
 
     func update(_ value: SessionSnapshot, reduceMotion: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
         let recording = value.state == .recording
         let paused = value.state == .paused
         let outlined = value.state == .preparing || value.state == .finishing
@@ -83,22 +86,10 @@ final class RecordingStatusChip: NSStackView {
             : value.state.statusLabel
         elapsed.stringValue = TranscriptRenderer.elapsed(value.elapsed)
         for view in [mark, label, elapsed] { view.textColor = foreground }
-        // 更新は毎秒来るため、同じアニメーションを張り直して位相をリセットしない。
-        if recording && !reduceMotion {
-            if mark.layer?.animation(forKey: "recordingPulse") == nil {
-                let pulse = CABasicAnimation(keyPath: "opacity")
-                pulse.fromValue = 1
-                pulse.toValue = 0.45
-                pulse.duration = 0.5
-                pulse.autoreverses = true
-                pulse.repeatCount = .infinity
-                pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                mark.layer?.add(pulse, forKey: "recordingPulse")
-            }
-        } else {
-            mark.layer?.removeAnimation(forKey: "recordingPulse")
-            mark.layer?.opacity = 1
-        }
+        // 毎秒届く経過時間でだけ明暗を切り替え、連続的な再合成を発生させない。
+        // 同じ秒に音声更新が複数届いても位相は変えない。
+        let opacity: Float = recording && !reduceMotion && Int(max(0, value.elapsed)) % 2 == 1 ? 0.45 : 1
+        if mark.layer?.opacity != opacity { mark.layer?.opacity = opacity }
         setAccessibilityLabel([label.stringValue, elapsed.stringValue].joined(separator: " "))
     }
 }
