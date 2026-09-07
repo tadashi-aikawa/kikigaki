@@ -15,9 +15,9 @@ public enum RecordingState: Equatable, Sendable {
     public var startStopTitle: String {
         switch self {
         case .idle: return "録音を開始"
-        case .preparing: return "準備中..."
+        case .preparing: return "準備中…"
         case .recording, .paused: return "録音を停止"
-        case .finishing: return "保存中..."
+        case .finishing: return "保存中…"
         }
     }
 
@@ -36,7 +36,7 @@ public enum RecordingState: Equatable, Sendable {
         case .idle: return "待機中"
         case .preparing: return "準備中"
         case .recording: return "録音中"
-        case .paused: return "一時停止中"
+        case .paused: return "一時停止"
         case .finishing: return "保存中"
         }
     }

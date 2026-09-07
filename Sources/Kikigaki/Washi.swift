@@ -14,6 +14,8 @@ enum Washi {
     static let tentative = color(0x4A443D)
     static let red = color(0xAA1405)
     static let brightRed = color(0xCF321F)
+    static let white = NSColor.white
+    static let gold = color(0xC4801F)
     static let searchMatch = color(0xE09C3C).withAlphaComponent(0.25)
     static let searchCurrent = color(0xE09C3C).withAlphaComponent(0.6)
     struct SpeakerColor { let background: NSColor; let foreground: NSColor }

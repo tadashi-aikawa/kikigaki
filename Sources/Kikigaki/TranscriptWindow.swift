@@ -1,30 +1,6 @@
 import AppKit
 import KikigakiCore
 
-/// NSButtonの操作・フォーカス・アクセシビリティを残して主操作の地だけ描く。
-private final class CopyButton: NSButton {
-    override var intrinsicContentSize: NSSize {
-        let size = super.intrinsicContentSize
-        return NSSize(width: size.width + 32, height: size.height)
-    }
-    override func draw(_ dirtyRect: NSRect) {
-        (isEnabled ? (isHighlighted ? Washi.brightRed : Washi.red) : Washi.rule).setFill()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 0, dy: 2), xRadius: 6, yRadius: 6).fill()
-        super.draw(dirtyRect)
-    }
-}
-
-private final class RecordingMark: NSView {
-    var paused = false { didSet { needsDisplay = true } }
-    override func draw(_ dirtyRect: NSRect) {
-        (paused ? Washi.muted : Washi.red).setFill()
-        if paused {
-            NSRect(x: 0, y: 0, width: 3, height: 9).fill()
-            NSRect(x: 6, y: 0, width: 3, height: 9).fill()
-        } else { NSBezierPath(ovalIn: bounds).fill() }
-    }
-}
-
 @MainActor
 final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegate, NSMenuItemValidation {
     var onRename: ((Int, String) -> Void)?
@@ -47,19 +23,18 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private lazy var reconnectAI = AIActionButton("AIセッションを作り直す") { [weak self] in self?.onRecreateAI?() }
     private lazy var retryAISave = AIActionButton("保存を再試行") { [weak self] in self?.onRetryAISave?() }
     private let aiStatusRow = NSStackView()
-    private let askButton = NSButton(title: "AIへ…", target: nil, action: nil)
+    private let askButton = WashiActionButton(title: "AIへ…", target: nil, action: nil)
     private var aiMarks: [String: AIMarkRow] = [:]
     private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
     private var speakerSettingsPopover: SpeakerSettingsPopover?
-    private let startStopButton = NSButton()
-    private let pauseButton = NSButton()
+    private let startStopButton = WashiActionButton()
+    private var startStopWidth: NSLayoutConstraint?
+    private let pauseButton = WashiActionButton()
     private let openButton = NSButton()
-    private let copyButton = CopyButton(title: "会話をコピー", target: nil, action: nil)
+    private let copyButton = WashiActionButton(title: "会話をコピー", target: nil, action: nil)
     private let latestButton = NSButton(title: "最新の発言へ ↓", target: nil, action: nil)
     private var transcriptBottom: NSLayoutConstraint?
-    private let statusDot = RecordingMark()
-    private let statusLabel = Washi.label(size: 13, weight: .semibold)
-    private let elapsedLabel = Washi.label(color: Washi.muted)
+    private let statusChip = RecordingStatusChip()
     private let messageLabel = NSTextField(wrappingLabelWithString: "")
     private let rangeLabel = Washi.label(color: Washi.muted)
     private var handoffNotice: (text: String, failed: Bool)?
@@ -133,8 +108,10 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         aiStatusRow.isHidden = aiNotice.isHidden && reconnectAI.isHidden && retryAISave.isHidden
         askButton.isHidden = value.ai == nil
         if let ai = value.ai {
-            askButton.title = "AIへ…  " + ai.shortcut
+            askButton.title = "AIへ…"
+            askButton.toolTip = "AIへ依頼する (" + ai.shortcut + ")"
             askButton.isEnabled = value.canShare
+            askButton.emphasis = .primary
         }
         if previous.state != value.state || previous.timeline.startedAt != value.timeline.startedAt { clearHandoffNotice() }
         if copyRequested || previous.handoffMessage != value.handoffMessage || previous.handoffFailed != value.handoffFailed {
@@ -152,17 +129,19 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             }
         }
         if value.state == .preparing || previous.timeline.startedAt != value.timeline.startedAt { renamePopover?.close() }
-        let startTitle = value.state == .idle && value.markdownURL != nil ? "新しい録音" : value.state.startStopTitle
-        symbol(startStopButton, name: value.state.canStart ? "record.circle" : "stop.fill", title: startTitle)
+        let startTitle = value.state == .idle && value.markdownURL != nil ? "新しい録音"
+            : value.state.canStart ? value.state.startStopTitle : "停止"
+        symbol(startStopButton, name: value.state.canStart ? "record.circle" : "stop.fill", title: startTitle, showTitle: true)
         startStopButton.isEnabled = value.state.canStart || value.state.canStop
-        symbol(pauseButton, name: value.state == .paused ? "play.fill" : "pause.fill", title: value.state.pauseResumeTitle)
+        startStopWidth?.constant = value.state.canStart ? 112 : 72
+        // 前の会議を共有できる画面では、フッターへ主操作を譲る。
+        startStopButton.emphasis = value.state.canStart && !value.canShare ? .primary : .neutralOutline
+        symbol(pauseButton, name: value.state == .paused ? "play.fill" : "pause.fill", title: value.state.pauseResumeTitle, showTitle: true)
         pauseButton.isEnabled = value.state.canPauseOrResume
-        pauseButton.isHidden = value.state == .idle && value.markdownURL != nil
+        pauseButton.refreshStyle()
+        pauseButton.isHidden = value.state == .idle
         openButton.isHidden = !(value.state == .idle && value.saved)
-        statusLabel.stringValue = value.state == .idle && value.saved ? "保存済み" : value.state.statusLabel
-        statusDot.isHidden = value.state != .recording && value.state != .paused
-        statusDot.paused = value.state == .paused
-        elapsedLabel.stringValue = TranscriptRenderer.elapsed(value.elapsed)
+        statusChip.update(value, reduceMotion: shouldReduceMotion())
         var message = value.message ?? ""
         if value.saved, message.hasPrefix("保存:") {
             message = message.components(separatedBy: " / ").dropFirst().joined(separator: " / ")
@@ -172,11 +151,12 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         messageLabel.textColor = value.state == .idle && !value.saved && !message.isEmpty ? Washi.red : Washi.muted
         speakerButton.update(snapshot: value)
         speakerSettingsPopover?.update(snapshot: value)
-        copyButton.title = value.hasCopied ? "前回コピー以降をコピー" : "会話をコピー"
+        copyButton.title = value.hasCopied ? "続きをコピー" : "会話をコピー"
         copyButton.isEnabled = value.canShare && value.handoffPreview != nil
-        copyButton.attributedTitle = NSAttributedString(string: copyButton.title, attributes: [
-            .font: NSFont.systemFont(ofSize: 13), .foregroundColor: copyButton.isEnabled ? NSColor.white : Washi.muted
-        ])
+        copyButton.toolTip = value.hasCopied && value.canShare && value.handoffPreview == nil
+            ? "前回コピーから変更なし"
+            : "会話ファイルへの参照と、今回読む範囲をクリップボードにコピー"
+        copyButton.emphasis = value.ai == nil ? .primary : .accentOutline
         copyButton.menu = handoffMenu()
         updateRangeLabel()
         emptyView.isHidden = !value.utterances.isEmpty || value.tentativeText != nil || !(value.ai?.conversation?.questions.isEmpty ?? true)
@@ -282,22 +262,23 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         configure(speakerButton, #selector(speakerPressed))
         configure(askButton, #selector(askPressed))
         askButton.isHidden = true
-        askButton.isBordered = true; askButton.bezelStyle = .rounded
         askButton.setContentHuggingPriority(.required, for: .horizontal)
         speakerButton.setAccessibilityLabel("話者の統合先")
-        for button in [startStopButton, pauseButton, openButton] {
-            button.widthAnchor.constraint(equalToConstant: 34).isActive = true
-            button.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        for button in [startStopButton, pauseButton, askButton, copyButton] {
+            button.isBordered = false
+            button.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        }
+        startStopWidth = startStopButton.widthAnchor.constraint(equalToConstant: 112)
+        startStopWidth?.isActive = true
+        pauseButton.widthAnchor.constraint(equalToConstant: 92).isActive = true
+        openButton.widthAnchor.constraint(equalToConstant: 34).isActive = true
+        openButton.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        for button in [askButton, copyButton] {
+            button.widthAnchor.constraint(equalToConstant: 168).isActive = true
         }
         symbol(openButton, name: "doc.plaintext", title: "Markdownを開く")
-        copyButton.isBordered = false
-        copyButton.heightAnchor.constraint(equalToConstant: 30).isActive = true
-        copyButton.toolTip = "会話ファイルへの参照と、今回読む範囲をクリップボードにコピー"
         latestButton.isHidden = true
         latestButton.controlSize = .small
-        statusDot.widthAnchor.constraint(equalToConstant: 9).isActive = true
-        statusDot.heightAnchor.constraint(equalToConstant: 9).isActive = true
-        elapsedLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         messageLabel.font = .systemFont(ofSize: 12)
         messageLabel.maximumNumberOfLines = 3
         rangeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
@@ -307,8 +288,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         Washi.surface(logoRule, color: Washi.rule)
         logoRule.widthAnchor.constraint(equalToConstant: 1).isActive = true
         logoRule.heightAnchor.constraint(equalToConstant: 20).isActive = true
-        let status = row([statusDot, statusLabel, elapsedLabel], spacing: 8)
-        let controls = row([Washi.logoView(size: 26), logoRule, status, NSView(), speakerButton, pauseButton, startStopButton, openButton], spacing: 12)
+        let controls = row([Washi.logoView(size: 26), logoRule, statusChip, speakerButton, NSView(), pauseButton, startStopButton, openButton], spacing: 8)
         let header = column([controls, messageLabel], spacing: 8, inset: 12)
         Washi.surface(header)
         scrollView.documentView = transcriptDocument
@@ -351,8 +331,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         aiNotice.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         for view in [aiNotice, reconnectAI, retryAISave] { aiStatusRow.addArrangedSubview(view) }
         aiStatusRow.isHidden = true
-        copyButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let footerButtons = row([askButton, copyButton], spacing: 12)
+        let leftSpace = NSView(), rightSpace = NSView()
+        let footerButtons = row([leftSpace, askButton, copyButton, rightSpace], spacing: 12)
+        leftSpace.widthAnchor.constraint(equalTo: rightSpace.widthAnchor).isActive = true
         let footer = column([footerTitle, aiStatusRow, footerButtons], spacing: 8, inset: 16)
         Washi.surface(footer)
         searchField.placeholderString = "会話を検索"
@@ -382,13 +363,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     override func cancelOperation(_ sender: Any?) {
         if searchOpen { closeSearch(sender) } else { super.cancelOperation(sender) }
     }
-    private func symbol(_ button: NSButton, name: String, title: String) {
+    private func symbol(_ button: NSButton, name: String, title: String, showTitle: Bool = false) {
         // Apple CoreGlyphsのname_availability.plistとNSImage APIで存在を確認した名称。
         button.image = NSImage(systemSymbolName: name, accessibilityDescription: title)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 14, weight: .regular))
         button.imageScaling = .scaleProportionallyDown
-        button.imagePosition = .imageOnly
-        button.title = ""
+        button.imagePosition = showTitle ? .imageLeading : .imageOnly
+        button.imageHugsTitle = showTitle
+        button.title = showTitle ? title : ""
         button.toolTip = title
         button.setAccessibilityLabel(title)
     }
@@ -481,6 +463,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     }
     @objc private func motionChanged() {
         if shouldReduceMotion() { rows.values.forEach { $0.stopAnimations() } }
+        statusChip.update(snapshot, reduceMotion: shouldReduceMotion())
     }
     private func handoffMenu() -> NSMenu {
         let menu = NSMenu()
