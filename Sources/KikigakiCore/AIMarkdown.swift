@@ -22,7 +22,8 @@ public enum AIMarkdown {
         for question in ai.questions {
             let number = question.request.number
             if let sent = question.sendAttemptedAt {
-                let label = question.state == .deliveryUnknown ? "AIへ・送達不明" : "AIへ"
+                let label = (question.state == .deliveryUnknown ? "AIへ・送達不明" : "AIへ")
+                    + (question.request.trigger == .scheduled ? "(自動)" : "")
                 let line = Line(date: sent, kind: 1, order: number,
                     text: "- [\(stamp(sent, relativeTo: meeting.startedAt, timeZone: timeZone))] \(label) #\(number) → AIとのやりとり")
                 if let index = question.request.voiceAnchorIndex(in: meeting.utterances) { attached[index, default: []].append(line) }
@@ -66,7 +67,9 @@ public enum AIMarkdown {
             let envelope = request.envelope
             let participant = envelope.participant
             lines += ["", "### AI #\(request.number)", ""]
-            if let sent = question.sendAttemptedAt { lines.append("- 送信: " + date(sent, timeZone: timeZone)) }
+            if let sent = question.sendAttemptedAt {
+                lines.append("- 送信: " + date(sent, timeZone: timeZone) + (request.trigger == .scheduled ? " (自動)" : ""))
+            }
             lines.append("- 宛先: " + oneLine(participant.participantName))
             lines.append("- 送信文: 「" + oneLine(request.displayQuestion.isEmpty ? "会話末尾の送信文" : request.displayQuestion) + "」")
             let range = envelope.readLineCount == 0 ? "読む行数0" : "\(envelope.readStartLine)〜\(envelope.totalLineCount)行"

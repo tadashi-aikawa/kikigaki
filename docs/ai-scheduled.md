@@ -58,7 +58,7 @@ Coreの値型 `AIScheduleState` に設定、実行ID、次の期限、連続失�
 
 差分の入口は `AIStreamHistory` の受領済み本文と現在の確定本文を比較する副作用のないAPIとする。行は手入力統合後の `TranscriptRenderer.lines` を使い、受領済みなしなら現在の非空本文を変更ありと扱う。
 
-**既存の `preview().readLineCount` を差分件数として流用しない。** `prepare` は同一本文なら受領済みsnapshotをそのまま返すので、変更がなくても過去のreadLineCountが正になる。また末尾の削除だけなら変更があっても読む行数は0になる。追加・置換・削除を区別できる `hasChanges` と変更開始位置を返し、削除だけの訂正も送れるようにする。これは発注文の「差分0」を「本文の変更なし」と解釈する提案であり、本人の採否を待つ。
+**既存の `preview().readLineCount` を差分件数として流用しない。** `prepare` は同一本文なら受領済みsnapshotをそのまま返すので、変更がなくても過去のreadLineCountが正になる。また末尾の削除だけなら変更があっても読む行数は0になる。`hasChanges(lines:)` は追加・置換・削除のいずれもtrueとし、変更開始位置の算出は送信する場合の既存prepareへ任せる。「差分0」は本文の変更なしと解釈し、削除だけの訂正も送る。本人レビューで採用済み。
 
 tick時に差分を確認し、既存の3秒確定待ちを終えた `capture.lines` でもprepare前に再確認する。待ち中に差分が解消したらrequestを作らず終える。暫定末尾だけの変化は確定本文の差分に数えず、送れる回の付帯情報としてだけ扱う。
 
@@ -116,3 +116,9 @@ tick時に差分を確認し、既存の3秒確定待ちを終えた `capture.li
 | 4・実herdr | 同じpane・generation・streamで複数回受領、手動と自動の混在、最後の1回の受領と保存。既定cwdの初回信頼確認は本人が行う |
 
 各段のコミット前に `swift build` と `swift test` を通す。段1レビューで削除訂正のhasChanges・作業許可の開始時固定・標準外間隔の候補追加を採用。最終回のbusyスキップは不採用となり、返事到着後の1回へ変更した。段3の前にmainへrebaseして手入力の統合を取り込む。
+
+### 段2のCore実装
+
+`AIScheduleOptions` が開始値を検証し、`AIScheduleState` がtick、録音停止、最終保存結果、最終送信判定、requestの結果観測を受ける。最終待機には期限を置かず、`finalDecision` がsendを返す前に権利を消費する。アプリは同じ会議の送信状態からavailabilityを作る。awaitingResultとbusyは保留、disconnectedは表示付きスキップ、confirmationは通常回のみスキップする。
+
+失敗の観測には現在の実行へ登録したrequestだけを使い、送信試行中の一時的なdeliveryUnknownを渡さない。確定結果は送達不明を置き換え、登録順で連続失敗を計算する。再開後の旧run IDと別meeting IDの通知は無視する。UI表題向けの `AIRequest.automaticLabel` と、保存用の「(自動)」をCoreに用意した。通知音・シート・タイマー・接続状態の配線は段3で行う。

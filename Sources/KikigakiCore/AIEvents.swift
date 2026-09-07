@@ -14,6 +14,8 @@ public struct AIRequest: Codable, Equatable, Sendable {
     /// 声の問いに使った確定済み末尾発話の位置。表示名や停止後の再分割に依存しない。
     public let voiceUtteranceStart: Double?
     public var id: UUID { envelope.participant.requestID }
+    public var trigger: AIParticipantContext.Trigger? { envelope.participant.trigger }
+    public var automaticLabel: String { trigger == .scheduled ? " · 自動" : "" }
 
     public init(envelope: AIEnvelope, number: Int, voiceQuestion: String = "", snapshot: AIContextSnapshot? = nil,
                 voiceUtteranceStart: Double? = nil) throws {
@@ -171,7 +173,8 @@ public struct AIQuestion: Codable, Equatable, Sendable {
             if result == nil, cancelledAt == nil { state = .accepted }
         } else {
             guard order > 0 else { throw AIError.invalid("event order") }
-            result = event; resultReceivedAt = date; resultOrder = order; isUnread = true
+            result = event; resultReceivedAt = date; resultOrder = order
+            isUnread = !(request.trigger == .scheduled && event.kind == .answered)
             if cancelledAt == nil {
                 switch event.kind {
                 case .answered: state = .answered

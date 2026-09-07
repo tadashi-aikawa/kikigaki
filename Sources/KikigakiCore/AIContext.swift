@@ -73,6 +73,8 @@ public struct AITentativeTail: Codable, Equatable, Sendable {
 }
 
 public struct AIParticipantContext: Codable, Equatable, Sendable {
+    public enum Trigger: String, Codable, Sendable { case scheduled }
+    public let trigger: Trigger?
     public enum QuestionSource: String, Codable, Sendable { case voice, typed }
     public let schemaVersion: Int
     public let mode: String
@@ -95,7 +97,9 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     public init(streamID: UUID, requestID: UUID, sessionGeneration: Int, participantName: String,
                 cliPath: String, sessionPath: String, requestToken: String, question: String,
                 capturedAt: Date, audioCutoffSeconds: Double, tentativeTail: AITentativeTail? = nil,
-                inReplyToRequestID: UUID? = nil, inReplyToEventID: String? = nil, workAllowed: Bool = true) {
+                inReplyToRequestID: UUID? = nil, inReplyToEventID: String? = nil, workAllowed: Bool = true,
+                trigger: Trigger? = nil) {
+        self.trigger = trigger
         schemaVersion = 1; mode = "meeting"; self.streamID = streamID; self.requestID = requestID
         self.sessionGeneration = sessionGeneration; self.participantName = participantName
         self.cliPath = cliPath; self.sessionPath = sessionPath; self.requestToken = requestToken
@@ -115,6 +119,10 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
               questionSource == (question.isEmpty ? .voice : .typed),
               (inReplyToRequestID == nil) == (inReplyToEventID == nil) else { throw AIError.invalid("participant") }
         try AIValidation.text(question, limit: AILimits.questionBytes)
+        if trigger == .scheduled {
+            try AIValidation.text(question, limit: AILimits.questionBytes, nonempty: true)
+            guard inReplyToRequestID == nil else { throw AIError.invalid("scheduled parent") }
+        }
         if let id = inReplyToRequestID, inReplyToEventID != "\(id.uuidString)/result" {
             throw AIError.invalid("in_reply_to_event_id")
         }
@@ -127,6 +135,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case trigger
         case schemaVersion = "schema_version", mode, streamID = "stream_id", requestID = "request_id"
         case sessionGeneration = "session_generation", participantName = "participant_name"
         case cliPath = "cli_path", sessionPath = "session_path", requestToken = "request_token"
@@ -137,6 +146,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        trigger = try values.contains(.trigger) ? values.decode(Trigger.self, forKey: .trigger) : nil
         schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
         mode = try values.decode(String.self, forKey: .mode)
         streamID = try values.decode(UUID.self, forKey: .streamID)
@@ -323,6 +333,12 @@ public struct AIStreamHistory: Sendable {
                 .appendingPathComponent(snapshotID.uuidString + ".md"), readStartLine: common + 1, lines: lines)
         issued[snapshotID] = snapshot; lastPrepared = snapshot
         return snapshot
+    }
+
+    /// 受領基準との比較だけを行う。snapshot再利用時のreadLineCountや未受領のprepareに依存しない。
+    /// 末尾を削除して読む行数が0になる訂正も変更として数える。
+    public func hasChanges(lines: [String]) -> Bool {
+        lines != (received?.lines ?? [])
     }
 
     public mutating func acknowledge(snapshotID: UUID, streamID: UUID, sessionGeneration: Int) throws {

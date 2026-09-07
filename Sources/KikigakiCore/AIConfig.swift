@@ -31,15 +31,19 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var prompt: String?
     public var notifySound: Bool?
     public var allowWork: Bool?
+    public var autoPrompt: String?
+    public var autoIntervalMinutes: Int?
     public var hotkey: KikigakiConfig.Hotkey?
 
     public init(cli: AIProvider? = nil, command: String? = nil, herdrCommand: String? = nil, model: String? = nil,
                 address: String? = nil, cwd: String? = nil, extraArgs: [String]? = nil,
-                prompt: String? = nil, notifySound: Bool? = nil, hotkey: KikigakiConfig.Hotkey? = nil, allowWork: Bool? = nil) {
+                prompt: String? = nil, notifySound: Bool? = nil, hotkey: KikigakiConfig.Hotkey? = nil, allowWork: Bool? = nil,
+                autoPrompt: String? = nil, autoIntervalMinutes: Int? = nil) {
         self.cli = cli; self.command = command; self.herdrCommand = herdrCommand; self.model = model; self.address = address
         self.cwd = cwd; self.extraArgs = extraArgs; self.prompt = prompt
         self.notifySound = notifySound; self.hotkey = hotkey
         self.allowWork = allowWork
+        self.autoPrompt = autoPrompt; self.autoIntervalMinutes = autoIntervalMinutes
     }
 
     public func validate() throws {
@@ -57,6 +61,12 @@ public struct AIConfig: Codable, Equatable, Sendable {
             throw invalid("prompt exceeds limit or contains NUL")
         }
         try AIExtraArguments.validate(extraArgs ?? [], provider: cli ?? .codex)
+        if let autoPrompt, autoPrompt.utf8.count > AILimits.questionBytes || autoPrompt.contains("\0") {
+            throw invalid("autoPrompt exceeds limit or contains NUL")
+        }
+        if let autoIntervalMinutes, !(1...60).contains(autoIntervalMinutes) {
+            throw invalid("autoIntervalMinutes must be 1...60")
+        }
     }
 }
 
@@ -73,6 +83,8 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public let prompt: String
     public let notifySound: Bool
     public let allowWork: Bool
+    public let autoPrompt: String
+    public let autoIntervalMinutes: Int
     public let hotkey: KikigakiConfig.Hotkey
     public var participantName: String { address.hasSuffix("へ") ? String(address.dropLast()) : address }
 
@@ -83,10 +95,12 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         extraArgs = config.extraArgs ?? []; prompt = config.prompt ?? ""
         notifySound = config.notifySound ?? false; hotkey = config.hotkey ?? Self.defaultHotkey
         allowWork = config.allowWork ?? true
+        autoPrompt = config.autoPrompt ?? ""; autoIntervalMinutes = config.autoIntervalMinutes ?? 3
     }
 
     private enum CodingKeys: String, CodingKey {
         case cli, command, herdrCommand, model, address, cwd, extraArgs, prompt, notifySound, hotkey, allowWork
+        case autoPrompt, autoIntervalMinutes
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -102,6 +116,9 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         hotkey = try values.decode(KikigakiConfig.Hotkey.self, forKey: .hotkey)
         // 旧会議のmanifestにこのキーが無い場合だけ、以前の作業可能な契約を引き継ぐ。
         allowWork = try values.contains(.allowWork) ? values.decode(Bool.self, forKey: .allowWork) : true
+        autoPrompt = try values.contains(.autoPrompt) ? values.decode(String.self, forKey: .autoPrompt) : ""
+        autoIntervalMinutes = try values.contains(.autoIntervalMinutes) ? values.decode(Int.self, forKey: .autoIntervalMinutes) : 3
+        try AIConfig(autoPrompt: autoPrompt, autoIntervalMinutes: autoIntervalMinutes).validate()
     }
 }
 
