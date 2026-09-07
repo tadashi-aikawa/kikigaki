@@ -14,8 +14,8 @@ import KikigakiCore
         func start(onSamples: @escaping ([Float]) -> Void) throws { Issue.record("音源は起動しない") }
         func stop() {}
     }
-    private func enter(_ editor: TypedEntryEditor, shift: Bool = false) throws {
-        let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: shift ? [.shift] : [],
+    private func enter(_ editor: TypedEntryEditor, modifiers: NSEvent.ModifierFlags = .command) throws {
+        let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
             timestamp: 0, windowNumber: editor.window?.windowNumber ?? 0, context: nil,
             characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
         editor.keyDown(with: event)
@@ -94,10 +94,19 @@ import KikigakiCore
         pasteboard.setString("https://example.com/a\r\n補足\u{2028}続き", forType: .string)
         #expect(editor.readSelection(from: pasteboard, type: .string))
         #expect(editor.string == "https://example.com/a 補足 続き")
-        try enter(editor, shift: true)
+        try enter(editor, modifiers: [])
+        try enter(editor, modifiers: .shift)
+        editor.insertNewline(nil)
+        editor.insertLineBreak(nil)
+        #expect(posted.isEmpty && editor.string == "https://example.com/a 補足 続き")
+        #expect(editor.placeholder.contains("⌘Enterで投稿") && editor.toolTip == "⌘Enterで投稿")
+        try enter(editor)
         #expect(posted.count == 1 && editor.string.isEmpty)
         editor.setMarkedText("へんかん", selectedRange: NSRange(location: 4, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
         #expect(editor.hasMarkedText())
+        try enter(editor, modifiers: [])
+        #expect(posted.count == 1)
+        editor.setMarkedText("へんかん", selectedRange: NSRange(location: 4, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
         try enter(editor)
         #expect(posted.count == 1)
         editor.unmarkText()

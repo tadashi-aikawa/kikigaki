@@ -15,7 +15,6 @@ final class TypedEntryEditor: NSTextView {
         if accepted { onFocusChange?(false) }
         return accepted
     }
-    private var committingMarkedText = false
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if string.isEmpty {
@@ -25,14 +24,14 @@ final class TypedEntryEditor: NSTextView {
     }
     override func keyDown(with event: NSEvent) {
         if (event.keyCode == 36 || event.keyCode == 76), !hasMarkedText() {
-            if isEditable { onSubmit?() }
+            let modifiers = event.modifierFlags.intersection([.command, .shift, .control, .option])
+            if isEditable && modifiers == .command { onSubmit?() }
             return
         }
-        committingMarkedText = hasMarkedText()
-        defer { committingMarkedText = false }
         super.keyDown(with: event)
     }
-    override func insertNewline(_ sender: Any?) { if isEditable && !hasMarkedText() && !committingMarkedText { onSubmit?() } }
+    // 投稿は未確定文字のない⌘EnterのkeyDownだけ。IME確定後の改行命令も消費する。
+    override func insertNewline(_ sender: Any?) {}
     override func insertLineBreak(_ sender: Any?) { insertNewline(sender) }
     override func paste(_ sender: Any?) {
         _ = readSelection(from: .general, type: .string)
@@ -102,7 +101,8 @@ final class TypedEntryField: NSScrollView, NSTextViewDelegate {
         editor.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: 32)
         editor.delegate = self
         editor.setAccessibilityLabel("会話に書き込む")
-        editor.toolTip = "Enterで会話へ投稿。録音中・一時停止中に使えます"
+        editor.toolTip = "⌘Enterで投稿。録音中・一時停止中に使えます"
+        editor.setAccessibilityHelp(editor.toolTip)
         editor.onSubmit = { [weak self] in
             guard let self, editor.isEditable, !editor.hasMarkedText(), onSubmit?(editor.string) == true else { return }
             reset()
@@ -135,10 +135,11 @@ final class TypedEntryField: NSScrollView, NSTextViewDelegate {
         editor.textColor = enabled ? Washi.ink : Washi.muted
         editor.backgroundColor = Washi.paper
         backgroundColor = editor.backgroundColor
-        editor.toolTip = enabled ? "Enterで会話へ投稿" : "録音中・一時停止中に会話へ投稿できます"
+        editor.toolTip = enabled ? "⌘Enterで投稿" : "録音中・一時停止中に会話へ投稿できます"
+        editor.setAccessibilityHelp(editor.toolTip)
         editor.setAccessibilityEnabled(enabled)
         if !enabled, window?.firstResponder === editor { window?.makeFirstResponder(nil) }
-        editor.placeholder = enabled ? "会話に書き込む…" : "録音中に書き込めます"
+        editor.placeholder = enabled ? "会話に書き込む… · ⌘Enterで投稿" : "録音中に書き込めます"
         draftLabel.isHidden = enabled || editor.string.isEmpty
         contentInsets.right = draftLabel.isHidden ? 2 : 50
         editor.needsDisplay = true
