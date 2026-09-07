@@ -15,7 +15,7 @@ if CommandLine.arguments.contains("--smoke") {
         let config = try AppDelegate.loadConfig()
         print("Kikigaki (smoke): outputDir=\(config.outputDir.path) saveRecording=\(config.saveRecording)")
         if CommandLine.arguments.contains("--replay") {
-            print("Kikigaki (replay debug): questions=\(replayDebug.questions.count) hold=\(replayDebug.hold) rename=\(replayDebug.rename != nil) typed=\(replayDebug.typedEntries.count) verifyTyped=\(replayDebug.verifyTyped)")
+            print("Kikigaki (replay debug): questions=\(replayDebug.questions.count) hold=\(replayDebug.hold) rename=\(replayDebug.rename != nil) typed=\(replayDebug.typedEntries.count) verifyTyped=\(replayDebug.verifyTyped) automatic=\(replayDebug.automatic != nil)")
         }
     } catch {
         FileHandle.standardError.write(Data("Kikigaki: failed to load config: \(error)\n".utf8))

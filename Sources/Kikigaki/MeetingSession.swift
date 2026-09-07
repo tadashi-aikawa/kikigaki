@@ -682,13 +682,21 @@ extension MeetingSession {
             aiScheduleTimer?.invalidate(); aiScheduleTimer = nil; return
         }
         observeAIScheduleResults()
+        guard aiSchedule?.phase == .awaitingFinal ||
+              (aiSchedule?.phase == .running && aiSchedule?.nextFire.map({ now >= $0 }) == true) else { return }
         let lines = TranscriptRenderer.lines(snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
         let changed = aiRecord?.controller.hasChanges(lines: lines) ?? !lines.isEmpty
+        let availability = scheduleAvailability
         let effect: AIScheduleState.Effect?
         if phase == .awaitingFinal {
-            effect = aiSchedule?.finalDecision(availability: scheduleAvailability, hasChanges: changed)
+            effect = aiSchedule?.finalDecision(availability: availability, hasChanges: changed)
         } else {
-            effect = aiSchedule?.tick(now: now, availability: scheduleAvailability, hasChanges: changed)
+            effect = aiSchedule?.tick(now: now, availability: availability, hasChanges: changed)
+        }
+        if CommandLine.arguments.contains("--replay"), ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_AUTO"] != nil,
+           let effect, effect != .none {
+            let count = aiRecord?.controller.conversation.questions.count ?? 0
+            FileHandle.standardError.write(Data("[schedule] \(effect) availability=\(availability) changed=\(changed) requests=\(count)\n".utf8))
         }
         switch effect {
         case .send:

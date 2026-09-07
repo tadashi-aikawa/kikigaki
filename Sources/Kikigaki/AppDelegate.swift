@@ -11,6 +11,7 @@ struct ReplayDebugOptions {
     struct TypedEntry: Decodable { let seconds: Double; let text: String; let pauseSeconds: Double? }
     var typedEntries: [TypedEntry] = []
     var verifyTyped = false
+    var automatic: AIScheduleOptions?
     @MainActor static func recoverForNextQuestion(_ controller: AIConversationController?, preparing: Bool) throws {
         guard !preparing, let controller, !controller.canSend,
               let previous = controller.conversation.questions.last,
@@ -20,6 +21,13 @@ struct ReplayDebugOptions {
     static func load(arguments: [String] = CommandLine.arguments, environment env: [String: String] = ProcessInfo.processInfo.environment) throws -> Self {
         guard arguments.contains("--replay") else { return Self() }
         var result = Self()
+        if let input = env["KIKIGAKI_DEBUG_AI_AUTO"] {
+            let pair = input.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            guard pair.count == 2, let seconds = Double(pair[0]) else {
+                throw AIError.invalid("KIKIGAKI_DEBUG_AI_AUTO")
+            }
+            result.automatic = try AIScheduleOptions(prompt: String(pair[1]), interval: seconds)
+        }
         if let input = env["KIKIGAKI_DEBUG_AI_ASK"], !input.isEmpty {
             for entry in input.split(separator: ";", omittingEmptySubsequences: false) {
                 let pair = entry.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
@@ -265,6 +273,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         window?.show()
         let started = await session.start(source: source)
+        if started, replayURL != nil, let automatic = replayDebug.automatic {
+            do {
+                let options = try AIScheduleOptions(prompt: automatic.prompt, interval: automatic.interval,
+                                                    workAllowed: session.aiWorkAllowed)
+                try session.startAISchedule(options: options,
+                    helper: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli"))
+                Self.log("replay 自動送信開始: \(options.interval)秒")
+            } catch { Self.log("replay 自動送信を開始できない: \(error)"); exit(1) }
+        }
         if !started, replayURL != nil {
             Self.log("replay を開始できなかったので終了する")
             exit(1)
