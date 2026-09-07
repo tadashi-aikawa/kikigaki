@@ -63,9 +63,12 @@ final class AIConversationController {
         return try copy.prepare(lines: lines, outputDirectory: outputDirectory, full: full)
     }
 
+    func hasChanges(lines: [String]) -> Bool { history.hasChanges(lines: lines) }
+
     func prepare(lines: [String], question: String, voiceQuestion: String, capturedAt: Date, cutoff: Double,
                  tail: AITentativeTail?, config: ResolvedAIConfig, helper: URL, parent: UUID? = nil,
-                 full: Bool = false, workAllowed: Bool? = nil, voiceUtteranceStart: Double? = nil) throws -> AIRequest {
+                 full: Bool = false, workAllowed: Bool? = nil, voiceUtteranceStart: Double? = nil,
+                 trigger: AIParticipantContext.Trigger? = nil) throws -> AIRequest {
         guard canSend else { throw AIHerdrError.notReady }
         if let configuration, configuration != config { throw AIError.mismatch }
         let snapshot = try history.prepare(lines: lines, outputDirectory: outputDirectory, full: full)
@@ -73,7 +76,7 @@ final class AIConversationController {
             participantName: config.participantName, cliPath: helper.path, sessionPath: sessionURL.path,
             requestToken: UUID().uuidString + UUID().uuidString, question: question, capturedAt: capturedAt,
             audioCutoffSeconds: cutoff, tentativeTail: tail, inReplyToRequestID: parent,
-            inReplyToEventID: parent.map { "\($0.uuidString)/result" }, workAllowed: workAllowed ?? config.allowWork)
+            inReplyToEventID: parent.map { "\($0.uuidString)/result" }, workAllowed: workAllowed ?? config.allowWork, trigger: trigger)
         let request = try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant),
             number: conversation.questions.count + 1, voiceQuestion: voiceQuestion, snapshot: snapshot, voiceUtteranceStart: voiceUtteranceStart)
         var next = conversation
@@ -209,7 +212,8 @@ final class AIConversationController {
             do {
                 if try next.receive(event, at: now) {
                     changed = true; resultArrived = resultArrived || event.kind != .accept
-                    notifyResult = notifyResult || event.kind == .answered || event.kind == .needsInput
+                    let scheduled = next.questions.first { $0.request.id == event.requestID }?.request.trigger == .scheduled
+                    notifyResult = notifyResult || event.kind == .needsInput || (event.kind == .answered && !scheduled)
                     if event.contextReceived, snapshots.contains(event.snapshotID), event.sessionGeneration == generation {
                         try received.acknowledge(snapshotID: event.snapshotID, streamID: history.streamID, sessionGeneration: generation)
                     }

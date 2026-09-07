@@ -80,6 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminateWhenIdle = false
     private var aiStore: AIRecordStore?
     private var aiSheet: AIQuestionSheet?
+    private var scheduleSheet: AIScheduleSheet?
+    private var scheduleSheetMeetingID: UUID?
     private var aiSheetMeetingID: UUID?
     private var previousAI: AIPastMeetingsWindow?
     private var registeredAIHotkey: KikigakiConfig.Hotkey?
@@ -137,6 +139,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onCopy = { full in session.copyContext(full: full, writeClipboard: Self.writeClipboard) }
         window.onRecopy = { session.recopyContext(writeClipboard: Self.writeClipboard) }
         window.onAskAI = { [weak self] in self?.showAISheet(parent: $0) }
+        window.onScheduleAI = { [weak self] in self?.showScheduleSheet() }
+        window.onStopScheduleAI = { [weak session] in session?.stopAISchedule() }
         window.onReadAI = { session.readAI($0) }
         window.onCancelAI = { session.cancelAI($0) }
         window.onOpenAIPane = { session.showAIPane() }
@@ -165,8 +169,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if self.registeredAIHotkey != session.aiConfiguration?.hotkey, let config = self.config { _ = self.registerHotkeys(config) }
             if let sheet = self.aiSheet {
                 if self.aiSheetMeetingID != session.aiMeetingID || !snapshot.canShare || snapshot.ai?.submissionID != nil {
-                    sheet.close(); self.aiSheet = nil
+                    sheet.close(); self.aiSheet = nil; session.endAIDraft()
                 } else { sheet.update(progress: snapshot.ai?.progress, canSubmit: snapshot.ai?.canSubmit == true, warning: snapshot.ai?.warning) }
+            }
+            if let sheet = self.scheduleSheet,
+               self.scheduleSheetMeetingID != session.aiMeetingID || (snapshot.state != .recording && snapshot.state != .paused) {
+                sheet.close(); self.scheduleSheet = nil
             }
             if self.terminateWhenIdle, snapshot.state == .idle {
                 self.terminateWhenIdle = false
@@ -190,6 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 録音中・停止処理中に終了されたら、保存してから終了する(書き起こしを失わないため)
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let session else { return .terminateNow }
+        session.stopAISchedule()
         switch session.snapshot.state {
         case .recording, .paused:
             Task {
@@ -386,6 +395,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showAISheet(parent: UUID?) {
         guard let session, session.snapshot.canShare, let config = session.aiConfiguration, let window = window?.window else { return }
         if let aiSheet { aiSheet.window.makeFirstResponder(aiSheet.window.firstResponder); return }
+        if let scheduleSheet { self.window?.show(); scheduleSheet.focus(); return }
         session.beginAIDraft()
         let snapshot = session.snapshot
         let question = parent.flatMap { id in session.aiRecord?.controller.conversation.questions.first { $0.request.id == id } }
@@ -397,7 +407,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sheet.onDraft = { session.updateAIDraft($0) }
         sheet.onWorkAllowedChange = { session.updateAIWorkAllowed($0) }
         sheet.rangePreview = { session.aiRangePreview(full: $0) }
-        sheet.onCancel = { [weak self] in session.cancelAIPreparation(); self?.aiSheet = nil }
+        sheet.onCancel = { [weak self] in session.cancelAIPreparation(); session.endAIDraft(); self?.aiSheet = nil }
         sheet.onPane = { session.showAIPane() }
         sheet.onSubmit = { text, full in
             let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
@@ -406,6 +416,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         aiSheet = sheet; aiSheetMeetingID = session.aiMeetingID
         self.window?.show(); sheet.present(on: window)
     }
+    private func showScheduleSheet() {
+        guard let session, let config = session.aiConfiguration, let parent = window?.window,
+              session.snapshot.state == .recording || session.snapshot.state == .paused,
+              aiSheet == nil, scheduleSheet == nil else { return }
+        let previous = session.lastScheduleOptions
+        let sheet = AIScheduleSheet(prompt: session.scheduleDraft ?? previous?.prompt ?? config.autoPrompt,
+            minutes: previous.map { Int($0.interval / 60) } ?? config.autoIntervalMinutes,
+            workAllowed: previous?.workAllowed ?? session.aiWorkAllowed, sendFinal: previous?.sendFinal ?? true, participant: config.participantName)
+        sheet.onDraft = { session.updateScheduleDraft($0) }
+        sheet.onCancel = { [weak self] in self?.scheduleSheet = nil }
+        sheet.onStart = { [weak self, weak sheet] options in
+            do {
+                try session.startAISchedule(options: options, helper: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli"))
+                sheet?.close(); self?.scheduleSheet = nil
+            } catch {
+                Self.log("自動送信を開始できません: \(error)")
+                sheet?.update(warning: "開始できませんでした。録音状態を確認して、もう一度開始してください")
+            }
+        }
+        scheduleSheet = sheet; scheduleSheetMeetingID = session.aiMeetingID
+        window?.show(); sheet.present(on: parent)
+    }
+
     private func showPreviousAI() {
         guard let aiStore, let session else { return }
         if previousAI == nil { previousAI = AIPastMeetingsWindow(store: aiStore, current: { [weak session] in session?.aiMeetingID }) }

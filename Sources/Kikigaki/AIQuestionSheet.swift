@@ -1,16 +1,17 @@
 import AppKit
 
-private final class AIQuestionWindow: NSWindow {
+final class AIQuestionWindow: NSWindow {
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown, event.keyCode == 36, let editor = firstResponder as? AIQuestionEditor,
-           editor.hasMarkedText() || event.modifierFlags.contains(.shift) {
+        if event.type == .keyDown, let editor = firstResponder as? AIQuestionEditor,
+           (event.keyCode == 36 && (editor.hasMarkedText() || event.modifierFlags.contains(.shift))) ||
+           (event.keyCode == 53 && editor.hasMarkedText()) {
             editor.keyDown(with: event); return
         }
         super.sendEvent(event)
     }
 }
 
-private final class AIQuestionEditor: NSTextView {
+final class AIQuestionEditor: NSTextView {
     var placeholder = ""
     var onSubmit: (() -> Void)?
     var onCancel: (() -> Void)?
@@ -25,7 +26,10 @@ private final class AIQuestionEditor: NSTextView {
         if event.keyCode == 36, !hasMarkedText(), !event.modifierFlags.contains(.shift) { onSubmit?(); return }
         super.keyDown(with: event)
     }
-    override func cancelOperation(_ sender: Any?) { if hasMarkedText() { super.cancelOperation(sender) } else { onCancel?() } }
+    override func cancelOperation(_ sender: Any?) {
+        if hasMarkedText() { inputContext?.discardMarkedText(); unmarkText() }
+        else { onCancel?() }
+    }
 }
 
 @MainActor

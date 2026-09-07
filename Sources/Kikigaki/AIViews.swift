@@ -1,6 +1,11 @@
 import AppKit
 import KikigakiCore
 
+enum AINoticeTone {
+    case normal, warning
+    var color: NSColor { self == .warning ? Washi.gold : Washi.muted }
+}
+
 enum AIBadgeKind: String, CaseIterable {
     case unread = "未読", confirmation = "確認待ち", waiting = "返事待ち", unknown = "送達不明", failed = "失敗"
     func matches(_ question: AIQuestion) -> Bool {
@@ -86,6 +91,7 @@ struct AIViewState {
     var canRecreate = false
     var saveFailed = false
     var generation = 1
+    var noticeTone: AINoticeTone { warning == nil ? .normal : .warning }
     var badges: String {
         let questions = conversation?.questions ?? []
         let counts = AIBadgeKind.allCases.map { kind in (kind.rawValue, questions.filter(kind.matches).count) }
@@ -112,9 +118,15 @@ struct AIInlineMark {
         let prefix = "#\(question.request.number) " + question.request.envelope.participant.participantName
         if kind == .question {
             let label = parentNumber.map { "#\(question.request.number) #\($0)への返答" } ?? prefix + "へ"
-            return label + (question.state == .deliveryUnknown ? "・送達不明" : "")
+            return label + question.request.automaticLabel + (question.state == .deliveryUnknown ? " · 送達不明" : "")
         }
-        return prefix + (question.result?.kind == .needsInput ? "の確認" : question.result?.kind == .failed ? "の失敗報告" : "から")
+        return prefix + (question.result?.kind == .needsInput ? "の確認" : question.result?.kind == .failed ? "の失敗報告" : "から") + question.request.automaticLabel
+    }
+    var excerpt: String {
+        if kind == .result { return question.result?.body?.components(separatedBy: .newlines).first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? "" }
+        if question.request.trigger == .scheduled { return "対象: \(question.request.envelope.readLineCount)発言" }
+        return parentNumber != nil || question.request.envelope.participant.questionSource == .typed
+            ? question.request.displayQuestion.components(separatedBy: .newlines).joined(separator: " ") : ""
     }
     static func ordered(_ conversation: AIConversation?) -> [Self] {
         (conversation?.questions ?? []).flatMap { question -> [Self] in
@@ -268,8 +280,7 @@ final class AIMarkRow: NSView, DocumentRow {
         if expanded && mark.kind == .result && mark.question.isUnread { onRead?() }
     }
     private func updateVisibility() {
-        let showExcerpt = mark.kind == .result || mark.parentNumber != nil || mark.question.request.envelope.participant.questionSource == .typed
-        let excerpt = showExcerpt ? " · " + mark.question.request.displayQuestion.components(separatedBy: .newlines).joined(separator: " ") : ""
+        let excerpt = mark.excerpt.isEmpty ? "" : " · " + mark.excerpt
         let heading = (expanded ? "▾ " : "▸ ") + title
         let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byTruncatingTail
         let label = NSMutableAttributedString(string: heading, attributes: [

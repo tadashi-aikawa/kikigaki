@@ -209,7 +209,7 @@ import KikigakiAIIO
         try click(question)
         let answer = try #require(rows.compactMap { $0 as? AIMarkRow }.first { $0.mark.kind == .result })
         let toggle = try #require(descendants(answer).compactMap { $0 as? NSButton }.first { $0.title.hasPrefix("▸ ") })
-        #expect(toggle.title == "▸ #1 迅雷から · " + request.displayQuestion)
+        #expect(toggle.title == "▸ #1 迅雷から · 了解しました。")
         #expect(toggle.cell?.lineBreakMode == .byTruncatingTail)
         #expect(toggle.frame.maxX <= answer.bounds.width - 80)
         try capture("fb3-answer-collapsed", view: content.superview!)

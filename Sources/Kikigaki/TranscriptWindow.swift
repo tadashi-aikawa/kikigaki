@@ -13,6 +13,12 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onOpenMarkdown: (() -> Void)?
     var onSpeakerMappingChange: ((Int, Int?) -> Void)?
     var onAskAI: ((UUID?) -> Void)?
+    var onScheduleAI: (() -> Void)?
+    var onStopScheduleAI: (() -> Void)?
+    private lazy var scheduleAI = AIActionButton("自動送信…") { [weak self] in self?.onScheduleAI?() }
+    private lazy var stopScheduleAI = AIActionButton("自動送信を停止") { [weak self] in self?.onStopScheduleAI?() }
+    private let scheduleNotice = Washi.label(size: 11, color: Washi.muted)
+    private let scheduleRow = NSStackView()
     var onReadAI: ((UUID) -> Void)?
     var onOpenAIPane: (() -> Void)?
     var onCancelAI: ((UUID) -> Void)?
@@ -108,10 +114,21 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         aiNotice.stringValue = [value.ai?.progress, value.ai?.warning].compactMap { $0 }.joined(separator: " · ")
         aiNotice.isHidden = aiNotice.stringValue.isEmpty
         aiNotice.toolTip = aiNotice.stringValue
+        aiNotice.textColor = value.ai?.noticeTone.color ?? Washi.muted
         reconnectAI.isHidden = value.ai?.canRecreate != true
         retryAISave.isHidden = value.ai?.saveFailed != true
         aiStatusRow.isHidden = aiNotice.isHidden && reconnectAI.isHidden && retryAISave.isHidden
         askButton.isHidden = value.ai == nil
+        scheduleRow.isHidden = value.ai == nil
+        scheduleAI.isHidden = value.aiSchedule.active
+        scheduleAI.isEnabled = value.state == .recording || value.state == .paused
+        scheduleAI.toolTip = scheduleAI.isEnabled ? "繰り返し送る依頼と間隔を設定します" : "録音中・一時停止中に開始できます"
+        stopScheduleAI.toolTip = "自動送信と保留中の最後の1回を取りやめます"
+        stopScheduleAI.isHidden = !value.aiSchedule.active
+        stopScheduleAI.setAccessibilityLabel("自動送信を停止")
+        scheduleNotice.stringValue = value.aiSchedule.text
+        scheduleNotice.toolTip = value.aiSchedule.toolTip
+        scheduleNotice.textColor = value.aiSchedule.tone.color
         if let ai = value.ai {
             askButton.title = "AIへ…"
             askButton.toolTip = "AIへ依頼する (" + ai.shortcut + ")"
@@ -341,7 +358,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         let leftSpace = NSView(), rightSpace = NSView()
         let footerButtons = row([leftSpace, askButton, copyButton, rightSpace], spacing: 12)
         leftSpace.widthAnchor.constraint(equalTo: rightSpace.widthAnchor).isActive = true
-        let footer = column([footerTitle, aiStatusRow, footerButtons], spacing: 8, inset: 16)
+        scheduleRow.orientation = .horizontal; scheduleRow.spacing = 12
+        scheduleNotice.lineBreakMode = .byTruncatingTail
+        scheduleNotice.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for view in [scheduleAI, scheduleNotice, stopScheduleAI] { scheduleRow.addArrangedSubview(view) }
+        let footer = column([footerTitle, aiStatusRow, scheduleRow, footerButtons], spacing: 8, inset: 16)
         Washi.surface(footer)
         searchField.placeholderString = "会話を検索"
         searchField.setAccessibilityLabel("会話を検索")

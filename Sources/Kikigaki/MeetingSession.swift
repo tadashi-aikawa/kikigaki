@@ -66,6 +66,17 @@ final class MeetingSession {
     private let aiStore: AIRecordStore?
     private var meetingAI: ResolvedAIConfig?
     private var aiTask: Task<Void, Never>?
+    private var aiSubmissionOwner = UUID()
+    private var aiSubmissionTrigger: AIParticipantContext.Trigger?
+    private var cancelledAutomaticOwner: UUID?
+    private var aiSchedule: AIScheduleState?
+    private var aiScheduleTimer: Timer?
+    private var aiScheduleHelper: URL?
+    private var aiScheduleWarning: String?
+    private var manualAISheetOpen = false
+    private(set) var lastScheduleOptions: AIScheduleOptions?
+    private(set) var scheduleDraft: String?
+    func updateScheduleDraft(_ value: String) { scheduleDraft = value }
     private enum AIPhase { case confirmationWait, preparingAndSending }
     private var aiPhase: AIPhase?
     private var aiProgress: String?
@@ -103,6 +114,8 @@ final class MeetingSession {
     func start(source: AudioSource) async -> Bool {
         guard snapshot.state.canStart else { return false }
         cancelAIPreparation()
+        stopAISchedule()
+        aiSchedule = nil; lastScheduleOptions = nil; scheduleDraft = nil; aiScheduleWarning = nil
         let preparation = UUID()
         preparationID = preparation
         // 準備中や録音中の再読込で、同じ会議の保存方針を途中から切り替えない。
@@ -179,6 +192,8 @@ final class MeetingSession {
 
     func stop() async {
         guard snapshot.state.canStop else { return }
+        aiSchedule?.recordingStopped()
+        var finalizationSucceeded = true
         // 録音の停止で破棄するのは、まだ会話を確定していない問いだけ。
         // prepare以降は固定済みの会話を使い、最終保存と並行して接続・送信を続ける。
         if aiPhase == .confirmationWait { cancelAIPreparation() }
@@ -202,6 +217,7 @@ final class MeetingSession {
                 tokens = try await transcriber.finish()
             } catch {
                 // 最終化に失敗しても、それまでに得た確定・暫定トークンは残す(空の Markdown を書かない)
+                finalizationSucceeded = false
                 log("文字起こしの終了に失敗。取得済みの結果で保存する: \(error)")
                 tokens = await transcriber.tokens()
                 note = "文字起こしの最終化に失敗したため途中までの結果"
@@ -209,7 +225,7 @@ final class MeetingSession {
         }
         var segments: [SpeakerSegment] = []
         if let diarizer {
-            do { try diarizer.finish() } catch { log("話者判別の終了に失敗: \(error)") }
+            do { try diarizer.finish() } catch { finalizationSucceeded = false; log("話者判別の終了に失敗: \(error)") }
             segments = diarizer.segments()
             receiveSpeakerState(segments: segments)
             diarizer.cleanup()
@@ -243,6 +259,10 @@ final class MeetingSession {
         snapshot.elapsed = duration
         consumedAudioTime = duration
         save()
+        if aiSchedule?.finalSaveCompleted(succeeded: finalizationSucceeded && snapshot.saved) == .skipped(.saveFailed) {
+            aiScheduleWarning = "保存が完了していないため最後の1回を中止しました"
+        }
+        evaluateAISchedule()
         if let note { snapshot.message = note + " / " + (snapshot.message ?? "") }
         emit()
     }
@@ -345,6 +365,7 @@ final class MeetingSession {
         snapshot.previousAIUnread = aiStore?.records.values.filter { $0.manifest.meetingID != handoff.meetingID }
             .reduce(0) { $0 + $1.controller.conversation.questions.filter(\.isUnread).count } ?? 0
         snapshot.aiRecoveryWarning = aiStore?.warnings.first
+        snapshot.aiSchedule = AIScheduleViewState(schedule: aiSchedule, warning: aiScheduleWarning)
         if let config = meetingAI {
             let controller = aiRecord?.controller
             snapshot.ai = AIViewState(conversation: controller?.conversation, hotkey: config.hotkey,
@@ -371,10 +392,21 @@ final class MeetingSession {
 
     func updateAIDraft(_ text: String) { aiDraft = text }
     func updateAIWorkAllowed(_ allowed: Bool) { aiWorkAllowed = allowed }
-    func beginAIDraft() { aiCompleted = nil }
+    func beginAIDraft() {
+        manualAISheetOpen = true
+        if aiSubmissionTrigger == .scheduled, aiTask != nil,
+           aiRecord?.controller.conversation.questions.contains(where: { $0.isAwaitingResult }) != true {
+            if aiPhase == .confirmationWait || aiRecord?.controller.isSending == true { cancelAIPreparation() }
+            else { cancelledAutomaticOwner = aiSubmissionOwner }
+        }
+        aiCompleted = nil
+        emit()
+    }
+    func endAIDraft() { manualAISheetOpen = false }
     func retryAISaves() { aiStore?.retrySaves() }
 
     func cancelAIPreparation() {
+        aiSubmissionOwner = UUID(); aiSubmissionTrigger = nil
         aiTask?.cancel(); aiTask = nil; aiPhase = nil; aiProgress = nil
         if let controller = aiRecord?.controller {
             for q in controller.conversation.questions where q.state == .prepared { try? controller.cancel(q.request.id) }
@@ -400,20 +432,27 @@ final class MeetingSession {
         return "対象: \(context.readStartLine)〜\(context.lines.count)行\(time) · 送信時に確定"
     }
 
-    /// シートのEnterだけが入口。収録位置・宛先・問いは最初に固定し、待ち中の追加発話を混ぜない。
+    /// 手動と自動の共通入口。収録位置・宛先・問いは最初に固定し、待ち中の追加発話を混ぜない。
     func submitAI(question: String, full: Bool, parent: UUID?, helper: URL,
-                  launch: ((ResolvedAIConfig, URL, AIConversationController) throws -> (URL, [String]))? = nil) {
+                  launch: ((ResolvedAIConfig, URL, AIConversationController) throws -> (URL, [String]))? = nil,
+                  trigger: AIParticipantContext.Trigger? = nil, workAllowed suppliedWorkAllowed: Bool? = nil) {
         guard snapshot.canShare, aiTask == nil, let config = meetingAI, let url = snapshot.markdownURL, let aiStore else { return }
         let meetingID = handoff.meetingID, capturedAt = Date(), cutoff = snapshot.state == .idle ? snapshot.elapsed : pause.audioTime
         let names = snapshot.names, timeline = snapshot.timeline, typed = typedEntries
-        let workAllowed = aiWorkAllowed
-        aiDraft = question; aiCompleted = nil; aiWarning = nil; aiProgress = "送信の準備中"
+        let workAllowed = suppliedWorkAllowed ?? aiWorkAllowed
+        let owner = UUID(), scheduleRun = aiSchedule?.runID
+        aiSubmissionOwner = owner; aiSubmissionTrigger = trigger
+        if trigger == nil { aiDraft = question; aiCompleted = nil }
+        aiWarning = nil; aiProgress = "送信の準備中"
         aiPhase = .confirmationWait
         aiTask = Task { [weak self] in
             guard let self else { return }
             var request: AIRequest?
             defer {
-                if meetingID == handoff.meetingID, !Task.isCancelled { aiTask = nil; aiPhase = nil; aiProgress = nil; emit() }
+                if meetingID == handoff.meetingID, aiSubmissionOwner == owner {
+                    aiTask = nil; aiPhase = nil; aiProgress = nil; aiSubmissionTrigger = nil
+                    observeAIScheduleResults(); emit()
+                }
             }
             do {
                 let record = try aiStore.begin(meetingID: meetingID, markdownURL: url, config: config)
@@ -435,13 +474,18 @@ final class MeetingSession {
                     }
                 }, progress: { seconds in self.aiProgress = "聞き取りの確定待ち · あと\(seconds)秒"; self.emit() })
                 try Task.checkCancellation()
+                guard aiSubmissionOwner == owner else { throw CancellationError() }
                 guard consumedAudioTime >= cutoff else { throw AIError.invalid("audio not processed") }
+                if trigger == .scheduled, !record.controller.hasChanges(lines: capture.lines) { return }
                 // prepareの通知から録音停止が始まっても、確定待ちの取消へ戻さない。
                 aiPhase = .preparingAndSending
                 let fixed = try record.controller.prepare(lines: capture.lines, question: question, voiceQuestion: capture.voice,
                     capturedAt: capturedAt, cutoff: cutoff, tail: capture.tail, config: config, helper: helper, parent: parent, full: full,
-                    workAllowed: workAllowed, voiceUtteranceStart: capture.voiceUtteranceStart)
+                    workAllowed: workAllowed, voiceUtteranceStart: capture.voiceUtteranceStart, trigger: trigger)
                 request = fixed
+                if trigger == .scheduled, let scheduleRun {
+                    aiSchedule?.register(requestID: fixed.id, meetingID: meetingID, runID: scheduleRun)
+                }
                 let executable: URL, arguments: [String]
                 if let launch { (executable, arguments) = try launch(config, helper, record.controller) }
                 else { let settings = try AILaunchConfiguration(config: config, helper: helper, controller: record.controller); executable = settings.executable; arguments = settings.arguments }
@@ -450,9 +494,10 @@ final class MeetingSession {
                 try await record.controller.connect(config: config, label: "KIKIGAKI \(config.participantName) \(format.string(from: startedAt))", executable: executable, arguments: arguments)
                 try Task.checkCancellation()
                 guard handoff.meetingID == meetingID else { throw CancellationError() }
+                guard cancelledAutomaticOwner != owner else { throw CancellationError() }
                 aiProgress = "送信中"; emit()
                 try await record.controller.send(fixed, config: config)
-                aiDraft = ""; aiCompleted = fixed.id
+                if trigger == nil { aiDraft = ""; aiCompleted = fixed.id }
             } catch is CancellationError {
                 if let request { try? aiStore.records[meetingID]?.controller.cancel(request.id) }
             } catch {
@@ -466,6 +511,7 @@ final class MeetingSession {
     }
 
     private func aiChanged() {
+        observeAIScheduleResults()
         if snapshot.state == .idle, let result = aiRecord?.saveResult {
             snapshot.saved = result.succeeded; snapshot.message = result.message
         }
@@ -582,5 +628,107 @@ final class MeetingSession {
         snapshot.elapsed = elapsed
         diagnostics.liveTraceLines(snapshot.utterances, names: snapshot.names, elapsed: elapsed).forEach(log)
         emit()
+    }
+}
+
+extension MeetingSession {
+    func startAISchedule(options: AIScheduleOptions, helper: URL, now: Date = Date()) throws {
+        guard snapshot.state == .recording || snapshot.state == .paused, meetingAI != nil else {
+            throw AIError.invalid("schedule recording state")
+        }
+        if aiSchedule == nil { aiSchedule = AIScheduleState(meetingID: aiMeetingID) }
+        try aiSchedule?.start(options: options, now: now, runID: UUID())
+        lastScheduleOptions = options; aiScheduleHelper = helper; aiScheduleWarning = nil
+        aiScheduleTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else { timer.invalidate(); return }
+                self.evaluateAISchedule()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        aiScheduleTimer = timer
+        emit()
+    }
+
+    func stopAISchedule() {
+        aiSchedule?.stop(); aiScheduleTimer?.invalidate(); aiScheduleTimer = nil
+        if aiSubmissionTrigger == .scheduled, aiTask != nil,
+           aiRecord?.controller.conversation.questions.contains(where: { $0.isAwaitingResult }) != true {
+            if aiPhase == .confirmationWait || aiRecord?.controller.isSending == true { cancelAIPreparation() }
+            else { cancelledAutomaticOwner = aiSubmissionOwner }
+        }
+        emit()
+    }
+
+    private var scheduleAvailability: AIScheduleAvailability {
+        let controller = aiRecord?.controller
+        if let controller, controller.connection != nil,
+           controller.connectionStatus == .disconnected || controller.connectionStatus == .blocked || controller.connectionStatus == .unknown {
+            return .disconnected
+        }
+        if aiTask != nil || manualAISheetOpen { return .busy }
+        if let controller {
+            let current = controller.conversation.questions.filter { $0.request.envelope.participant.sessionGeneration == controller.generation }
+            if current.contains(where: { $0.isAwaitingResult }) { return .awaitingResult }
+            if !controller.canSend { return controller.connectionStatus == .working ? .busy : .disconnected }
+            if current.contains(where: { $0.state == .needsInput && $0.answeredByRequestID == nil }) { return .confirmation }
+        }
+        return .ready
+    }
+
+    func evaluateAISchedule(now: Date = Date()) {
+        guard let phase = aiSchedule?.phase, phase != .stopped else {
+            aiScheduleTimer?.invalidate(); aiScheduleTimer = nil; return
+        }
+        observeAIScheduleResults()
+        let lines = TranscriptRenderer.lines(snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
+        let changed = aiRecord?.controller.hasChanges(lines: lines) ?? !lines.isEmpty
+        let effect: AIScheduleState.Effect?
+        if phase == .awaitingFinal {
+            effect = aiSchedule?.finalDecision(availability: scheduleAvailability, hasChanges: changed)
+        } else {
+            effect = aiSchedule?.tick(now: now, availability: scheduleAvailability, hasChanges: changed)
+        }
+        switch effect {
+        case .send:
+            if let options = aiSchedule?.options, let helper = aiScheduleHelper {
+                submitAI(question: options.prompt, full: false, parent: nil, helper: helper,
+                         trigger: .scheduled, workAllowed: options.workAllowed)
+            }
+        case .skipped(.disconnected): aiScheduleWarning = "接続できないため最後の1回を中止しました"
+        default: break
+        }
+        emit()
+    }
+
+#if DEBUG
+    func setScheduleTranscriptForTesting(_ text: String) {
+        finalTokens = [.init(text: text, phraseId: 0, start: 0, end: 0)]
+        snapshot.utterances = [.init(speaker: nil, start: 0, end: 0, text: text)]
+        consumedAudioTime = 1; snapshot.elapsed = 1
+        emit()
+    }
+#endif
+
+    private func observeAIScheduleResults() {
+        guard let run = aiSchedule?.runID, let controller = aiRecord?.controller else { return }
+        for question in controller.conversation.questions where question.request.trigger == .scheduled {
+            let outcome: AIScheduleState.Outcome?
+            if let result = question.result {
+                switch result.kind {
+                case .answered: outcome = .answered
+                case .needsInput: outcome = .needsInput
+                case .failed: outcome = .failed
+                case .accept: outcome = nil
+                }
+            } else if question.state == .failed { outcome = .failed }
+            else if question.state == .deliveryUnknown && !controller.isSending { outcome = .deliveryUnknown }
+            else { outcome = nil }
+            if let outcome, aiSchedule?.observe(requestID: question.request.id, meetingID: aiMeetingID, runID: run, outcome: outcome) == .stoppedAfterFailures {
+                aiScheduleWarning = "自動送信が3回続けて失敗したため停止しました"
+                aiScheduleTimer?.invalidate(); aiScheduleTimer = nil
+            }
+        }
     }
 }
