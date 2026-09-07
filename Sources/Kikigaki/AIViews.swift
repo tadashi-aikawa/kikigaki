@@ -157,6 +157,8 @@ final class AIMarkRow: NSView, DocumentRow {
     var onPane: (() -> Void)?
     var onToggle: (() -> Void)?
     private let body = NSTextField(wrappingLabelWithString: "")
+    private let markdownBody = MarkdownBodyView()
+    private let confirmationMark = Washi.label("?", size: 15, color: Washi.muted)
     private let detail = NSTextField(wrappingLabelWithString: "")
     private let questionText = NSTextField(wrappingLabelWithString: "")
     private lazy var toggle = AIActionButton("") { [weak self] in self?.toggleExpanded() }
@@ -193,7 +195,7 @@ final class AIMarkRow: NSView, DocumentRow {
     override var isFlipped: Bool { true }
     init(mark: AIInlineMark, state: AIViewState) {
         self.mark = mark; self.state = state; super.init(frame: .zero)
-        for view in [toggle, questionText, body, detail, reply, cancel, pane] { addSubview(view) }
+        for view in [toggle, questionText, body, markdownBody, confirmationMark, detail, reply, cancel, pane] { addSubview(view) }
         toggle.cell?.lineBreakMode = .byTruncatingTail
         questionText.isSelectable = true; questionText.maximumNumberOfLines = 0
         questionText.lineBreakMode = .byWordWrapping
@@ -213,10 +215,10 @@ final class AIMarkRow: NSView, DocumentRow {
                 .font: NSFont.systemFont(ofSize: 12), .foregroundColor: Washi.muted, .paragraphStyle: paragraph
             ])
         }
-        let text = mark.kind == .question ? question.request.displayQuestion
-            : (question.result?.kind == .needsInput ? "? " : "") + (question.result?.body ?? "")
-        if body.stringValue != text {
-            body.attributedStringValue = NSAttributedString(string: text, attributes: [
+        if mark.kind == .result {
+            markdownBody.update(question.result?.body ?? "")
+        } else if body.stringValue != question.request.displayQuestion {
+            body.attributedStringValue = NSAttributedString(string: question.request.displayQuestion, attributes: [
                 .font: NSFont.systemFont(ofSize: 15), .foregroundColor: Washi.ink, .paragraphStyle: paragraph
             ])
         }
@@ -282,7 +284,10 @@ final class AIMarkRow: NSView, DocumentRow {
         toggle.setAccessibilityLabel(title + (statusPill.map { "、" + $0 } ?? "") + (expanded ? "、折りたたむ" : "、展開する"))
         toggle.toolTip = title + excerpt
         questionText.isHidden = !expanded || mark.kind != .result
-        body.isHidden = !expanded; detail.isHidden = !expanded
+        body.isHidden = !expanded || mark.kind == .result
+        markdownBody.isHidden = !expanded || mark.kind != .result
+        confirmationMark.isHidden = !expanded || mark.kind != .result || mark.question.result?.kind != .needsInput
+        detail.isHidden = !expanded
         reply.isHidden = !expanded || mark.kind != .result || !confirming || state.readOnly
         cancel.isHidden = !expanded || mark.kind != .question || !mark.question.isAwaitingResult || state.readOnly
         pane.isHidden = !expanded || !state.canOpenPane
@@ -291,7 +296,8 @@ final class AIMarkRow: NSView, DocumentRow {
     func height(for width: CGFloat) -> CGFloat {
         guard expanded else { return 28 }
         let bounds = NSRect(x: 0, y: 0, width: max(44, width - 90), height: .greatestFiniteMagnitude)
-        measuredBody = ceil(body.cell?.cellSize(forBounds: bounds).height ?? 0)
+        measuredBody = mark.kind == .result ? markdownBody.height(for: bounds.width)
+            : ceil(body.cell?.cellSize(forBounds: bounds).height ?? 0)
         measuredDetail = ceil(detail.cell?.cellSize(forBounds: bounds).height ?? 0)
         measuredQuestion = mark.kind == .result ? ceil(questionText.cell?.cellSize(forBounds: bounds).height ?? 0) + 10 : 0
         let actions = [reply, cancel, pane].contains { !$0.isHidden } ? 30.0 : 0
@@ -302,6 +308,8 @@ final class AIMarkRow: NSView, DocumentRow {
         toggle.frame = NSRect(x: 64, y: 2, width: max(0, bounds.width - 158 - (statusPill == nil ? 0 : pillWidth + 8)), height: 24)
         questionText.frame = NSRect(x: 68, y: 36, width: max(44, bounds.width - 90), height: max(0, measuredQuestion - 10))
         body.frame = NSRect(x: 68, y: 36 + measuredQuestion, width: max(44, bounds.width - 90), height: measuredBody)
+        markdownBody.frame = body.frame
+        confirmationMark.frame = NSRect(x: 60, y: body.frame.minY + 2, width: 10, height: 20)
         detail.frame = NSRect(x: 68, y: body.frame.maxY + 10, width: body.frame.width, height: measuredDetail)
         var x: CGFloat = 68
         for button in [reply, cancel, pane] where !button.isHidden {
