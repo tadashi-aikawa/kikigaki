@@ -12,7 +12,18 @@ public enum TranscriptRenderer {
     /// `[HH:mm:ss] 話者名: テキスト`。会議開始と一時停止を含む実時刻を使う。
     public static func line(_ utterance: Utterance, names: SpeakerNames,
                             timeline: MeetingTimeline, timeZone: TimeZone = .current) -> String {
-        formattedLine(utterance, names: names, stamp: timeline.clock(at: utterance.start, seconds: true, timeZone: timeZone))
+        formattedLine(utterance, names: names, stamp: clock(for: utterance, timeline: timeline, seconds: true, timeZone: timeZone))
+    }
+
+    /// 並びの第一キーは音声位置だが、手入力の時計は実際の投稿日時で固定する。
+    public static func date(for utterance: Utterance, timeline: MeetingTimeline) -> Date {
+        if utterance.kind == .typed, let postedAt = utterance.postedAt { return postedAt }
+        return timeline.date(at: utterance.start)
+    }
+
+    public static func clock(for utterance: Utterance, timeline: MeetingTimeline,
+                             seconds: Bool = false, timeZone: TimeZone = .current) -> String {
+        ClockFormatters.shared.string(from: date(for: utterance, timeline: timeline), seconds: seconds, timeZone: timeZone)
     }
 
     private static func formattedLine(_ utterance: Utterance, names: SpeakerNames, stamp: String) -> String {
@@ -20,7 +31,7 @@ public enum TranscriptRenderer {
             .replacingOccurrences(of: "\r\n", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
-        return "[\(stamp)] \(names.name(for: utterance.speaker)): \(text)"
+        return "[\(stamp)] \(names.displayName(for: utterance)): \(text)"
     }
 
     public static func lines(_ utterances: [Utterance], names: SpeakerNames,

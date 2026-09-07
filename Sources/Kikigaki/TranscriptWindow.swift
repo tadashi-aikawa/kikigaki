@@ -4,6 +4,8 @@ import KikigakiCore
 @MainActor
 final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegate, NSMenuItemValidation {
     var onRename: ((Int, String) -> Void)?
+    var onSubmitTyped: ((String) -> Bool)?
+    let typedEntry = TypedEntryField()
     var onStartStop: (() -> Void)?
     var onPauseResume: (() -> Void)?
     var onCopy: ((Bool) -> Void)?
@@ -61,7 +63,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var searchHits: [SearchHit] = []
     var currentHit: Int?
     // 開始時刻が重複しても落とさず、同時刻の出現順で別ビューとして扱う。
-    struct RowID: Hashable { let start: Double; let occurrence: Int }
+    struct RowKey: Hashable { let kind: Utterance.Kind; let start: Double }
+    struct RowID: Hashable { let kind: Utterance.Kind; let start: Double; let occurrence: Int }
     var rows: [RowID: TranscriptRow] = [:]
 
     init(shouldReduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }) {
@@ -95,6 +98,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     func apply(_ value: SessionSnapshot) {
         let previous = snapshot
         snapshot = value
+        typedEntry.update(enabled: value.canSubmitTyped,
+                          resetDraft: value.state == .preparing && previous.state != .preparing)
         previousAIButton.isHidden = value.previousAIUnread == 0 && value.aiRecoveryWarning == nil
         previousAIButton.title = value.aiRecoveryWarning == nil ? "前の会議に返事あり" : "AIの返事の回収を確認"
         previousAIButton.toolTip = value.aiRecoveryWarning
@@ -179,8 +184,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             if let preview = snapshot.handoffPreview {
                 let end = snapshot.state == .idle ? "終了" : "現在"
                 let correction = preview.includesCorrections ? "訂正を含む · " : ""
-                rangeLabel.stringValue = correction + snapshot.timeline.clock(at: preview.startTime)
-                    + " 〜 " + end + " " + snapshot.timeline.clock(at: snapshot.elapsed)
+                rangeLabel.stringValue = correction + snapshot.contextStartClock(preview)
+                    + " 〜 " + end + " " + snapshot.contextEndClock
             } else { rangeLabel.stringValue = snapshot.hasCopied ? "前回コピーから変更なし" : "発言を待っています" }
         }
         rangeLabel.toolTip = rangeLabel.stringValue
@@ -206,19 +211,20 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         let animated = sameMeeting && !shouldReduceMotion()
         var next: [RowID: TranscriptRow] = [:]
         var ordered: [any DocumentRow] = []
-        var occurrences: [Double: Int] = [:]
+        var occurrences: [RowKey: Int] = [:]
         var inserted: [TranscriptRow] = []
         var changed: [TranscriptRow] = []
         for (index, utterance) in snapshot.utterances.enumerated() {
-            while markIndex < marks.count, marks[markIndex].date < snapshot.timeline.date(at: utterance.start) {
+            while markIndex < marks.count, marks[markIndex].date < TranscriptRenderer.date(for: utterance, timeline: snapshot.timeline) {
                 let mark = marks[markIndex]
                 let view = markView(mark)
                 aiMarks[mark.id] = view; ordered.append(view); markIndex += 1
             }
             if snapshot.hasCopied, snapshot.handoffPreview?.startLine == index + 1 { ordered.append(boundary) }
-            let occurrence = occurrences[utterance.start, default: 0]
-            occurrences[utterance.start] = occurrence + 1
-            let id = RowID(start: utterance.start, occurrence: occurrence)
+            let key = RowKey(kind: utterance.kind, start: utterance.start)
+            let occurrence = occurrences[key, default: 0]
+            occurrences[key] = occurrence + 1
+            let id = RowID(kind: utterance.kind, start: utterance.start, occurrence: occurrence)
             let row = rows[id] ?? TranscriptRow()
             if rows[id] == nil { inserted.append(row) }
             if row.update(utterance, names: snapshot.names, timeline: snapshot.timeline,
@@ -245,7 +251,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         aiMarks = aiMarks.filter { markIDs.contains($0.key) }
         transcriptDocument.setRows(ordered, anchor: anchor)
         for row in inserted {
-            row.appear(animated: animated && snapshot.state == .recording)
+            row.appear(animated: animated && snapshot.canSubmitTyped)
             // 停止時の再分割で開始位置が変わった行も、最終結果の変更として同時に点灯する。
             if snapshot.state == .idle && !previous.utterances.isEmpty { row.highlight(animated: animated) }
         }
@@ -283,6 +289,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         messageLabel.maximumNumberOfLines = 3
         rangeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         rangeLabel.lineBreakMode = .byTruncatingMiddle
+        rangeLabel.maximumNumberOfLines = 1
         rangeLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let logoRule = NSView()
         Washi.surface(logoRule, color: Washi.rule)
@@ -357,7 +364,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         for view in [searchField, searchCount, searchPrevious, searchNext, close] { searchBar.addArrangedSubview(view) }
         Washi.surface(searchBar)
         searchBar.isHidden = true
-        return column([header, searchBar, separator(), body, separator(), footer], spacing: 0, inset: 0)
+        typedEntry.onSubmit = { [weak self] text in
+            guard let self, onSubmitTyped?(text) == true else { return false }
+            latestPressed()
+            return true
+        }
+        let entryArea = column([typedEntry], spacing: 0, inset: 12)
+        Washi.surface(entryArea, color: Washi.paper)
+        return column([header, searchBar, separator(), body, entryArea, separator(), footer], spacing: 0, inset: 0)
     }
 
     override func cancelOperation(_ sender: Any?) {

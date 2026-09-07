@@ -26,6 +26,26 @@ struct SessionSnapshot {
     var speakerMapping: [Int: Int] = [:]
     var speakerOverrides: [Int: Int] = [:]
 
+    var canSubmitTyped: Bool { state == .recording || state == .paused }
+    var voiceQuestionPlaceholder: String {
+        tentativeText ?? utterances.last(where: { $0.kind == .voice })?.text ?? "空欄なら声の末尾を送ります"
+    }
+    /// 音声消費が遅れていても、投稿済みの位置までを表示範囲に含める。
+    var contextEnd: Double { max(elapsed, utterances.filter { $0.kind == .typed }.map(\.start).max() ?? 0) }
+    var contextEndClock: String {
+        if let latest = utterances.filter({ $0.kind == .typed }).compactMap(\.postedAt).max(),
+           latest > timeline.date(at: contextEnd) {
+            return MeetingTimeline(startedAt: latest).clock(at: 0)
+        }
+        return timeline.clock(at: contextEnd)
+    }
+
+    func contextStartClock(_ preview: HandoffPreview) -> String {
+        let index = preview.startLine - 1
+        if utterances.indices.contains(index) { return TranscriptRenderer.clock(for: utterances[index], timeline: timeline) }
+        return timeline.clock(at: preview.startTime)
+    }
+
     var canShare: Bool {
         markdownURL != nil && (state == .recording || state == .paused || state == .idle)
     }

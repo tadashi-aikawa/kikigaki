@@ -71,6 +71,10 @@ avatar = "https://example.com/jinrai.webp"
 
 新しく保存する発話行とAI用の会話ファイルは `[HH:MM:SS] 話者名: 本文` の実時刻です。一時停止の長さを反映し、既存の経過時刻形式のファイルは変換しません。
 
+本文下の1行入力欄から、録音中・一時停止中だけEnterで投稿できます。固定名「手入力」は4話者とは別で、改名・統合・相槌省略の対象外です。IMEのEnterは変換確定を優先し、Escでは下書きを残します。手入力のURLはクリックで開け、名前と本文は検索対象です。
+
+`MeetingSession.typedEntries` を音声処理から独立して保持し、`TranscriptEntries.merge` で音声位置順に併合します。typedは必須のpostedAtを持ち、画面・Markdown・AI文脈は `TranscriptRenderer.clock` で投稿日時を表示します。AI送信のtypedは最初のawaitより前に固定します。詳細は [手入力の設計](docs/typed-entry.md)。
+
 同じ分に録音を始め直した場合、既存の保存物があれば `_2`、`_3` と連番を付けます。
 
 `dropRepeatedBackchannels = true` は、停止時に「うんうん」「そうそう」など短い反復の候補を省きます。録音中は省略せず、通常の `.md` と停止後の画面へ省略結果を反映し、省略前の書き起こしは同名の `.raw.md` に残します。話者名の変更は両方へ反映します。原文ファイルの保存に失敗した会議は、通常の `.md` と画面へ原文を残します。
@@ -131,6 +135,10 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - 環境変数 `KIKIGAKI_DEBUG_AI_ASK="40:;100:問い"`: replayの音声経過秒に達したら本番のsubmitAIで送信する。空の問いは声の末尾を使い、返事待ちは順番を保つ。前問がfailed/cancelledで接続が送信不可なら次問のために新世代へ作り直す。期限に達していない問いや失敗した問いの再送は行わない
 - 環境変数 `KIKIGAKI_DEBUG_REPLAY_HOLD=180`: replayの停止・保存後に指定秒だけ終了を遅らせる。0〜86400秒、既定0。到達済みの送信待ちと回答回収を継続する
 - 環境変数 `KIKIGAKI_DEBUG_AI_RENAME="0=田中"`: HOLD中に結果が届いた時点で0始まりの枡を一度改名する。結果がなければHOLD終了直前に行う。この3変数は通常起動では無視し、`--smoke --replay <wav>` で入力形式だけ検証できる
+- 環境変数 `KIKIGAKI_DEBUG_TYPED_ENTRIES='[{"seconds":20,"text":"https://example.com:8080/a;b"}]'`: replayの処理済み音声秒が指定位置に達したら本番のsubmitTypedで投稿する。startは実際の受付時点の収録位置で、処理が遅れていれば指定秒より後になる。JSON配列なのでURL中のコロン・セミコロンを保持し、同じ指定秒では配列順を保つ
+  - 投稿に `"pauseSeconds":2` を足すと、その位置で一時停止し、実時間2秒後に投稿して再開する。0秒超・60秒以下だけを受け付ける。一時停止中の音声は通常の録音と同じく取り込まない。検証フラグ併用時は一時停止中・再開直後の会話、timelineと実ウィンドウも保存する
+- 環境変数 `KIKIGAKI_DEBUG_TYPED_VERIFY=1`: replay中の投稿直後と停止後に本番の全体コピーを通し、保存先の `typed-verification/` に行JSON・コピープロンプト・Markdownを残す。停止後は改名、先頭2話者の統合、統合解除も通す。名前はAI_RENAMEの指定、なければ「改名確認」。クリップボードは変えず、AI登録簿も保存先の `.typed-test-support/` に隔離する。この2変数も通常起動では無視し、`--smoke --replay <wav>` で形式だけ検証できる
+  - AI_ASKを併用する場合、この検証モードだけは指定秒に到達した問いを停止後のHOLDで送る。HOLDを設定し、停止による確定待ち取消を挟まず最終会話の送信と返送後の保存を確認する
 - 環境変数 `KIKIGAKI_DEBUG_LIVE=1`: 停止直前の録音中表示を stderr に出す (録音中と最終結果の差を調べる用)
 - 環境変数 `KIKIGAKI_DEBUG_LIVE_TRACE=1`: 録音中の表示更新時に、音声経過秒と全文を stderr に出す。診断ログに会話本文を含む
 - 環境変数 `KIKIGAKI_DEBUG_PHRASES=1`: 停止時のフレーズごとに、トークンの時刻と窓判定から多数決後への話者の変化を stderr に出す

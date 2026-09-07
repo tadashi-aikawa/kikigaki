@@ -45,7 +45,7 @@ public struct AIRequest: Codable, Equatable, Sendable {
     /// 旧requestや確定行がない問いは、従来の送信時刻で配置する。
     public func voiceAnchorIndex(in utterances: [Utterance]) -> Int? {
         guard envelope.participant.questionSource == .voice, let start = voiceUtteranceStart else { return nil }
-        return utterances.indices.filter { utterances[$0].start <= start }.max {
+        return utterances.indices.filter { utterances[$0].kind == .voice && utterances[$0].start <= start }.max {
             utterances[$0].start == utterances[$1].start ? $0 < $1 : utterances[$0].start < utterances[$1].start
         }
     }

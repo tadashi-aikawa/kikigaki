@@ -29,6 +29,10 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
         return names[slot] ?? Self.defaultName(for: slot)
     }
 
+    public func displayName(for utterance: Utterance) -> String {
+        utterance.kind == .typed ? "手入力" : name(for: utterance.speaker)
+    }
+
     /// 付けた名前(既定のままなら nil)
     public func customName(for slot: Int) -> String? {
         names[slot]

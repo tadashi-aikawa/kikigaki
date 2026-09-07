@@ -8,15 +8,17 @@ struct ReplayDebugOptions {
     var questions: [Question] = []
     var hold: Double = 0
     var rename: (slot: Int, name: String)?
+    struct TypedEntry: Decodable { let seconds: Double; let text: String; let pauseSeconds: Double? }
+    var typedEntries: [TypedEntry] = []
+    var verifyTyped = false
     @MainActor static func recoverForNextQuestion(_ controller: AIConversationController?, preparing: Bool) throws {
         guard !preparing, let controller, !controller.canSend,
               let previous = controller.conversation.questions.last,
               previous.state == .failed || previous.state == .cancelled else { return }
         try controller.newGeneration()
     }
-    static func load() throws -> Self {
-        guard CommandLine.arguments.contains("--replay") else { return Self() }
-        let env = ProcessInfo.processInfo.environment
+    static func load(arguments: [String] = CommandLine.arguments, environment env: [String: String] = ProcessInfo.processInfo.environment) throws -> Self {
+        guard arguments.contains("--replay") else { return Self() }
         var result = Self()
         if let input = env["KIKIGAKI_DEBUG_AI_ASK"], !input.isEmpty {
             for entry in input.split(separator: ";", omittingEmptySubsequences: false) {
@@ -43,6 +45,21 @@ struct ReplayDebugOptions {
             }
             result.rename = (slot, String(pair[1]))
         }
+        if let input = env["KIKIGAKI_DEBUG_TYPED_ENTRIES"] {
+            let entries = try JSONDecoder().decode([TypedEntry].self, from: Data(input.utf8))
+            guard entries.allSatisfy({ $0.seconds.isFinite && $0.seconds >= 0
+                && ($0.pauseSeconds.map { $0.isFinite && $0 > 0 && $0 <= 60 } ?? true)
+                && (try? Utterance(typedText: $0.text, at: $0.seconds, postedAt: Date(timeIntervalSince1970: 0))) != nil }) else {
+                throw AIError.invalid("KIKIGAKI_DEBUG_TYPED_ENTRIES")
+            }
+            result.typedEntries = entries.enumerated().sorted {
+                $0.element.seconds == $1.element.seconds ? $0.offset < $1.offset : $0.element.seconds < $1.element.seconds
+            }.map(\.element)
+        }
+        if let input = env["KIKIGAKI_DEBUG_TYPED_VERIFY"] {
+            guard ["0", "1"].contains(input) else { throw AIError.invalid("KIKIGAKI_DEBUG_TYPED_VERIFY") }
+            result.verifyTyped = input == "1"
+        }
         return result
     }
 }
@@ -68,6 +85,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var registeredAIHotkey: KikigakiConfig.Hotkey?
     private let replayDebug: ReplayDebugOptions
     private var nextDebugQuestion = 0
+    private var nextDebugTyped = 0
+    private var debugTypedPausing = false
     private var replayHolding = false
     private var debugRenamed = false
     private var performingReplayDebug = false
@@ -92,7 +111,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let modelsTask = Task { try await SortformerModelStore.load() }
         self.modelsTask = modelsTask
-        let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/KIKIGAKI")
+        let support = replayURL != nil && replayDebug.verifyTyped
+            ? config.outputDir.appendingPathComponent(".typed-test-support")
+            : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/KIKIGAKI")
         do { try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true) }
         catch { Self.log("AI会議の登録先を作成できません") }
         // herdrはPATHか既知の置き場で探し、設定 `[ai] herdrCommand` があればそれを使う(GUI起動のPATH不足への備え)
@@ -109,6 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let window = TranscriptWindowController()
         window.onRename = { session.rename(slot: $0, to: $1) }
+        window.onSubmitTyped = { session.submitTyped($0) }
         window.onSpeakerMappingChange = { session.setSpeakerMapping(source: $0, target: $1) }
         window.onStartStop = { [weak self] in self?.toggleRecording() }
         window.onPauseResume = { session.togglePause() }
@@ -208,6 +230,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     Task { @MainActor in
                         await self?.session?.stop()
                         Self.log("replay 完了: \(self?.session?.snapshot.markdownURL?.path ?? "-")")
+                        if let self, self.replayDebug.verifyTyped, let session = self.session {
+                            do { try ReplayTypedVerification.finish(session, rename: self.replayDebug.rename, window: self.window?.window); self.debugRenamed = true }
+                            catch { Self.log("replay 手入力検証失敗: \(error)") }
+                        }
                         if let self, self.replayDebug.hold > 0 {
                             self.replayHolding = true
                             Self.log("replay HOLD開始: \(self.replayDebug.hold)秒")
@@ -243,12 +269,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func performReplayDebugActions(_ snapshot: SessionSnapshot) {
-        guard replayURL != nil, !performingReplayDebug, snapshot.state == .recording || replayHolding else { return }
+        guard replayURL != nil, !performingReplayDebug, !debugTypedPausing,
+              snapshot.state == .recording || replayHolding else { return }
         performingReplayDebug = true
         defer { performingReplayDebug = false }
+        if let session, snapshot.state == .recording {
+            while nextDebugTyped < replayDebug.typedEntries.count,
+                  replayDebug.typedEntries[nextDebugTyped].seconds <= snapshot.elapsed {
+                let entry = replayDebug.typedEntries[nextDebugTyped]
+                nextDebugTyped += 1
+                if let seconds = entry.pauseSeconds {
+                    debugTypedPausing = true
+                    session.togglePause()
+                    Self.log("replay 手入力: 音声\(session.snapshot.elapsed)秒で一時停止、\(seconds)秒後に投稿")
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(for: .seconds(seconds))
+                        guard let self else { return }
+                        let accepted = session.submitTyped(entry.text)
+                        Self.log("replay 一時停止中の手入力: 受理\(accepted)")
+                        if accepted, self.replayDebug.verifyTyped {
+                            do { try ReplayTypedVerification.capture(session, phase: "paused", window: self.window?.window) }
+                            catch { Self.log("replay 一時停止中の検証失敗: \(error)") }
+                        }
+                        if session.snapshot.state == .paused { session.togglePause() }
+                        self.debugTypedPausing = false
+                        if self.replayDebug.verifyTyped {
+                            do { try ReplayTypedVerification.capture(session, phase: "resumed", window: self.window?.window) }
+                            catch { Self.log("replay 再開直後の検証失敗: \(error)") }
+                        }
+                    }
+                    return
+                }
+                let accepted = session.submitTyped(entry.text)
+                Self.log("replay 手入力\(nextDebugTyped): 指定\(entry.seconds)秒、受理\(accepted)")
+                if accepted, replayDebug.verifyTyped {
+                    do { try ReplayTypedVerification.capture(session, phase: "recording-\(nextDebugTyped)", window: window?.window) }
+                    catch { Self.log("replay 手入力の途中保存失敗: \(error)") }
+                }
+            }
+        }
         if replayHolding, snapshot.ai?.conversation?.questions.contains(where: { $0.result != nil }) == true {
             performReplayRename()
         }
+        // 手入力の保存検証では最終会話を送る。停止による確定待ち取消を避ける。
+        if replayDebug.verifyTyped && !replayHolding { return }
         guard nextDebugQuestion < replayDebug.questions.count, let session else { return }
         let question = replayDebug.questions[nextDebugQuestion]
         guard snapshot.elapsed >= question.seconds else { return }
@@ -327,7 +391,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let question = parent.flatMap { id in session.aiRecord?.controller.conversation.questions.first { $0.request.id == id } }
         let range = session.aiRangePreview(full: false)
         let sheet = AIQuestionSheet(participant: config.participantName, parentNumber: question?.request.number,
-            draft: session.aiDraft, voice: snapshot.tentativeText ?? snapshot.utterances.last?.text ?? "空欄なら会話末尾を送ります",
+            draft: session.aiDraft, voice: snapshot.voiceQuestionPlaceholder,
             range: range, tentative: snapshot.tentativeText != nil, canSubmit: snapshot.ai?.canSubmit == true, confirmation: question?.result?.body,
             workAllowed: session.aiWorkAllowed)
         sheet.onDraft = { session.updateAIDraft($0) }

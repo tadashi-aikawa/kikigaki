@@ -33,7 +33,7 @@ public struct MeetingTimeline: Equatable, Sendable {
 }
 
 /// 辞書の生成と整形を同じロックで保護し、並行する保存と表示でも共有できる。
-private final class ClockFormatters: @unchecked Sendable {
+final class ClockFormatters: @unchecked Sendable {
     static let shared = ClockFormatters()
     private struct Key: Hashable { let seconds: Bool; let timeZone: TimeZone }
     private let lock = NSLock()

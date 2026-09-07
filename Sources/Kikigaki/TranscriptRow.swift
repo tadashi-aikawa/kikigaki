@@ -8,6 +8,9 @@ final class AvatarView: NSView {
     var initial = "?"
     var slot: Int?
     var tentative = false
+    var typed = false
+    private let pencil = NSImage(systemSymbolName: "pencil", accessibilityDescription: "手入力")?
+        .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [Washi.paper]))
     var image: NSImage? { didSet { if image !== oldValue { needsDisplay = true } } }
     override func draw(_ dirtyRect: NSRect) {
         NSGraphicsContext.saveGraphicsState()
@@ -24,16 +27,21 @@ final class AvatarView: NSView {
             return
         }
         let color = Washi.speakerColor(for: slot)
-        color.background.setFill()
+        (typed ? Washi.ink : color.background).setFill()
         let shape = NSBezierPath(ovalIn: NSRect(x: 0, y: 0, width: 24, height: 24))
         let tail = NSBezierPath()
         tail.move(to: NSPoint(x: 3, y: 18))
         tail.line(to: NSPoint(x: 8, y: 22))
         tail.line(to: NSPoint(x: 1, y: 25))
         tail.close()
-        shape.append(tail)
+        if !typed { shape.append(tail) }
         shape.windingRule = .nonZero
         shape.fill()
+        if typed {
+            pencil?.draw(in: NSRect(x: 5, y: 5, width: 14, height: 14), from: .zero,
+                         operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            return
+        }
         if let image {
             shape.addClip()
             let scale = max(25 / image.size.width, 26 / image.size.height)
@@ -76,6 +84,7 @@ final class TranscriptRow: NSView, DocumentRow {
     private let timeLabel = Washi.label(color: Washi.muted)
     private let hint = Washi.label("コピーには含めません", size: 11, color: Washi.muted)
     private let body = NSTextField(wrappingLabelWithString: "")
+    private let typedBody = TypedEntryBody()
     private let speakerButton = SpeakerButton()
     var onRename: ((Int, NSView) -> Void)?
     private var utterance: Utterance?
@@ -107,6 +116,7 @@ final class TranscriptRow: NSView, DocumentRow {
         avatar.tentative = tentative
         body.font = .systemFont(ofSize: 15)
         body.isSelectable = true
+        body.allowsEditingTextAttributes = true
         body.maximumNumberOfLines = 0
         body.lineBreakMode = .byWordWrapping
         timeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
@@ -115,7 +125,8 @@ final class TranscriptRow: NSView, DocumentRow {
         if tentative { nameLabel.font = .systemFont(ofSize: 12) }
         hint.isHidden = !tentative
         hint.alignment = .right
-        for view in [avatar, nameLabel, timeLabel, hint, body] { addSubview(view) }
+        typedBody.isHidden = true
+        for view in [avatar, nameLabel, timeLabel, hint, body, typedBody] { addSubview(view) }
         speakerButton.isBordered = false
         speakerButton.title = ""
         speakerButton.target = self
@@ -128,9 +139,9 @@ final class TranscriptRow: NSView, DocumentRow {
         if let slot = utterance?.speaker { onRename?(slot, speakerButton) }
     }
     func updateAvatar(speakers: [KikigakiConfig.Speaker], store: AvatarStore, editable: Bool) {
-        let source = utterance?.speaker == nil ? nil : speakers.first { $0.name == displayedName }?.avatar
+        let source = utterance?.kind == .typed || utterance?.speaker == nil ? nil : speakers.first { $0.name == displayedName }?.avatar
         avatar.image = store.image(for: source)
-        speakerButton.isHidden = tentative || utterance?.speaker == nil
+        speakerButton.isHidden = tentative || utterance?.kind == .typed || utterance?.speaker == nil
         speakerButton.isEnabled = editable
         speakerButton.toolTip = "\(displayedName)の名前を変更"
         speakerButton.setAccessibilityLabel(speakerButton.toolTip)
@@ -139,6 +150,7 @@ final class TranscriptRow: NSView, DocumentRow {
     /// 本文・話者変更だけを点灯対象とする。時刻や話者固定待ちの変化では点灯しない。
     @discardableResult
     func update(_ value: Utterance, names: SpeakerNames, timeline: MeetingTimeline, speakerPending: Bool = false) -> Bool {
+        let speakerPending = value.kind == .voice && speakerPending
         if !tentative && self.speakerPending != speakerPending {
             self.speakerPending = speakerPending
             shade.isHidden = !speakerPending
@@ -147,7 +159,7 @@ final class TranscriptRow: NSView, DocumentRow {
             hint.isHidden = !speakerPending
             needsLayout = true
         }
-        let name = names.name(for: value.speaker)
+        let name = names.displayName(for: value)
         guard utterance != value || displayedName != name || displayedTimeline != timeline else { return false }
         let changed = utterance != nil && (utterance?.text != value.text || utterance?.speaker != value.speaker || displayedName != name)
         utterance = value
@@ -155,9 +167,12 @@ final class TranscriptRow: NSView, DocumentRow {
         displayedTimeline = timeline
         searchStyle = nil
         nameLabel.stringValue = name
-        timeLabel.stringValue = timeline.clock(at: value.start)
-        timeLabel.toolTip = TranscriptRenderer.elapsed(value.start)
+        timeLabel.stringValue = TranscriptRenderer.clock(for: value, timeline: timeline)
+        timeLabel.toolTip = value.kind == .typed
+            ? "会話の位置 \(TranscriptRenderer.elapsed(value.start)) · 投稿 \(TranscriptRenderer.clock(for: value, timeline: timeline, seconds: true))"
+            : TranscriptRenderer.elapsed(value.start)
         avatar.slot = value.speaker
+        avatar.typed = value.kind == .typed
         avatar.initial = value.speaker.map { names.customName(for: $0) == nil ? SpeakerNames.letter(for: $0) : String(name.prefix(1)) } ?? "?"
         avatar.setAccessibilityLabel(name)
         avatar.needsDisplay = true
@@ -171,26 +186,44 @@ final class TranscriptRow: NSView, DocumentRow {
         setBody(text)
     }
     func markSearch(nameRanges: [NSRange], textRanges: [NSRange], currentName: NSRange?, currentText: NSRange?) {
-        let style = SearchStyle(name: nameLabel.stringValue, text: body.stringValue, nameRanges: nameRanges,
+        let style = SearchStyle(name: nameLabel.stringValue, text: utterance?.text ?? body.stringValue, nameRanges: nameRanges,
                                 textRanges: textRanges, currentName: currentName, currentText: currentText)
         guard searchStyle != style else { return }
         searchStyle = style
-        for (label, ranges, current) in [(nameLabel, nameRanges, currentName), (body, textRanges, currentText)] {
-            let value = NSMutableAttributedString(attributedString: label.attributedStringValue)
+        func highlighted(_ source: NSAttributedString, _ ranges: [NSRange], _ current: NSRange?) -> NSAttributedString {
+            let value = NSMutableAttributedString(attributedString: source)
             value.removeAttribute(.backgroundColor, range: NSRange(location: 0, length: value.length))
             for range in ranges { value.addAttribute(.backgroundColor, value: Washi.searchMatch, range: range) }
             if let current { value.addAttribute(.backgroundColor, value: Washi.searchCurrent, range: current) }
-            label.attributedStringValue = value
+            return value
         }
+        nameLabel.attributedStringValue = highlighted(nameLabel.attributedStringValue, nameRanges, currentName)
+        if utterance?.kind == .typed {
+            let selection = typedBody.selectedRanges
+            typedBody.textStorage?.setAttributedString(highlighted(typedBody.attributedString(), textRanges, currentText))
+            typedBody.selectedRanges = selection
+        } else { body.attributedStringValue = highlighted(body.attributedStringValue, textRanges, currentText) }
     }
     private func setBody(_ text: String) {
-        guard body.stringValue != text else { return }
+        let typed = utterance?.kind == .typed
+        guard (typed ? typedBody.string : body.stringValue) != text else { return }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = 4
-        body.attributedStringValue = NSAttributedString(string: text, attributes: [
+        let attributed = NSMutableAttributedString(string: text, attributes: [
             .font: NSFont.systemFont(ofSize: 15), .foregroundColor: tentative ? Washi.tentative : Washi.ink,
             .paragraphStyle: paragraph
         ])
+        if utterance?.kind == .typed, let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+            for match in detector.matches(in: text, range: NSRange(location: 0, length: attributed.length)) {
+                guard let url = match.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { continue }
+                attributed.addAttributes([.link: url, .foregroundColor: Washi.red,
+                                          .underlineStyle: NSUnderlineStyle.single.rawValue], range: match.range)
+            }
+        }
+        typedBody.isHidden = !typed; body.isHidden = typed
+        if typed {
+            if typedBody.string != text { typedBody.textStorage?.setAttributedString(attributed) }
+        } else { body.attributedStringValue = attributed }
         measuredWidth = -1
     }
     func height(for width: CGFloat) -> CGFloat {
@@ -198,7 +231,7 @@ final class TranscriptRow: NSView, DocumentRow {
             // NSTextFieldの内側余白まで含めて測る。文字列だけのboundingRectでは
             // 折り返し境界の数pt差で最終行が切れるため、描画するセル自身に問い合わせる。
             let size = body.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: max(44, width - 74), height: .greatestFiniteMagnitude)) ?? .zero
-            measuredHeight = max(20, ceil(size.height)) + 36
+            measuredHeight = max(20, typedBody.isHidden ? ceil(size.height) : typedBody.height(for: max(44, width - 74))) + 36
             measuredWidth = width
         }
         return measuredHeight
@@ -216,6 +249,7 @@ final class TranscriptRow: NSView, DocumentRow {
         timeLabel.frame = NSRect(x: 54 + nameWidth + 12, y: 8, width: 62, height: 18)
         hint.frame = NSRect(x: bounds.width - 150, y: 8, width: 130, height: 18)
         body.frame = NSRect(x: 54, y: 31, width: max(44, bounds.width - 74), height: max(20, bounds.height - 36))
+        typedBody.frame = body.frame
     }
     func appear(animated: Bool) {
         guard animated else { stopAnimations(); return }

@@ -28,8 +28,9 @@ public struct MeetingArchive: Codable {
 
     /// 統合訂正は原トークンから再計算した結果を入れる。raw所有権と省略失敗状態は維持する。
     public mutating func replaceResult(_ result: MeetingResult) {
-        original.utterances = result.utterances
-        processed = result.processed
+        let typed = original.utterances.filter { $0.kind == .typed }
+        original.utterances = TranscriptEntries.merge(voice: result.utterances, typed: typed, timeline: original.timeline).utterances
+        processed = result.processed.map { TranscriptEntries.merge(voice: $0, typed: typed, timeline: original.timeline).utterances }
         candidateCount = result.candidates.count
     }
 

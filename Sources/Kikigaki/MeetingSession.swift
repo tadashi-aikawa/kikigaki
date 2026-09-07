@@ -57,6 +57,7 @@ final class MeetingSession {
     private var dropRepeatedBackchannels = false
     private var speakerMapping = SpeakerMapping()
     private var liveSource = SpeakerTranscript()
+    private var typedEntries: [Utterance] = []
     private var finalTokens: [TimedToken] = []
     private var finalSegments: [SpeakerSegment] = []
     private var preparationID = UUID()
@@ -113,6 +114,7 @@ final class MeetingSession {
         snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers, message: "エンジンを準備中...")
         speakerMapping = SpeakerMapping()
         liveSource = SpeakerTranscript()
+        typedEntries = []
         finalTokens = []
         finalSegments = []
         handoff = HandoffHistory()
@@ -225,15 +227,17 @@ final class MeetingSession {
 
         let duration = Double(result.fedSamples) / 16000
         snapshot.timeline = pause.timeline
-        let meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: duration, utterances: final.utterances,
+        let merged = TranscriptEntries.merge(voice: final.utterances, typed: typedEntries, timeline: snapshot.timeline).utterances
+        let processed = final.processed.map { TranscriptEntries.merge(voice: $0, typed: typedEntries, timeline: snapshot.timeline).utterances }
+        let meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: duration, utterances: merged,
                                               names: snapshot.names, pauses: snapshot.timeline.pauses)
         if let url = snapshot.markdownURL {
-            archive = MeetingArchive(original: meeting, processed: final.processed,
+            archive = MeetingArchive(original: meeting, processed: processed,
                                      candidateCount: final.candidates.count, markdownURL: url)
         }
 
         snapshot.state = .idle
-        snapshot.utterances = final.utterances
+        snapshot.utterances = merged
         snapshot.tentativeText = nil
         snapshot.pendingSpeakerRows = []
         snapshot.elapsed = duration
@@ -254,7 +258,19 @@ final class MeetingSession {
         default:
             return
         }
+        refreshLive()
         emit()
+    }
+
+    /// 投稿受付からemitまでawaitを挟まない。停止より先に受理した行は最終保存に含める。
+    @discardableResult
+    func submitTyped(_ text: String) -> Bool {
+        guard snapshot.canSubmitTyped,
+              let entry = try? Utterance(typedText: text, at: pause.audioTime, postedAt: Date()) else { return false }
+        typedEntries.append(entry)
+        refreshLive()
+        emit()
+        return true
     }
 
     /// 枡に名前を付ける。停止後なら Markdown を保存し直す
@@ -295,7 +311,7 @@ final class MeetingSession {
                                           writeClipboard: writeClipboard) {
                 snapshot.handoffMessage = copy.preview.lineCount == 0
                     ? "会話の訂正をコピーしました"
-                    : "\(snapshot.timeline.clock(at: copy.preview.startTime))以降をコピーしました。AIへ貼り付けられます"
+                    : "\(snapshot.contextStartClock(copy.preview))以降をコピーしました。AIへ貼り付けられます"
             } else {
                 snapshot.handoffMessage = "前回のコピーから会話の変更はありません"
             }
@@ -389,7 +405,7 @@ final class MeetingSession {
                   launch: ((ResolvedAIConfig, URL, AIConversationController) throws -> (URL, [String]))? = nil) {
         guard snapshot.canShare, aiTask == nil, let config = meetingAI, let url = snapshot.markdownURL, let aiStore else { return }
         let meetingID = handoff.meetingID, capturedAt = Date(), cutoff = snapshot.state == .idle ? snapshot.elapsed : pause.audioTime
-        let names = snapshot.names, timeline = snapshot.timeline
+        let names = snapshot.names, timeline = snapshot.timeline, typed = typedEntries
         let workAllowed = aiWorkAllowed
         aiDraft = question; aiCompleted = nil; aiWarning = nil; aiProgress = "送信の準備中"
         aiPhase = .confirmationWait
@@ -412,10 +428,10 @@ final class MeetingSession {
                         let (tokens, count) = await transcriber.snapshot()
                         let speakers = self.speakerMapping.apply(Aligner.speakers(for: tokens, segments: self.diarizer?.segments() ?? []))
                         return try AICapture(tokens: tokens, speakers: speakers, finalCount: count, processedUntil: self.consumedAudioTime,
-                            cutoff: cutoff, names: names, timeline: timeline)
+                            cutoff: cutoff, names: names, timeline: timeline, typed: typed)
                     } else {
                         return try AICapture(tokens: self.finalTokens, speakers: self.speakerMapping.apply(Aligner.speakers(for: self.finalTokens, segments: self.finalSegments)),
-                            finalCount: self.finalTokens.count, processedUntil: self.snapshot.elapsed, cutoff: cutoff, names: names, timeline: timeline)
+                            finalCount: self.finalTokens.count, processedUntil: self.snapshot.elapsed, cutoff: cutoff, names: names, timeline: timeline, typed: typed)
                     }
                 }, progress: { seconds in self.aiProgress = "聞き取りの確定待ち · あと\(seconds)秒"; self.emit() })
                 try Task.checkCancellation()
@@ -473,6 +489,15 @@ final class MeetingSession {
         emit()
     }
     var submissionTaskForTesting: Task<Void, Never>? { aiTask }
+    func publishForTesting(tokens: [TimedToken], speakers: [Int?], elapsed: Double) {
+        finalTokens = tokens
+        finalSegments = zip(tokens, speakers).compactMap { token, slot in
+            slot.map { SpeakerSegment(speaker: $0, start: token.start, end: token.end) }
+        }
+        receiveSpeakerState(segments: finalSegments)
+        consumedAudioTime = elapsed
+        publishLive(SpeakerTranscript(tokens: tokens, speakers: speakers, finalCount: tokens.count), elapsed: elapsed)
+    }
 #endif
 
     private func tearDown() async {
@@ -543,9 +568,11 @@ final class MeetingSession {
     private func refreshLive() {
         let live = LiveTranscript(tokens: liveSource.tokens, speakers: speakerMapping.apply(liveSource.speakers),
                                   finalCount: liveSource.finalCount, frozenCount: liveSource.frozenCount)
-        snapshot.utterances = live.utterances
+        let merged = TranscriptEntries.merge(voice: live.utterances, typed: typedEntries, timeline: pause.timeline,
+                                             pendingVoiceRows: live.pendingSpeakerRows)
+        snapshot.utterances = merged.utterances
         snapshot.tentativeText = live.tentativeText
-        snapshot.pendingSpeakerRows = live.pendingSpeakerRows
+        snapshot.pendingSpeakerRows = merged.pendingSpeakerRows
     }
 
     private func publishLive(_ live: SpeakerTranscript, elapsed: Double) {

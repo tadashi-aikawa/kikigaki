@@ -30,6 +30,28 @@ import KikigakiCore
         #expect(try #require(lines.firstIndex { $0.contains("[00:00:41] AIから #1") }) > laterLine)
         #expect(try AIJSON.decode(AIRequest.self, from: AIJSON.encode(request)).voiceUtteranceStart == (typed ? nil : 10))
     }
+    @Test func 手入力を声の印の対象にせずAI印があっても会話順を保つ() throws {
+        let value = try request(typed: false, anchor: 10)
+        let typed = try Utterance(typedText: "手入力本文", at: 10, postedAt: Date(timeIntervalSince1970: 120))
+        let voice = Utterance(speaker: 0, start: 10, end: 15, text: "声の本文")
+        #expect(value.voiceAnchorIndex(in: [voice, typed]) == 0)
+        #expect(value.voiceAnchorIndex(in: [typed]) == nil)
+        var conversation = AIConversation(meetingID: value.envelope.meetingID)
+        try conversation.append(value)
+        try conversation.update(value.id) {
+            try $0.beginSending(at: Date(timeIntervalSince1970: 30))
+            try $0.submitted()
+        }
+        let later = Utterance(speaker: 0, start: 20, end: 25, text: "後続の声")
+        let meeting = MeetingMarkdown.Meeting(startedAt: Date(timeIntervalSince1970: 0), duration: 50,
+            utterances: [voice, typed, later], names: SpeakerNames(), ai: conversation)
+        let lines = MeetingMarkdown.render(meeting, timeZone: TimeZone(secondsFromGMT: 0)!).components(separatedBy: "\n")
+        let first = try #require(lines.firstIndex { $0.contains("声の本文") })
+        let entry = try #require(lines.firstIndex { $0.contains("[00:02:00] 手入力: 手入力本文") })
+        let last = try #require(lines.firstIndex { $0.contains("後続の声") })
+        #expect(first < entry && entry < last)
+        #expect(lines[first + 1].contains("AIへ #1"))
+    }
     @Test func 旧requestと対象なしは時刻へ戻り不正な位置を拒否する() throws {
         let value = try request(typed: false, anchor: 10)
         var json = try #require(JSONSerialization.jsonObject(with: AIJSON.encode(value)) as? [String: Any])

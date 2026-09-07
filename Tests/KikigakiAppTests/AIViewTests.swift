@@ -103,7 +103,8 @@ import KikigakiAIIO
         apply()
         #expect(state.ai?.badges == "未読 1 · 確認待ち 1 · 返事待ち 1 · 失敗 1")
         #expect(descendants(content).compactMap { $0 as? AIBadgeButton }.filter { !$0.isHidden }.map(\.title) == ["未読 1", "確認待ち 1", "返事待ち 1", "失敗 1"])
-        #expect(descendants(content).compactMap { $0 as? NSScrollView }.count == 1)
+        // 手入力の横スクロール欄を除き、AI本文が独立スクロールを作らないことを確認する。
+        #expect(descendants(content).compactMap { $0 as? NSScrollView }.filter { !($0 is TypedEntryField) }.count == 1)
         #expect(!descendants(content).compactMap { $0 as? NSButton }.contains { $0.title.contains("AIとのやりとり") || $0.title == "既読にする" })
         #expect(marks().count == 6 && marks().allSatisfy { !$0.expanded && $0.height(for: 680) == 28 })
         let answer = try #require(marks().first { $0.title == "#1 迅雷から" })

@@ -13,10 +13,11 @@ public enum AIMarkdown {
         guard let ai = meeting.ai, !ai.questions.isEmpty else {
             return meeting.utterances.map { "- " + TranscriptRenderer.line($0, names: meeting.names, timeline: meeting.timeline, timeZone: timeZone) }
         }
-        var lines = meeting.utterances.enumerated().map { index, utterance in
-            Line(date: meeting.timeline.date(at: utterance.start), kind: 0, order: index,
+        let lines = meeting.utterances.enumerated().map { index, utterance in
+            Line(date: TranscriptRenderer.date(for: utterance, timeline: meeting.timeline), kind: 0, order: index,
                  text: "- " + TranscriptRenderer.line(utterance, names: meeting.names, timeline: meeting.timeline, timeZone: timeZone))
         }
+        var marks: [Line] = []
         var attached: [Int: [Line]] = [:]
         for question in ai.questions {
             let number = question.request.number
@@ -25,21 +26,35 @@ public enum AIMarkdown {
                 let line = Line(date: sent, kind: 1, order: number,
                     text: "- [\(stamp(sent, relativeTo: meeting.startedAt, timeZone: timeZone))] \(label) #\(number) → AIとのやりとり")
                 if let index = question.request.voiceAnchorIndex(in: meeting.utterances) { attached[index, default: []].append(line) }
-                else { lines.append(line) }
+                else { marks.append(line) }
             }
             if let result = question.result, let received = question.resultReceivedAt {
                 let label = result.kind == .needsInput ? "AIからの確認" : result.kind == .failed ? "AI失敗" : "AIから"
-                lines.append(Line(date: received, kind: 2, order: question.resultOrder ?? 0,
+                marks.append(Line(date: received, kind: 2, order: question.resultOrder ?? 0,
                     text: "- [\(stamp(received, relativeTo: meeting.startedAt, timeZone: timeZone))] \(label) #\(number) → AIとのやりとり"))
             }
         }
-        return lines.sorted {
+        marks.sort {
             if $0.date != $1.date { return $0.date < $1.date }
             if $0.kind != $1.kind { return $0.kind < $1.kind }
             return $0.order < $1.order
-        }.flatMap { line in
-            [line.text] + (line.kind == 0 ? attached[line.order, default: []].sorted { $0.date == $1.date ? $0.order < $1.order : $0.date < $1.date }.map(\.text) : [])
         }
+        // 会話行は音声位置順の正本を保つ。postedAtで全文をsortすると、replayや
+        // 壁時計の変更時に手入力だけ末尾へ飛ぶため、AIの印だけ日時順で差し込む。
+        var rendered: [String] = []
+        var markIndex = 0
+        for line in lines {
+            while markIndex < marks.count, marks[markIndex].date < line.date {
+                rendered.append(marks[markIndex].text)
+                markIndex += 1
+            }
+            rendered.append(line.text)
+            rendered += attached[line.order, default: []].sorted {
+                $0.date == $1.date ? $0.order < $1.order : $0.date < $1.date
+            }.map(\.text)
+        }
+        rendered += marks.dropFirst(markIndex).map(\.text)
+        return rendered
     }
 
     public static func section(_ conversation: AIConversation, timeZone: TimeZone = .current) -> String {

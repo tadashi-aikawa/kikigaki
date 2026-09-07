@@ -60,12 +60,13 @@ extension TranscriptWindowController {
         let previous = currentHit.flatMap { searchHits.indices.contains($0) ? searchHits[$0] : nil }
         searchHits = []
         if searchOpen, !searchField.stringValue.isEmpty {
-            var occurrences: [Double: Int] = [:]
+            var occurrences: [RowKey: Int] = [:]
             for (index, utterance) in snapshot.utterances.enumerated() {
-                let occurrence = occurrences[utterance.start, default: 0]
-                occurrences[utterance.start] = occurrence + 1
-                let id = RowID(start: utterance.start, occurrence: occurrence)
-                for (inName, text) in [(true, snapshot.names.name(for: utterance.speaker)), (false, utterance.text)] {
+                let key = RowKey(kind: utterance.kind, start: utterance.start)
+                let occurrence = occurrences[key, default: 0]
+                occurrences[key] = occurrence + 1
+                let id = RowID(kind: utterance.kind, start: utterance.start, occurrence: occurrence)
+                for (inName, text) in [(true, snapshot.names.displayName(for: utterance)), (false, utterance.text)] {
                     for range in TranscriptSearch.ranges(in: text, query: searchField.stringValue) {
                         searchHits.append(SearchHit(row: id, rowIndex: index, inName: inName, range: NSRange(range, in: text)))
                     }
