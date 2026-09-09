@@ -14,6 +14,7 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
     }
     public let id: UUID
     public let profileSlot: Int
+    public let name: String?
     public let profileName: String
     public let startedAt: Date
     /// 起動に使った設定の固定値。紐づけの等価性検証にこれを使う
@@ -28,7 +29,8 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
 
     public init(id: UUID = UUID(), profileSlot: Int, profileName: String, startedAt: Date,
                 config: ResolvedAIConfig, token: String, contextRoot: URL, contextMeetingID: UUID,
-                connection: AIHerdrConnection? = nil, bound: Binding? = nil) {
+                connection: AIHerdrConnection? = nil, bound: Binding? = nil, name: String? = nil) {
+        self.name = name
         self.id = id; self.profileSlot = profileSlot; self.profileName = profileName
         self.startedAt = startedAt; self.config = config; self.token = token
         self.contextRoot = contextRoot; self.contextMeetingID = contextMeetingID
@@ -70,6 +72,7 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
     }
 
     public func validate() throws {
+        _ = try AIPreparedName.parse(name)
         guard profileSlot > 0, config.slot == profileSlot,
               // 長さは設定の解析側でだけ見る。宛名から補った名前は制限の対象外。
               !profileName.trimmingCharacters(in: .whitespaces).isEmpty,
@@ -81,12 +84,13 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, profileSlot = "profile_slot", profileName = "profile_name"
+        case name, id, profileSlot = "profile_slot", profileName = "profile_name"
         case startedAt = "started_at", config, token, connection, bound
         case contextRoot = "context_root", contextMeetingID = "context_meeting_id"
     }
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = try AIPreparedName.parse(values.decodeIfPresent(String.self, forKey: .name))
         id = try values.decode(UUID.self, forKey: .id)
         profileSlot = try values.decode(Int.self, forKey: .profileSlot)
         profileName = try values.decode(String.self, forKey: .profileName)

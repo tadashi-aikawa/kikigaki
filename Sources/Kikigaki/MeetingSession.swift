@@ -182,7 +182,7 @@ final class MeetingSession {
         var shown: [String] = []
         for row in rows.prefix(3) {
             let time: String = AIPreparedStore.clock.string(from: row.startedAt)
-            shown.append(row.profileName + " " + time)
+            shown.append((row.name ?? row.profileName) + " " + time)
         }
         let rest: Int = rows.count - shown.count
         let tail: String = rest > 0 ? " ほか\(rest)件" : ""

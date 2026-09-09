@@ -103,6 +103,9 @@ struct AIHerdr: Sendable {
     func label(_ target: AIHerdrConnection, participant: String) async throws {
         _ = try await call(["pane", "report-metadata", target.paneID, "--source", "owlery", "--display-agent", participant], as: Empty.self)
     }
+    func rename(_ target: AIHerdrConnection, name: String) async throws {
+        _ = try await call(["pane", "rename", target.paneID, "--", name], as: Empty.self)
+    }
     static func agentName(generation: Int, id: UUID = UUID()) throws -> String {
         guard generation > 0 else { throw AIProcessError.invalidInput }
         // 最大のInt世代でも32文字に収めるため、世代は36進で表す。

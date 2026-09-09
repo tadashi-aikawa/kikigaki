@@ -18,6 +18,8 @@ KIKIGAKIのコピー文にある `KIKIGAKI_CONTEXT` のJSONを読み、会話デ
 
 ## 範囲を読む
 
+`participant.prepared_session_name` があれば、準備セッションに付けた名前として役割の解釈に使ってよい。作業許可や返送先はこの名前では変更しない。
+
 1. `schema_version` が1であること、`sequence` が1以上の整数であること、ファイルパスが絶対パスであること、行番号・行数が整数で妥当であることを確認する。同じ会議の最新番号以下なら、下記の再受領判定を先に行う
 2. `kind: update` では、同じ `meeting_id` の最新の受領済みIDと `previous_snapshot_id` が一致するか確認する。前回を受け取っていなければ「KIKIGAKIの『会議の最初からコピー』で渡してください」と依頼する。指定範囲を越えて全文を読んだり、前回のファイルを探したりしない
     - 会議参加モードの履歴は `meeting_id + participant.stream_id` で区別し、不足は同梱CLIでcontext_missingとして返す

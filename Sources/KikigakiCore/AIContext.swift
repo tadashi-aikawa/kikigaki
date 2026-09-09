@@ -98,12 +98,14 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     public let profile: String?
     /// 送信先プロファイルの通し番号。session recordの枝名になる。旧requestには無い
     public let profileSlot: Int?
+    public let preparedSessionName: String?
 
     public init(streamID: UUID, requestID: UUID, sessionGeneration: Int, participantName: String,
                 cliPath: String, sessionPath: String, requestToken: String, question: String,
                 capturedAt: Date, audioCutoffSeconds: Double, tentativeTail: AITentativeTail? = nil,
                 inReplyToRequestID: UUID? = nil, inReplyToEventID: String? = nil, workAllowed: Bool = true,
-                trigger: Trigger? = nil, profile: String? = nil, profileSlot: Int? = nil) {
+                trigger: Trigger? = nil, profile: String? = nil, profileSlot: Int? = nil, preparedSessionName: String? = nil) {
+        self.preparedSessionName = preparedSessionName
         self.trigger = trigger; self.profile = profile; self.profileSlot = profileSlot
         schemaVersion = 1; mode = "meeting"; self.streamID = streamID; self.requestID = requestID
         self.sessionGeneration = sessionGeneration; self.participantName = participantName
@@ -116,6 +118,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     }
 
     public func validate() throws {
+        _ = try AIPreparedName.parse(preparedSessionName)
         guard schemaVersion == 1, mode == "meeting", sessionGeneration > 0,
               AIValidation.singleLine(participantName), AIValidation.absolutePath(cliPath),
               AIValidation.absolutePath(sessionPath), AIValidation.singleLine(requestToken),
@@ -150,6 +153,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case trigger, profile
+        case preparedSessionName = "prepared_session_name"
         case profileSlot = "profile_slot"
         case schemaVersion = "schema_version", mode, streamID = "stream_id", requestID = "request_id"
         case sessionGeneration = "session_generation", participantName = "participant_name"
@@ -165,6 +169,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
         // 複数プロファイル以前のrequestはこのキーを持たない。欠損は既定プロファイルとして読む。
         profile = try values.decodeIfPresent(String.self, forKey: .profile)
         profileSlot = try values.decodeIfPresent(Int.self, forKey: .profileSlot)
+        preparedSessionName = try AIPreparedName.parse(values.decodeIfPresent(String.self, forKey: .preparedSessionName))
         schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
         mode = try values.decode(String.self, forKey: .mode)
         streamID = try values.decode(UUID.self, forKey: .streamID)

@@ -27,6 +27,7 @@ final class AIConversationController {
         var idleSince: Date?
         var hookBackgroundRunning = false
         var warning: String?
+        var preparedSessionName: String?
         /// フック観測の置き場と、その通知が名乗る世代。準備済みセッションを引き継いだ枠は、
         /// 起動時に焼き付いた仮の会議の置き場へ、常に第1世代として落ちる
         var hookContext: (root: URL, meetingID: UUID, generation: Int)?
@@ -196,7 +197,7 @@ final class AIConversationController {
             requestToken: UUID().uuidString + UUID().uuidString, question: question, capturedAt: capturedAt,
             audioCutoffSeconds: cutoff, tentativeTail: tail, inReplyToRequestID: parent,
             inReplyToEventID: parent.map { "\($0.uuidString)/result" }, workAllowed: workAllowed ?? config.allowWork,
-            trigger: trigger, profile: slot == nil ? nil : config.name, profileSlot: slot)
+            trigger: trigger, profile: slot == nil ? nil : config.name, profileSlot: slot, preparedSessionName: channel.preparedSessionName)
         let request = try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant),
             number: conversation.questions.count + 1, voiceQuestion: voiceQuestion, snapshot: snapshot, voiceUtteranceStart: voiceUtteranceStart)
         var next = conversation
@@ -257,6 +258,7 @@ final class AIConversationController {
         channel.connection = connection
         channel.launchingAttempted = true; channel.inputAttempted = true
         // 準備の通知は第1世代を名乗る。会議側の世代と別に持たないと、作り直した枠で捨ててしまう。
+        channel.preparedSessionName = prepared.name
         channel.hookContext = (prepared.contextRoot, prepared.contextMeetingID, 1)
         // 引き継いだ直後に生存を確かめる。失敗しても記録は残し、状態は切断として見せる。
         try? await refreshConnection(slot: config.slot)
@@ -275,6 +277,7 @@ final class AIConversationController {
         channel.session = nil; channel.connection = nil; channel.configuration = nil
         channel.launchingAttempted = false; channel.inputAttempted = false
         channel.connectionStatus = .unknown; channel.idleSince = nil; channel.warning = nil
+        channel.preparedSessionName = nil
         channel.hookContext = nil; channel.hookBackgroundRunning = false
         onChange?()
     }
@@ -405,6 +408,7 @@ final class AIConversationController {
         channel.connectionStatus = .unknown; channel.idleSince = nil; channel.warning = nil
         // 作り直したCLIのフックは本会議の受信箱へ落ちる。引き継いだ置き場を残すと、
         // 走査が仮の会議の側を読み続けて背景処理中を拾えなくなる。
+        channel.preparedSessionName = nil
         channel.hookContext = nil; channel.hookBackgroundRunning = false
         onChange?()
     }

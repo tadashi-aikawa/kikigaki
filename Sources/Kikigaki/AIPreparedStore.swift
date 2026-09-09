@@ -82,7 +82,7 @@ final class AIPreparedStore {
 
     /// 「議事録 · Kikigaki 議事録抽出 · 13:05起動」。表題が取れない間は名前と時刻だけにする。
     func label(_ session: AIPreparedSession, includingName: Bool = true) -> String {
-        var parts: [String] = includingName ? [session.profileName] : []
+        var parts: [String] = session.name.map { [$0] } ?? (includingName ? [session.profileName] : [])
         if let pane = session.connection?.paneID, let title = titles[pane], !title.isEmpty { parts.append(title) }
         parts.append(Self.clock.string(from: session.startedAt) + "起動")
         return parts.joined(separator: " · ")
@@ -114,7 +114,10 @@ final class AIPreparedStore {
 
     /// 会議に紐づけずに起こす。フック・サンドボックス許可・返送許可は会議用と同じに付ける。
     /// フックの置き場は仮の会議IDで作った枝で、起動引数へ焼き付くため紐づけても動かない。
-    func prepare(profile: ResolvedAIConfig, helper: URL, outputDirectory: URL, now: Date = Date()) async {
+    func prepare(profile: ResolvedAIConfig, helper: URL, outputDirectory: URL, now: Date = Date(), name rawName: String? = nil) async {
+        let name: String?
+        do { name = try AIPreparedName.parse(rawName) }
+        catch { warning = "名前は改行なし・64バイト以内で入力してください"; onChange?(); return }
         // 同じ枠で送信が動いている間は起こさない。別の枠の送信は止めない。
         guard isUsable, !launching.contains(profile.slot), isSlotBusy?(profile.slot) != true else { return }
         launching.insert(profile.slot); onChange?()
@@ -122,8 +125,9 @@ final class AIPreparedStore {
         let context = UUID()
         var session = AIPreparedSession(profileSlot: profile.slot, profileName: profile.name, startedAt: now,
             config: profile, token: UUID().uuidString + UUID().uuidString,
-            contextRoot: outputDirectory, contextMeetingID: context)
+            contextRoot: outputDirectory, contextMeetingID: context, name: name)
         do {
+            warning = nil
             // 録音前は保存先もまだ無いことがある。会議開始と同じ方法で親を作り、
             // 以下のsession保存で権限0700の .kikigaki-context を作ってから起動引数へ渡す。
             try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
@@ -142,6 +146,10 @@ final class AIPreparedStore {
             session.connection = created
             var stored = record; stored.connection = created
             try store.write(AIJSON.encode(stored), to: base + ["sessions", "1.json"])
+            if let name {
+                do { try await herdr.rename(created, name: name) }
+                catch { warning = "準備は継続しますが、herdrのペイン表題を設定できません" }
+            }
             do { try await herdr.label(created, participant: profile.participantName) }
             catch { warning = "herdrの表示名を設定できません" }
             do {
@@ -152,7 +160,6 @@ final class AIPreparedStore {
             try next.add(session)
             try files.write(AIJSON.encode(next), to: [Self.fileName])
             ledger = next
-            warning = nil
         } catch {
             warning = "AIセッションを準備できません。herdrのペインと設定を確認してください"
         }

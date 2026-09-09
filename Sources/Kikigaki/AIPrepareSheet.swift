@@ -5,7 +5,7 @@ import KikigakiAIIO
 /// 会議に紐づかないAIセッションを起こすシート。下半分に未紐づけの一覧を置く。
 /// 起こす操作と溜まっているものの確認は同じ関心なので、画面を分けない。
 @MainActor
-final class AIPrepareSheet: NSObject {
+final class AIPrepareSheet: NSObject, NSTextFieldDelegate {
     struct Row {
         let id: UUID
         let label: String
@@ -15,12 +15,15 @@ final class AIPrepareSheet: NSObject {
         init(id: UUID, label: String, reason: String?) { self.id = id; self.label = label; self.reason = reason }
     }
     let window: NSWindow
-    var onStart: ((Int) -> Void)?
+    var onStart: ((Int, String?) -> Void)?
     var onCancel: (() -> Void)?
     var onPane: ((UUID?) -> Void)?
     var onDiscard: ((UUID) -> Void)?
 
     private let profile = NSPopUpButton()
+    let nameField = NSTextField(string: "")
+    private let nameHint = Washi.label("任意・64バイト以内", size: 11, color: Washi.muted)
+    private var launching = false
     private let startButton = NSButton(title: "起動", target: nil, action: nil)
     private let hint = Washi.label(size: 12, color: Washi.muted)
     private let listTitle = Washi.label("準備済み", size: 12, weight: .semibold)
@@ -40,6 +43,11 @@ final class AIPrepareSheet: NSObject {
         profile.setAccessibilityLabel("準備するプロファイル")
         let row = NSStackView(views: [Washi.label("プロファイル", size: 13), profile])
         row.orientation = .horizontal; row.spacing = 12; row.alignment = .centerY
+        nameField.placeholderString = "例: 決定事項の確認役"
+        nameField.usesSingleLineMode = true; nameField.delegate = self
+        nameField.setAccessibilityLabel("準備セッションの名前")
+        let nameRow = NSStackView(views: [Washi.label("名前", size: 13), nameField])
+        nameRow.orientation = .horizontal; nameRow.spacing = 12
         hint.stringValue = "録音と結びつけずに起動します。次の録音を開始するときに、この準備済みセッションを選べます"
         hint.maximumNumberOfLines = 2
         startButton.bezelStyle = .rounded; startButton.target = self; startButton.action = #selector(start)
@@ -52,7 +60,7 @@ final class AIPrepareSheet: NSObject {
         actions.orientation = .horizontal; actions.spacing = 12
         separator.boxType = .separator
         list.orientation = .vertical; list.alignment = .leading; list.spacing = 6
-        for view in [title, row, hint, actions, separator, listTitle, list] {
+        for view in [title, row, nameRow, nameHint, hint, actions, separator, listTitle, list] {
             stack.addArrangedSubview(view)
             view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
         }
@@ -70,7 +78,9 @@ final class AIPrepareSheet: NSObject {
         listTitle.stringValue = warning ?? "準備済み \(rows.count)件"
         listTitle.textColor = warning == nil ? Washi.ink : Washi.gold
         for row in rows { list.addArrangedSubview(entry(row)) }
-        startButton.isEnabled = !launching
+        self.launching = launching
+        updateNameValidity()
+        nameField.isEnabled = !launching
         profile.isEnabled = !launching
         hint.stringValue = launching
             ? "起動しています。herdrのペインで初回の確認が要ることがあります"
@@ -96,7 +106,20 @@ final class AIPrepareSheet: NSObject {
 
     func present(on parent: NSWindow) { parent.beginSheet(window) }
     @objc func close() { if let parent = window.sheetParent { parent.endSheet(window) }; window.orderOut(nil); onCancel?() }
-    @objc private func start() { onStart?(selectedSlot) }
+    func controlTextDidChange(_ notification: Notification) { updateNameValidity() }
+    private func updateNameValidity() {
+        let valid: Bool
+        do { _ = try AIPreparedName.parse(nameField.stringValue); valid = true }
+        catch { valid = false }
+        startButton.isEnabled = !launching && valid
+        nameHint.stringValue = valid ? "任意・64バイト以内" : "改行なし・64バイト以内で入力してください"
+        nameHint.textColor = valid ? Washi.muted : Washi.gold
+    }
+    @objc private func start() {
+        guard !launching else { return }
+        do { onStart?(selectedSlot, try AIPreparedName.parse(nameField.stringValue)) }
+        catch { updateNameValidity() }
+    }
     @objc private func openPane() { onPane?(nil) }
 }
 

@@ -519,10 +519,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let selected = session?.snapshot.ai?.selectedSlot ?? profiles.first?.slot ?? 1
         let sheet = AIPrepareSheet(profiles: profiles, selected: selected)
         sheet.onCancel = { [weak self] in self?.prepareSheet = nil }
-        sheet.onStart = { [weak self] slot in
+        sheet.onStart = { [weak self] slot, name in
             guard let self, let profile = self.config?.aiProfiles.first(where: { $0.slot == slot }) else { return }
             Task { await preparedStore.prepare(profile: profile, helper: self.helperURL,
-                                               outputDirectory: config.outputDir) }
+                                               outputDirectory: config.outputDir, name: name) }
         }
         sheet.onDiscard = { preparedStore.discard($0) }
         sheet.onPane = { [weak sheet] id in
