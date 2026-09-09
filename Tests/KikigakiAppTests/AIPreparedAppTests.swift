@@ -619,6 +619,114 @@ import KikigakiAIIO
         #expect(send.isEnabled && popup.isEnabled)
     }
 
+    // MARK: - 統合前の確認レビューの指摘
+
+    /// 【中】引き継ぎの観測待ち中に取り止めると、消した置き場をsessionの保存で作り直していた。
+    @Test func 取消の後に戻った引き継ぎは置き場を作り直さない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let id = try #require(prepared.unbound.first?.id)
+        let meetingID = session.aiMeetingID
+        try Data().write(to: root.appendingPathComponent("meeting.md"))
+        // 会議を作っておく。取消で外す対象にする。
+        #expect(await session.adoptPrepared(id, profile: list[0]))
+        #expect(prepared.unbound.isEmpty)
+        let controller = try #require(session.aiRecord?.controller)
+        try controller.releaseAdopted(slot: 1)
+        prepared.unbindAll(meetingID: meetingID)
+
+        // 引き継ぎの生存確認の最中に取り止める。
+        await fake.onCommand { args in
+            guard args.first == "agent", args.dropFirst().first == "get" else { return }
+            await MainActor.run { Task { await session.abandon() } }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        _ = await session.adoptPrepared(id, profile: list[0])
+        let context = root.appendingPathComponent(".kikigaki-context").appendingPathComponent(meetingID.uuidString)
+        #expect(!FileManager.default.fileExists(atPath: context.path))
+        #expect(!session.hasPendingDiscard)
+    }
+
+    /// 【中】続けて取り止めに失敗すると、古い会議が再試行の対象から消えていた。
+    @Test func 片付け残しは会議ごとに持ち越す() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        let ledgerFile = root.appendingPathComponent("ai-prepared.json")
+        var contexts: [URL] = []
+
+        // 同じアプリのまま、取り止めに失敗する会議を2つ続ける。
+        for round in 0..<2 {
+            await prepare(prepared, list[0], root: root)
+            let id = try #require(prepared.unbound.first?.id)
+            #expect(await session.adoptPrepared(id, profile: list[0]))
+            contexts.append(root.appendingPathComponent(".kikigaki-context")
+                .appendingPathComponent(session.aiMeetingID.uuidString))
+            // 台帳を書けなくして取り止めを失敗させる。
+            try FileManager.default.removeItem(at: ledgerFile)
+            try FileManager.default.createDirectory(at: ledgerFile, withIntermediateDirectories: false)
+            await session.abandon()
+            #expect(session.hasPendingDiscard)
+            try FileManager.default.removeItem(at: ledgerFile)
+            // 次の会議は、前の片付けが済まないまま始まる(再試行もこの時点では失敗していた)。
+            if round == 0 { session.beginNextMeetingForTesting(recording: true) }
+        }
+        #expect(contexts.count == 2 && contexts[0] != contexts[1])
+
+        // 書けるようになったら、2会議ぶんとも片付く。古いほうを失っていない。
+        #expect(session.retryDiscard())
+        #expect(contexts.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+        #expect(!session.hasPendingDiscard)
+    }
+
+    /// 【中】実体を消せなくても取消成功にしていた。「何も残らない」を満たしていない。
+    @Test func 実体を消せなければ取消を未完了として残す() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let id = try #require(prepared.unbound.first?.id)
+        #expect(await session.adoptPrepared(id, profile: list[0]))
+        let meetingID = session.aiMeetingID
+        let context = root.appendingPathComponent(".kikigaki-context").appendingPathComponent(meetingID.uuidString)
+        // 置き場を消せなくする。親ディレクトリから書き込み権限を外す。
+        let parent = root.appendingPathComponent(".kikigaki-context")
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: parent.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: parent.path) }
+
+        await session.abandon()
+        #expect(FileManager.default.fileExists(atPath: context.path))
+        #expect(session.hasPendingDiscard)
+        #expect(session.snapshot.message?.contains("片付けられませんでした") == true)
+
+        // 消せるようになれば、同じ経路でやり直せる。
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: parent.path)
+        #expect(session.retryDiscard())
+        #expect(!FileManager.default.fileExists(atPath: context.path))
+        #expect(!session.hasPendingDiscard)
+    }
+
+    /// 【低】1つのプロファイルでも、紐づけた宛先の表題は出し続ける。
+    @Test func 単一プロファイルでも紐づけた表題は隠さない() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let picker = AIDestinationPicker()
+        picker.update(items: [.init(slot: 1, name: "議事録")], selected: 1)
+        #expect(picker.isHidden)
+        picker.update(items: [.init(slot: 1, name: "議事録", bound: "Kikigaki 議事録抽出 · 13:05起動")], selected: 1)
+        #expect(!picker.isHidden)
+    }
+
     // MARK: - 4巡目の確認レビューの指摘
 
     /// 【中】記録の後始末に失敗したまま実体を消すと、設計表の「起きない」状態ができる。

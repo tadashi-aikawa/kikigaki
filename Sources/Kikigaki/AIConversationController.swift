@@ -195,6 +195,7 @@ final class AIConversationController {
     /// 準備済みセッションをこの枠のチャネルへ引き継ぐ。**会議側の保存が成功してから**
     /// 台帳へ `bound` を書くこと。逆順にすると、台帳では使用済みなのに会議側に接続が無い行が残る。
     func adopt(_ prepared: AIPreparedSession, config: ResolvedAIConfig) async throws {
+        guard !discarded else { throw AIHerdrError.notReady }
         try register([config])
         let channel = try channel(config.slot)
         guard prepared.matches(config), let connection = prepared.connection else { throw AIError.mismatch }
@@ -212,7 +213,9 @@ final class AIConversationController {
         // 何も書く前に生存を確かめる。消えたペインを引き継ぐと枠が塞がり、別の準備済みを選び直せない。
         _ = try await herdr.observe(connection)
         // await後にもう一度見る。待っている間に同じ枠で起動や別の紐づけが進んでいることがある。
-        guard channel.session == nil, channel.connection == nil, !channel.launchingAttempted else { throw AIHerdrError.notReady }
+        // 取り止めた会議へも書かない。ここを抜けると、消した置き場をsessionの保存で作り直す。
+        guard !discarded, channel.session == nil, channel.connection == nil,
+              !channel.launchingAttempted else { throw AIHerdrError.notReady }
         // フック用トークンは準備時のものを引き継ぐ。起動引数へ焼き付いていて変えられない。
         var record = AISessionRecord(schemaVersion: 1, meetingID: meetingID, generation: channel.generation,
                                      provider: config.cli, token: prepared.token)

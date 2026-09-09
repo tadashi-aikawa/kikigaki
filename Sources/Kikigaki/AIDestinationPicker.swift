@@ -51,7 +51,8 @@ final class AIDestinationPicker: NSStackView {
         }
         let index = popup.itemArray.firstIndex { ($0.representedObject as? Choice) == .profile(selected) }
         popup.selectItem(at: index ?? 0)
-        isHidden = items.count <= 1 && items.allSatisfy { $0.prepared.isEmpty }
+        // 紐づけたものがあれば、選ぶ先が1つでも「何を使っているか」を出し続ける。
+        isHidden = items.count <= 1 && items.allSatisfy { $0.prepared.isEmpty && $0.bound == nil }
     }
 
     /// ポップアップの行が指すもの。準備済みは選んだ時点で紐づける

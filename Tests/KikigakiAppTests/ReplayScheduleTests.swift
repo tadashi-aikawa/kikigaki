@@ -92,6 +92,24 @@ struct ReplayScheduleTests {
         #expect(try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"], environment: env).attachCancel)
     }
 
+    /// 録音中の準備。次の会議のぶんを会議の最中に用意することを再現する。
+    @Test func 録音中の準備の指定はreplayだけで効く() throws {
+        let env = ["KIKIGAKI_DEBUG_AI_PREPARE_AT": "12:相談;3:議事録"]
+        #expect(try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke"], environment: env).prepareDuring.isEmpty)
+        let value = try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"], environment: env)
+        // 指定秒の順に並べ替える。
+        #expect(value.prepareDuring.map(\.seconds) == [3, 12])
+        #expect(value.prepareDuring.map(\.name) == ["議事録", "相談"])
+    }
+
+    @Test(arguments: ["12", "12:", "abc:相談", "-1:相談", "nan:相談", "12:相談\n議事録", "12:相談\0"])
+    func 不正な録音中の準備をsmokeでも拒否する(input: String) {
+        #expect(throws: (any Error).self) {
+            try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"],
+                                        environment: ["KIKIGAKI_DEBUG_AI_PREPARE_AT": input])
+        }
+    }
+
     @Test(arguments: ["", "2", "true", "yes"])
     func 不正な取消指定をsmokeでも拒否する(input: String) {
         #expect(throws: (any Error).self) {

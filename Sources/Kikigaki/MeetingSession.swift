@@ -478,7 +478,7 @@ final class MeetingSession {
         let leftover = Discarded(meetingID: meetingID, outputDir: outputDir, markdownURL: markdownURL)
         guard cleanUp(leftover) else {
             // 片付けられないものが残る。実体は消さず、やり直せる状態のままにする。
-            pendingDiscard = leftover
+            pendingDiscards[meetingID] = leftover
             snapshot.state = .idle
             snapshot.message = "録音を取り止めましたが、AIの記録を片付けられませんでした。保存先を確認してください"
             aiWarning = "取り止めた会議のAIの記録が残っています"
@@ -493,45 +493,55 @@ final class MeetingSession {
         emit()
     }
 
-    /// 片付けきれなかった取り止め。次の録音開始でもう一度片付ける
+    /// 片付けきれなかった取り止め。**会議ごとに持つ。** 1つだけだと、続けて取り止めに
+    /// 失敗したときに古い会議が再試行の対象から消える
     private struct Discarded { let meetingID: UUID; let outputDir: URL; let markdownURL: URL? }
-    private var pendingDiscard: Discarded?
+    private var pendingDiscards: [UUID: Discarded] = [:]
+    /// 片付け残しがあるか。表示と検証に使う
+    var hasPendingDiscard: Bool { !pendingDiscards.isEmpty }
 
     /// 取り止めた会議の後始末。記録を外せなければ実体を消さず false を返す。
+    /// **実体を消せなかったときも false。** 「取消で何も残らない」を満たせていないため。
     private func cleanUp(_ target: Discarded) -> Bool {
         // 登録簿と監視を外す。実体だけ消すと、再起動時に無いmanifestを回収しようとして失敗する。
         let unregistered = aiStore?.discard(meetingID: target.meetingID) ?? true
         // 紐づけ済みの準備済みは未紐づけへ戻す。会議が無くなった以上、次の録音でまた選べるべき。
         let unbound = preparedStore?.unbindAll(meetingID: target.meetingID) ?? true
         guard unregistered, unbound else { return false }
+        var removed = true
         // 予約したMarkdownは中身が無いときだけ消す。書き込み済みのものは触らない。
         if let markdownURL = target.markdownURL {
             if (try? Data(contentsOf: markdownURL))?.isEmpty ?? false {
-                do { try FileManager.default.removeItem(at: markdownURL) } catch { log("予約の片付けに失敗: \(error)") }
+                do { try FileManager.default.removeItem(at: markdownURL) }
+                catch { log("予約の片付けに失敗: \(error)"); removed = false }
             }
             let wav = MeetingFiles.wavURL(for: markdownURL)
             if FileManager.default.fileExists(atPath: wav.path) {
-                do { try FileManager.default.removeItem(at: wav) } catch { log("録音の片付けに失敗: \(error)") }
+                do { try FileManager.default.removeItem(at: wav) }
+                catch { log("録音の片付けに失敗: \(error)"); removed = false }
             }
         }
         // この会議のAIの置き場も残さない。
         let context = target.outputDir.appendingPathComponent(".kikigaki-context")
             .appendingPathComponent(target.meetingID.uuidString)
         if FileManager.default.fileExists(atPath: context.path) {
-            do { try FileManager.default.removeItem(at: context) } catch { log("AIの置き場の片付けに失敗: \(error)") }
+            do { try FileManager.default.removeItem(at: context) }
+            catch { log("AIの置き場の片付けに失敗: \(error)"); removed = false }
         }
-        return true
+        return removed
     }
 
     /// 片付けきれなかった取り止めをもう一度片付ける。次の録音開始でも通る。
+    /// 片付いた会議から順に外し、残ったものは次の機会へ持ち越す。
     @discardableResult
     func retryDiscard() -> Bool {
-        guard let pending = pendingDiscard else { return true }
-        guard cleanUp(pending) else { return false }
-        pendingDiscard = nil
-        aiWarning = nil
+        guard !pendingDiscards.isEmpty else { return true }
+        for (meetingID, pending) in pendingDiscards where cleanUp(pending) {
+            pendingDiscards[meetingID] = nil
+        }
+        if pendingDiscards.isEmpty { aiWarning = nil }
         emit()
-        return true
+        return pendingDiscards.isEmpty
     }
 
     func togglePause() {
@@ -890,8 +900,12 @@ final class MeetingSession {
         emit()
     }
     /// 次の会議へ移った状態を作る。録音の全経路を通さずに、会議IDの入れ替わりと
-    /// 会議をまたがない状態の初期化だけを再現する
-    func beginNextMeetingForTesting() { handoff = HandoffHistory(); resetMeetingAIState(config) }
+    /// 会議をまたがない状態の初期化だけを再現する。録音中の状態も作り直す
+    func beginNextMeetingForTesting(recording: Bool = false) {
+        handoff = HandoffHistory()
+        resetMeetingAIState(config)
+        if recording { snapshot.state = .recording }
+    }
     var submissionTaskForTesting: Task<Void, Never>? { aiTasks[meetingAI?.slot ?? 1] ?? aiTasks.values.first }
     func submissionTaskForTesting(slot: Int) -> Task<Void, Never>? { aiTasks[slot] }
     func publishForTesting(tokens: [TimedToken], speakers: [Int?], elapsed: Double) {

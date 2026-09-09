@@ -23,6 +23,8 @@ struct ReplayDebugOptions {
     var attach: [Int: Attach] = [:]
     /// 紐づけシートの「取消(録音を始めない)」を再現する。開始直後に取り止める
     var attachCancel = false
+    /// 録音中に起こす準備。次の会議のぶんを会議の最中に用意することを再現する
+    var prepareDuring: [(seconds: Double, name: String)] = []
     @MainActor static func recoverForNextQuestion(_ controller: AIConversationController?, preparing: Bool) throws {
         guard !preparing, let controller, !controller.canSend,
               let previous = controller.conversation.questions.last,
@@ -82,6 +84,18 @@ struct ReplayDebugOptions {
                 }
                 result.attach[slot] = choice
             }
+        }
+        if let input = env["KIKIGAKI_DEBUG_AI_PREPARE_AT"], !input.isEmpty {
+            for entry in input.split(separator: ";", omittingEmptySubsequences: false) {
+                let pair = entry.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+                guard pair.count == 2, let seconds = Double(pair[0]), seconds.isFinite, seconds >= 0,
+                      !pair[1].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      !pair[1].contains("\0"), !pair[1].contains(where: \.isNewline) else {
+                    throw AIError.invalid("KIKIGAKI_DEBUG_AI_PREPARE_AT")
+                }
+                result.prepareDuring.append((seconds, String(pair[1])))
+            }
+            result.prepareDuring.sort { $0.seconds < $1.seconds }
         }
         if let input = env["KIKIGAKI_DEBUG_AI_ATTACH_CANCEL"] {
             guard ["0", "1"].contains(input) else { throw AIError.invalid("KIKIGAKI_DEBUG_AI_ATTACH_CANCEL") }
@@ -147,6 +161,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var registeredAIHotkey: KikigakiConfig.Hotkey?
     private let replayDebug: ReplayDebugOptions
     private var nextDebugQuestion = 0
+    private var nextDebugPrepare = 0
+    /// 録音中の準備は1件ずつ。同じ枠の起動を重ねない
+    private var preparingDuringRecording = false
     private var nextDebugTyped = 0
     private var debugTypedPausing = false
     private var replayHolding = false
@@ -373,6 +390,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Self.log("replay 準備: \(profile.name)(slot \(profile.slot)) 未紐づけ \(preparedStore.unbound.count)件")
             }
         }
+        // 候補を確定する前に、前回の取り止めの片付けをやり直す。ここで台帳が戻ると、
+        // 復旧した準備済みも今回の選択肢に出る。start()の中の再試行では候補に間に合わない。
+        session.retryDiscard()
         // 候補を出す前に生存と表題を引き直す。消えたペインを選ばせない。
         if replayURL == nil, let preparedStore { await preparedStore.refresh() }
         let choices = attachChoices()
@@ -383,10 +403,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if started, !choices.isEmpty { presentAttachSheet(choices) }
         else if started, replayURL != nil, replayDebug.attachCancel {
             // 「取消(録音を始めない)」と同じ経路。何も残らないことを実機で確かめる。
+            // 検査対象は**取消の前に固定する**。取消が成功すると会議IDは新しくなる。
+            let cancelled = session.aiMeetingID
+            let markdown = session.snapshot.markdownURL
+            let root = markdown?.deletingLastPathComponent() ?? config?.outputDir
+            // 紐づけも実機で確かめる。指定があれば取消の前に当てておく。
+            if !replayDebug.attach.isEmpty, let preparedStore {
+                var selection: [Int: UUID?] = [:]
+                for (slot, choice) in replayDebug.attach {
+                    guard let profile = session.meetingAIProfiles.first(where: { $0.slot == slot }) else { continue }
+                    selection[slot] = choice == .oldest
+                        ? preparedStore.available(for: profile, contextRoot: session.aiContextRoot).first?.id : nil
+                }
+                let failed = await session.applyPreparedSelection(selection)
+                Self.log("replay 取消前の紐づけ: 失敗 \(failed.sorted()) 紐づけ済み \(preparedStore.ledger.sessions.filter { !$0.isUnbound }.count)件")
+                if !failed.isEmpty { exit(1) }
+            }
             await session.abandon()
-            let context = config?.outputDir.appendingPathComponent(".kikigaki-context")
-                .appendingPathComponent(session.aiMeetingID.uuidString)
-            Self.log("replay 取消: 保存 \(session.snapshot.saved) 置き場 \(context.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)")
+            let context = root?.appendingPathComponent(".kikigaki-context").appendingPathComponent(cancelled.uuidString)
+            let leftovers = [
+                "Markdown": markdown.map { FileManager.default.fileExists(atPath: $0.path) } ?? false,
+                "WAV": markdown.map { FileManager.default.fileExists(atPath: MeetingFiles.wavURL(for: $0).path) } ?? false,
+                "置き場": context.map { FileManager.default.fileExists(atPath: $0.path) } ?? false,
+                "登録簿": aiStore?.records[cancelled] != nil,
+                "紐づけ": preparedStore?.ledger.sessions.contains { $0.bound?.meetingID == cancelled } ?? false,
+                "片付け残し": session.hasPendingDiscard,
+            ]
+            let remaining = leftovers.filter(\.value).keys.sorted()
+            Self.log("replay 取消: 会議 \(cancelled) 保存 \(session.snapshot.saved) 残り \(remaining)"
+                + " 未紐づけ \(preparedStore?.unbound.count ?? 0)件")
+            if session.snapshot.saved || !remaining.isEmpty { exit(1) }
             NSApp.terminate(nil)
             return
         }
@@ -622,6 +668,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // 手入力の保存検証では最終会話を送る。停止による確定待ち取消を避ける。
         if replayDebug.verifyTyped && !replayHolding { return }
+        // 録音中の準備。次の会議のぶんを会議の最中に用意する。
+        if let session, nextDebugPrepare < replayDebug.prepareDuring.count,
+           snapshot.state == .recording, !preparingDuringRecording {
+            let target = replayDebug.prepareDuring[nextDebugPrepare]
+            if snapshot.elapsed >= target.seconds, let preparedStore, let config,
+               let profile = config.aiProfiles.first(where: { $0.name == target.name }) {
+                nextDebugPrepare += 1
+                preparingDuringRecording = true
+                // 起動そのものは非同期で、終わるころには録音が終わっていることもある。
+                // 「録音中に始めた」ことが分かるよう、判断した時点の状態と位置を先に出す。
+                Self.log("replay 録音中の準備を開始: \(profile.name)(指定\(target.seconds)秒、"
+                    + "経過\(snapshot.elapsed)秒、状態\(snapshot.state))")
+                Task {
+                    await preparedStore.prepare(profile: profile, helper: self.helperURL,
+                                                outputDirectory: config.outputDir)
+                    self.preparingDuringRecording = false
+                    Self.log("replay 録音中の準備が完了: \(profile.name) 未紐づけ \(preparedStore.unbound.count)件")
+                }
+            }
+        }
         guard !replayDestinationPending, nextDebugQuestion < replayDebug.questions.count, let session else { return }
         let question = replayDebug.questions[nextDebugQuestion]
         guard snapshot.elapsed >= question.seconds else { return }
