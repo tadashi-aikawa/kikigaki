@@ -373,39 +373,119 @@ import KikigakiAIIO
         #expect(controller.isReturnUnconfirmed(questions[0], now: later))
     }
 
-    /// 【中】手動シートの取消が別枠の自動送信まで取り消していた。
-    @Test func 取消は指定した枠だけを対象にする() async throws {
-        NSApplication.shared.setActivationPolicy(.prohibited)
-        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
-        let fake = FakeHerdr()
-        let list = try two(root)
-        let session = session(root, profiles: list, fake: fake)
-        try await submit(session, profile: list[0])
-        try await submit(session, profile: list[1])
-        let controller = try #require(session.aiRecord?.controller)
-        // 送信済みは取消の対象外。preparedだけが取り消される契約を、枠を指定して確かめる。
-        #expect(controller.conversation.questions.allSatisfy { $0.state == .submitted })
-        session.cancelAIPreparation(slot: 2)
-        #expect(controller.conversation.questions.allSatisfy { $0.state == .submitted })
+    /// 接続待ちで止まっている送信を作る。取消・停止の競合はこの状態でしか起きない。
+    private func stalledSubmit(_ session: MeetingSession, profile: ResolvedAIConfig,
+                               fake: FakeHerdr, trigger: AIParticipantContext.Trigger? = nil) async throws {
+        await fake.setStatuses(["unknown"])
+        session.submitAI(question: "接続待ちの依頼", full: false, parent: nil,
+                         helper: URL(fileURLWithPath: "/bin/echo"), trigger: trigger, profile: profile)
+        // requestを保存し、接続の生存確認で止まるところまで待つ。
+        try await waitUntil {
+            session.aiRecord?.controller.conversation.questions.contains {
+                $0.request.envelope.participant.profileSlot == profile.slot
+            } == true
+        }
+    }
+    private func waitUntil(_ condition: () -> Bool, limit: Int = 400) async throws {
+        for _ in 0..<limit {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
     }
 
-    /// 【中】別枠が返事待ちだと自動送信を止められていなかった。
-    @Test func 別枠の返事待ちは自動送信の停止を妨げない() async throws {
+    /// 【中】手動シートの取消が、送信を始めた枠ではなく取消時点の選択枠を見ていた。
+    /// Aへ送って接続待ちの間にBへ変えて取り消すと、Aが接続完了後に飛んでいた。
+    @Test func 送信後に宛先を変えても取消は送信した枠へ効く() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr()
         let list = try two(root)
         let session = session(root, profiles: list, fake: fake)
-        // 1枠目を返事待ちにしておく。
+        let before = await fake.commands.filter { Array($0.prefix(2)) == ["agent", "prompt"] }.count
+
+        try await stalledSubmit(session, profile: list[0], fake: fake)
+        // 接続待ちのまま宛先をBへ変える。シートは送信を始めた枠を持ち続ける。
+        session.selectAIProfile(slot: 2)
+        #expect(session.aiConfiguration?.slot == 2)
+        session.cancelAIPreparation(slot: 1)
+        // 取消の後で接続が整っても、送ってはいけない。
+        await fake.setStatuses(["idle"])
+        if let task = session.submissionTaskForTesting(slot: 1) { await task.value }
+        let after = await fake.commands.filter { Array($0.prefix(2)) == ["agent", "prompt"] }.count
+        #expect(after == before)
+        let controller = try #require(session.aiRecord?.controller)
+        #expect(controller.conversation.questions.allSatisfy { $0.state != .submitted })
+    }
+
+    /// シートは送信を始めた枠を覚え、以後は宛先を選び直せない。
+    @Test func シートは送信を始めた枠を保持し宛先を固定する() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let sheet = AIQuestionSheet(participant: "議事録", parentNumber: nil, draft: "依頼",
+            voice: "", range: "対象なし", tentative: false, canSubmit: true)
+        sheet.updateDestinations([.init(slot: 1, name: "議事録", prepared: nil),
+                                  .init(slot: 2, name: "相談", prepared: nil)], selected: 1, participant: "議事録")
+        #expect(sheet.activeSlot == nil && sheet.owningSlot == 1)
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let send = try #require(descendants(sheet.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "送信 ⏎" })
+        send.performClick(nil)
+        #expect(sheet.activeSlot == 1 && sheet.owningSlot == 1)
+        // 送信を始めた後の差し替えは無視する。宛先のポップアップも操作させない。
+        sheet.updateDestinations([.init(slot: 1, name: "議事録", prepared: nil),
+                                  .init(slot: 2, name: "相談", prepared: nil)], selected: 2, participant: "相談")
+        #expect(sheet.owningSlot == 1)
+        let popup = try #require(descendants(sheet.window.contentView!).compactMap { $0 as? NSPopUpButton }.first)
+        #expect(!popup.isEnabled)
+    }
+
+    /// 【中】別枠が返事待ちだと自動送信を止められず、接続完了後に飛んでいた。
+    @Test func 自動送信の停止は接続待ちの依頼も飛ばさない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try two(root)
+        // 自動送信は差分が無いと送らないので、会話本文を用意する。
+        let session = session(root, profiles: list, fake: fake, recordedSamples: 16_000)
+        session.setScheduleTranscriptForTesting("架空の会議です")
+        // 1枠目を返事待ちにしておく。停止判定が会議全体を見ていると、ここで早期returnした。
         try await submit(session, profile: list[0])
         let controller = try #require(session.aiRecord?.controller)
         #expect(controller.conversation.questions.first?.isAwaitingResult == true)
-        // 2枠目の自動送信を始めて止める。1枠目の返事待ちで早期returnしてはいけない。
+        let before = await fake.commands.filter { Array($0.prefix(2)) == ["agent", "prompt"] }.count
+
         try session.startAISchedule(options: try AIScheduleOptions(prompt: "議事録を更新して", interval: 60),
                                     helper: URL(fileURLWithPath: "/bin/echo"), profile: list[1])
-        #expect(session.snapshot.aiSchedule.active)
+        try await stalledSubmit(session, profile: list[1], fake: fake, trigger: .scheduled)
         session.stopAISchedule()
         #expect(!session.snapshot.aiSchedule.active)
+        await fake.setStatuses(["idle"])
+        if let task = session.submissionTaskForTesting(slot: 2) { await task.value }
+        let after = await fake.commands.filter { Array($0.prefix(2)) == ["agent", "prompt"] }.count
+        #expect(after == before)
+        let scheduled = try #require(controller.conversation.questions.last)
+        #expect(scheduled.request.trigger == .scheduled && scheduled.state != .submitted)
+    }
+
+    /// 【中】Aへの返答シートを開いている間、Bの自動送信まで抑制していた。
+    @Test func 返答シートは自分の枠だけを抑制する() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try two(root)
+        let session = session(root, profiles: list, fake: fake, recordedSamples: 16_000)
+        session.setScheduleTranscriptForTesting("架空の会議です")
+        // 手動の選択はBのまま、Aの返答シートを開く。
+        session.selectAIProfile(slot: 2)
+        session.beginAIDraft(slot: 1)
+        try session.startAISchedule(options: try AIScheduleOptions(prompt: "議事録を更新して", interval: 0.01),
+                                    helper: URL(fileURLWithPath: "/bin/echo"), profile: list[1])
+        // Bの自動送信は止まらない。Aのシートを開いていても対象が違う。
+        try await waitUntil { session.aiRecord?.controller.conversation.questions.isEmpty == false }
+        if let task = session.submissionTaskForTesting(slot: 2) { await task.value }
+        let controller = try #require(session.aiRecord?.controller)
+        let sent = try #require(controller.conversation.questions.first)
+        #expect(sent.request.envelope.participant.profileSlot == 2)
+        #expect(sent.request.trigger == .scheduled)
+        session.endAIDraft()
     }
 
     /// 【中】共通のherdrCommandを後続で省略できる。

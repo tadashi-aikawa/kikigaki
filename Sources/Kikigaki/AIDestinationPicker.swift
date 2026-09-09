@@ -40,6 +40,12 @@ final class AIDestinationPicker: NSStackView {
         isHidden = items.count <= 1 && items.allSatisfy { $0.prepared == nil }
     }
 
+    /// 送信を始めたら操作させない。無効時は面を足さず、既にある枠のまま色を抜く。
+    func setEnabled(_ enabled: Bool) {
+        popup.isEnabled = enabled
+        label.textColor = enabled ? Washi.ink : Washi.muted
+    }
+
     @objc private func changed() {
         guard let slot = popup.selectedItem?.representedObject as? Int else { return }
         selected = slot

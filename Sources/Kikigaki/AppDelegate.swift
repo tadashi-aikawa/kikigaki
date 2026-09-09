@@ -206,7 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     sheet.close(); self.aiSheet = nil; self.aiSheetSlot = nil; session.endAIDraft()
                 } else {
                     // 返答シートは固定した枠の状態を見る。選択中の宛先が返事待ちでも無効にしない。
-                    let slot = self.aiSheetSlot ?? snapshot.ai?.selectedSlot ?? 1
+                    let slot = sheet.owningSlot
                     sheet.update(progress: snapshot.ai?.progress(slot: slot),
                                  canSubmit: snapshot.ai?.canSubmit(slot: slot) == true, warning: snapshot.ai?.warning)
                 }
@@ -467,7 +467,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fixed = parent != nil
         if let aiSheet { aiSheet.window.makeFirstResponder(aiSheet.window.firstResponder); return }
         if let scheduleSheet { self.window?.show(); scheduleSheet.focus(); return }
-        session.beginAIDraft()
+        session.beginAIDraft(slot: config.slot)
         let snapshot = session.snapshot
         let question = parent.flatMap { id in session.aiRecord?.controller.conversation.questions.first { $0.request.id == id } }
         let slot = config.slot
@@ -479,9 +479,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             workAllowed: session.aiWorkAllowed)
         sheet.updateDestinations(session.aiDestinationItems, selected: slot, participant: config.participantName)
         if !fixed {
-            sheet.onDestination = { [weak sheet] chosen in
+            sheet.onDestination = { [weak self, weak sheet] chosen in
                 session.selectAIProfile(slot: chosen)
                 guard let profile = session.aiConfiguration else { return }
+                // シートが持つ枠も選び直しに追随させる。開始処理と抑制判定の対象を揃える。
+                session.beginAIDraft(slot: profile.slot)
+                self?.aiSheetSlot = profile.slot
                 sheet?.updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
             }
         }
@@ -489,19 +492,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sheet.onWorkAllowedChange = { session.updateAIWorkAllowed($0) }
         // 返答シートは親の枠に固定。それ以外は開いている間の選び直しへ追随する。
         sheet.rangePreview = { session.aiRangePreview(full: $0, slot: fixed ? slot : session.aiConfiguration?.slot) }
-        sheet.onCancel = { [weak self] in
-            // 取り消すのはこのシートが持つ枠だけ。別プロファイルの自動送信まで巻き込まない。
-            session.cancelAIPreparation(slot: fixed ? slot : session.aiConfiguration?.slot ?? slot)
-            session.endAIDraft(); self?.aiSheet = nil
+        sheet.onCancel = { [weak self, weak sheet] in
+            // 取り消すのは、このシートが送信を始めた枠。取消の時点の選択で決めると、
+            // 送信後に宛先を変えたときに元の依頼が残って接続完了後に飛ぶ。
+            session.cancelAIPreparation(slot: sheet?.owningSlot ?? self?.aiSheetSlot ?? slot)
+            session.endAIDraft(); self?.aiSheet = nil; self?.aiSheetSlot = nil
         }
         sheet.onPane = { session.showAIPane(slot: fixed ? slot : session.aiConfiguration?.slot) }
-        sheet.onSubmit = { text, full in
+        sheet.onSubmit = { [weak self] text, full in
             let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
-            session.submitAI(question: text, full: full, parent: parent, helper: helper,
-                             profile: fixed ? config : session.aiConfiguration)
+            let target = fixed ? config : session.aiConfiguration
+            self?.aiSheetSlot = target?.slot
+            session.submitAI(question: text, full: full, parent: parent, helper: helper, profile: target)
         }
         aiSheet = sheet; aiSheetMeetingID = session.aiMeetingID
-        aiSheetSlot = fixed ? slot : nil
+        aiSheetSlot = slot
         self.window?.show(); sheet.present(on: window)
     }
     private func showScheduleSheet() {

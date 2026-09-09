@@ -124,6 +124,15 @@ import KikigakiCore
         schedule.updateDestinations(items, selected: 1, participant: "迅雷")
         try capture("profiles-sheet-schedule", schedule.window.contentView!, to: output)
 
+        // 送信を始めた後。宛先は選び直せない。無効の部品は面を足さず色を抜く。
+        let locked = AIQuestionSheet(participant: "議事録", parentNumber: nil, draft: "この段取りで抜けはありますか",
+            voice: "", range: "対象: 3〜7行(14:05:20〜14:06:16) · 送信時に確定", tentative: false, canSubmit: true)
+        locked.updateDestinations(items, selected: 1, participant: "議事録")
+        let send = try #require(descendants(locked.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "送信 ⏎" })
+        send.performClick(nil)
+        locked.update(progress: "AIの入力準備を確認中。初回設定はherdrで確認してください", canSubmit: false)
+        try capture("profiles-sheet-sending", locked.window.contentView!, to: output)
+
         // プロファイルが1つで準備済みも無い会議では、宛先の行そのものを出さない。
         let single = AIQuestionSheet(participant: "迅雷", parentNumber: nil, draft: "", voice: "",
             range: "追加の確定行なし", tentative: false, canSubmit: true)

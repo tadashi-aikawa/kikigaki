@@ -84,7 +84,8 @@ final class MeetingSession {
     /// replayだけで使う間隔の上書き。分単位の設定値では実行時間に収まらない
     var automaticIntervalOverride: Double?
     private var aiScheduleWarning: String?
-    private var manualAISheetOpen = false
+    /// 開いている手動シートが持つ枠。抑制も譲りもこの枠だけに効かせる
+    private var manualAISheetSlot: Int?
     private(set) var lastScheduleOptions: AIScheduleOptions?
     private(set) var scheduleDraft: String?
     func updateScheduleDraft(_ value: String) { scheduleDraft = value }
@@ -456,14 +457,16 @@ final class MeetingSession {
 
     func updateAIDraft(_ text: String) { aiDraft = text }
     func updateAIWorkAllowed(_ allowed: Bool) { aiWorkAllowed = allowed }
-    func beginAIDraft() {
-        manualAISheetOpen = true
+    /// シートが持つ枠を受け取る。確認への返答は元質問の枠で開くので、選択中の宛先とは限らない。
+    func beginAIDraft(slot requested: Int? = nil) {
+        let slot = requested ?? meetingAI?.slot
+        manualAISheetSlot = slot
         // 手動へ譲るのは同じ宛先の自動だけ。別プロファイルの自動送信は止めない。
-        if let slot = meetingAI?.slot { yieldAutomatic(slot: slot) }
+        if let slot { yieldAutomatic(slot: slot) }
         aiCompleted = nil
         emit()
     }
-    func endAIDraft() { manualAISheetOpen = false }
+    func endAIDraft() { manualAISheetSlot = nil }
     func retryAISaves() { aiStore?.retrySaves() }
 
     /// 進行中の自動送信を手動へ譲る。送信試行済みのrequestは取り消さず、既存の返事待ちに従う。
@@ -783,9 +786,9 @@ extension MeetingSession {
             let status = controller.connectionStatus(slot: slot)
             if status == .disconnected || status == .blocked || status == .unknown { return .disconnected }
         }
-        // 手動シートを開いている間に止めるのは同じ宛先のときだけ。別プロファイルなら同時に使える。
-        let sameTarget = aiScheduleConfiguration?.slot == meetingAI?.slot
-        if aiTasks[slot] != nil || (manualAISheetOpen && sameTarget) { return .busy }
+        // 手動シートを開いている間に止めるのは、そのシートが持つ枠と同じときだけ。
+        // 選択中の宛先で判定すると、Aへの返答シートを開いている間にBの自動送信が止まる。
+        if aiTasks[slot] != nil || manualAISheetSlot == slot { return .busy }
         if let controller {
             let generation = controller.generation(slot: slot)
             let current = controller.conversation.questions.filter {

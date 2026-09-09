@@ -101,8 +101,15 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         window.contentView = stack
         editor.onSubmit = { [weak self] in self?.submit() }; editor.onCancel = { [weak self] in self?.cancel() }
     }
-    /// 宛先の一覧と選択を差し替える。
+    /// このシートが送信を始めた枠。取消はここへ返す。
+    /// 送信後に宛先を選び直せると、接続待ちの依頼を取り消せなくなる。
+    private(set) var activeSlot: Int?
+    /// 送信を始めていなければ現在の選択、始めていればそのときの枠
+    var owningSlot: Int { activeSlot ?? destination.selected }
+
+    /// 宛先の一覧と選択を差し替える。送信を始めた後は差し替えない。
     func updateDestinations(_ items: [AIDestinationPicker.Item], selected: Int, participant: String) {
+        guard activeSlot == nil else { return }
         destination.update(items: items, selected: selected)
         title.stringValue = "\(participant)へ"
     }
@@ -115,7 +122,11 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         sendButton.isEnabled = canSubmit && !sent
         editor.isEditable = !sent || progress == nil
         work.isEnabled = !sent || progress == nil
-        if progress == nil { sent = false; sendButton.isEnabled = canSubmit }
+        if progress == nil {
+            sent = false; sendButton.isEnabled = canSubmit
+            // 送信が終わって次の下書きへ戻ったら、宛先をまた選べるようにする。
+            activeSlot = nil; destination.setEnabled(true)
+        }
     }
     func textDidChange(_ notification: Notification) { editor.needsDisplay = true; onDraft?(editor.string) }
     @objc private func updateRange() { if let rangePreview { range.stringValue = rangePreview(full.state == .on) } }
@@ -123,6 +134,9 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     @objc private func submit() {
         guard sendButton.isEnabled, !editor.hasMarkedText() else { return }
         sent = true; sendButton.isEnabled = false; editor.isEditable = false; work.isEnabled = false
+        // 送信を始めた枠を固定し、宛先も操作させない。取消の宛先が動くと元の依頼が残る。
+        activeSlot = destination.selected
+        destination.setEnabled(false)
         onSubmit?(editor.string, full.state == .on)
     }
     @objc private func cancel() { onCancel?(); close() }
