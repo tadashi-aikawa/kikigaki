@@ -22,7 +22,7 @@ public enum TranscriptRenderer {
     }
 
     public static func clock(for utterance: Utterance, timeline: MeetingTimeline,
-                             seconds: Bool = false, timeZone: TimeZone = .current) -> String {
+                             seconds: Bool = true, timeZone: TimeZone = .current) -> String {
         ClockFormatters.shared.string(from: date(for: utterance, timeline: timeline), seconds: seconds, timeZone: timeZone)
     }
 

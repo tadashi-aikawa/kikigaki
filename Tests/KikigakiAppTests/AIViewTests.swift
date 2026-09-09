@@ -44,6 +44,11 @@ import KikigakiAIIO
         let avatar = try #require(descendants(row).compactMap { $0 as? AvatarView }.first)
         for _ in 0..<100 where avatar.image == nil { try await Task.sleep(for: .milliseconds(20)) }
         #expect(avatar.image != nil)
+        content.layoutSubtreeIfNeeded()
+        let clocks = window.transcriptDocument.rows.flatMap { descendants($0).compactMap { $0 as? NSTextField } }
+            .filter { $0.stringValue.range(of: "^\\d{2}:\\d{2}:\\d{2}$", options: .regularExpression) != nil }
+        #expect(clocks.count == 4) // 発話・手入力・人側の送信・AIの返事
+        #expect(clocks.allSatisfy { $0.frame.width >= $0.intrinsicContentSize.width })
         try capture("feedback-avatar-900", view: content.superview!)
         state.ai?.avatarSources[1] = nil
         window.apply(state)
@@ -255,8 +260,8 @@ import KikigakiAIIO
         let rows = window.transcriptDocument.rows
         let send = try #require(rows[1] as? AISendLineRow)
         #expect(rows[0] is TranscriptRow && rows[2] is TranscriptRow)
-        // 時刻は人の発話と同じ粒度。秒はtooltipへ。
-        let clock = DateFormatter(); clock.locale = Locale(identifier: "en_US_POSIX"); clock.dateFormat = "HH:mm"
+        // 時刻は人の発話と同じ秒の粒度。
+        let clock = DateFormatter(); clock.locale = Locale(identifier: "en_US_POSIX"); clock.dateFormat = "HH:mm:ss"
         #expect(send.displayText == "└ 迅雷へ送信 · 2発言 · " + clock.string(from: started.addingTimeInterval(343)))
         // 取消の有無で高さが変わらない。結果の到着で行が縮むと末尾の画面が動く。
         #expect(send.height(for: 680) == 26)

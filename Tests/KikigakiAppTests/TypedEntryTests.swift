@@ -207,7 +207,7 @@ import KikigakiCore
         try enter(controller.typedEntry.editor)
         #expect(entries.count == 2 && entries[1].start == 105)
         try capture("paused-post")
-        #expect(state.contextEndClock == TranscriptRenderer.clock(for: entries[1], timeline: state.timeline))
+        #expect(state.contextEndClock == TranscriptRenderer.clock(for: entries[1], timeline: state.timeline, seconds: false))
         state.timeline = .init(startedAt: startedAt, pauses: [.init(audioTime: 105, duration: 180)])
         voices.append(.init(speaker: 1, start: 110, end: 115, text: "再開します。会場案内も確認できました。"))
         state.elapsed = 120

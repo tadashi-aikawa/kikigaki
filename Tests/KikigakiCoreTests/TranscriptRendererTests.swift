@@ -6,6 +6,12 @@ import Testing
 @Suite struct TranscriptRendererTests {
     private let timeline = MeetingTimeline(startedAt: Date(timeIntervalSince1970: 0))
     private let utc = TimeZone(secondsFromGMT: 0)!
+    @Test func 表示の既定も発話と手入力の秒を出す() throws {
+        let voice = Utterance(speaker: 0, start: 61, end: 62, text: "確認します")
+        let typed = try Utterance(typedText: "確認しました", at: 61, postedAt: Date(timeIntervalSince1970: 67))
+        #expect(TranscriptRenderer.clock(for: voice, timeline: timeline, timeZone: utc) == "00:01:01")
+        #expect(TranscriptRenderer.clock(for: typed, timeline: timeline, timeZone: utc) == "00:01:07")
+    }
     @Test func 経過時刻はmmss() {
         #expect(TranscriptRenderer.elapsed(0) == "00:00")
         #expect(TranscriptRenderer.elapsed(65.9) == "01:05")

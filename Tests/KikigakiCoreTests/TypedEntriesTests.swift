@@ -70,7 +70,7 @@ import Testing
         let expected = "[00:02:00] 手入力: https://example.com/meeting"
         for clock in [timeline, resumed] {
             #expect(TranscriptRenderer.line(entry, names: names, timeline: clock, timeZone: utc) == expected)
-            #expect(TranscriptRenderer.clock(for: entry, timeline: clock, timeZone: utc) == "00:02")
+            #expect(TranscriptRenderer.clock(for: entry, timeline: clock, timeZone: utc) == "00:02:00")
         }
         #expect(TranscriptRenderer.clock(for: voice("再開", at: 60), timeline: resumed, seconds: true, timeZone: utc) == "00:05:00")
         #expect(TranscriptRenderer.clock(for: entry, timeline: resumed, seconds: true, timeZone: TimeZone(secondsFromGMT: 9 * 3600)!) == "09:02:00")

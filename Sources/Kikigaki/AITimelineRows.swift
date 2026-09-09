@@ -12,8 +12,8 @@ enum AIRowMetrics {
     static let bodyX: CGFloat = 54
     static let avatar = NSRect(x: 20, y: 8, width: 25, height: 26)
     static func bodyWidth(_ width: CGFloat) -> CGFloat { max(44, width - 90) }
-    /// 人の発話と同じ粒度で出す。1本の時間軸に2つの桁数を混ぜない。秒はtooltipへ。
-    static let clock = formatter("HH:mm")
+    /// 人の発話と同じ秒の粒度で出す。1本の時間軸に2つの桁数を混ぜない。
+    static let clock = formatter("HH:mm:ss")
     static let clockWithSeconds = formatter("HH:mm:ss")
     private static func formatter(_ format: String) -> DateFormatter {
         let formatter = DateFormatter()
@@ -247,7 +247,8 @@ final class AITypedSendRow: NSView, AITimelineRowView {
         avatar.frame = AIRowMetrics.avatar
         let nameWidth = ceil(nameLabel.intrinsicContentSize.width) + 4
         nameLabel.frame = NSRect(x: AIRowMetrics.bodyX, y: 8, width: nameWidth, height: 18)
-        timeLabel.frame = NSRect(x: AIRowMetrics.bodyX + nameWidth + 12, y: 8, width: 48, height: 18)
+        timeLabel.frame = NSRect(x: AIRowMetrics.bodyX + nameWidth + 12, y: 8,
+                                width: ceil(timeLabel.intrinsicContentSize.width) + 4, height: 18)
         let addressWidth = ceil(address.intrinsicContentSize.width) + 2
         address.frame = NSRect(x: bounds.width - 20 - addressWidth, y: 9, width: addressWidth, height: 16)
         let width = cancelAction.isHidden ? 0 : cancelAction.measuredWidth
@@ -424,7 +425,8 @@ final class AIReplyRow: NSView, AITimelineRowView {
             let retryWidth = retryAction.isHidden ? 0 : retryAction.measuredWidth
             retryAction.frame = NSRect(x: bounds.width - 20 - retryWidth, y: 5, width: retryWidth, height: 24)
             let right = retryAction.isHidden ? bounds.width - 20 : retryAction.frame.minX - 8
-            timeLabel.frame = NSRect(x: right - 48, y: 6, width: 48, height: 18)
+            let timeWidth = ceil(timeLabel.intrinsicContentSize.width) + 4
+            timeLabel.frame = NSRect(x: right - timeWidth, y: 6, width: timeWidth, height: 18)
             // 返送された失敗は未読になるので、押して既読にできる印を帯の中へ置く。
             let pillWidth = pill.isHidden ? 0 : ceil(pill.intrinsicContentSize.width)
             pill.frame = NSRect(x: timeLabel.frame.minX - 8 - pillWidth, y: 5, width: pillWidth, height: 20)
@@ -441,7 +443,8 @@ final class AIReplyRow: NSView, AITimelineRowView {
         nameLabel.frame = NSRect(x: AIRowMetrics.bodyX, y: 8, width: nameWidth, height: 18)
         let chipWidth = chip.isHidden ? 0 : chip.measuredWidth
         chip.frame = NSRect(x: nameLabel.frame.maxX + 8, y: 9, width: chipWidth, height: 16)
-        timeLabel.frame = NSRect(x: nameLabel.frame.maxX + (chip.isHidden ? 12 : chipWidth + 16), y: 8, width: 48, height: 18)
+        timeLabel.frame = NSRect(x: nameLabel.frame.maxX + (chip.isHidden ? 12 : chipWidth + 16), y: 8,
+                                width: ceil(timeLabel.intrinsicContentSize.width) + 4, height: 18)
         let pillWidth = ceil(pill.intrinsicContentSize.width)
         pill.frame = NSRect(x: bounds.width - 20 - pillWidth, y: 8, width: pillWidth, height: 20)
         let bodyWidth = AIRowMetrics.bodyWidth(bounds.width)

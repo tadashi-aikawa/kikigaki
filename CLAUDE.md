@@ -120,6 +120,8 @@ address = "ネオへ"
 
 新しく保存する発話行とAI用の会話ファイルは `[HH:MM:SS] 話者名: 本文` の実時刻です。一時停止の長さを反映し、既存の経過時刻形式のファイルは変換しません。
 
+画面の時刻も、発話・手入力・AIの行・送信の細い1行をすべて `HH:MM:SS` で表示します。
+
 本文下の1行入力欄から、録音中・一時停止中だけ⌘Enterで投稿できます。素のEnter・Shift+Enterでは投稿も改行もしません。固定名「手入力」は4話者とは別で、改名・統合・相槌省略の対象外です。IMEのEnterは変換確定を優先し、Escでは下書きを残します。手入力のURLはクリックで開け、名前と本文は検索対象です。
 
 `MeetingSession.typedEntries` を音声処理から独立して保持し、`TranscriptEntries.merge` で音声位置順に併合します。typedは必須のpostedAtを持ち、画面・Markdown・AI文脈は `TranscriptRenderer.clock` で投稿日時を表示します。AI送信のtypedは最初のawaitより前に固定します。詳細は [手入力の設計](docs/typed-entry.md)。
