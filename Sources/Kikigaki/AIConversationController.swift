@@ -129,7 +129,7 @@ final class AIConversationController {
     /// 旧requestと同じ形を保つ。プロファイルを増やした会議だけ枝を切る。
     private func storedSlot(_ slot: Int) -> Int? { profiles.count > 1 || slot != defaultSlot ? slot : nil }
     func canSend(slot: Int) -> Bool {
-        guard allowsSending, let channel = channels[slot] else { return false }
+        guard allowsSending, !discarded, let channel = channels[slot] else { return false }
         return !channel.isSending && !channel.connecting
             && (channel.connection == nil ? !channel.launchingAttempted : channel.connectionStatus == .idle)
             && !questions(inSlot: slot, generation: channel.generation).contains { $0.isAwaitingResult || $0.state == .prepared }
@@ -255,8 +255,20 @@ final class AIConversationController {
     /// この枠が準備済みセッションを引き継いだ状態か。紐づけの後始末の判定に使う
     func hasAdopted(slot: Int) -> Bool { channels[slot]?.hookContext != nil }
 
-    /// 監視を止める。取り止めた会議の置き場を消す前に呼ぶ
-    func stopWatching() { monitor?.stop(); monitor = nil }
+    /// 取り止めた会議。置き場を消した後は、遅れて返ってきた観測でも何も書かない
+    private(set) var discarded = false
+
+    /// 監視を止め、この会議への書き込みを一切やめる。取り止めた会議の置き場を消す前に呼ぶ。
+    /// 監視元を止めるだけでは、既に走っているpollがawaitから戻って消した場所へ書き直せる。
+    func stopWatching() {
+        discarded = true
+        monitor?.stop(); monitor = nil
+    }
+    /// 片付けに失敗して会議を残すときに戻す
+    func resumeWatching() throws {
+        discarded = false
+        try watch()
+    }
 
     func connect(config: ResolvedAIConfig, label: String, executable: URL, arguments: [String], readinessTimeout: TimeInterval = 30) async throws {
         guard readinessTimeout.isFinite, readinessTimeout > 0 else { throw AIProcessError.invalidInput }
@@ -306,10 +318,11 @@ final class AIConversationController {
         let revision = channel.generation
         do {
             let observed = try await herdr.observe(target)
-            guard revision == channel.generation, target.paneID == channel.connection?.paneID else { return }
+            // 取り止めた会議へは書かない。置き場は既に消えている。
+            guard !discarded, revision == channel.generation, target.paneID == channel.connection?.paneID else { return }
             try apply(channel, observed)
         } catch {
-            guard revision == channel.generation, target.paneID == channel.connection?.paneID else { return }
+            guard !discarded, revision == channel.generation, target.paneID == channel.connection?.paneID else { return }
             channel.idleSince = nil
             if error as? AIHerdrError == .replaced || error as? AIHerdrError == .missing { channel.connectionStatus = .disconnected }
             else { channel.connectionStatus = .unknown }
@@ -372,6 +385,7 @@ final class AIConversationController {
     // MARK: - 受信
 
     func scan() {
+        guard !discarded else { return }
         invalidInboxFiles = []
         scanWarning = nil
         scanHooks()
@@ -492,7 +506,8 @@ final class AIConversationController {
 
     private func pollAll() { for slot in channels.keys { poll(slot) } }
     private func poll(_ slot: Int) {
-        guard let channel = channels[slot], !polling.contains(slot), channel.connection != nil, channel.inputAttempted else { return }
+        guard !discarded, let channel = channels[slot], !polling.contains(slot),
+              channel.connection != nil, channel.inputAttempted else { return }
         polling.insert(slot)
         Task { [weak self] in
             guard let self else { return }
@@ -513,6 +528,7 @@ final class AIConversationController {
     }
 
     private func saveConnection(_ channel: Channel, _ target: AIHerdrConnection, replacing: Bool = true) throws {
+        guard !discarded else { throw AIHerdrError.notReady }
         guard var record = channel.session else { throw AIHerdrError.notReady }
         record.connection = target
         try files.write(AIJSON.encode(record), to: sessionParts(channel), replacing: replacing)

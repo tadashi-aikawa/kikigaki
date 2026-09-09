@@ -619,6 +619,93 @@ import KikigakiAIIO
         #expect(send.isEnabled && popup.isEnabled)
     }
 
+    // MARK: - 4巡目の確認レビューの指摘
+
+    /// 【中】記録の後始末に失敗したまま実体を消すと、設計表の「起きない」状態ができる。
+    @Test func 記録を片付けられないときは実体を消さない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let id = try #require(prepared.unbound.first?.id)
+        #expect(await session.adoptPrepared(id, profile: list[0]))
+        let meetingID = session.aiMeetingID
+        let markdown = root.appendingPathComponent("meeting.md")
+        try Data().write(to: markdown)
+        // 台帳を書けなくする。紐づけを戻せないまま実体を消してはいけない。
+        let ledgerFile = root.appendingPathComponent("ai-prepared.json")
+        try FileManager.default.removeItem(at: ledgerFile)
+        try FileManager.default.createDirectory(at: ledgerFile, withIntermediateDirectories: false)
+
+        await session.abandon()
+        let context = root.appendingPathComponent(".kikigaki-context").appendingPathComponent(meetingID.uuidString)
+        #expect(FileManager.default.fileExists(atPath: context.path))
+        #expect(FileManager.default.fileExists(atPath: markdown.path))
+        #expect(session.snapshot.state == .idle)
+        #expect(session.snapshot.message?.contains("片付けられませんでした") == true)
+
+        // 書けるようになれば、同じ操作でやり直せる。
+        try FileManager.default.removeItem(at: ledgerFile)
+        #expect(session.retryDiscard())
+        #expect(!FileManager.default.fileExists(atPath: context.path))
+        #expect(prepared.unbound.map(\.id) == [id])
+    }
+
+    /// 【中】監視を止めても、走っているpollがawaitから戻って消した場所へ書き直せる。
+    @Test func 取り止めた会議へは遅れた観測でも書かない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let id = try #require(prepared.unbound.first?.id)
+        #expect(await session.adoptPrepared(id, profile: list[0]))
+        let controller = try #require(session.aiRecord?.controller)
+        let meetingID = session.aiMeetingID
+        try Data().write(to: root.appendingPathComponent("meeting.md"))
+        await session.abandon()
+        let context = root.appendingPathComponent(".kikigaki-context").appendingPathComponent(meetingID.uuidString)
+        #expect(!FileManager.default.fileExists(atPath: context.path))
+
+        // 取り止めた後に観測が返ってくる。session IDが補われても書き戻さない。
+        await fake.setSession("codex-thread-late")
+        try? await controller.refreshConnection(slot: 1)
+        #expect(!FileManager.default.fileExists(atPath: context.path))
+        #expect(!controller.canSend(slot: 1))
+    }
+
+    /// 【中】台帳の保存に失敗した後、同じ枠で別の準備済みへ選び直せなかった。
+    @Test func 台帳保存に失敗した枠でも別の準備済みへ移れる() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        await prepare(prepared, list[0], root: root)
+        let first = try #require(prepared.unbound.first?.id)
+        let second = try #require(prepared.unbound.last?.id)
+
+        // 1つ目は会議側だけ保存できて、台帳の保存に失敗する。
+        let ledgerFile = root.appendingPathComponent("ai-prepared.json")
+        try FileManager.default.removeItem(at: ledgerFile)
+        try FileManager.default.createDirectory(at: ledgerFile, withIntermediateDirectories: false)
+        #expect(await session.adoptPrepared(first, profile: list[0]) == false)
+        try FileManager.default.removeItem(at: ledgerFile)
+
+        // 2つ目を選び直せる。1つ目の接続は手放してから移る。
+        #expect(await session.adoptPrepared(second, profile: list[0]))
+        let controller = try #require(session.aiRecord?.controller)
+        #expect(controller.sessionToken(slot: 1) == prepared.ledger.sessions.first { $0.id == second }?.token)
+        #expect(prepared.unbound.map(\.id) == [first])
+    }
+
     /// 【高】候補が尽きても、新規起動へ黙って進めず利用者に選ばせる。
     @Test func 候補が尽きた枠でも新規を選ばせる() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)

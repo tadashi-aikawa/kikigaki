@@ -135,12 +135,22 @@ final class AIRecordStore {
     }
     /// 取り止めた会議を登録簿から外す。置き場を消す前に呼ぶ。
     /// 残すと監視が続き、再起動時に無い manifest を回収しようとして失敗する。
-    func discard(meetingID: UUID) {
-        guard let record = records[meetingID] else { return }
+    /// - Returns: 外せたら true。保存に失敗したら元へ戻して false(呼び手は実体を消さない)
+    @discardableResult
+    func discard(meetingID: UUID) -> Bool {
+        guard let record = records[meetingID] else { return true }
         record.controller.stopWatching()
         records[meetingID] = nil
-        do { try persistRegistry() } catch { warnings.append("AI会議の登録簿を保存できません") }
+        do { try persistRegistry() } catch {
+            // 登録簿を書けないなら、実体を消させない。消すと回収できない登録だけが残る。
+            records[meetingID] = record
+            try? record.controller.resumeWatching()
+            warnings.append("AI会議の登録簿を保存できません")
+            onChange?()
+            return false
+        }
         onChange?()
+        return true
     }
 
     /// 稼働中のpane ID。準備済みセッションの生存確認に使う。

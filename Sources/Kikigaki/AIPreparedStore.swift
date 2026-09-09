@@ -138,15 +138,22 @@ final class AIPreparedStore {
     }
 
     /// 取り止めた会議の紐づけを未紐づけへ戻す。次の会議でまた選べるようにする。
-    func unbindAll(meetingID: UUID) {
+    /// - Returns: 戻せたら true。保存に失敗したら false(呼び手は会議の実体を消さない)
+    @discardableResult
+    func unbindAll(meetingID: UUID) -> Bool {
         var next = ledger
         let restored = next.unbindAll(meetingID: meetingID)
-        guard !restored.isEmpty else { return }
+        guard !restored.isEmpty else { return true }
         do {
             try files.write(AIJSON.encode(next), to: [Self.fileName])
             ledger = next
-        } catch { warning = "準備済みAIセッションの紐づけを戻せません" }
-        onChange?()
+            onChange?()
+            return true
+        } catch {
+            warning = "準備済みAIセッションの紐づけを戻せません"
+            onChange?()
+            return false
+        }
     }
 
     func discard(_ id: UUID) {

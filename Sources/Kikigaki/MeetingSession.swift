@@ -246,6 +246,14 @@ final class MeetingSession {
             // 紐づけの前に会議の全プロファイルを登録する。1つだけ登録すると保存パスが平置きになり、
             // あとで他の枠が登録された時点で参照先が枝つきへ変わって、CLIがsessionを読めなくなる。
             try record.controller.register(meetingAIProfiles)
+            // 同じ枠に、台帳へ書けなかった別の引き継ぎが残っていることがある。
+            // 先に手放さないと、別の準備済みを選び直せない(adoptが拒否する)。
+            if record.controller.hasAdopted(slot: profile.slot), boundPrepared[profile.slot] == nil,
+               record.controller.sessionToken(slot: profile.slot) != prepared.token {
+                try record.controller.releaseAdopted(slot: profile.slot)
+            }
+            // 同じ枠に、台帳へ書けなかった別の引き継ぎが残っていることがある。
+            // 先に手放さないと、別の準備済みを選び直せない(adoptが拒否する)。
             try await record.controller.adopt(prepared, config: profile)
             guard handoff.meetingID == meetingID else { return false }
             // 台帳へは保存済みcontrollerの会議IDを書く。await後の現在の会議ではない。
@@ -292,6 +300,8 @@ final class MeetingSession {
     @discardableResult
     func start(source: AudioSource) async -> Bool {
         guard snapshot.state.canStart else { return false }
+        // 前回の取り止めで片付けきれなかったものがあれば、ここでもう一度片付ける。
+        retryDiscard()
         cancelAIPreparation()
         stopAISchedule()
         aiSchedule = nil; lastScheduleOptions = nil; scheduleDraft = nil; aiScheduleWarning = nil
@@ -449,6 +459,9 @@ final class MeetingSession {
     /// 録音そのものを取り止める。**保存しない**。予約したMarkdownとWAV、AIの置き場も残さない。
     /// 紐づけシートの「取消(録音を始めない)」から呼ぶ。表示している契約と動きを揃えるため、
     /// 通常の停止(最終判定して保存する)とは別の道にしてある。
+    ///
+    /// 片付けは**記録が先、実体が後**。逆順にすると、消えた会議の登録や使用済みのままの
+    /// 紐づけだけが残り、設計文書の表で「起きない」としている状態を作ってしまう。
     func abandon() async {
         guard snapshot.state == .recording || snapshot.state == .paused else { return }
         stopAISchedule()
@@ -462,8 +475,37 @@ final class MeetingSession {
         snapshot.message = "録音を取り止め中..."
         emit()
         await tearDown()
+        let leftover = Discarded(meetingID: meetingID, outputDir: outputDir, markdownURL: markdownURL)
+        guard cleanUp(leftover) else {
+            // 片付けられないものが残る。実体は消さず、やり直せる状態のままにする。
+            pendingDiscard = leftover
+            snapshot.state = .idle
+            snapshot.message = "録音を取り止めましたが、AIの記録を片付けられませんでした。保存先を確認してください"
+            aiWarning = "取り止めた会議のAIの記録が残っています"
+            emit()
+            return
+        }
+        archive = nil; finalTokens = []; finalSegments = []; typedEntries = []
+        consumedAudioTime = 0
+        handoff = HandoffHistory()
+        resetMeetingAIState(config)
+        snapshot = SessionSnapshot(state: .idle, speakers: config.speakers, message: "録音を取り止めました")
+        emit()
+    }
+
+    /// 片付けきれなかった取り止め。次の録音開始でもう一度片付ける
+    private struct Discarded { let meetingID: UUID; let outputDir: URL; let markdownURL: URL? }
+    private var pendingDiscard: Discarded?
+
+    /// 取り止めた会議の後始末。記録を外せなければ実体を消さず false を返す。
+    private func cleanUp(_ target: Discarded) -> Bool {
+        // 登録簿と監視を外す。実体だけ消すと、再起動時に無いmanifestを回収しようとして失敗する。
+        let unregistered = aiStore?.discard(meetingID: target.meetingID) ?? true
+        // 紐づけ済みの準備済みは未紐づけへ戻す。会議が無くなった以上、次の録音でまた選べるべき。
+        let unbound = preparedStore?.unbindAll(meetingID: target.meetingID) ?? true
+        guard unregistered, unbound else { return false }
         // 予約したMarkdownは中身が無いときだけ消す。書き込み済みのものは触らない。
-        if let markdownURL {
+        if let markdownURL = target.markdownURL {
             if (try? Data(contentsOf: markdownURL))?.isEmpty ?? false {
                 do { try FileManager.default.removeItem(at: markdownURL) } catch { log("予約の片付けに失敗: \(error)") }
             }
@@ -472,21 +514,24 @@ final class MeetingSession {
                 do { try FileManager.default.removeItem(at: wav) } catch { log("録音の片付けに失敗: \(error)") }
             }
         }
-        // 登録簿と監視も外す。実体だけ消すと、再起動時に無いmanifestを回収しようとして失敗する。
-        aiStore?.discard(meetingID: meetingID)
-        // 紐づけ済みの準備済みは未紐づけへ戻す。会議が無くなった以上、次の録音でまた選べるべき。
-        preparedStore?.unbindAll(meetingID: meetingID)
         // この会議のAIの置き場も残さない。
-        let context = outputDir.appendingPathComponent(".kikigaki-context").appendingPathComponent(meetingID.uuidString)
+        let context = target.outputDir.appendingPathComponent(".kikigaki-context")
+            .appendingPathComponent(target.meetingID.uuidString)
         if FileManager.default.fileExists(atPath: context.path) {
             do { try FileManager.default.removeItem(at: context) } catch { log("AIの置き場の片付けに失敗: \(error)") }
         }
-        archive = nil; finalTokens = []; finalSegments = []; typedEntries = []
-        consumedAudioTime = 0
-        handoff = HandoffHistory()
-        resetMeetingAIState(config)
-        snapshot = SessionSnapshot(state: .idle, speakers: config.speakers, message: "録音を取り止めました")
+        return true
+    }
+
+    /// 片付けきれなかった取り止めをもう一度片付ける。次の録音開始でも通る。
+    @discardableResult
+    func retryDiscard() -> Bool {
+        guard let pending = pendingDiscard else { return true }
+        guard cleanUp(pending) else { return false }
+        pendingDiscard = nil
+        aiWarning = nil
         emit()
+        return true
     }
 
     func togglePause() {
