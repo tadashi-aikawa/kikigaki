@@ -174,6 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onCopy = { full in session.copyContext(full: full, writeClipboard: Self.writeClipboard) }
         window.onRecopy = { session.recopyContext(writeClipboard: Self.writeClipboard) }
         window.onAskAI = { [weak self] in self?.showAISheet(parent: $0) }
+        window.onResendAI = { [weak self] in self?.showAISheet(parent: nil, resend: $0) }
         window.onScheduleAI = { [weak self] in self?.showScheduleSheet() }
         window.onStopScheduleAI = { [weak session] in session?.stopAISchedule() }
         window.onReadAI = { session.readAI($0) }
@@ -460,17 +461,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
-    private func showAISheet(parent: UUID?) {
+    private func showAISheet(parent: UUID?, resend: UUID? = nil) {
         guard let session, session.snapshot.canShare, let window = window?.window else { return }
-        // 確認への返答はシート全体を元質問の宛先へ固定する。送信先だけ直しても、
+        let questions = session.aiRecord?.controller.conversation.questions
+        // 失敗した依頼はそのまま送り直せるよう、送信文・親・作業許可を元requestから戻す。
+        let source = resend.flatMap { id in questions?.first { $0.request.id == id } }
+        let parent = parent ?? source?.request.envelope.participant.inReplyToRequestID
+        // 確認への返答と再送はシート全体を元質問の宛先へ固定する。送信先だけ直しても、
         // 送信可否・進捗・範囲・ペイン操作・表題が現在の選択を見ていては噛み合わない。
-        guard let config = parent.flatMap({ session.aiProfile(forRequest: $0) }) ?? session.aiConfiguration else { return }
-        let fixed = parent != nil
+        guard let config = (resend ?? parent).flatMap({ session.aiProfile(forRequest: $0) }) ?? session.aiConfiguration else { return }
+        let fixed = parent != nil || resend != nil
         if let aiSheet { aiSheet.window.makeFirstResponder(aiSheet.window.firstResponder); return }
         if let scheduleSheet { self.window?.show(); scheduleSheet.focus(); return }
+        if let source {
+            session.updateAIDraft(source.request.displayQuestion)
+            session.updateAIWorkAllowed(source.request.envelope.participant.workAllowed)
+        }
         session.beginAIDraft(slot: config.slot)
         let snapshot = session.snapshot
-        let question = parent.flatMap { id in session.aiRecord?.controller.conversation.questions.first { $0.request.id == id } }
+        let question = parent.flatMap { id in questions?.first { $0.request.id == id } }
         let slot = config.slot
         let range = session.aiRangePreview(full: false, slot: slot)
         let sheet = AIQuestionSheet(participant: config.participantName, parentNumber: question?.request.number,

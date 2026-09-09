@@ -22,6 +22,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onReadAI: ((UUID) -> Void)?
     var onOpenAIPane: (() -> Void)?
     var onCancelAI: ((UUID) -> Void)?
+    /// 失敗した依頼を送り直す。元requestを渡し、送信文・宛先・親・作業許可を戻したシートを開く。
+    var onResendAI: ((UUID) -> Void)?
     var onRecreateAI: (() -> Void)?
     var onRetryAISave: (() -> Void)?
     var onShowPreviousAI: (() -> Void)?
@@ -34,10 +36,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let aiStatusRow = NSStackView()
     private let askButton = WashiActionButton(title: "AIへ…", target: nil, action: nil)
     private var aiRows: [String: any AITimelineRowView] = [:]
-    private var aiReadSince: [String: Date] = [:]
-    private var aiReadTimer: Timer?
-    /// 既読の可視化判定でウィンドウが見られているとみなす条件。テストから差し替える。
-    var aiReadWindowActive: (() -> Bool)?
+    let aiRead = AIReadWatcher()
     private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
     private var speakerSettingsPopover: SpeakerSettingsPopover?
     private let startStopButton = WashiActionButton()
@@ -96,6 +95,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             for row in rows.values { row.updateAvatar(speakers: snapshot.speakers, store: avatars, editable: snapshot.canShare) }
             renamePopover?.refreshAvatars()
         }
+        connectAIRead()
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification,
                                                object: scrollView.contentView)
@@ -219,7 +219,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private func updateRows(previous: SessionSnapshot) {
         var anchor = transcriptDocument.anchor()
         let sameMeeting = previous.timeline.startedAt == snapshot.timeline.startedAt
-        if !sameMeeting { rows.removeAll(); aiRows.removeAll(); aiReadSince.removeAll(); anchor = .init(candidates: [], y: 0, atBottom: true) }
+        if !sameMeeting { rows.removeAll(); aiRows.removeAll(); aiRead.reset(); anchor = .init(candidates: [], y: 0, atBottom: true) }
         if sameMeeting, previous.utterances == snapshot.utterances, previous.ai?.conversation != snapshot.ai?.conversation {
             // 回答の到着だけでは末尾へ移動しない。人間の発言が増えたときの追従は従来どおり。
             anchor = .init(candidates: anchor.candidates, y: anchor.y, atBottom: false)
@@ -262,9 +262,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         rows = next
         let rowIDs = Set(items.map(\.rowID))
         aiRows = aiRows.filter { rowIDs.contains($0.key) }
-        aiReadSince = aiReadSince.filter { rowIDs.contains($0.key) }
         transcriptDocument.setRows(ordered, anchor: anchor)
-        refreshAIReadTimer()
+        aiRead.noteVisibilityChanged()
+        aiRead.refresh()
         for row in inserted {
             row.appear(animated: animated && snapshot.canSubmitTyped)
             // 停止時の再分割で開始位置が変わった行も、最終結果の変更として同時に点灯する。
@@ -455,7 +455,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             reply.onRead = { [weak self] in self?.onReadAI?(id) }
             reply.onReply = { [weak self] in self?.onAskAI?(id) }
             reply.onCancel = { [weak self] in self?.onCancelAI?(id) }
-            reply.onRetry = { [weak self] in self?.onAskAI?(nil) }
+            reply.onRetry = { [weak self] in self?.onResendAI?(id) }
             reply.onResize = { [weak self, weak reply] in
                 guard let self, let reply else { return }
                 let y = scrollView.contentView.bounds.minY
@@ -468,39 +468,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         return view
     }
 
-    private func refreshAIReadTimer() {
-        let hasUnread = aiRows.values.contains { ($0 as? AIReplyRow).map { $0.item.isUnread && !$0.isFailure } == true }
-        if hasUnread, aiReadTimer == nil {
-            aiReadTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.evaluateAIRead() }
-            }
-        } else if !hasUnread {
-            aiReadTimer?.invalidate(); aiReadTimer = nil; aiReadSince.removeAll()
-        }
-    }
-
-    /// 展開が既定になったので、印を開く操作の代わりに可視化で既読にする。
-    /// 行の上端が可視域へ入り、ウィンドウを見ている状態のまま連続1秒留まったら既読。
-    /// 到着した返事は末尾追従の対象外なので、読まずに既読になる場面は限られる。
-    func evaluateAIRead(now: Date = Date(), dwell: TimeInterval = 1) {
-        let active = aiReadWindowActive?() ?? (window?.isKeyWindow == true)
-        let clip = scrollView.contentView.bounds
-        var seen: Set<String> = []
-        var read: [UUID] = []
-        // 画面の上から順に見る。辞書の順で回すと既読になる順が実行ごとに変わる。
-        for reply in transcriptDocument.rows.compactMap({ $0 as? AIReplyRow }) {
-            let id = reply.item.rowID
-            guard reply.item.isUnread, !reply.isFailure else { continue }
-            let top = reply.frame.minY
-            guard active, top >= clip.minY, top <= clip.maxY - 8 else { continue }
-            seen.insert(id)
-            let since = aiReadSince[id] ?? now
-            aiReadSince[id] = since
-            if now.timeIntervalSince(since) >= dwell { read.append(reply.item.requestID) }
-        }
-        aiReadSince = aiReadSince.filter { seen.contains($0.key) }
-        // 既読の保存は再構築を呼ぶので、走査を終えてから通知する。
-        for id in read { onReadAI?(id) }
+    private func connectAIRead() {
+        aiRead.rows = { [weak self] in self?.transcriptDocument.rows.compactMap { $0 as? AIReplyRow } ?? [] }
+        aiRead.clip = { [weak self] in self?.scrollView.contentView.bounds ?? .zero }
+        aiRead.isActive = { [weak self] in self?.window?.isKeyWindow == true }
+        aiRead.onRead = { [weak self] in self?.onReadAI?($0) }
     }
     @objc private func askPressed() { onAskAI?(nil) }
     @objc private func pausePressed() { onPauseResume?() }
@@ -540,6 +512,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     }
     @objc func scrolled() {
         latestButton.isHidden = transcriptDocument.anchor().atBottom || (snapshot.utterances.isEmpty && snapshot.tentativeText == nil)
+        // 可視域から外れた行の滞在時間はここで捨てる。0.25秒の間の出入りを見落とさない。
+        aiRead.noteVisibilityChanged()
     }
     @objc private func motionChanged() {
         if shouldReduceMotion() { rows.values.forEach { $0.stopAnimations() } }

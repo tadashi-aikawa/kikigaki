@@ -285,23 +285,26 @@ final class AIReplyRow: NSView, AITimelineRowView {
     private var measuredBody: CGFloat = 0
     private var measuredNotes: CGFloat = 0
     var chipText: String { chip.stringValue }
+    var chipVisible: Bool { !chip.isHidden }
+    var timeText: String { timeLabel.isHidden ? "" : timeLabel.stringValue }
     var noteText: String { notes.isHidden ? "" : notes.stringValue }
     var failureText: String { failureLabel.stringValue }
     var quoteButton: AIQuoteButton { quote }
+    var statusPill: AIStatusPill { pill }
 
     var isFailure: Bool { if case .failure = item.kind { return true }; return false }
     var isWaiting: Bool { item.kind == .reply(.waiting) }
     /// 未読は朱、未返答の確認は金。既読と返答済みは薄墨へ戻す。
     var accent: NSColor? {
         if isFailure { return Washi.red }
-        // 確認質問は未読の朱ではなく金。返答すれば未読のままでも薄墨へ戻す。
-        if item.kind == .reply(.needsInput) { return item.needsAnswer && item.isUnread ? Washi.gold : nil }
+        // 確認質問の金の帯は返答するまで残す。既読では消さない。
+        if item.kind == .reply(.needsInput) { return item.needsAnswer ? Washi.gold : nil }
         return item.isUnread ? Washi.red : nil
     }
     var pillStyle: AIStatusPill.Style? {
-        if isFailure { return nil }
         if isWaiting { return .waiting }
-        if item.kind == .reply(.needsInput) { return item.needsAnswer && item.isUnread ? .confirmation : nil }
+        if item.kind == .reply(.needsInput) { return item.needsAnswer ? .confirmation : nil }
+        // 返送された失敗も未読になる。送信前の失敗は未読にならないので印も出ない。
         return item.isUnread ? .unread : nil
     }
 
@@ -361,7 +364,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
         // 失敗の帯にも確定時刻を出す。返事待ちは到着していないので時刻も種別も出さない。
         timeLabel.isHidden = isWaiting
         chip.isHidden = failure || isWaiting
-        pill.isHidden = failure || pillStyle == nil
+        pill.isHidden = pillStyle == nil
         quote.isHidden = failure || item.question.isEmpty
         markdownBody.isHidden = failure || isWaiting
         waitingBody.isHidden = failure || !isWaiting
@@ -394,7 +397,11 @@ final class AIReplyRow: NSView, AITimelineRowView {
             let retryWidth = retryAction.measuredWidth
             retryAction.frame = NSRect(x: bounds.width - 20 - retryWidth, y: 5, width: retryWidth, height: 24)
             timeLabel.frame = NSRect(x: retryAction.frame.minX - 70, y: 6, width: 62, height: 18)
-            failureLabel.frame = NSRect(x: AIRowMetrics.bodyX, y: 7, width: max(0, timeLabel.frame.minX - AIRowMetrics.bodyX - 8), height: 18)
+            // 返送された失敗は未読になるので、押して既読にできる印を帯の中へ置く。
+            let pillWidth = pill.isHidden ? 0 : ceil(pill.intrinsicContentSize.width)
+            pill.frame = NSRect(x: timeLabel.frame.minX - 8 - pillWidth, y: 5, width: pillWidth, height: 20)
+            let end = pill.isHidden ? timeLabel.frame.minX : pill.frame.minX
+            failureLabel.frame = NSRect(x: AIRowMetrics.bodyX, y: 7, width: max(0, end - AIRowMetrics.bodyX - 8), height: 18)
             return
         }
         avatar.frame = AIRowMetrics.avatar

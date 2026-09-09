@@ -15,6 +15,8 @@ import KikigakiCore
         Task { try? await record.controller.showPane() }
     }
     private var marks: [String: any AITimelineRowView] = [:]
+    /// 書き起こしウィンドウと同じ可視化の既読判定を使う。
+    let aiRead = AIReadWatcher()
     private var displayedMeeting: UUID?
     private let warning = NSTextField(wrappingLabelWithString: "")
     private var ids: [UUID] = []
@@ -33,7 +35,21 @@ import KikigakiCore
         window.contentView = stack; window.backgroundColor = Washi.paper
         picker.target = self; picker.action = #selector(selected)
         badges.onSelect = { [weak self] id in
-            guard let view = self?.marks[id] as? NSView else { return }; view.scrollToVisible(view.bounds)
+            guard let view = self?.marks[id] as? NSView else { return }
+            view.scrollToVisible(view.bounds); self?.aiRead.noteVisibilityChanged()
+        }
+        aiRead.rows = { [weak self] in self?.transcript.rows.compactMap { $0 as? AIReplyRow } ?? [] }
+        aiRead.clip = { [weak self] in self?.scroll.contentView.bounds ?? .zero }
+        aiRead.isActive = { [weak self] in self?.window?.isKeyWindow == true }
+        aiRead.onRead = { [weak self] id in
+            guard let record = self?.selectedRecord else { return }
+            try? record.controller.markRead(id)
+            self?.update()
+        }
+        scroll.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView,
+                                               queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.aiRead.noteVisibilityChanged() }
         }
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -53,11 +69,12 @@ import KikigakiCore
     @objc private func selected() {
         guard let record = selectedRecord else {
             scroll.isHidden = true; badges.isHidden = true; retry.isHidden = true; openPane.isHidden = true
-            marks = [:]; displayedMeeting = nil; return
+            marks = [:]; displayedMeeting = nil; aiRead.stop(); return
         }
         scroll.isHidden = false
         let changedMeeting = displayedMeeting != record.manifest.meetingID
-        if changedMeeting { marks = [:] }
+        // 会議を切り替えたら滞在時間を捨てる。前の会議で見ていた時間を持ち越さない。
+        if changedMeeting { marks = [:]; aiRead.reset() }
         displayedMeeting = record.manifest.meetingID
         let state = AIViewState(conversation: record.controller.conversation, participant: record.manifest.config.participantName,
             warning: record.saveWarning, canSubmit: false, readOnly: true, canOpenPane: record.controller.connection != nil,
@@ -98,5 +115,7 @@ import KikigakiCore
         }
         marks = next
         transcript.setRows(rows, anchor: changedMeeting ? .init(candidates: [], y: 0, atBottom: false) : anchor)
+        aiRead.noteVisibilityChanged()
+        aiRead.refresh()
     }
 }
