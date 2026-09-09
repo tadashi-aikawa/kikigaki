@@ -6,9 +6,9 @@ import KikigakiAIIO
 
 @Suite(.timeLimit(.minutes(1))) @MainActor struct AIScheduleReviewTests {
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
-    private func key(_ window: NSWindow, code: UInt16, shift: Bool = false) throws {
+    private func key(_ window: NSWindow, code: UInt16, shift: Bool = false, command: Bool = false) throws {
         let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero,
-            modifierFlags: shift ? [.shift] : [], timestamp: 0, windowNumber: window.windowNumber,
+            modifierFlags: command ? [.command] : shift ? [.shift] : [], timestamp: 0, windowNumber: window.windowNumber,
             context: nil, characters: code == 36 ? "\r" : "\u{1b}", charactersIgnoringModifiers: code == 36 ? "\r" : "\u{1b}",
             isARepeat: false, keyCode: code))
         window.sendEvent(event)
@@ -32,9 +32,9 @@ import KikigakiAIIO
         #expect(cancelled == 0)
         editor.unmarkText(); sheet.textDidChange(Notification(name: NSText.didChangeNotification))
         #expect(draft == editor.string)
-        try key(sheet.window, code: 36); #expect(submitted == 1)
+        try key(sheet.window, code: 36, command: true); #expect(submitted == 1)
         sheet.update(warning: "開始できませんでした")
-        try key(sheet.window, code: 36); #expect(submitted == 2)
+        try key(sheet.window, code: 36, command: true); #expect(submitted == 2)
         try key(sheet.window, code: 53); #expect(cancelled == 1)
     }
 

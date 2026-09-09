@@ -751,7 +751,7 @@ import KikigakiAIIO
                                  selected: 1, participant: "議事録")
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let send = try #require(descendants(sheet.window.contentView!).compactMap { $0 as? NSButton }
-            .first { $0.title == "送信 ⏎" })
+            .first { $0.title == "送信" })
         let popup = try #require(descendants(sheet.window.contentView!).compactMap { $0 as? NSPopUpButton }.first)
 
         sheet.setBinding(true, canSubmit: false)

@@ -436,7 +436,7 @@ import KikigakiAIIO
                                   .init(slot: 2, name: "相談")], selected: 1, participant: "議事録")
         #expect(sheet.activeSlot == nil && sheet.owningSlot == 1)
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
-        let send = try #require(descendants(sheet.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "送信 ⏎" })
+        let send = try #require(descendants(sheet.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "送信" })
         send.performClick(nil)
         #expect(sheet.activeSlot == 1 && sheet.owningSlot == 1)
         // 送信を始めた後の差し替えは無視する。宛先のポップアップも操作させない。

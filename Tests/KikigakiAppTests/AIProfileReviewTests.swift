@@ -8,9 +8,15 @@ import KikigakiCore
 @Suite @MainActor struct AIProfileReviewTests {
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
     private func capture(_ name: String, _ view: NSView, to output: String) throws {
+        let window = view.window
+        let wasVisible = window?.isVisible == true
+        if !wasVisible { window?.setFrameOrigin(NSPoint(x: 20000, y: 20000)); window?.orderFront(nil) }
+        defer { if !wasVisible { window?.orderOut(nil) } }
         view.layoutSubtreeIfNeeded()
-        let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-        view.cacheDisplay(in: view.bounds, to: bitmap)
+        let rendered = window?.contentView?.superview ?? view
+        rendered.layoutSubtreeIfNeeded(); rendered.displayIfNeeded()
+        let bitmap = try #require(rendered.bitmapImageRepForCachingDisplay(in: rendered.bounds))
+        rendered.cacheDisplay(in: rendered.bounds, to: bitmap)
         try #require(bitmap.representation(using: .png, properties: [:]))
             .write(to: URL(fileURLWithPath: output).appendingPathComponent(name + ".png"))
     }
@@ -148,7 +154,7 @@ import KikigakiCore
         #expect(!descendants(resend.window.contentView!).contains { $0 is AIDestinationPicker && !$0.isHidden })
         let resendTitle = try #require(descendants(resend.window.contentView!).compactMap { $0 as? NSTextField }.first)
         #expect(resendTitle.stringValue == "ネオへ")
-        let resendSend = try #require(descendants(resend.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "送信 ⏎" })
+        let resendSend = try #require(descendants(resend.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "送信" })
         resendSend.performClick(nil)
         #expect(resend.owningSlot == 2)   // 送信後も取消の宛先は元のまま
         if let output { try capture("profiles-sheet-resend", resend.window.contentView!, to: output) }
@@ -162,7 +168,7 @@ import KikigakiCore
         let locked = AIQuestionSheet(participant: "議事録", parentNumber: nil, draft: "この段取りで抜けはありますか",
             voice: "", range: "対象: 3〜7行(14:05:20〜14:06:16) · 送信時に確定", tentative: false, canSubmit: true)
         locked.updateDestinations(items, selected: 1, participant: "議事録")
-        let send = try #require(descendants(locked.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "送信 ⏎" })
+        let send = try #require(descendants(locked.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "送信" })
         send.performClick(nil)
         locked.update(progress: "AIの入力準備を確認中。初回設定はherdrで確認してください", canSubmit: false)
         if let output { try capture("profiles-sheet-sending", locked.window.contentView!, to: output) }

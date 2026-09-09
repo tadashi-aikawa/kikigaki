@@ -62,7 +62,7 @@ import KikigakiCore
             view.cacheDisplay(in: view.bounds, to: bitmap)
             try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: output).appendingPathComponent("work-allowed-\(!defaultAllowed).png"))
         }
-        let send = try #require(descendants(firstSheet.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "送信 ⏎" })
+        let send = try #require(descendants(firstSheet.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "送信" })
         send.performClick(nil)
         #expect(!checkbox.isEnabled)
         let task = try #require(session.submissionTaskForTesting)

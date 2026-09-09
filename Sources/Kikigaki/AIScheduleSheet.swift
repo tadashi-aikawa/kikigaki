@@ -47,11 +47,11 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         let frequency = NSStackView(views: [Washi.label("間隔", size: 13), interval]); frequency.spacing = 12
         work.state = workAllowed ? .on : .off; final.state = sendFinal ? .on : .off
         startButton.bezelStyle = .rounded; startButton.target = self; startButton.action = #selector(start)
-        startButton.keyEquivalent = "\r"
+        startButton.keyEquivalent = "\r"; startButton.keyEquivalentModifierMask = .command
         let cancel = NSButton(title: "取消", target: self, action: #selector(cancel))
         cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
         let actions = NSStackView(views: [NSView(), cancel, startButton]); actions.spacing = 12
-        for view in [title, destination, scroll, frequency, hint, work, final, actions] {
+        for view in [title, destination, scroll, Washi.label("⌘Enterで送信して開始 · Enterで改行", size: 11, color: Washi.muted), frequency, hint, work, final, actions] {
             stack.addArrangedSubview(view)
             view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
         }
@@ -84,7 +84,7 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         else if editor.string.utf8.count > AILimits.questionBytes { invalid = "入力が長すぎます。32 KiB以内に短くしてください" }
         else { invalid = nil }
         startButton.isEnabled = invalid == nil && !binding
-        hint.stringValue = warning ?? invalid ?? "指定間隔ごとに差分を送ります。Shift+Enterで改行"
+        hint.stringValue = warning ?? invalid ?? "指定間隔ごとに差分を送ります"
         hint.textColor = warning != nil || invalid != nil ? Washi.gold : Washi.tentative
     }
     func textDidChange(_ notification: Notification) {

@@ -4,7 +4,7 @@ import KikigakiCore
 final class AIQuestionWindow: NSWindow {
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, let editor = firstResponder as? AIQuestionEditor,
-           (event.keyCode == 36 && (editor.hasMarkedText() || event.modifierFlags.contains(.shift))) ||
+           (event.keyCode == 36 || event.keyCode == 76) ||
            (event.keyCode == 53 && editor.hasMarkedText()) {
             editor.keyDown(with: event); return
         }
@@ -24,7 +24,17 @@ final class AIQuestionEditor: NSTextView {
         }
     }
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 36, !hasMarkedText(), !event.modifierFlags.contains(.shift) { onSubmit?(); return }
+        if (event.keyCode == 36 || event.keyCode == 76), !hasMarkedText() {
+            let modifiers = event.modifierFlags.intersection([.command, .shift, .control, .option])
+            if modifiers == .command {
+                if isEditable { onSubmit?() }
+                return
+            }
+            if modifiers.isEmpty || modifiers == .shift {
+                if isEditable { insertNewline(nil) }
+                return
+            }
+        }
         super.keyDown(with: event)
     }
     override func cancelOperation(_ sender: Any?) {
@@ -46,7 +56,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     private let destination = AIDestinationPicker()
     private let title = Washi.label("", size: 17, weight: .semibold)
     private let editor = AIQuestionEditor()
-    private let sendButton = NSButton(title: "送信 ⏎", target: nil, action: nil)
+    private let sendButton = NSButton(title: "送信", target: nil, action: nil)
     private let hint = NSTextField(wrappingLabelWithString: "")
     private let range = Washi.label(size: 11, color: Washi.muted)
     private let full = NSButton(checkboxWithTitle: "会話を最初から送り直す", target: nil, action: nil)
@@ -85,7 +95,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         hint.font = .systemFont(ofSize: 11); hint.textColor = Washi.tentative
         hint.stringValue = canSubmit ? (tentative ? "空欄なら声の末尾を送ります。聞き取り中の末尾は最大3秒待ちます" : "空欄なら声の末尾を送ります") : "返事待ちです。下書きは保持されます"
         sendButton.bezelStyle = .rounded; sendButton.target = self; sendButton.action = #selector(submit)
-        sendButton.keyEquivalent = "\r"
+        sendButton.keyEquivalent = "\r"; sendButton.keyEquivalentModifierMask = .command
         sendButton.isEnabled = canSubmit
         let cancel = NSButton(title: "取消", target: self, action: #selector(cancel)); cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
         pane.isBordered = false; pane.target = self; pane.action = #selector(openPane)
@@ -102,7 +112,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
             views.append(context)
             window.setContentSize(NSSize(width: 504, height: 394))
         }
-        views += [scroll, hint, full, work, actions]
+        views += [scroll, Washi.label("⌘Enterで送信 · Enterで改行", size: 11, color: Washi.muted), hint, full, work, actions]
         for view in views {
             stack.addArrangedSubview(view); view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
         }
