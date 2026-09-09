@@ -3,7 +3,8 @@ import QuartzCore
 import KikigakiCore
 
 /// 操作・メニュー・キーボードフォーカスはNSButtonに任せ、地と文字色だけを揃える。
-final class WashiActionButton: NSButton {
+final class WashiActionButton: HoverButton {
+    override var drawsHoverBackground: Bool { false }
     enum Emphasis { case primary, accentOutline, neutralOutline, secondary }
     var emphasis: Emphasis = .secondary { didSet { refreshStyle() } }
 
@@ -27,10 +28,10 @@ final class WashiActionButton: NSButton {
                 path.stroke()
             }
         } else if emphasis == .primary {
-            (isHighlighted ? Washi.brightRed : Washi.red).setFill()
+            (isHighlighted || isHovered ? Washi.brightRed : Washi.red).setFill()
             path.fill()
         } else {
-            if isHighlighted { Washi.rule.setFill(); path.fill() }
+            if isHighlighted || isHovered { Washi.rule.withAlphaComponent(0.45).setFill(); path.fill() }
             if emphasis != .secondary {
                 (emphasis == .accentOutline ? Washi.red : Washi.muted).setStroke()
                 path.lineWidth = 1

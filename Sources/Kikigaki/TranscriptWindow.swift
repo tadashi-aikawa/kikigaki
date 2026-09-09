@@ -33,8 +33,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let startStopButton = WashiActionButton()
     private var startStopWidth: NSLayoutConstraint?
     private let pauseButton = WashiActionButton()
-    private let openButton = NSButton()
-    private let latestButton = NSButton(title: "最新の発言へ ↓", target: nil, action: nil)
+    private let openButton = HoverButton()
+    private let latestButton = HoverButton(title: "最新の発言へ ↓", target: nil, action: nil)
     private var transcriptBottom: NSLayoutConstraint?
     private let statusChip = RecordingStatusChip()
     private let messageLabel = NSTextField(wrappingLabelWithString: "")
@@ -56,8 +56,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     let searchField = NSSearchField()
     let searchCount = Washi.label(color: Washi.muted)
     let searchBar = NSStackView()
-    let searchPrevious = NSButton(title: "↑", target: nil, action: nil)
-    let searchNext = NSButton(title: "↓", target: nil, action: nil)
+    let searchPrevious = HoverButton(title: "↑", target: nil, action: nil)
+    let searchNext = HoverButton(title: "↓", target: nil, action: nil)
     var searchOpen = false
     var searchHits: [SearchHit] = []
     var currentHit: Int?
@@ -305,7 +305,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         searchNext.toolTip = "次を検索 (Return)"
         searchPrevious.setAccessibilityLabel("前を検索")
         searchNext.setAccessibilityLabel("次を検索")
-        let close = NSButton(title: "完了", target: self, action: #selector(closeSearch(_:)))
+        let close = HoverButton(title: "完了", target: self, action: #selector(closeSearch(_:)))
         close.bezelStyle = .rounded
         searchBar.orientation = .horizontal
         searchBar.alignment = .centerY

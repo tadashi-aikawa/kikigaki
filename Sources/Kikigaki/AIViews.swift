@@ -24,7 +24,7 @@ enum AIBadgeKind: String, CaseIterable {
     }
 }
 
-final class AIBadgeButton: NSButton {
+final class AIBadgeButton: HoverButton {
     let kind: AIBadgeKind?
     var callback: (() -> Void)?
     init(_ title: String, kind: AIBadgeKind? = nil, action: @escaping () -> Void) {
@@ -40,6 +40,7 @@ final class AIBadgeButton: NSButton {
         NSSize(width: ceil((title as NSString).size(withAttributes: [.font: font!]).width) + 16, height: 24)
     }
     override func draw(_ dirtyRect: NSRect) {
+        drawHoverBackground()
         let color = kind == .confirmation ? Washi.color(0xC4801F) : kind == .unread || kind == .failed ? Washi.red : Washi.muted
         let filled = kind == .unread || kind == .confirmation || kind == nil
         let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 1), xRadius: 6, yRadius: 6)
@@ -143,7 +144,7 @@ struct AIViewState {
 
 /// フッターの操作。行の中の操作と同じ枠のピルで描き、同じ「押すもの」が
 /// 2種類の見え方をしないようにする。無効な場面ではビューごと隠す。
-final class AIActionButton: NSButton {
+final class AIActionButton: HoverButton {
     var callback: (() -> Void)?
     init(_ title: String, size: CGFloat = 11, action: @escaping () -> Void) {
         callback = action; super.init(frame: .zero); self.title = title
@@ -157,6 +158,7 @@ final class AIActionButton: NSButton {
     }
     override func draw(_ dirtyRect: NSRect) {
         let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 12, yRadius: 12)
+        if isHovered || (isEnabled && isHighlighted) { Washi.rule.withAlphaComponent(0.45).setFill(); pill.fill() }
         (isEnabled ? Washi.muted : Washi.rule).setStroke(); pill.lineWidth = 1; pill.stroke()
         let attributes: [NSAttributedString.Key: Any] = [.font: font!, .foregroundColor: isEnabled ? Washi.ink : Washi.muted]
         let size = (title as NSString).size(withAttributes: attributes)

@@ -2,7 +2,7 @@ import AppKit
 import KikigakiCore
 
 /// フッターのアイコン操作。無効時は地を足さず色だけを抜く。
-class AIFooterButton: NSButton {
+class AIFooterButton: HoverButton {
     override var isFlipped: Bool { false }
     var callback: (() -> Void)?
     var symbolName: String
@@ -18,6 +18,7 @@ class AIFooterButton: NSButton {
     required init?(coder: NSCoder) { fatalError() }
     @objc private func pressed() { callback?() }
     override func draw(_ dirtyRect: NSRect) {
+        drawHoverBackground()
         guard let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(paletteColors: [isEnabled ? tint : Washi.muted])) else { return }
         let scale = 23 / max(image.size.width, image.size.height)
@@ -35,6 +36,7 @@ final class AIFooterCount: AIFooterButton {
     }
     required init?(coder: NSCoder) { fatalError() }
     override func draw(_ dirtyRect: NSRect) {
+        drawHoverBackground()
         let color = kind == .unread ? Washi.red : Washi.color(0xC4801F)
         if kind == .unread {
             color.setFill(); NSBezierPath(ovalIn: NSRect(x: 8, y: 17, width: 20, height: 20)).fill()
@@ -77,6 +79,7 @@ final class AIRobotButton: AIFooterButton {
         needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {
+        drawHoverBackground()
         let color = isEnabled ? Washi.red : Washi.muted
         let x = bounds.midX - 11.5
         color.setStroke()

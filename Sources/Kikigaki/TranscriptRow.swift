@@ -61,23 +61,7 @@ final class AvatarView: NSView {
     }
 }
 
-final class SpeakerButton: NSButton {
-    private var hovered = false
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackingAreas.forEach { removeTrackingArea($0) }
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
-    }
-    override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
-    override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
-    override func draw(_ dirtyRect: NSRect) {
-        if isEnabled && (hovered || isHighlighted) {
-            Washi.rule.withAlphaComponent(0.35).setFill()
-            NSBezierPath(roundedRect: bounds, xRadius: 4, yRadius: 4).fill()
-        }
-        super.draw(dirtyRect)
-    }
-}
+final class SpeakerButton: HoverButton {}
 
 final class TranscriptRow: NSView, DocumentRow {
     override var isFlipped: Bool { true }

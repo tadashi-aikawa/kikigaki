@@ -3,7 +3,7 @@ import KikigakiCore
 
 /// アイコンと検出枠数を同じ中心線に上下で並べる。
 @MainActor
-final class SpeakerCountButton: NSButton {
+final class SpeakerCountButton: HoverButton {
     override var isFlipped: Bool { false }
     private(set) var countText = "0/4"
     override var intrinsicContentSize: NSSize { NSSize(width: 36, height: 38) }
@@ -14,6 +14,7 @@ final class SpeakerCountButton: NSButton {
         setAccessibilityLabel(toolTip); needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {
+        drawHoverBackground()
         NSImage(systemSymbolName: "person.2.fill", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(paletteColors: [Washi.ink]))?
             .draw(in: NSRect(x: (bounds.width - 24) / 2, y: 15, width: 24, height: 20))

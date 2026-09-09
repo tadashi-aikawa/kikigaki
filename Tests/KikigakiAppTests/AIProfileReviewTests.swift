@@ -111,6 +111,17 @@ import KikigakiCore
             let rows = window.transcriptDocument.rows.compactMap { $0 as? (any AITimelineRowView) }
             #expect(!rows.isEmpty && rows.allSatisfy { requests.contains($0.item.requestID) })
             if let output { try capture("profiles-crowded-\(width)", content.superview!, to: output) }
+            if width == 600, let output {
+                let event = try #require(NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
+                    windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil))
+                let targets = descendants(content).compactMap { $0 as? HoverButton }
+                    .filter { $0.isEnabled && !$0.isHiddenOrHasHiddenAncestor }
+                for (index, button) in targets.enumerated() {
+                    button.mouseEntered(with: event)
+                    try capture("hover-\(index)-\(type(of: button))-600", content, to: output)
+                    button.mouseExited(with: event)
+                }
+            }
         }
 
         // 「議事録」には準備済みセッションがある想定。

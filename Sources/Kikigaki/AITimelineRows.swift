@@ -28,7 +28,7 @@ enum AIRowMetrics {
 
 /// 未読・確認待ち・返事待ちの印。押して既読にできるのは未読だけで、
 /// 他は状態表示なので操作を持たせない。無効でも面は足さず、色だけを抜く。
-final class AIStatusPill: NSButton {
+final class AIStatusPill: HoverButton {
     enum Style: Equatable { case unread, confirmation, waiting }
     private(set) var style: Style = .waiting
     private var configured = false
@@ -55,7 +55,7 @@ final class AIStatusPill: NSButton {
         NSSize(width: ceil((title as NSString).size(withAttributes: [.font: font!]).width) + 16, height: 20)
     }
     override func draw(_ dirtyRect: NSRect) {
-        let color = style == .unread ? Washi.red : style == .confirmation ? Washi.gold : Washi.muted
+        let color = style == .unread ? (isHovered ? Washi.brightRed : Washi.red) : style == .confirmation ? Washi.gold : Washi.muted
         let filled = style != .waiting
         let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10)
         if filled { color.setFill(); pill.fill() }
@@ -87,7 +87,7 @@ final class AITagPill: NSView {
 }
 
 /// 返事の上へ添える送信文の引用。既定は1行で末尾を省略し、押すと全文へ伸びる。
-final class AIQuoteButton: NSButton {
+final class AIQuoteButton: HoverButton {
     private(set) var expanded = false
     var text = ""
     var onToggle: (() -> Void)?
