@@ -168,6 +168,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
                 message = message.components(separatedBy: " / ").dropFirst().joined(separator: " / ")
             }
             messageLabel.stringValue = message
+            messageLabel.textColor = snapshot.state == .idle && !snapshot.saved && !message.isEmpty ? Washi.red : Washi.muted
             messageLabel.isHidden = messageLabel.stringValue.isEmpty
         }
     }
@@ -423,7 +424,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             add("直前の範囲を再コピー", #selector(recopyPressed), enabled: snapshot.canShare)
             add("会議の最初からコピー", #selector(fullCopyPressed), enabled: snapshot.canShare)
         }
-        if snapshot.aiSchedule.active { add("自動送信を停止", #selector(stopAutomaticPressed)) }
+        if snapshot.aiSchedule.active {
+            add("今すぐ送る", #selector(fireAutomaticPressed),
+                enabled: snapshot.aiSchedule.nextFire != nil && snapshot.aiSchedule.skipReason == nil)
+            add("自動送信を停止", #selector(stopAutomaticPressed))
+        }
         add("AIセッションを準備…", #selector(preparePressed), enabled: snapshot.ai?.canPrepare == true)
         menu.items.last?.toolTip = snapshot.ai?.preparedToolTip
         add("ペインを開く", #selector(panePressed), enabled: snapshot.ai?.canOpenPane == true)
@@ -441,6 +446,10 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
                 y: compactFooter.more.bounds.maxY + menu.size.height + 6)
     }
     @objc private func stopAutomaticPressed() { onStopScheduleAI?() }
+    @objc private func fireAutomaticPressed() {
+        guard snapshot.aiSchedule.active, snapshot.aiSchedule.nextFire != nil, snapshot.aiSchedule.skipReason == nil else { return }
+        onFireScheduleAI?()
+    }
     @objc private func preparePressed() { onPrepareAI?() }
     @objc private func panePressed() { onOpenAIPane?() }
     @objc private func recreatePressed() { onRecreateAI?() }

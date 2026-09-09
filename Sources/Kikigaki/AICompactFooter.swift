@@ -59,6 +59,7 @@ final class AIScheduleGauge: AIFooterButton {
     var onFire: (() -> Void)?
     private(set) var scheduleState = AIScheduleViewState()
     private(set) var displayText = ""
+    var disabledReason = "録音中・一時停止中に自動送信を設定できます"
     private var fraction: CGFloat = 0
     init() {
         super.init(symbol: "", label: "自動送信")
@@ -74,7 +75,13 @@ final class AIScheduleGauge: AIFooterButton {
         let countdown = remaining >= 60 ? String(format: "%d:%02d", remaining / 60, remaining % 60) : String(remaining)
         displayText = !state.active ? "" : state.skipReason != nil ? "—" : countdown
         fraction = state.active && state.skipReason == nil ? CGFloat(min(1, max(0, Double(remaining) / state.interval))) : 0
-        toolTip = !state.active ? "クリックで自動送信を設定" : state.skipReason ?? "次 \(countdown) · ダブルクリックで今すぐ送る"
+        if !isEnabled { toolTip = disabledReason }
+        else if !state.active { toolTip = "クリックで自動送信を設定" }
+        else {
+            toolTip = [state.skipReason ?? "次 \(countdown)", state.destination.map { $0 + "へ" },
+                       state.skipReason == nil ? "ダブルクリックで今すぐ送る" : nil]
+                .compactMap { $0 }.joined(separator: " · ")
+        }
         setAccessibilityLabel("自動送信、" + (toolTip ?? ""))
         needsDisplay = true
     }
@@ -129,6 +136,7 @@ final class AICompactFooter: NSStackView {
     func update(_ state: SessionSnapshot, reduceMotion: Bool, now: Date = Date()) {
         self.state = state; self.reduceMotion = reduceMotion
         gauge.isEnabled = state.ai != nil && (state.aiSchedule.active || state.state == .recording || state.state == .paused)
+        gauge.disabledReason = state.ai == nil ? "AI連携が設定されていません" : "録音中・一時停止中に自動送信を設定できます"
         ask.isHidden = state.ai == nil
         ask.isEnabled = state.canShare
         ask.toolTip = ["AIへ依頼する " + (state.ai?.shortcut ?? ""), state.ai?.progress].compactMap { $0 }.joined(separator: "\n")

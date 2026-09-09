@@ -77,6 +77,9 @@ final class MeetingSession {
     private var aiSubmissionTriggers: [Int: AIParticipantContext.Trigger] = [:]
     private var cancelledAutomaticOwners: [Int: UUID] = [:]
     private var aiSchedule: AIScheduleState?
+#if DEBUG
+    private(set) var scheduleLinesBuildCount = 0
+#endif
     private var aiScheduleTimer: Timer?
     private var aiScheduleHelper: URL?
     /// 同梱CLIの置き場。録音開始で自動送信を始めるときに使う。バンドル実行でない検証では差し替える
@@ -1085,6 +1088,10 @@ extension MeetingSession {
     }
 
     private var scheduleHasChanges: Bool {
+        guard aiSchedule?.phase == .running else { return false }
+#if DEBUG
+        scheduleLinesBuildCount += 1
+#endif
         let lines = TranscriptRenderer.lines(snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
         return aiRecord?.controller.hasChanges(lines: lines, slot: aiScheduleConfiguration?.slot) ?? !lines.isEmpty
     }

@@ -10,6 +10,7 @@ struct AIScheduleViewState {
     var nextFire: Date?
     var interval: TimeInterval = 180
     var skipReason: String?
+    var destination: String?
     private static let clock: DateFormatter = {
         let value = DateFormatter(); value.locale = Locale(identifier: "en_US_POSIX"); value.dateFormat = "HH:mm"; return value
     }()
@@ -17,6 +18,7 @@ struct AIScheduleViewState {
     init(schedule: AIScheduleState? = nil, warning: String? = nil, destination: String? = nil,
          availability: AIScheduleAvailability = .ready, hasChanges: Bool = true) {
         self.warning = warning
+        self.destination = destination
         // 宛先は複数プロファイルのときだけ添える。1つしか無い会議で行を伸ばさない。
         let target = destination.map { " · " + $0 + "へ" } ?? ""
         guard let schedule, schedule.phase != .stopped else {

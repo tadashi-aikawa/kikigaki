@@ -28,6 +28,25 @@ import KikigakiAIIO
     }
     private func settle(_ session: MeetingSession) async { await session.submissionTaskForTesting?.value }
 
+    @Test func 非稼働時の表示更新は自動送信用の全行を組まない() throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = try session(root, fake: FakeHerdr())
+        #expect(session.scheduleLinesBuildCount == 0)
+        session.setScheduleTranscriptForTesting("追加の発話")
+        #expect(session.scheduleLinesBuildCount == 0)
+        try session.startAISchedule(options: .init(prompt: "更新"), helper: URL(fileURLWithPath: "/bin/echo"))
+        #expect(session.scheduleLinesBuildCount > 0)
+        let runningCount = session.scheduleLinesBuildCount
+        session.stopAISchedule()
+        session.setScheduleTranscriptForTesting("停止後の発話")
+        #expect(session.scheduleLinesBuildCount == runningCount)
+        let noAI = MeetingSession(testingRecordingAt: root.appendingPathComponent("without-ai.md"),
+            config: ResolvedConfig(config: try ConfigLoader.parse(toml: ""), home: root),
+            aiStore: AIRecordStore(directory: root), recordedSamples: 16_000)
+        noAI.setScheduleTranscriptForTesting("AI未設定の発話")
+        #expect(noAI.scheduleLinesBuildCount == 0)
+    }
+
     @Test func ゲージの即時実行が本番の送信経路へ入り期限を更新する() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let session = try session(root, fake: FakeHerdr()), now = Date()
