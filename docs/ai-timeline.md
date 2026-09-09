@@ -159,7 +159,7 @@ public enum AITimeline {
 |---|---|---|
 | 2 | Coreの `AITimeline` と行IDの整理 | 声・手動typed・自動・確認への返答の分類、`afterUtterance` の解決と再分割で発話が消えた場合、`tail` の順序、返事到着で `tail` から `at` へ移ること、同日時の並び、発話ゼロの過去会議、複数プロファイルの宛名 |
 | 3 | 行ビューの実装と `AIMarkRow` の廃止 | 4種類の行の高さと折り返し、引用の開閉、返事待ちから返事への状態更新でビューが同一であること、既読の配線、フッターのピルからの移動、過去会議ウィンドウ |
-| 4 | 実画面と混雑した会議 | 600・900幅で通常と混雑を撮影。未読・確認待ち・返事待ち・失敗・自動の5状態を1枚に含める。上へスクロールした状態と検索を開いた状態で返事を受ける挙動。`KIKIGAKI_DEBUG_AI_ASK` と `KIKIGAKI_DEBUG_AI_AUTO` に `KIKIGAKI_DEBUG_REPLAY_HOLD` を併用して撮る |
+| 4 | 実画面と混雑した会議 | 600・900幅で通常と混雑を撮影。未読・確認待ち・返事待ち・失敗・自動の5状態を1枚に含める。上へスクロールした状態と検索を開いた状態で返事を受ける挙動。`KIKIGAKI_DEBUG_AI_ASK` と `KIKIGAKI_DEBUG_AI_AUTO` に `KIKIGAKI_DEBUG_REPLAY_HOLD` を併用して撮る。結果は [結合検証](ai-timeline-verification.md) |
 
 各段のコミット前に `swift build` と `swift test` を通す。段3の実画面は本人からクロディーヌのレビューへ回す。
 
