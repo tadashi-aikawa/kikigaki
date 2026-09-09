@@ -79,6 +79,8 @@ final class MeetingSession {
     private var aiScheduleHelper: URL?
     /// 同梱CLIの置き場。録音開始で自動送信を始めるときに使う。バンドル実行でない検証では差し替える
     var automaticHelper: URL? = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
+    /// replayだけで使う間隔の上書き。分単位の設定値では実行時間に収まらない
+    var automaticIntervalOverride: Double?
     private var aiScheduleWarning: String?
     private var manualAISheetOpen = false
     private(set) var lastScheduleOptions: AIScheduleOptions?
@@ -541,9 +543,16 @@ final class MeetingSession {
                 if trigger == .scheduled, let scheduleRun {
                     aiSchedule?.register(requestID: fixed.id, meetingID: meetingID, runID: scheduleRun)
                 }
-                let executable: URL, arguments: [String]
-                if let launch { (executable, arguments) = try launch(config, helper, record.controller) }
-                else { let settings = try AILaunchConfiguration(config: config, helper: helper, controller: record.controller); executable = settings.executable; arguments = settings.arguments }
+                var executable = helper, arguments: [String] = []
+                // 接続型はKIKIGAKIが起動しないので、起動引数もCLIの実在確認も要らない。
+                // フック設定を書いても誰も読まないため作らない。
+                if !config.connectsToExistingPane {
+                    if let launch { (executable, arguments) = try launch(config, helper, record.controller) }
+                    else {
+                        let settings = try AILaunchConfiguration(config: config, helper: helper, controller: record.controller)
+                        executable = settings.executable; arguments = settings.arguments
+                    }
+                }
                 aiProgress = "AIの入力準備を確認中。初回設定はherdrで確認してください"; emit()
                 let format = DateFormatter(); format.dateFormat = "HH:mm"
                 try await record.controller.connect(config: config, label: "KIKIGAKI \(config.participantName) \(format.string(from: startedAt))", executable: executable, arguments: arguments)
@@ -692,14 +701,34 @@ extension MeetingSession {
     func startAutomaticSchedule(now: Date = Date()) {
         guard let profile = meetingAIProfiles.first(where: \.autoStart), let helper = automaticHelper else { return }
         do {
-            let options = try AIScheduleOptions(prompt: profile.autoPrompt, interval: Double(profile.autoIntervalMinutes) * 60,
+            let options = try AIScheduleOptions(prompt: profile.autoPrompt,
+                interval: automaticIntervalOverride ?? Double(profile.autoIntervalMinutes) * 60,
                 workAllowed: profile.allowWork, sendFinal: true)
             try startAISchedule(options: options, helper: helper, now: now, profile: profile)
+            verifyAutomaticTarget(profile)
         } catch {
             aiScheduleWarning = "設定の自動送信を開始できません。宛先と依頼を確認してください"
             log("autoStartを開始できません: \(error)")
         }
     }
+    /// 設定だけで始まる自動送信は、宛先を決められないまま何分も待たせない。
+    /// 接続型なら開始直後に候補を引いて確かめ、決まらなければ理由を出して止める。
+    private func verifyAutomaticTarget(_ profile: ResolvedAIConfig) {
+        guard profile.connectsToExistingPane else { return }
+        let meetingID = handoff.meetingID, run = aiSchedule?.runID
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let agents = await runningAIAgents()
+            guard handoff.meetingID == meetingID, aiSchedule?.runID == run, aiSchedule?.phase != .stopped else { return }
+            guard case .failure(let failure) = AIAgentResolver.resolve(candidates: agents, criteria: profile.criteria,
+                                                                      provider: profile.cli) else { return }
+            stopAISchedule()
+            aiScheduleWarning = "自動送信の宛先を決められません。" + failure.message
+            log("autoStartの宛先を解決できない: \(failure.message)")
+            emit()
+        }
+    }
+
     func startAISchedule(options: AIScheduleOptions, helper: URL, now: Date = Date(), profile: ResolvedAIConfig? = nil) throws {
         guard snapshot.state == .recording || snapshot.state == .paused, meetingAI != nil else {
             throw AIError.invalid("schedule recording state")

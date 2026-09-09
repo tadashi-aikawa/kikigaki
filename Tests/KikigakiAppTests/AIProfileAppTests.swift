@@ -22,6 +22,14 @@ import KikigakiCore
         return session
     }
 
+    /// 非同期の確認が終わるまで待つ。負荷で遅れても落ちないよう、固定の待ち時間にしない。
+    private func waitUntil(_ condition: () -> Bool, limit: Int = 200) async throws {
+        for _ in 0..<limit {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     private func submit(_ session: MeetingSession, profile: ResolvedAIConfig?) async throws {
         session.submitAI(question: "質問", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"), profile: profile)
         await (try #require(session.submissionTaskForTesting)).value
@@ -150,6 +158,58 @@ import KikigakiCore
         #expect(session.snapshot.aiSchedule.text.contains("議事録へ"))
         session.stopAISchedule()
         #expect(!session.snapshot.aiSchedule.active)
+    }
+
+    @Test(arguments: [0, 2]) func autoStartは接続先が決まらなければ理由を出して止まる(_ matches: Int) async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        await fake.setListed((0..<matches).map { ("w\($0):p1", "w\($0)", "claude", "迅雷", "/work/minutes") })
+        let list = try profiles(root, toml: """
+        [[ai]]
+        name = "議事録"
+        cli = "claude"
+        attach = true
+        cwd = "/work/minutes"
+        autoStart = true
+        autoPrompt = "議事録を更新してください"
+        """)
+        let session = session(root, profiles: list, fake: fake)
+        session.startAutomaticSchedule()
+        #expect(session.snapshot.aiSchedule.active)
+        // 宛先の確認は非同期。決まらなければ止めて理由を出す。
+        try await waitUntil { !session.snapshot.aiSchedule.active }
+        #expect(!session.snapshot.aiSchedule.active)
+        let warning = try #require(session.snapshot.aiSchedule.warning)
+        #expect(warning.contains("宛先を決められません"))
+        let commands = await fake.commands.map { Array($0.prefix(2)) }
+        #expect(!commands.contains(["workspace", "create"]) && !commands.contains(["agent", "prompt"]))
+    }
+
+    @Test func autoStartは接続先が一意なら止まらない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        await fake.setListed([("w1:p1", "w1", "claude", "迅雷", "/work/minutes")])
+        let list = try profiles(root, toml: """
+        [[ai]]
+        name = "議事録"
+        cli = "claude"
+        attach = true
+        cwd = "/work/minutes"
+        autoStart = true
+        autoPrompt = "議事録を更新してください"
+        """)
+        let session = session(root, profiles: list, fake: fake)
+        session.startAutomaticSchedule()
+        // 一覧を引き終えたことを確かめてから、止まっていないことを見る。
+        var listed = false
+        for _ in 0..<200 where !listed {
+            listed = await fake.commands.contains { Array($0.prefix(2)) == ["agent", "list"] }
+            if !listed { try await Task.sleep(for: .milliseconds(10)) }
+        }
+        #expect(listed)
+        #expect(session.snapshot.aiSchedule.active && session.snapshot.aiSchedule.warning == nil)
     }
 
     @Test func 稼働中ペインをその場限りの宛先にできる() async throws {

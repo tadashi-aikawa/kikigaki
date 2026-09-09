@@ -35,14 +35,24 @@ struct ReturnCommand: Sendable {
         guard path.hasPrefix("/"), !path.contains("\0"), !path.contains("//"),
               !path.split(separator: "/").contains(where: { $0 == "." || $0 == ".." }) else { throw AIError.unsafeFile }
         let url = URL(fileURLWithPath: path), pieces = url.pathComponents
-        guard pieces.count >= 6, pieces[pieces.count - 5] == ".kikigaki-context",
-              let meeting = UUID(uuidString: pieces[pieces.count - 4]), pieces[pieces.count - 4] == meeting.uuidString,
-              pieces[pieces.count - 3] == "ai", pieces[pieces.count - 2] == "sessions",
-              url.pathExtension == "json", let generation = Int(url.deletingPathExtension().lastPathComponent), generation > 0,
+        guard url.pathExtension == "json", let generation = Int(url.deletingPathExtension().lastPathComponent), generation > 0,
               url.lastPathComponent == "\(generation).json" else { throw AIError.unsafeFile }
-        let root = (0..<5).reduce(url) { value, _ in value.deletingLastPathComponent() }
+        // 複数プロファイルの会議は `sessions/<slot>/<generation>.json`、単一の会議は従来の平置き。
+        let slot: Int?
+        if pieces.count >= 6, pieces[pieces.count - 2] == "sessions" { slot = nil }
+        else if pieces.count >= 7, pieces[pieces.count - 3] == "sessions",
+                let parsed = Int(pieces[pieces.count - 2]), parsed > 0,
+                pieces[pieces.count - 2] == "\(parsed)" { slot = parsed }
+        else { throw AIError.unsafeFile }
+        let depth = slot == nil ? 5 : 6
+        guard pieces.count >= depth + 1, pieces[pieces.count - depth] == ".kikigaki-context",
+              let meeting = UUID(uuidString: pieces[pieces.count - depth + 1]),
+              pieces[pieces.count - depth + 1] == meeting.uuidString,
+              pieces[pieces.count - depth + 2] == "ai" else { throw AIError.unsafeFile }
+        let root = (0..<depth).reduce(url) { value, _ in value.deletingLastPathComponent() }
         let files = AIFileStore(root: root), base = [".kikigaki-context", meeting.uuidString, "ai"]
-        let session = try AIJSON.decode(AISessionRecord.self, from: files.read(base + ["sessions", "\(generation).json"], limit: AILimits.eventBytes))
+        let sessions = base + ["sessions"] + (slot.map { ["\($0)"] } ?? [])
+        let session = try AIJSON.decode(AISessionRecord.self, from: files.read(sessions + ["\(generation).json"], limit: AILimits.eventBytes))
         guard session.schemaVersion == 1, session.meetingID == meeting, session.generation == generation,
               !session.token.isEmpty, session.connection?.provider == session.provider else { throw AIError.mismatch }
         if action == "notify" {
@@ -87,7 +97,7 @@ struct ReturnCommand: Sendable {
         if session.provider == .codex, let thread = environment["CODEX_THREAD_ID"], !thread.isEmpty {
             guard thread.utf8.count <= 512, !thread.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
                   session.connection?.sessionID == nil || session.connection?.sessionID == thread else { throw AIError.mismatch }
-            let target = base + ["sessions", "\(generation).identity.json"]
+            let target = sessions + ["\(generation).identity.json"]
             let data = try AIJSON.encode(thread)
             do { try files.write(data, to: target, replacing: false) }
             catch AIError.conflict {

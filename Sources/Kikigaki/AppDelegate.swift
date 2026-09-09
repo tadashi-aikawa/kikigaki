@@ -12,6 +12,10 @@ struct ReplayDebugOptions {
     var typedEntries: [TypedEntry] = []
     var verifyTyped = false
     var automatic: AIScheduleOptions?
+    /// 設定の `autoStart` を短い間隔で試すための上書き。分単位の設定ではreplayに収まらない
+    var automaticSeconds: Double?
+    /// 手動送信の宛先。自動と別のプロファイルへ同時に送ることを試す
+    var askProfile: String?
     @MainActor static func recoverForNextQuestion(_ controller: AIConversationController?, preparing: Bool) throws {
         guard !preparing, let controller, !controller.canSend,
               let previous = controller.conversation.questions.last,
@@ -39,6 +43,19 @@ struct ReplayDebugOptions {
             result.questions = result.questions.enumerated().sorted {
                 $0.element.seconds == $1.element.seconds ? $0.offset < $1.offset : $0.element.seconds < $1.element.seconds
             }.map(\.element)
+        }
+        if let input = env["KIKIGAKI_DEBUG_AI_AUTO_SECONDS"] {
+            guard let seconds = Double(input), seconds.isFinite, seconds > 0, seconds <= 3600 else {
+                throw AIError.invalid("KIKIGAKI_DEBUG_AI_AUTO_SECONDS")
+            }
+            result.automaticSeconds = seconds
+        }
+        if let input = env["KIKIGAKI_DEBUG_AI_ASK_PROFILE"] {
+            guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !input.contains("\0"),
+                  !input.contains(where: \.isNewline), input.utf8.count <= AILimits.profileNameBytes else {
+                throw AIError.invalid("KIKIGAKI_DEBUG_AI_ASK_PROFILE")
+            }
+            result.askProfile = input
         }
         if let input = env["KIKIGAKI_DEBUG_REPLAY_HOLD"] {
             guard let seconds = Double(input), seconds.isFinite, (0...86400).contains(seconds) else {
@@ -272,7 +289,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             source = MicSource()
         }
         window?.show()
+        if replayURL != nil {
+            session.automaticIntervalOverride = replayDebug.automaticSeconds
+            if let name = replayDebug.askProfile {
+                guard let profile = session.meetingAIProfiles.first(where: { $0.name == name }) else {
+                    Self.log("replay 手動の宛先が設定にない: \(name)"); exit(1)
+                }
+                session.selectAIProfile(slot: profile.slot)
+                Self.log("replay 手動の宛先: \(profile.name)(slot \(profile.slot))")
+            }
+        }
         let started = await session.start(source: source)
+        if started, replayURL != nil, let schedule = session.aiScheduleConfiguration, schedule.autoStart {
+            Self.log("replay autoStart: \(schedule.name)(slot \(schedule.slot))へ \(session.lastScheduleOptions?.interval ?? 0)秒間隔")
+        }
         if started, replayURL != nil, let automatic = replayDebug.automatic {
             do {
                 let options = try AIScheduleOptions(prompt: automatic.prompt, interval: automatic.interval,
@@ -347,9 +377,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard session.snapshot.ai?.canSubmit == true else { return }
         // callbackの再入や回答待ちで二重送信しない。送信可能になるまで順番を保って待つ。
         nextDebugQuestion += 1
-        Self.log("replay AI質問\(nextDebugQuestion): 指定\(question.seconds)秒、音声\(snapshot.elapsed)秒で送信開始")
+        let target = session.aiConfiguration
+        Self.log("replay AI質問\(nextDebugQuestion): 指定\(question.seconds)秒、音声\(snapshot.elapsed)秒、宛先\(target?.name ?? "-")で送信開始")
         let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
-        session.submitAI(question: question.text, full: false, parent: nil, helper: helper)
+        session.submitAI(question: question.text, full: false, parent: nil, helper: helper, profile: target)
     }
     private func performReplayRename() {
         guard replayHolding, !debugRenamed, let rename = replayDebug.rename, let session else { return }

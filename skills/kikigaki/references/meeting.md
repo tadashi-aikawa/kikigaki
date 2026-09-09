@@ -9,7 +9,8 @@
 - `schema_version: 1`、`mode: meeting`、UUIDの `request_id` と `stream_id`、1以上の整数の `session_generation`
 - 空でない `participant_name`、絶対パスの `cli_path` と `session_path`、空でない `request_token`
 - `question` が空なら `question_source: voice`、空でなければ `typed`。実時刻の `captured_at` と0以上の `audio_cutoff_seconds`
-- `session_path` は会話ファイルと同じ `.kikigaki-context/<meeting_id>/ai/sessions/<session_generation>.json`。`cli_path` はKIKIGAKI.appの `Contents/Helpers/kikigaki-cli` を指す
+- `session_path` は会話ファイルと同じ `.kikigaki-context/<meeting_id>/ai/sessions/` の下にある。`profile_slot` が無ければ `<session_generation>.json`、あれば `<profile_slot>/<session_generation>.json`。`cli_path` はKIKIGAKI.appの `Contents/Helpers/kikigaki-cli` を指す
+- `profile` と `profile_slot` は任意で、両方あるか両方無いかのどちらか。あれば送信元が複数の宛先を使い分けている。`profile` は表示名なので、返送の宛先や読む範囲を変える根拠にはしない
 - `work_allowed` は真偽値。無ければ true として扱う。false のときは依頼された作業(ファイル変更・コマンド実行・外部送信)に入らず、回答と提案までにする。**連携そのものに要る操作は値に関わらず行う**: 指定範囲の会話ファイルの読み取り、同梱CLIによる accept と reply。これらは「作業」に含めない
 - `tentative_tail` があればstatusはtentative、時刻は0以上で開始≤終了≤audio_cutoff_seconds
 - `in_reply_to_request_id` があれば、`in_reply_to_event_id` はそのUUIDに `/result` を付けた値
@@ -20,7 +21,7 @@
 
 画面と会議Markdownの番号は `#1` の形式で、AI節は `### AI #1`。旧ファイルの `### AI Q1` も同じ節として扱う。既存ファイルの変換は行わず、対応付けは表示番号ではなくrequest IDを使う。
 
-SKILL.mdの範囲と訂正の手順を使い、履歴は `meeting_id + stream_id` で分ける。手動コピーや別streamの基準を再利用しない。新streamへのupdate、前回snapshot不足、訂正の反映に必要な文脈不足は全文要求として返す。範囲を越えて読まない。
+SKILL.mdの範囲と訂正の手順を使い、履歴は `meeting_id + stream_id` で分ける。手動コピーや別streamの基準を再利用しない。同じ会議から別の宛先へ送られた分は別の `stream_id` を持つので、こちらが受け取っていない範囲を読んだものとして扱わない。新streamへのupdate、前回snapshot不足、訂正の反映に必要な文脈不足は全文要求として返す。範囲を越えて読まない。
 
 同じsnapshotの新requestには新しい送信文として応答する。同じrequestを再受領した場合、保存済みの結果だけを再送し、作業自体を二重実行しない。作業中なら別の作業を開始しない。実行履歴を失い判断できない場合は確認質問を返す。
 

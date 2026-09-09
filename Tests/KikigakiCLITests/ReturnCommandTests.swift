@@ -10,20 +10,22 @@ import KikigakiAIIO
         let root: URL, request: AIRequest, session: AISessionRecord, path: String
         var base: [String] { [".kikigaki-context", session.meetingID.uuidString, "ai"] }
         var files: AIFileStore { .init(root: root) }
-        init(provider: AIProvider = .codex) throws {
+        init(provider: AIProvider = .codex, slot: Int? = nil) throws {
             root = FileManager.default.temporaryDirectory.appendingPathComponent("kikigaki cli ' $ " + UUID().uuidString)
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             let meeting = UUID()
             var history = try AIStreamHistory(meetingID: meeting)
             let snapshot = try history.prepare(lines: ["[12:00:00] A: 質問です"], outputDirectory: root)
-            path = root.appendingPathComponent(".kikigaki-context/\(meeting.uuidString)/ai/sessions/1.json").path
+            let branch = AIEnvelope.sessionPath(slot: slot, generation: 1)
+            path = root.appendingPathComponent(".kikigaki-context/\(meeting.uuidString)/" + branch).path
             let participant = AIParticipantContext(streamID: history.streamID, requestID: UUID(), sessionGeneration: 1,
                 participantName: "迅雷", cliPath: "/tmp/helper", sessionPath: path, requestToken: "request-secret",
-                question: "質問", capturedAt: Date(), audioCutoffSeconds: 1)
+                question: "質問", capturedAt: Date(), audioCutoffSeconds: 1,
+                profile: slot == nil ? nil : "議事録", profileSlot: slot)
             request = try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant), number: 1, snapshot: snapshot)
             session = AISessionRecord(meetingID: meeting, generation: 1, provider: provider, token: "hook-secret",
                 connection: .init(workspaceID: "w", paneID: "p", provider: provider, sessionID: "main-thread"))
-            try files.write(AIJSON.encode(session), to: base + ["sessions", "1.json"])
+            try files.write(AIJSON.encode(session), to: base + ["sessions"] + (slot.map { ["\($0)"] } ?? []) + ["1.json"])
             try files.write(AIJSON.encode(request), to: base + ["requests", request.id.uuidString + ".json"])
         }
         deinit { try? FileManager.default.removeItem(at: root) }
@@ -46,6 +48,27 @@ import KikigakiAIIO
             #expect(try AIInbox(outputDirectory: f.root).read(filename: f.request.id.uuidString + ".accept.json", for: f.request).kind == .accept)
         }
     }
+    /// プロファイルごとの枝を切った会議でも返送できること。
+    /// 平置きだけを想定していた頃はここで unsafe_file になり、実herdrの返送が全滅した。
+    @Test func プロファイルの枝を切った保存パスでも返送できる() throws {
+        let f = try Fixture(slot: 2)
+        #expect(f.path.hasSuffix("/ai/sessions/2/1.json"))
+        _ = try ReturnCommand(f.args("accept")).execute(input: { Data() }, environment: [:])
+        _ = try ReturnCommand(f.args("reply", ["--kind", "answered"])).execute(input: { Data("回答".utf8) }, environment: [:])
+        let inbox = AIInbox(outputDirectory: f.root)
+        #expect(try inbox.read(filename: f.request.id.uuidString + ".accept.json", for: f.request).kind == .accept)
+        #expect(try inbox.read(filename: f.request.id.uuidString + ".result.json", for: f.request).body == "回答")
+    }
+
+    @Test func 枝の番号が不正な保存パスを拒否する() throws {
+        let f = try Fixture(slot: 2)
+        for broken in ["/ai/sessions/0/1.json", "/ai/sessions/02/1.json", "/ai/sessions/x/1.json", "/ai/sessions/2/3/1.json"] {
+            var args = f.args("accept")
+            args[2] = f.path.replacingOccurrences(of: "/ai/sessions/2/1.json", with: broken)
+            #expect(throws: (any Error).self) { try ReturnCommand(args).execute(input: { Data() }, environment: [:]) }
+        }
+    }
+
     @Test func 再実行は時刻を変えず異なる本文は拒否する() throws {
         let f = try Fixture(), command = try ReturnCommand(f.args("reply", ["--kind", "answered"]))
         let first = try command.execute(input: { Data("回答".utf8) }, environment: [:], now: Date(timeIntervalSince1970: 100))

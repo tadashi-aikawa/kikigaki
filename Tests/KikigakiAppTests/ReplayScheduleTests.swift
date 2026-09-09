@@ -18,4 +18,34 @@ struct ReplayScheduleTests {
             try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"], environment: ["KIKIGAKI_DEBUG_AI_AUTO": input])
         }
     }
+
+    @Test func 設定のautoStartを短い間隔へ上書きする指定はreplayだけで効く() throws {
+        let env = ["KIKIGAKI_DEBUG_AI_AUTO_SECONDS": "4.5"]
+        #expect(try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke"], environment: env).automaticSeconds == nil)
+        let value = try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"], environment: env)
+        #expect(value.automaticSeconds == 4.5)
+    }
+
+    @Test(arguments: ["", "0", "-1", "nan", "inf", "3601", "abc"])
+    func 不正な間隔上書きをsmokeでも拒否する(input: String) {
+        #expect(throws: (any Error).self) {
+            try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"],
+                                        environment: ["KIKIGAKI_DEBUG_AI_AUTO_SECONDS": input])
+        }
+    }
+
+    @Test func 手動の宛先指定はreplayだけで効く() throws {
+        let env = ["KIKIGAKI_DEBUG_AI_ASK_PROFILE": "相談"]
+        #expect(try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke"], environment: env).askProfile == nil)
+        let value = try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"], environment: env)
+        #expect(value.askProfile == "相談")
+    }
+
+    @Test(arguments: ["", "  ", "相談\n議事録", "相談\0", String(repeating: "あ", count: 22)])
+    func 不正な宛先指定をsmokeでも拒否する(input: String) {
+        #expect(throws: (any Error).self) {
+            try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"],
+                                        environment: ["KIKIGAKI_DEBUG_AI_ASK_PROFILE": input])
+        }
+    }
 }
