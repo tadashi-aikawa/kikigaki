@@ -48,7 +48,7 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         work.state = workAllowed ? .on : .off; final.state = sendFinal ? .on : .off
         startButton.bezelStyle = .rounded; startButton.target = self; startButton.action = #selector(start)
         startButton.keyEquivalent = "\r"; startButton.keyEquivalentModifierMask = .command
-        let cancel = NSButton(title: "取消", target: self, action: #selector(cancel))
+        let cancel = NSButton(title: "閉じる", target: self, action: #selector(cancel))
         cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
         let actions = NSStackView(views: [NSView(), cancel, startButton]); actions.spacing = 12
         for view in [title, destination, scroll, Washi.label("⌘Enterで送信して開始 · Enterで改行", size: 11, color: Washi.muted), frequency, hint, work, final, actions] {

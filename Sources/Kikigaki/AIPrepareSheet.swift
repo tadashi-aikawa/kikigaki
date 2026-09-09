@@ -52,7 +52,7 @@ final class AIPrepareSheet: NSObject, NSTextFieldDelegate {
         hint.maximumNumberOfLines = 2
         startButton.bezelStyle = .rounded; startButton.target = self; startButton.action = #selector(start)
         startButton.keyEquivalent = "\r"
-        let cancel = NSButton(title: "取消", target: self, action: #selector(close))
+        let cancel = NSButton(title: "閉じる", target: self, action: #selector(close))
         cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
         let pane = NSButton(title: "ペインを開く", target: self, action: #selector(openPane))
         pane.isBordered = false

@@ -97,7 +97,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         sendButton.bezelStyle = .rounded; sendButton.target = self; sendButton.action = #selector(submit)
         sendButton.keyEquivalent = "\r"; sendButton.keyEquivalentModifierMask = .command
         sendButton.isEnabled = canSubmit
-        let cancel = NSButton(title: "取消", target: self, action: #selector(cancel)); cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
+        let cancel = NSButton(title: "閉じる", target: self, action: #selector(cancel)); cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
         pane.isBordered = false; pane.target = self; pane.action = #selector(openPane)
         let actions = NSStackView(views: [pane, NSView(), cancel, sendButton]); actions.orientation = .horizontal; actions.spacing = 12
         // 確認への返答と再送は元質問と同じ宛先へ送る。宛先を選び直させない。
