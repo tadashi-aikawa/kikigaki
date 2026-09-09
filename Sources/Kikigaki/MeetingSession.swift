@@ -144,7 +144,7 @@ final class MeetingSession {
             }
             // 表題は台帳へ持たないので、閉じた表題も出すたびに解決する。
             let bound = boundPrepared[profile.slot].flatMap { preparedStore?.label(id: $0, includingName: false) }
-            return .init(slot: profile.slot, name: profile.name, prepared: prepared, bound: bound)
+            return .init(slot: profile.slot, name: profile.name, prepared: prepared, bound: bound, avatar: profile.avatar)
         }
     }
 

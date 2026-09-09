@@ -17,12 +17,14 @@ final class AIDestinationPicker: NSStackView {
         let name: String
         var prepared: [Prepared] = []
         var bound: String?
+        var avatar: String?
     }
     var onChange: ((Int) -> Void)?
     /// 準備済みを選んだ。呼び手が紐づけてから一覧を差し替える
     var onPrepared: ((Int, UUID) -> Void)?
     private let popup = NSPopUpButton()
     private let label = Washi.label("宛先", size: 13)
+    private let avatars = AvatarStore()
     private(set) var items: [Item] = []
     private(set) var selected = 1
 
@@ -32,6 +34,7 @@ final class AIDestinationPicker: NSStackView {
         popup.target = self; popup.action = #selector(changed)
         popup.setAccessibilityLabel("送信先")
         setViews([label, popup], in: .leading)
+        avatars.onChange = { [weak self] in self?.refreshAvatars() }
     }
     required init?(coder: NSCoder) { nil }
 
@@ -51,8 +54,33 @@ final class AIDestinationPicker: NSStackView {
         }
         let index = popup.itemArray.firstIndex { ($0.representedObject as? Choice) == .profile(selected) }
         popup.selectItem(at: index ?? 0)
+        refreshAvatars()
         // 紐づけたものがあれば、選ぶ先が1つでも「何を使っているか」を出し続ける。
         isHidden = items.count <= 1 && items.allSatisfy { $0.prepared.isEmpty && $0.bound == nil }
+    }
+
+    /// AI行と同じ描画と読み込みキャッシュを使い、取得完了時は画像だけ差し替える。
+    /// メニューを作り直すと、準備済みの選択や開いているメニューを失ってしまう。
+    private func refreshAvatars() {
+        for item in items {
+            let avatar = AvatarView(frame: NSRect(x: 0, y: 0, width: 25, height: 26))
+            avatar.accent = Washi.ai
+            avatar.initial = String(item.name.prefix(1))
+            avatar.image = avatars.image(for: item.avatar)
+            let image = NSImage(size: avatar.bounds.size, flipped: true) { rect in
+                avatar.draw(rect)
+                return true
+            }
+            image.size = NSSize(width: 20, height: 21)
+            for entry in popup.itemArray {
+                guard let choice = entry.representedObject as? Choice else { continue }
+                let slot: Int
+                switch choice {
+                case .profile(let value), .prepared(let value, _): slot = value
+                }
+                if slot == item.slot { entry.image = image }
+            }
+        }
     }
 
     /// ポップアップの行が指すもの。準備済みは選んだ時点で紐づける
