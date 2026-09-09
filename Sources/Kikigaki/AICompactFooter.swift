@@ -1,6 +1,12 @@
 import AppKit
 import KikigakiCore
 
+enum AIFooterMetrics {
+    /// 40ptの部品内で、顔と未読の丸の中心、下ラベルの原点を揃える。
+    static let iconCenterY: CGFloat = 24.5
+    static let labelY: CGFloat = 2
+}
+
 /// フッターのアイコン操作。無効時は地を足さず色だけを抜く。
 class AIFooterButton: HoverButton {
     override var isFlipped: Bool { false }
@@ -30,6 +36,7 @@ class AIFooterButton: HoverButton {
 final class AIFooterCount: AIFooterButton {
     let kind: AIBadgeKind
     var count = 0
+    var badgeFrame: NSRect { NSRect(x: 8, y: AIFooterMetrics.iconCenterY - 10, width: 20, height: 20) }
     init(kind: AIBadgeKind) {
         self.kind = kind
         super.init(symbol: "questionmark.bubble.fill", label: kind == .unread ? "未読" : "要返答")
@@ -39,15 +46,15 @@ final class AIFooterCount: AIFooterButton {
         drawHoverBackground()
         let color = kind == .unread ? Washi.red : Washi.color(0xC4801F)
         if kind == .unread {
-            color.setFill(); NSBezierPath(ovalIn: NSRect(x: 8, y: 17, width: 20, height: 20)).fill()
-            centered(String(count), y: 19, size: 11, color: .white)
+            color.setFill(); NSBezierPath(ovalIn: badgeFrame).fill()
+            centered(String(count), y: AIFooterMetrics.iconCenterY - 8, size: 11, color: .white)
         } else {
             NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
                 .withSymbolConfiguration(.init(paletteColors: [color]))?
-                .draw(in: NSRect(x: 1, y: 18, width: 19, height: 19))
-            (String(count) as NSString).draw(at: NSPoint(x: 23, y: 20), withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: color])
+                .draw(in: NSRect(x: 1, y: AIFooterMetrics.iconCenterY - 9.5, width: 19, height: 19))
+            (String(count) as NSString).draw(at: NSPoint(x: 23, y: AIFooterMetrics.iconCenterY - 8), withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: color])
         }
-        centered(kind == .unread ? "未読" : "要返答", y: 2, size: 9, color: Washi.muted)
+        centered(kind == .unread ? "未読" : "要返答", y: AIFooterMetrics.labelY, size: 9, color: Washi.muted)
     }
     private func centered(_ text: String, y: CGFloat, size: CGFloat, color: NSColor) {
         let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: size, weight: .medium), .foregroundColor: color]
@@ -62,6 +69,7 @@ final class AIRobotButton: AIFooterButton {
     private(set) var isRunning = false
     let statusFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
     var eyeColor: NSColor { isRunning && isEnabled ? .white : isEnabled ? Washi.red : Washi.muted }
+    var headFrame: NSRect { NSRect(x: bounds.midX - 11.5, y: AIFooterMetrics.iconCenterY - 8.5, width: 23, height: 17) }
     init() { super.init(symbol: "", label: "AIの操作") }
     required init?(coder: NSCoder) { fatalError() }
     func update(schedule: AIScheduleViewState, waiting: Bool, animate: Bool, now: Date) {
@@ -81,25 +89,26 @@ final class AIRobotButton: AIFooterButton {
     override func draw(_ dirtyRect: NSRect) {
         drawHoverBackground()
         let color = isEnabled ? Washi.red : Washi.muted
-        let x = bounds.midX - 11.5
+        let face = headFrame
+        let x = face.minX
         color.setStroke()
-        let head = NSBezierPath(roundedRect: NSRect(x: x, y: 14, width: 23, height: 17), xRadius: 4, yRadius: 4)
+        let head = NSBezierPath(roundedRect: face, xRadius: 4, yRadius: 4)
         head.lineWidth = 1.7
         if isRunning && isEnabled { color.setFill(); head.fill() }
         head.stroke()
         let antenna = NSBezierPath(); antenna.lineWidth = 1.7
-        antenna.move(to: NSPoint(x: bounds.midX, y: 31)); antenna.line(to: NSPoint(x: bounds.midX, y: 35)); antenna.stroke()
+        antenna.move(to: NSPoint(x: bounds.midX, y: face.maxY)); antenna.line(to: NSPoint(x: bounds.midX, y: face.maxY + 4)); antenna.stroke()
         color.setFill()
-        NSBezierPath(ovalIn: NSRect(x: bounds.midX - 1.5, y: 35, width: 3, height: 3)).fill()
+        NSBezierPath(ovalIn: NSRect(x: bounds.midX - 1.5, y: face.maxY + 4, width: 3, height: 3)).fill()
         eyeColor.setFill()
         for eye: CGFloat in [6, 16] {
-            NSBezierPath(ovalIn: NSRect(x: x + eye + eyeOffset - 1.5, y: 21, width: 3, height: 3)).fill()
+            NSBezierPath(ovalIn: NSRect(x: x + eye + eyeOffset - 1.5, y: face.midY - 1.5, width: 3, height: 3)).fill()
         }
         let attributes: [NSAttributedString.Key: Any] = [
             .font: statusFont,
             .foregroundColor: displayText == "実行中" ? color : Washi.muted]
         let width = (displayText as NSString).size(withAttributes: attributes).width
-        (displayText as NSString).draw(at: NSPoint(x: bounds.midX - width / 2, y: 1), withAttributes: attributes)
+        (displayText as NSString).draw(at: NSPoint(x: bounds.midX - width / 2, y: AIFooterMetrics.labelY), withAttributes: attributes)
     }
 }
 
