@@ -144,6 +144,11 @@ public struct AIProfileList: Codable, Equatable, Sendable {
             }
             // ホットキーはプロファイルごとに持たない。録音・一時停止との衝突検証が組み合わせで増えるため。
             guard index == 0 || profile.hotkey == nil else { throw invalid("hotkey is only allowed on the first profile") }
+            // herdr自体はプロファイルごとに分けない。1つのadapterで全チャネルを扱うので、
+            // 2つ目以降に別の値を書いても効かない。黙って無視せず不一致を拒否する。
+            guard index == 0 || profile.herdrCommand == profiles[0].herdrCommand else {
+                throw invalid("herdrCommand is shared. it must match the first profile")
+            }
         }
         guard profiles.filter({ $0.autoStart == true }).count <= 1 else {
             throw invalid("autoStart is allowed on at most one profile")
@@ -218,8 +223,11 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         let fallbackName = address.hasSuffix("へ") ? String(address.dropLast()) : address
         name = try values.contains(.name) ? values.decode(String.self, forKey: .name) : fallbackName
         guard slot > 0, !name.isEmpty else { throw AIError.invalid("profile slot/name") }
-        try AIConfig(name: name, cli: cli, effort: effort, autoPrompt: autoPrompt,
-                     autoIntervalMinutes: autoIntervalMinutes).validate()
+        // 宛名から補った名前には長さの制限を掛けない。旧manifestは `name` を持たず、
+        // 長い宛名の会議が復号できなくなると未完了の回収まで止まる。
+        // 明示された `name` は設定の解析時と同じ基準で検証する。
+        try AIConfig(name: name == fallbackName ? nil : name, cli: cli, effort: effort,
+                     autoPrompt: autoPrompt, autoIntervalMinutes: autoIntervalMinutes).validate()
     }
 }
 

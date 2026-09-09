@@ -143,14 +143,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/KIKIGAKI")
         do { try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true) }
         catch { Self.log("AI会議の登録先を作成できません") }
-        // herdrはPATHか既知の置き場で探し、設定 `[ai] herdrCommand` があればそれを使う(GUI起動のPATH不足への備え)
+        // herdrはPATHか既知の置き場で探し、設定 `[ai] herdrCommand` があればそれを使う(GUI起動のPATH不足への備え)。
+        // adapterは全チャネルで共有するので、この設定はプロファイル共通で、不一致は設定エラーにしている。
         let aiStore = AIRecordStore(directory: support, makeHerdr: { [weak self] in
             AIHerdr(executable: try AIProcessRunner.executable(self?.config?.ai?.herdrCommand ?? "herdr"))
         })
         self.aiStore = aiStore
         aiStore.recover()
-        aiStore.onNewResult = { [weak self] id in
-            if self?.aiStore?.records[id]?.manifest.config.notifySound == true { NSSound(named: "Glass")?.play() }
+        // 通知音は返答元のプロファイルの設定で決める。先頭の設定で全チャネルを鳴らさない。
+        aiStore.onNewResult = { [weak self] id, slot in
+            let profiles = self?.aiStore?.records[id]?.manifest.profiles ?? []
+            let source = profiles.first { $0.slot == slot } ?? profiles.first
+            if source?.notifySound == true { NSSound(named: "Glass")?.play() }
         }
         let session = MeetingSession(config: config, models: { try await modelsTask.value }, log: Self.log, aiStore: aiStore)
         self.session = session
@@ -191,7 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.window?.apply(snapshot)
             self.previousAI?.update()
             self.performReplayDebugActions(snapshot)
-            if self.registeredAIHotkey != session.aiConfiguration?.hotkey, let config = self.config { _ = self.registerHotkeys(config) }
+            if self.registeredAIHotkey != session.aiPrimaryConfiguration?.hotkey, let config = self.config { _ = self.registerHotkeys(config) }
             if let sheet = self.aiSheet {
                 if self.aiSheetMeetingID != session.aiMeetingID || !snapshot.canShare || snapshot.ai?.submissionID != nil {
                     sheet.close(); self.aiSheet = nil; session.endAIDraft()
@@ -289,17 +293,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             source = MicSource()
         }
         window?.show()
-        if replayURL != nil {
-            session.automaticIntervalOverride = replayDebug.automaticSeconds
-            if let name = replayDebug.askProfile {
-                guard let profile = session.meetingAIProfiles.first(where: { $0.name == name }) else {
-                    Self.log("replay 手動の宛先が設定にない: \(name)"); exit(1)
-                }
-                session.selectAIProfile(slot: profile.slot)
-                Self.log("replay 手動の宛先: \(profile.name)(slot \(profile.slot))")
-            }
-        }
+        if replayURL != nil { session.automaticIntervalOverride = replayDebug.automaticSeconds }
         let started = await session.start(source: source)
+        // 宛先の指定は録音開始のリセットより後に当てる。start()が先頭へ戻すので、
+        // 前に当てると2つ目を指定しても先頭へ送ってしまう。
+        if started, replayURL != nil, let name = replayDebug.askProfile {
+            guard let profile = session.meetingAIProfiles.first(where: { $0.name == name }) else {
+                Self.log("replay 手動の宛先が設定にない: \(name)"); exit(1)
+            }
+            session.selectAIProfile(slot: profile.slot)
+            Self.log("replay 手動の宛先: \(profile.name)(slot \(profile.slot))")
+        }
         if started, replayURL != nil, let schedule = session.aiScheduleConfiguration, schedule.autoStart {
             Self.log("replay autoStart: \(schedule.name)(slot \(schedule.slot))へ \(session.lastScheduleOptions?.interval ?? 0)秒間隔")
         }
@@ -417,7 +421,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             (config.toggleRecording, { [weak self] in self?.toggleRecording() }),
             (config.togglePause, { [weak self] in self?.session?.togglePause() }),
         ]
-        let meetingAI = session == nil ? config.ai : session?.aiConfiguration
+        // ホットキーは1つ目のプロファイルのものだけ。宛先を選び直しても登録し直さない。
+        let meetingAI = session == nil ? config.aiProfiles.first : session?.aiPrimaryConfiguration
         if let ai = meetingAI { bindings.append((ai.hotkey, { [weak self] in self?.showAISheet(parent: nil) })) }
         var registered: [Hotkey] = []
         for (hotkey, handler) in bindings {

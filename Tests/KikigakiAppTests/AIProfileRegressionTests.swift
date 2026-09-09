@@ -1,0 +1,355 @@
+import AppKit
+import Testing
+import KikigakiCore
+import KikigakiAIIO
+@testable import KikigakiCLI
+@testable import Kikigaki
+
+/// クロスレビューで見つかった、プロファイル間の状態混在の再発防止。
+@Suite(.timeLimit(.minutes(1))) @MainActor struct AIProfileRegressionTests {
+    private func profiles(_ root: URL, toml: String) throws -> [ResolvedAIConfig] {
+        ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: root).aiProfiles
+    }
+    private func two(_ root: URL) throws -> [ResolvedAIConfig] {
+        try profiles(root, toml: """
+        [[ai]]
+        name = "議事録"
+        command = "/bin/echo"
+        cwd = "\(root.path)"
+        address = "迅雷へ"
+
+        [[ai]]
+        name = "相談"
+        command = "/bin/echo"
+        cwd = "\(root.path)"
+        address = "ネオへ"
+        """)
+    }
+    private func session(_ root: URL, profiles: [ResolvedAIConfig], fake: FakeHerdr) -> MeetingSession {
+        let store = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
+        var config = ResolvedConfig(config: KikigakiConfig(), home: root)
+        config.aiProfiles = profiles
+        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config, aiStore: store)
+        session.automaticHelper = URL(fileURLWithPath: "/bin/echo")
+        return session
+    }
+    private func submit(_ session: MeetingSession, profile: ResolvedAIConfig?, parent: UUID? = nil) async throws {
+        session.submitAI(question: "質問", full: false, parent: parent, helper: URL(fileURLWithPath: "/bin/echo"), profile: profile)
+        let slot = profile?.slot ?? session.aiConfiguration?.slot ?? 1
+        if let task = session.submissionTaskForTesting(slot: slot) ?? session.submissionTaskForTesting { await task.value }
+    }
+    private func deliver(_ session: MeetingSession, _ request: AIRequest, kind: AIReceiveEvent.Kind,
+                         body: String, reason: String? = nil) throws {
+        let event = try AIReceiveEvent(request: request, kind: kind, recordedAt: Date(), body: body, reason: reason)
+        try AIFileStore(root: session.aiRecord!.controller.outputDirectory)
+            .write(AIJSON.encode(event), to: [".kikigaki-context", session.aiMeetingID.uuidString, "ai", "inbox", event.filename],
+                   replacing: false)
+        session.aiRecord?.controller.scan()
+    }
+
+    /// 【高】確認質問への返答が現在の手動宛先へ送られていた。
+    @Test func 確認への返答は宛先を変えても元の質問へ返る() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try two(root)
+        let session = session(root, profiles: list, fake: fake)
+        try await submit(session, profile: list[0])
+        let controller = try #require(session.aiRecord?.controller)
+        let asked = try #require(controller.conversation.questions.first?.request)
+        try deliver(session, asked, kind: .needsInput, body: "会場は本社でよいですか", reason: "clarification")
+
+        // 手動の宛先を相談へ変えてから、議事録の確認へ返答する。
+        session.selectAIProfile(slot: 2)
+        #expect(session.aiConfiguration?.slot == 2)
+        try await submit(session, profile: session.aiConfiguration, parent: asked.id)
+
+        let followup = try #require(controller.conversation.questions.last?.request)
+        #expect(followup.id != asked.id)
+        #expect(followup.envelope.participant.profileSlot == asked.envelope.participant.profileSlot)
+        #expect(followup.envelope.participant.participantName == "迅雷")
+    }
+
+    /// 会話の整合検証でも親子の枠違いを拒否する。
+    @Test func 枠の違う返答を会話が受け付けない() throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meeting = UUID()
+        var history = try AIStreamHistory(meetingID: meeting)
+        func request(_ number: Int, slot: Int, parent: AIQuestion? = nil) throws -> AIRequest {
+            let snapshot = try history.prepare(lines: ["[12:00:00] A: 質問です"], outputDirectory: root)
+            let participant = AIParticipantContext(streamID: history.streamID, requestID: UUID(), sessionGeneration: 1,
+                participantName: "迅雷", cliPath: "/tmp/helper",
+                sessionPath: root.appendingPathComponent(".kikigaki-context/\(meeting.uuidString)/"
+                    + AIEnvelope.sessionPath(slot: slot, generation: 1)).path,
+                requestToken: "token", question: "問い", capturedAt: Date(), audioCutoffSeconds: 1,
+                inReplyToRequestID: parent?.request.id,
+                inReplyToEventID: parent?.result.map { "\($0.requestID.uuidString)/result" },
+                profile: "議事録", profileSlot: slot)
+            return try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant), number: number, snapshot: snapshot)
+        }
+        var conversation = AIConversation(meetingID: meeting)
+        let first = try request(1, slot: 1)
+        try conversation.append(first)
+        try conversation.update(first.id) { try $0.beginSending(at: Date()); try $0.submitted() }
+        _ = try conversation.receive(AIReceiveEvent(request: first, kind: .needsInput, recordedAt: Date(),
+            body: "確認です", reason: "clarification"), at: Date())
+        let parent = try #require(conversation.questions.first)
+        #expect(throws: AIError.mismatch) { try conversation.append(try request(2, slot: 2, parent: parent)) }
+        #expect(throws: Never.self) { try conversation.append(try request(2, slot: 1, parent: parent)) }
+    }
+
+    /// 【中】Aの送信準備中にBが送れなくなっていた。
+    @Test func 別プロファイルの送信は互いを塞がない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try two(root)
+        let session = session(root, profiles: list, fake: fake)
+        // 1件目の完了を待たずに2件目を投げる。
+        session.submitAI(question: "議事録へ", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"), profile: list[0])
+        session.submitAI(question: "相談へ", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"), profile: list[1])
+        let first = try #require(session.submissionTaskForTesting(slot: 1))
+        let second = try #require(session.submissionTaskForTesting(slot: 2))
+        await first.value; await second.value
+        let controller = try #require(session.aiRecord?.controller)
+        #expect(controller.conversation.questions.count == 2)
+        #expect(controller.conversation.questions.map { $0.request.envelope.participant.profileSlot } == [1, 2])
+        // 別チャネルなので接続先も分かれる。
+        #expect(controller.connection(slot: 1)?.paneID != controller.connection(slot: 2)?.paneID)
+    }
+
+    /// 【中】Bの回答でAの送達不明の警告が消えていた。
+    @Test func 別チャネルの回答でこちらの警告を消さない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try two(root)
+        let session = session(root, profiles: list, fake: fake)
+        try await submit(session, profile: list[0])
+        let controller = try #require(session.aiRecord?.controller)
+        // 議事録の送信を送達不明にする。
+        await fake.failPrompt {}
+        try await submit(session, profile: list[1])
+        #expect(controller.warning != nil)
+        let minutes = try #require(controller.conversation.questions.first?.request)
+        try deliver(session, minutes, kind: .answered, body: "議事録を更新しました")
+        // 議事録の回答では相談の警告は晴れない。
+        #expect(controller.warning != nil)
+    }
+
+    /// 【中】自動の宛先が手動の選択に追随していた。
+    @Test func 手動の宛先を変えても自動の宛先は動かない() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(root, profiles: try two(root), fake: FakeHerdr())
+        #expect(session.aiConfiguration?.slot == 1 && session.aiScheduleConfiguration?.slot == 1)
+        session.selectAIProfile(slot: 2)
+        #expect(session.aiConfiguration?.slot == 2 && session.aiScheduleConfiguration?.slot == 1)
+        session.selectAIProfile(slot: 2, forSchedule: true)
+        #expect(session.aiScheduleConfiguration?.slot == 2 && session.aiConfiguration?.slot == 2)
+    }
+
+    /// 【中】宛先を選び直すと共通ホットキーが変わっていた。
+    @Test func 宛先を変えてもホットキーは1つ目のもの() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let list = try profiles(root, toml: """
+        [[ai]]
+        name = "議事録"
+        [ai.hotkey]
+        modifiers = ["cmd", "shift"]
+        key = "j"
+
+        [[ai]]
+        name = "相談"
+        """)
+        let session = session(root, profiles: list, fake: FakeHerdr())
+        #expect(session.snapshot.ai?.hotkey.key == "j")
+        session.selectAIProfile(slot: 2)
+        #expect(session.aiConfiguration?.slot == 2)
+        #expect(session.snapshot.ai?.hotkey.key == "j")
+        #expect(session.aiPrimaryConfiguration?.slot == 1)
+    }
+
+    /// 【中】全質問の接続状態・世代が選択中の宛先に依存していた。
+    @Test func 印の接続状態と世代は送った枠のものを見る() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meeting = UUID()
+        var history = try AIStreamHistory(meetingID: meeting)
+        func request(_ number: Int, slot: Int, generation: Int) throws -> AIRequest {
+            let snapshot = try history.prepare(lines: ["[12:00:00] A: 質問\(number)"], outputDirectory: root)
+            let participant = AIParticipantContext(streamID: history.streamID, requestID: UUID(),
+                sessionGeneration: generation, participantName: "迅雷", cliPath: "/tmp/helper",
+                sessionPath: root.appendingPathComponent(".kikigaki-context/\(meeting.uuidString)/"
+                    + AIEnvelope.sessionPath(slot: slot, generation: generation)).path,
+                requestToken: "token", question: "問い", capturedAt: Date(), audioCutoffSeconds: 1,
+                profile: "P\(slot)", profileSlot: slot)
+            return try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant), number: number, snapshot: snapshot)
+        }
+        let a = try request(1, slot: 1, generation: 1), b = try request(2, slot: 2, generation: 1)
+        var state = AIViewState()
+        state.defaultSlot = 1
+        // Aだけ世代2へ作り直し、Aの接続だけ切れている状況。
+        state.generations = [1: 2, 2: 1]
+        state.connections = [1: .disconnected, 2: .idle]
+        state.generation = 2; state.connection = .disconnected
+        #expect(state.generation(for: a) == 2 && state.generation(for: b) == 1)
+        #expect(state.connection(for: a) == .disconnected && state.connection(for: b) == .idle)
+        // Bの世代1は現世代なので「旧接続からの返事」にならない。
+        #expect(b.envelope.participant.sessionGeneration == state.generation(for: b))
+        #expect(a.envelope.participant.sessionGeneration < state.generation(for: a))
+    }
+
+    /// 【中】旧manifestの長い宛名で回収できなくなっていた。
+    @Test func 宛名から補った長い名前でも旧manifestを読める() throws {
+        let long = String(repeating: "あ", count: 22)
+        let legacy = """
+        {"cli":"codex","address":"\(long)へ","cwd":"file:///out/","extraArgs":[],"prompt":"",
+         "notifySound":false,"hotkey":{"modifiers":["cmd"],"key":"a"}}
+        """
+        let decoded = try AIJSON.decode(ResolvedAIConfig.self, from: Data(legacy.utf8))
+        #expect(decoded.name == long && decoded.participantName == long)
+        // 設定として同じ宛名を書いても解析でき、往復しても壊れない。
+        let parsed = ResolvedConfig(config: try ConfigLoader.parse(toml: "[ai]\naddress = \"\(long)へ\""),
+                                    home: URL(fileURLWithPath: "/home/person")).aiProfiles[0]
+        #expect(try AIJSON.decode(ResolvedAIConfig.self, from: AIJSON.encode(parsed)) == parsed)
+        // 明示した長い name は今までどおり拒否する。
+        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "[[ai]]\nname = \"\(long)\"") }
+    }
+
+    /// 【中】herdrCommand は共通設定。
+    @Test func herdrCommandの不一致を拒否する() throws {
+        #expect(throws: ConfigError.self) {
+            try ConfigLoader.parse(toml: """
+            [[ai]]
+            name = "議事録"
+            herdrCommand = "/opt/homebrew/bin/herdr"
+
+            [[ai]]
+            name = "相談"
+            herdrCommand = "/usr/local/bin/herdr"
+            """)
+        }
+        #expect(throws: Never.self) {
+            try ConfigLoader.parse(toml: """
+            [[ai]]
+            name = "議事録"
+            herdrCommand = "/opt/homebrew/bin/herdr"
+
+            [[ai]]
+            name = "相談"
+            herdrCommand = "/opt/homebrew/bin/herdr"
+            """)
+        }
+    }
+
+    /// 【低】通知音が常に先頭プロファイルの設定で決まっていた。
+    @Test func 通知音は返答元のプロファイルの設定で決まる() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try profiles(root, toml: """
+        [[ai]]
+        name = "議事録"
+        command = "/bin/echo"
+        cwd = "\(root.path)"
+        notifySound = false
+
+        [[ai]]
+        name = "相談"
+        command = "/bin/echo"
+        cwd = "\(root.path)"
+        address = "ネオへ"
+        notifySound = true
+        """)
+        let store = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
+        var config = ResolvedConfig(config: KikigakiConfig(), home: root)
+        config.aiProfiles = list
+        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config, aiStore: store)
+        var notified: [Int] = []
+        store.onNewResult = { _, slot in notified.append(slot) }
+        try await submit(session, profile: list[1])
+        let request = try #require(session.aiRecord?.controller.conversation.questions.first?.request)
+        try deliver(session, request, kind: .answered, body: "回答")
+        #expect(notified == [2])
+        let source = try #require(session.aiRecord?.manifest.profiles.first { $0.slot == notified[0] })
+        #expect(source.notifySound)
+    }
+
+    /// 【低】相手側CLIの正常なフックを不正イベントに数えていた。
+    @Test func 別CLIのフックを不正イベントに数えない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        // 2つ目はClaude。世代はどちらも1で並ぶ。
+        let list = try profiles(root, toml: """
+        [[ai]]
+        name = "議事録"
+        cli = "codex"
+        command = "/bin/echo"
+        cwd = "\(root.path)"
+
+        [[ai]]
+        name = "相談"
+        cli = "claude"
+        command = "/bin/echo"
+        cwd = "\(root.path)"
+        address = "ネオへ"
+        """)
+        await fake.setProviders(["p": "codex", "w2:p1": "claude"])
+        // Claudeは agent_session が立つまで入力可能とみなさない(実測)。
+        await fake.setSessions(["w2:p1": "claude-session"])
+        let session = session(root, profiles: list, fake: fake)
+        try await submit(session, profile: list[0])
+        try await submit(session, profile: list[1])
+        let controller = try #require(session.aiRecord?.controller)
+        let files = AIFileStore(root: controller.outputDirectory)
+        let base = [".kikigaki-context", session.aiMeetingID.uuidString, "ai"]
+        // 両チャネルのsession recordからフック観測を作って受信箱へ置く。
+        for slot in [1, 2] {
+            let path = base + AIEnvelope.sessionPath(slot: slot, generation: 1).split(separator: "/").dropFirst().map(String.init)
+            let record = try AIJSON.decode(AISessionRecord.self, from: files.read(path, limit: 8192))
+            let payload = record.provider == .codex
+                ? Data("{\"type\":\"agent-turn-complete\",\"thread-id\":\"t\(slot)\",\"turn-id\":\"u\"}".utf8)
+                : Data("{\"hook_event_name\":\"Stop\",\"session_id\":\"t\(slot)\"}".utf8)
+            let event = try AIHookObservation(payload: payload, session: record, now: Date())
+            try files.write(AIJSON.encode(event), to: base + ["inbox", event.filename], replacing: false)
+        }
+        controller.scan()
+        // 相手側の観測を自分のproviderで検証して不正へ落とさない。
+        #expect(controller.invalidInboxFiles.isEmpty)
+    }
+
+    /// テストの穴として指摘された結合。アプリが書いた複数枠の保存物を実CLIが読めること。
+    @Test func 複数枠の保存物を実CLIで返送しcontrollerが回収する() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try two(root)
+        let session = session(root, profiles: list, fake: fake)
+        try await submit(session, profile: list[0])
+        try await submit(session, profile: list[1])
+        let controller = try #require(session.aiRecord?.controller)
+        let requests = controller.conversation.questions.map(\.request)
+        #expect(requests.count == 2)
+
+        for request in requests {
+            let participant = request.envelope.participant
+            // 枝を切った保存パスをそのまま実CLIへ渡す。
+            #expect(participant.sessionPath.contains("/ai/sessions/\(participant.profileSlot!)/1.json"))
+            let args = ["--session", participant.sessionPath, "--request", request.id.uuidString,
+                        "--token", participant.requestToken]
+            _ = try ReturnCommand(["accept"] + args).execute(input: { Data() }, environment: [:])
+            _ = try ReturnCommand(["reply"] + args + ["--kind", "answered"])
+                .execute(input: { Data("\(participant.participantName)からの回答".utf8) }, environment: [:])
+        }
+        controller.scan()
+        #expect(controller.invalidInboxFiles.isEmpty)
+        let answered = controller.conversation.questions
+        #expect(answered.allSatisfy { $0.state == .answered })
+        #expect(answered.map { $0.result?.body } == ["迅雷からの回答", "ネオからの回答"])
+        // 受領基準はそれぞれのstreamで進む。
+        #expect(answered[0].contextReceived && answered[1].contextReceived)
+    }
+}

@@ -70,10 +70,12 @@ final class MeetingSession {
     private var meetingAI: ResolvedAIConfig?
     /// 自動送信の宛先。手動と別に覚え、別プロファイルなら同時に使える
     private var scheduleAI: ResolvedAIConfig?
-    private var aiTask: Task<Void, Never>?
-    private var aiSubmissionOwner = UUID()
-    private var aiSubmissionTrigger: AIParticipantContext.Trigger?
-    private var cancelledAutomaticOwner: UUID?
+    /// 送信の進行はプロファイルごとに持つ。会議に1つだと、Aの確定待ちや起動待ちの間
+    /// Bへ送れなくなり、手動と自動を同時に使えるという契約が崩れる。
+    private var aiTasks: [Int: Task<Void, Never>] = [:]
+    private var aiSubmissionOwners: [Int: UUID] = [:]
+    private var aiSubmissionTriggers: [Int: AIParticipantContext.Trigger] = [:]
+    private var cancelledAutomaticOwners: [Int: UUID] = [:]
     private var aiSchedule: AIScheduleState?
     private var aiScheduleTimer: Timer?
     private var aiScheduleHelper: URL?
@@ -87,8 +89,8 @@ final class MeetingSession {
     private(set) var scheduleDraft: String?
     func updateScheduleDraft(_ value: String) { scheduleDraft = value }
     private enum AIPhase { case confirmationWait, preparingAndSending }
-    private var aiPhase: AIPhase?
-    private var aiProgress: String?
+    private var aiPhases: [Int: AIPhase] = [:]
+    private var aiProgresses: [Int: String] = [:]
     private var aiWarning: String?
     private(set) var aiDraft = ""
     private(set) var aiWorkAllowed: Bool
@@ -97,8 +99,10 @@ final class MeetingSession {
     var aiMeetingID: UUID { handoff.meetingID }
     var aiRecord: AIRecordStore.Record? { aiStore?.records[handoff.meetingID] }
     var aiConfiguration: ResolvedAIConfig? { meetingAI }
-    /// 自動送信の宛先。未選択なら手動と同じ既定を使う
-    var aiScheduleConfiguration: ResolvedAIConfig? { scheduleAI ?? meetingAI }
+    /// 自動送信の宛先。手動と独立に覚えるので、手動をBへ変えても自動はAのままにする
+    var aiScheduleConfiguration: ResolvedAIConfig? { scheduleAI }
+    /// ホットキーと共通設定を引く先。宛先の選択では動かない
+    var aiPrimaryConfiguration: ResolvedAIConfig? { meetingAIProfiles.first }
 
     /// 宛先を選び直す。会議の固定プロファイルとその場限りの接続先だけを受け付ける。
     func selectAIProfile(slot: Int, forSchedule: Bool = false) {
@@ -114,7 +118,9 @@ final class MeetingSession {
 
     init(config: ResolvedConfig, models: @escaping () async throws -> SortformerModelStore.Loaded, log: @escaping (String) -> Void, aiStore: AIRecordStore? = nil) {
         self.config = config
-        self.aiStore = aiStore; meetingAIProfiles = config.aiProfiles; meetingAI = config.ai
+        self.aiStore = aiStore; meetingAIProfiles = config.aiProfiles
+        // 手動と自動の宛先はどちらも先頭で独立に初期化する。
+        meetingAI = config.aiProfiles.first; scheduleAI = config.aiProfiles.first
         aiWorkAllowed = config.ai?.allowWork ?? true
         self.models = models
         self.log = log
@@ -145,7 +151,7 @@ final class MeetingSession {
         let meetingConfig = config
         // 宛先の選択とその場限りの接続先は会議をまたいで引き継がない。
         meetingAIProfiles = meetingConfig.aiProfiles
-        meetingAI = meetingConfig.ai; scheduleAI = nil
+        meetingAI = meetingConfig.aiProfiles.first; scheduleAI = meetingConfig.aiProfiles.first
         aiDraft = ""; aiWarning = nil; aiCompleted = nil
         aiWorkAllowed = meetingConfig.ai?.allowWork ?? true
         consumedAudioTime = 0
@@ -223,7 +229,7 @@ final class MeetingSession {
         var finalizationSucceeded = true
         // 録音の停止で破棄するのは、まだ会話を確定していない問いだけ。
         // prepare以降は固定済みの会話を使い、最終保存と並行して接続・送信を続ける。
-        if aiPhase == .confirmationWait { cancelAIPreparation() }
+        for (slot, phase) in aiPhases where phase == .confirmationWait { cancelAIPreparation(slot: slot) }
         snapshot.state = .finishing
         snapshot.message = "最終判定と保存中..."
         emit()
@@ -396,17 +402,28 @@ final class MeetingSession {
             destination: meetingAIProfiles.count > 1 ? aiScheduleConfiguration?.name : nil)
         if let config = meetingAI {
             let controller = aiRecord?.controller
-            snapshot.ai = AIViewState(conversation: controller?.conversation, hotkey: config.hotkey,
-                participant: config.participantName, connection: controller?.connectionStatus(slot: config.slot) ?? .unknown,
-                warning: aiWarning ?? aiRecord?.saveWarning ?? controller?.warning, progress: aiProgress,
+            let slot = config.slot
+            // 各印の接続状態と現世代は、その質問を送った枠のものを渡す。選択中の宛先で全行を
+            // 塗ると、Aを作り直しただけでBの正常な返事まで「旧接続から」になる。
+            var connections: [Int: AIConnectionStatus] = [:], generations: [Int: Int] = [:]
+            for profile in meetingAIProfiles {
+                connections[profile.slot] = controller?.connectionStatus(slot: profile.slot) ?? .unknown
+                generations[profile.slot] = controller?.generation(slot: profile.slot) ?? 1
+            }
+            snapshot.ai = AIViewState(conversation: controller?.conversation,
+                // ホットキーは1つ目のプロファイルのものだけを使う。宛先を選び直しても変わらない。
+                hotkey: meetingAIProfiles.first?.hotkey ?? config.hotkey,
+                participant: config.participantName, connection: connections[slot] ?? .unknown,
+                warning: aiWarning ?? aiRecord?.saveWarning ?? controller?.warning, progress: aiProgresses[slot],
                 unconfirmed: Set(controller?.conversation.questions.filter { controller!.isReturnUnconfirmed($0) }.map { $0.request.id } ?? []),
-                canSubmit: snapshot.canShare && aiTask == nil && (controller?.canSend(slot: config.slot) ?? true),
+                canSubmit: snapshot.canShare && aiTasks[slot] == nil && (controller?.canSend(slot: slot) ?? true),
                 submissionID: aiCompleted, draft: aiDraft,
-                canOpenPane: controller?.connection(slot: config.slot) != nil,
-                canRecreate: controller != nil && aiTask == nil
-                    && (aiWarning != nil || controller?.connectionStatus(slot: config.slot) == .disconnected),
-                saveFailed: aiRecord?.saveWarning != nil, generation: controller?.generation(slot: config.slot) ?? 1,
-                profiles: meetingAIProfiles.map { ($0.slot, $0.name) }, selectedSlot: config.slot)
+                canOpenPane: controller?.connection(slot: slot) != nil,
+                canRecreate: controller != nil && aiTasks[slot] == nil
+                    && (aiWarning != nil || connections[slot] == .disconnected),
+                saveFailed: aiRecord?.saveWarning != nil, generation: generations[slot] ?? 1,
+                profiles: meetingAIProfiles.map { ($0.slot, $0.name) }, selectedSlot: slot,
+                defaultSlot: controller?.defaultSlot ?? 1, connections: connections, generations: generations)
         } else { snapshot.ai = nil }
         onChange?(snapshot)
     }
@@ -425,22 +442,34 @@ final class MeetingSession {
     func updateAIWorkAllowed(_ allowed: Bool) { aiWorkAllowed = allowed }
     func beginAIDraft() {
         manualAISheetOpen = true
-        if aiSubmissionTrigger == .scheduled, aiTask != nil,
-           aiRecord?.controller.conversation.questions.contains(where: { $0.isAwaitingResult }) != true {
-            if aiPhase == .confirmationWait || aiRecord?.controller.isSending == true { cancelAIPreparation() }
-            else { cancelledAutomaticOwner = aiSubmissionOwner }
-        }
+        // 手動へ譲るのは同じ宛先の自動だけ。別プロファイルの自動送信は止めない。
+        if let slot = meetingAI?.slot { yieldAutomatic(slot: slot) }
         aiCompleted = nil
         emit()
     }
     func endAIDraft() { manualAISheetOpen = false }
     func retryAISaves() { aiStore?.retrySaves() }
 
-    func cancelAIPreparation() {
-        aiSubmissionOwner = UUID(); aiSubmissionTrigger = nil
-        aiTask?.cancel(); aiTask = nil; aiPhase = nil; aiProgress = nil
-        if let controller = aiRecord?.controller {
-            for q in controller.conversation.questions where q.state == .prepared { try? controller.cancel(q.request.id) }
+    /// 進行中の自動送信を手動へ譲る。送信試行済みのrequestは取り消さず、既存の返事待ちに従う。
+    private func yieldAutomatic(slot: Int) {
+        guard aiSubmissionTriggers[slot] == .scheduled, aiTasks[slot] != nil,
+              aiRecord?.controller.conversation.questions.contains(where: { $0.isAwaitingResult }) != true else { return }
+        if aiPhases[slot] == .confirmationWait || aiRecord?.controller.isSending == true { cancelAIPreparation(slot: slot) }
+        else { cancelledAutomaticOwners[slot] = aiSubmissionOwners[slot] }
+    }
+
+    func cancelAIPreparation(slot: Int? = nil) {
+        let targets = slot.map { [$0] } ?? Array(aiTasks.keys) + aiSubmissionOwners.keys.filter { aiTasks[$0] == nil }
+        for target in Set(targets) {
+            aiSubmissionOwners[target] = UUID(); aiSubmissionTriggers[target] = nil
+            aiTasks[target]?.cancel(); aiTasks[target] = nil
+            aiPhases[target] = nil; aiProgresses[target] = nil
+        }
+        guard let controller = aiRecord?.controller else { return }
+        for q in controller.conversation.questions where q.state == .prepared {
+            let owner = q.request.envelope.participant.profileSlot ?? controller.defaultSlot
+            guard slot == nil || slot == owner else { continue }
+            try? controller.cancel(q.request.id)
         }
     }
 
@@ -475,22 +504,30 @@ final class MeetingSession {
                   launch: ((ResolvedAIConfig, URL, AIConversationController) throws -> (URL, [String]))? = nil,
                   trigger: AIParticipantContext.Trigger? = nil, workAllowed suppliedWorkAllowed: Bool? = nil,
                   profile: ResolvedAIConfig? = nil) {
-        let selected = profile ?? (trigger == .scheduled ? aiScheduleConfiguration : meetingAI)
-        guard snapshot.canShare, aiTask == nil, let config = selected, let url = snapshot.markdownURL, let aiStore else { return }
+        // 確認への返答は元質問の宛先へ固定する。呼び手が別の宛先を渡していても、そちらを優先しない。
+        let parentSlot = parent.flatMap { id in
+            aiRecord?.controller.conversation.questions.first { $0.request.id == id }?
+                .request.envelope.participant.profileSlot
+        }
+        let selected = parentSlot.flatMap { slot in meetingAIProfiles.first { $0.slot == slot } }
+            ?? profile ?? (trigger == .scheduled ? aiScheduleConfiguration : meetingAI)
+        guard snapshot.canShare, let config = selected, aiTasks[config.slot] == nil,
+              let url = snapshot.markdownURL, let aiStore else { return }
+        let slot = config.slot
         let meetingID = handoff.meetingID, capturedAt = Date(), cutoff = snapshot.state == .idle ? snapshot.elapsed : pause.audioTime
         let names = snapshot.names, timeline = snapshot.timeline, typed = typedEntries
         let workAllowed = suppliedWorkAllowed ?? aiWorkAllowed
         let owner = UUID(), scheduleRun = aiSchedule?.runID
-        aiSubmissionOwner = owner; aiSubmissionTrigger = trigger
+        aiSubmissionOwners[slot] = owner; aiSubmissionTriggers[slot] = trigger
         if trigger == nil { aiDraft = question; aiCompleted = nil }
-        aiWarning = nil; aiProgress = "送信の準備中"
-        aiPhase = .confirmationWait
-        aiTask = Task { [weak self] in
+        aiWarning = nil; aiProgresses[slot] = "送信の準備中"
+        aiPhases[slot] = .confirmationWait
+        aiTasks[slot] = Task { [weak self] in
             guard let self else { return }
             var request: AIRequest?
             defer {
-                if meetingID == handoff.meetingID, aiSubmissionOwner == owner {
-                    aiTask = nil; aiPhase = nil; aiProgress = nil; aiSubmissionTrigger = nil
+                if meetingID == handoff.meetingID, aiSubmissionOwners[slot] == owner {
+                    aiTasks[slot] = nil; aiPhases[slot] = nil; aiProgresses[slot] = nil; aiSubmissionTriggers[slot] = nil
                     observeAIScheduleResults(); emit()
                 }
             }
@@ -513,13 +550,13 @@ final class MeetingSession {
                         return try AICapture(tokens: self.finalTokens, speakers: self.speakerMapping.apply(Aligner.speakers(for: self.finalTokens, segments: self.finalSegments)),
                             finalCount: self.finalTokens.count, processedUntil: self.snapshot.elapsed, cutoff: cutoff, names: names, timeline: timeline, typed: typed)
                     }
-                }, progress: { seconds in self.aiProgress = "聞き取りの確定待ち · あと\(seconds)秒"; self.emit() })
+                }, progress: { seconds in self.aiProgresses[slot] = "聞き取りの確定待ち · あと\(seconds)秒"; self.emit() })
                 try Task.checkCancellation()
-                guard aiSubmissionOwner == owner else { throw CancellationError() }
+                guard aiSubmissionOwners[slot] == owner else { throw CancellationError() }
                 guard consumedAudioTime >= cutoff else { throw AIError.invalid("audio not processed") }
                 if trigger == .scheduled, !record.controller.hasChanges(lines: capture.lines, slot: config.slot) { return }
                 // prepareの通知から録音停止が始まっても、確定待ちの取消へ戻さない。
-                aiPhase = .preparingAndSending
+                aiPhases[slot] = .preparingAndSending
                 let fixed = try record.controller.prepare(lines: capture.lines, question: question, voiceQuestion: capture.voice,
                     capturedAt: capturedAt, cutoff: cutoff, tail: capture.tail, config: config, helper: helper, parent: parent, full: full,
                     workAllowed: workAllowed, voiceUtteranceStart: capture.voiceUtteranceStart, trigger: trigger)
@@ -533,13 +570,13 @@ final class MeetingSession {
                     let settings = try AILaunchConfiguration(config: config, helper: helper, controller: record.controller)
                     executable = settings.executable; arguments = settings.arguments
                 }
-                aiProgress = "AIの入力準備を確認中。初回設定はherdrで確認してください"; emit()
+                aiProgresses[slot] = "AIの入力準備を確認中。初回設定はherdrで確認してください"; emit()
                 let format = DateFormatter(); format.dateFormat = "HH:mm"
                 try await record.controller.connect(config: config, label: "KIKIGAKI \(config.participantName) \(format.string(from: startedAt))", executable: executable, arguments: arguments)
                 try Task.checkCancellation()
                 guard handoff.meetingID == meetingID else { throw CancellationError() }
-                guard cancelledAutomaticOwner != owner else { throw CancellationError() }
-                aiProgress = "送信中"; emit()
+                guard cancelledAutomaticOwners[slot] != owner else { throw CancellationError() }
+                aiProgresses[slot] = "送信中"; emit()
                 try await record.controller.send(fixed, config: config)
                 if trigger == nil { aiDraft = ""; aiCompleted = fixed.id }
             } catch is CancellationError {
@@ -578,7 +615,8 @@ final class MeetingSession {
         }
         emit()
     }
-    var submissionTaskForTesting: Task<Void, Never>? { aiTask }
+    var submissionTaskForTesting: Task<Void, Never>? { aiTasks[meetingAI?.slot ?? 1] ?? aiTasks.values.first }
+    func submissionTaskForTesting(slot: Int) -> Task<Void, Never>? { aiTasks[slot] }
     func publishForTesting(tokens: [TimedToken], speakers: [Int?], elapsed: Double) {
         finalTokens = tokens
         finalSegments = zip(tokens, speakers).compactMap { token, slot in
@@ -713,11 +751,7 @@ extension MeetingSession {
 
     func stopAISchedule() {
         aiSchedule?.stop(); aiScheduleTimer?.invalidate(); aiScheduleTimer = nil
-        if aiSubmissionTrigger == .scheduled, aiTask != nil,
-           aiRecord?.controller.conversation.questions.contains(where: { $0.isAwaitingResult }) != true {
-            if aiPhase == .confirmationWait || aiRecord?.controller.isSending == true { cancelAIPreparation() }
-            else { cancelledAutomaticOwner = aiSubmissionOwner }
-        }
+        if let slot = aiScheduleConfiguration?.slot { yieldAutomatic(slot: slot) }
         emit()
     }
 
@@ -730,7 +764,7 @@ extension MeetingSession {
         }
         // 手動シートを開いている間に止めるのは同じ宛先のときだけ。別プロファイルなら同時に使える。
         let sameTarget = aiScheduleConfiguration?.slot == meetingAI?.slot
-        if aiTask != nil || (manualAISheetOpen && sameTarget) { return .busy }
+        if aiTasks[slot] != nil || (manualAISheetOpen && sameTarget) { return .busy }
         if let controller {
             let generation = controller.generation(slot: slot)
             let current = controller.conversation.questions.filter {

@@ -94,6 +94,14 @@ struct AIViewState {
     /// 会議で使えるプロファイル。宛先ポップアップの並び
     var profiles: [(slot: Int, name: String)] = []
     var selectedSlot = 1
+    /// プロファイル未指定の旧requestが属する枠
+    var defaultSlot = 1
+    /// 枠ごとの接続状態と現世代。印は自分を送った枠のものを見る
+    var connections: [Int: AIConnectionStatus] = [:]
+    var generations: [Int: Int] = [:]
+    func slot(of request: AIRequest) -> Int { request.envelope.participant.profileSlot ?? defaultSlot }
+    func connection(for request: AIRequest) -> AIConnectionStatus { connections[slot(of: request)] ?? connection }
+    func generation(for request: AIRequest) -> Int { generations[slot(of: request)] ?? generation }
     var noticeTone: AINoticeTone { warning == nil ? .normal : .warning }
     var badges: String {
         let questions = conversation?.questions ?? []
@@ -253,8 +261,10 @@ final class AIMarkRow: NSView, DocumentRow {
             case .needsInput: status = confirming ? "確認待ち" : "返答済み"
             case .answered: status = "返事済み"
             case .submitted, .accepted:
-                if state.connection == .blocked { status = "返事待ち · ペインで確認してください" }
-                else if state.connection == .disconnected { status = "返事待ち · 接続が切れています" }
+                // 接続状態はこの質問を送った枠のものを見る。別の宛先の切断を混ぜない。
+                let connection = state.connection(for: question.request)
+                if connection == .blocked { status = "返事待ち · ペインで確認してください" }
+                else if connection == .disconnected { status = "返事待ち · 接続が切れています" }
                 else if state.unconfirmed.contains(question.request.id) { status = "返事待ち · 返送未確認" }
                 else { status = "送信済み · 返事を待っています" }
             }
@@ -263,7 +273,9 @@ final class AIMarkRow: NSView, DocumentRow {
             let formatter = DateFormatter(); formatter.dateFormat = "HH:mm:ss"
             notes.append("到着: " + formatter.string(from: date))
             if question.cancelledAt != nil { notes.append("取消後の返事") }
-            if question.request.envelope.participant.sessionGeneration < state.generation { notes.append("旧接続からの返事") }
+            if question.request.envelope.participant.sessionGeneration < state.generation(for: question.request) {
+                notes.append("旧接続からの返事")
+            }
             if question.answeredByRequestID != nil { notes.append("返答済み") }
         }
         let details = notes.joined(separator: "\n")

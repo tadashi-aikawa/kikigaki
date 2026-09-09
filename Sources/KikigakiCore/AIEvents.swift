@@ -256,6 +256,9 @@ public struct AIConversation: Codable, Equatable, Sendable {
                 guard let parent = questions.prefix(index).first(where: { $0.request.id == parentID }),
                       parent.result?.kind == .needsInput,
                       parent.result?.eventID == question.request.envelope.participant.inReplyToEventID,
+                      // 確認への返答は元質問と同じ宛先へ返す。別のAIへ送ると、返答を見ていない
+                      // 相手が答え、元質問まで返答済みになる。
+                      parent.request.envelope.participant.profileSlot == question.request.envelope.participant.profileSlot,
                       question.sendAttemptedAt == nil || parent.answeredByRequestID == question.request.id else { throw AIError.mismatch }
             }
             if let childID = question.answeredByRequestID {
@@ -272,6 +275,8 @@ public struct AIConversation: Codable, Equatable, Sendable {
         if let parentID = request.envelope.participant.inReplyToRequestID {
             guard let index = questions.firstIndex(where: { $0.request.id == parentID }),
                   questions[index].result?.eventID == request.envelope.participant.inReplyToEventID,
+                  // 確認への返答は元質問と同じ宛先へ返す。
+                  questions[index].request.envelope.participant.profileSlot == request.envelope.participant.profileSlot,
                   questions[index].state == .needsInput, questions[index].answeredByRequestID == nil else { throw AIError.mismatch }
         }
         questions.append(question)

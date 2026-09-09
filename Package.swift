@@ -40,7 +40,9 @@ let package = Package(
         ),
         .testTarget(
             name: "KikigakiAppTests",
-            dependencies: ["Kikigaki", "KikigakiAIIO", .product(name: "Testing", package: "swift-testing")],
+            // 返送CLIを実物のまま呼ぶ結合テストのためにKikigakiCLIへ依存する。
+            // アプリが書いた保存物をCLIが読めることは、両側のfixtureでは確かめられない。
+            dependencies: ["Kikigaki", "KikigakiAIIO", "KikigakiCLI", .product(name: "Testing", package: "swift-testing")],
             path: "Tests/KikigakiAppTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),

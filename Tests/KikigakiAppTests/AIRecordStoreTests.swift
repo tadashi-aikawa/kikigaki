@@ -74,7 +74,7 @@ import KikigakiAIIO
         try AIFileStore(root: root).write(AIJSON.encode(result), to: [".kikigaki-context", id.uuidString, "ai", "inbox", result.filename], replacing: false)
         var starts = 0, sounds = 0
         let restored = AIRecordStore(directory: registry, makeHerdr: { starts += 1; throw AIHerdrError.notReady })
-        restored.onNewResult = { _ in sounds += 1 }
+        restored.onNewResult = { _, _ in sounds += 1 }
         restored.recover()
         #expect(starts == 0 && sounds == 0)
         #expect(restored.records[id]?.controller.connection == nil)

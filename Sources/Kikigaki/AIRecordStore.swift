@@ -70,7 +70,8 @@ final class AIRecordStore {
     private(set) var records: [UUID: Record] = [:]
     private(set) var warnings: [String] = []
     var onChange: (() -> Void)?
-    var onNewResult: ((UUID) -> Void)?
+    /// 会議IDと、返事が届いたプロファイルの枠
+    var onNewResult: ((UUID, Int) -> Void)?
     private let registry: AIFileStore
     private let makeHerdr: () throws -> AIHerdr
     private var unresolved: [AIRegistration] = []
@@ -174,9 +175,9 @@ final class AIRecordStore {
         record.controller.onChange = { [weak self, weak record] in
             guard let self, let record else { return }; changed(record)
         }
-        record.controller.onResult = { [weak self, weak record] in
+        record.controller.onResult = { [weak self, weak record] slot in
             guard let self, let record, !record.recovered else { return }
-            onNewResult?(record.manifest.meetingID)
+            onNewResult?(record.manifest.meetingID, slot)
         }
     }
     private func changed(_ record: Record) {

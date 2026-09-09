@@ -148,7 +148,7 @@ import KikigakiAIIO
         await #expect(throws: AIProcessError.timeout) { try await controller.send(request, config: config) }
         #expect(controller.conversation.questions[0].state == .deliveryUnknown)
         var results = 0
-        controller.onResult = { results += 1 }
+        controller.onResult = { _ in results += 1 }
         let event = try AIReceiveEvent(request: request, kind: .answered, recordedAt: Date(), body: "遅延回答")
         try store.write(AIJSON.encode(event), to: base + ["inbox", event.filename], replacing: false)
         controller.scan(); controller.scan()

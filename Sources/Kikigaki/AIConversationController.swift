@@ -39,7 +39,8 @@ final class AIConversationController {
     private(set) var conversation: AIConversation
     private(set) var invalidInboxFiles: [String] = []
     var onChange: (() -> Void)?
-    var onResult: (() -> Void)?
+    /// 返事が届いた枠。通知音は返答元のプロファイルの設定で決める
+    var onResult: ((Int) -> Void)?
     private var channels: [Int: Channel] = [:]
     private var profiles: [Int: ResolvedAIConfig] = [:]
     private let files: AIFileStore
@@ -151,6 +152,9 @@ final class AIConversationController {
         try register([config])
         let channel = try channel(config.slot)
         guard canSend(slot: config.slot) else { throw AIHerdrError.notReady }
+        // 確認への返答は元質問と同じチャネルへ返す。呼び手が宛先を変えていても、ここで止める。
+        if let parent, let original = conversation.questions.first(where: { $0.request.id == parent }),
+           slot(of: original.request) != config.slot { throw AIError.mismatch }
         if let configuration = channel.configuration, configuration != config { throw AIError.mismatch }
         let snapshot = try channel.history.prepare(lines: lines, outputDirectory: outputDirectory, full: full)
         let slot = storedSlot(config.slot)
@@ -294,7 +298,7 @@ final class AIConversationController {
     func scan() {
         invalidInboxFiles = []
         scanWarning = nil
-        for channel in channels.values { scanHooks(channel) }
+        scanHooks()
         var events: [AIReceiveEvent] = []
         for q in conversation.questions where q.sendAttemptedAt != nil {
             for suffix in ["accept", "result"] {
@@ -308,19 +312,25 @@ final class AIConversationController {
         }
         events.sort { $0.recordedAt == $1.recordedAt ? $0.eventID < $1.eventID : $0.recordedAt < $1.recordedAt }
         var next = conversation
-        var changed = false, resultArrived = false, notifyResult = false
+        var changed = false
         var acknowledged: [Int: AIStreamHistory] = [:]
+        /// 返事が届いたチャネル。警告を消してよいのはここに入った枠だけ
+        var resolved = Set<Int>()
+        var notify: [Int] = []
         let now = Date()
         for event in events {
             do {
                 if try next.receive(event, at: now) {
-                    changed = true; resultArrived = resultArrived || event.kind != .accept
+                    changed = true
                     let question = next.questions.first { $0.request.id == event.requestID }
-                    let scheduled = question?.request.trigger == .scheduled
-                    notifyResult = notifyResult || event.kind == .needsInput || (event.kind == .answered && !scheduled)
                     guard let request = question?.request else { continue }
                     let target = slot(of: request)
+                    let scheduled = request.trigger == .scheduled
+                    if event.kind == .needsInput || (event.kind == .answered && !scheduled) { notify.append(target) }
                     guard let channel = channels[target] else { continue }
+                    // 別チャネルの結果でこの枠の送達不明が晴れることはない。世代も合っていなければ、
+                    // その警告は今届いた結果では解消できない。
+                    if event.kind != .accept, event.sessionGeneration == channel.generation { resolved.insert(target) }
                     var received = acknowledged[target] ?? channel.history
                     if event.contextReceived, channel.snapshots.contains(event.snapshotID), event.sessionGeneration == channel.generation {
                         try received.acknowledge(snapshotID: event.snapshotID, streamID: channel.history.streamID,
@@ -334,8 +344,8 @@ final class AIConversationController {
             do {
                 try commit(next)
                 for (slot, history) in acknowledged { channels[slot]?.history = history }
-                if resultArrived { for channel in channels.values { channel.warning = nil } }
-                if notifyResult { onResult?() }
+                for slot in resolved { channels[slot]?.warning = nil }
+                for slot in notify { onResult?(slot) }
             } catch { scanWarning = "返事の取り込み状態を保存できません" }
         }
         onChange?()
@@ -348,28 +358,35 @@ final class AIConversationController {
             now: now, hasRunningBackgroundTasks: backgroundRunning || channel.hookBackgroundRunning)
     }
 
-    private func scanHooks(_ channel: Channel) {
-        channel.hookBackgroundRunning = false
-        guard let session = channel.session else { return }
+    /// 受信箱は会議で1つなので、フックの観測も全チャネル分が混ざって置かれる。
+    /// **どのチャネルのものかを先に決めてから検証する。** チャネルごとに走査して自分のproviderで
+    /// 検証すると、相手側CLIの正常なフックが不正イベントに化ける(世代番号が並ぶと必ず起きる)。
+    private func scanHooks() {
+        for channel in channels.values { channel.hookBackgroundRunning = false }
+        let owners = channels.values.compactMap { channel in channel.session.map { (channel, $0) } }
+        guard !owners.isEmpty else { return }
         do {
             let inbox = try files.directory(base + ["inbox"], create: false)
             let names = try FileManager.default.contentsOfDirectory(atPath: inbox.path)
-            let identity = channel.connection?.sessionID ?? (try? AIJSON.decode(String.self,
-                from: files.read(identityPath(channel), limit: 2048)))
-            var latest: AIHookObservation?
+            var identities: [Int: String] = [:]
+            for (channel, _) in owners {
+                if let identity = channel.connection?.sessionID ?? (try? AIJSON.decode(String.self,
+                    from: files.read(identityPath(channel), limit: 2048))) { identities[channel.slot] = identity }
+            }
+            var latest: [Int: AIHookObservation] = [:]
             for name in names where name.hasPrefix("notify-") && name.hasSuffix(".json") {
                 do {
                     let event = try AIJSON.decode(AIHookObservation.self, from: files.read(base + ["inbox", name], limit: AILimits.eventBytes))
-                    // 旧世代の診断も残すが、現世代の休止判定へ混ぜない。
-                    guard event.generation == channel.generation else { continue }
-                    try event.validate(session: session)
-                    guard event.filename == name else { throw AIError.mismatch }
-                    guard let identity, event.sessionID == identity else { continue }
-                    if latest == nil || event.recordedAt > latest!.recordedAt { latest = event }
+                    guard event.filename == name, event.meetingID == meetingID else { throw AIError.mismatch }
+                    // 現世代のどのチャネルにも属さないものは、旧世代の診断か未接続チャネル宛て。
+                    // 壊れているとは限らないので不正には数えない。
+                    guard let owner = owners.first(where: { (try? event.validate(session: $0.1)) != nil })?.0 else { continue }
+                    guard let identity = identities[owner.slot], event.sessionID == identity else { continue }
+                    if latest[owner.slot] == nil || event.recordedAt > latest[owner.slot]!.recordedAt { latest[owner.slot] = event }
                 } catch { invalidInboxFiles.append(name) }
             }
-            channel.hookBackgroundRunning = latest?.runningBackgroundTasks == true
-        } catch { channel.warning = "フック観測を確認できません" }
+            for (slot, event) in latest { channels[slot]?.hookBackgroundRunning = event.runningBackgroundTasks }
+        } catch { for channel in channels.values { channel.warning = "フック観測を確認できません" } }
     }
 
     private func pollAll() { for slot in channels.keys { poll(slot) } }

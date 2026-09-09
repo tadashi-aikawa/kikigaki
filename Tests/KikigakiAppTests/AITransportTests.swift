@@ -230,6 +230,14 @@ actor FakeHerdr {
     var statuses = ["idle"]
     var session: String?
     var provider = "codex"
+    /// workspace createのたびに別のIDを返す。チャネルごとの接続先を見分けるため
+    var createdWorkspaces = 0
+    /// paneごとのCLI種別。指定が無ければ `provider` を使う
+    var providersByPane: [String: String] = [:]
+    /// paneごとのagent session。世代や置き換えの検証で使う
+    var sessionsByPane: [String: String] = [:]
+    func setProviders(_ value: [String: String]) { providersByPane = value }
+    func setSessions(_ value: [String: String]) { sessionsByPane = value }
     var promptFailure = false
     var startFailure = false
     var beforePrompt: (@Sendable () throws -> Void)?
@@ -248,7 +256,12 @@ actor FakeHerdr {
         case ["agent", "start"] where startFailure:
             startFailure = false
             return AIProcessOutput(status: 1, stdout: Data(), stderr: Data("{\"error\":{\"code\":\"invalid_agent_name\"}}".utf8))
-        case ["workspace", "create"]: response = ["workspace": ["workspace_id": "w"], "root_pane": ["pane_id": "p"]]
+        case ["workspace", "create"]:
+            createdWorkspaces += 1
+            // 1つ目は既存テストと同じ固定値。2つ目からチャネルを見分けられる別IDを返す。
+            let workspace = createdWorkspaces == 1 ? "w" : "w\(createdWorkspaces)"
+            let pane = createdWorkspaces == 1 ? "p" : "w\(createdWorkspaces):p1"
+            response = ["workspace": ["workspace_id": workspace], "root_pane": ["pane_id": pane]]
         case ["agent", "list"]:
             response = ["agents": listed.map { entry -> [String: Any] in
                 var agent: [String: Any] = ["pane_id": entry.pane, "workspace_id": entry.workspace,
@@ -264,10 +277,12 @@ actor FakeHerdr {
                 return AIProcessOutput(status: 1, stdout: Data(), stderr: Data("{\"error\":{\"code\":\"agent_not_found\"}}".utf8))
             }
             let pane = args.count > 2 ? args[2] : "p"
-            let workspace = listed.first { $0.pane == pane }?.workspace ?? "w"
-            var agent: [String: Any] = ["workspace_id": workspace, "pane_id": pane, "agent": provider,
+            let workspace = listed.first { $0.pane == pane }?.workspace
+                ?? (pane.contains(":") ? String(pane.prefix(while: { $0 != ":" })) : "w")
+            var agent: [String: Any] = ["workspace_id": workspace, "pane_id": pane,
+                                        "agent": providersByPane[pane] ?? provider,
                                         "agent_status": status, "interactive_ready": true]
-            if let session { agent["agent_session"] = ["value": session] }
+            if let value = sessionsByPane[pane] ?? session { agent["agent_session"] = ["value": value] }
             response = ["agent": agent]
         case ["agent", "prompt"]:
             try beforePrompt?()
