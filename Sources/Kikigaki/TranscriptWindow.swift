@@ -437,7 +437,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
                 y: compactFooter.more.bounds.maxY + menu.size.height + 6)
     }
     private var canFireAutomatic: Bool {
-        snapshot.aiSchedule.active && snapshot.aiSchedule.nextFire != nil && snapshot.aiSchedule.skipReason == nil
+        snapshot.aiSchedule.active && snapshot.aiSchedule.nextFire != nil && snapshot.aiSchedule.canFireNow
+            && snapshot.ai?.isPreparing != true
             && snapshot.ai?.conversation?.questions.contains { $0.isAwaitingResult } != true
     }
     func robotMenu() -> NSMenu {

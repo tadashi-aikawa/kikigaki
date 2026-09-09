@@ -72,20 +72,22 @@ final class AIRobotButton: AIFooterButton {
     private(set) var displayText = ""
     private(set) var eyeOffset: CGFloat = 0
     private(set) var isRunning = false
+    private(set) var isPreparing = false
     var statusFont: NSFont { AIFooterMetrics.labelFont }
     var eyeColor: NSColor { isRunning && isEnabled ? .white : isEnabled ? tint : Washi.muted }
     var headFrame: NSRect { NSRect(x: bounds.midX - 11.5, y: AIFooterMetrics.iconCenterY - 8.5, width: 23, height: 17) }
     init() { super.init(symbol: "", label: "AIの操作") }
     required init?(coder: NSCoder) { fatalError() }
-    func update(schedule: AIScheduleViewState, waiting: Bool, animate: Bool, now: Date) {
+    func update(schedule: AIScheduleViewState, waiting: Bool, preparing: Bool = false, animate: Bool, now: Date) {
         isRunning = waiting
-        tint = waiting || schedule.active ? Washi.red : Washi.muted
+        isPreparing = preparing && !waiting
+        tint = waiting || preparing || schedule.active ? Washi.red : Washi.muted
         let remaining = max(0, Int(ceil(schedule.nextFire?.timeIntervalSince(now) ?? 0)))
         let countdown = String(format: "%d:%02d", remaining / 60, remaining % 60)
-        displayText = waiting ? "実行中" : !schedule.active ? "" :
-            schedule.skipReason != nil || schedule.nextFire == nil ? "—" : countdown
-        eyeOffset = waiting && animate ? (Int(now.timeIntervalSince1970) % 2 == 0 ? -1.5 : 1.5) : 0
-        let status = waiting ? "AI実行中・返事待ち" : !schedule.active ? "クリックで自動実行・手動実行を選択" :
+        displayText = waiting ? "実行中" : preparing ? "準備中" : !schedule.active ? "" :
+            !schedule.canCountDown || schedule.nextFire == nil ? "—" : countdown
+        eyeOffset = (waiting || preparing) && animate ? (Int(now.timeIntervalSince1970) % 2 == 0 ? -1.5 : 1.5) : 0
+        let status = waiting ? "AI実行中・返事待ち" : preparing ? "AI送信の準備中" : !schedule.active ? "クリックで自動実行・手動実行を選択" :
             schedule.skipReason ?? (schedule.nextFire == nil ? "最終送信を待っています" : "次 " + countdown)
         toolTip = isEnabled ? [status, schedule.active ? schedule.destination.map { $0 + "へ" } : nil,
             waiting ? schedule.skipReason : nil].compactMap { $0 }.joined(separator: " · ") : "AI連携が設定されていません"
@@ -181,7 +183,7 @@ final class AICompactFooter: NSStackView {
     }
     func updateVisibility() {
         let waiting = state.ai?.conversation?.questions.contains { $0.isAwaitingResult } == true
-        let needsTimer = displayed && (waiting ? !reduceMotion : state.aiSchedule.active)
+        let needsTimer = displayed && (waiting || state.ai?.isPreparing == true ? !reduceMotion : state.aiSchedule.active)
         if needsTimer && timer == nil {
             let value = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
                 MainActor.assumeIsolated {
@@ -209,6 +211,7 @@ final class AICompactFooter: NSStackView {
     override func viewDidUnhide() { super.viewDidUnhide(); updateVisibility() }
     func refresh(now: Date) {
         let waiting = state.ai?.conversation?.questions.contains { $0.isAwaitingResult } == true
-        robot.update(schedule: state.aiSchedule, waiting: waiting, animate: !reduceMotion && displayed, now: now)
+        robot.update(schedule: state.aiSchedule, waiting: waiting, preparing: state.ai?.isPreparing == true,
+                     animate: !reduceMotion && displayed, now: now)
     }
 }

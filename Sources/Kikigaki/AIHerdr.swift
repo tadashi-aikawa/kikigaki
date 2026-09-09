@@ -117,7 +117,17 @@ struct AIHerdr: Sendable {
             ? ["pane", "run", target.paneID, AIShell.command([executable.path] + arguments)]
             : ["agent", "start", try Self.agentName(generation: generation), "--kind", target.provider.rawValue,
                "--pane", target.paneID, "--timeout", "15000", "--"] + arguments
-        _ = try await call(args, as: Empty.self, timeout: 20)
+        // 新規workspaceのシェル初期化中はagent_pane_busyになることがある。
+        // herdr 0.8.2はこのエラーを入力前に返す。同じ起動名・同じペインだけを
+        // 最長約2秒待つ。入力済みのagent_not_readyや通信失敗は再送しない。
+        let maxAttempts = 20
+        for attempt in 0..<maxAttempts {
+            try Task.checkCancellation()
+            do { _ = try await call(args, as: Empty.self, timeout: 20); return }
+            catch AIHerdrError.server("agent_pane_busy") where !customCommand && attempt + 1 < maxAttempts {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+        }
     }
     func observe(_ target: AIHerdrConnection) async throws -> AIHerdrObservation {
         let agent = try await call(["agent", "get", target.paneID], as: AgentReply.self).agent

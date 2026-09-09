@@ -10,6 +10,8 @@ struct AIScheduleViewState {
     var nextFire: Date?
     var interval: TimeInterval = 180
     var skipReason: String?
+    var canCountDown = true
+    var canFireNow = true
     var destination: String?
     private static let clock: DateFormatter = {
         let value = DateFormatter(); value.locale = Locale(identifier: "en_US_POSIX"); value.dateFormat = "HH:mm"; return value
@@ -26,6 +28,8 @@ struct AIScheduleViewState {
         }
         active = true
         nextFire = schedule.nextFire
+        canCountDown = schedule.phase == .running && availability != .disconnected
+        canFireNow = schedule.phase == .running && availability == .ready
         interval = schedule.options?.interval ?? 180
         switch availability {
         case .awaitingResult: skipReason = "返事待ちでスキップ中"

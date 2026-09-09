@@ -89,6 +89,8 @@ struct AIViewState {
     var connection: AIConnectionStatus = .unknown
     var warning: String?
     var progress: String?
+    /// 確定待ち・起動・接続からCLI入力試行直前まで。単なる準備済みセッションは含めない。
+    var isPreparing = false
     var unconfirmed: Set<UUID> = []
     var canSubmit = true
     var submissionID: UUID?

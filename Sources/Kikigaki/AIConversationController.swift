@@ -360,7 +360,8 @@ final class AIConversationController {
         }
     }
 
-    func send(_ supplied: AIRequest, config: ResolvedAIConfig) async throws {
+    func send(_ supplied: AIRequest, config: ResolvedAIConfig,
+              willBeginSending: (() throws -> Void)? = nil, didBeginSending: ((Date) -> Void)? = nil) async throws {
         let channel = try channel(config.slot)
         guard allowsSending, !channel.isSending, !channel.connecting, channel.inputAttempted, channel.configuration == config,
               let stored = conversation.questions.first(where: { $0.request.id == supplied.id }), stored.request == supplied,
@@ -375,9 +376,13 @@ final class AIConversationController {
         do {
             try await herdr.prompt(target, text: text) { @MainActor [self] in
                 // 最後の生存確認中の取消まで反映し、prompt直前に送信試行を保存する。
+                try willBeginSending?()
+                let sentAt = Date()
                 var next = conversation
-                try next.update(stored.request.id) { try $0.beginSending(at: Date()) }
+                try next.update(stored.request.id) { try $0.beginSending(at: sentAt) }
                 try commit(next)
+                didBeginSending?(sentAt)
+                onChange?()
             }
             var next = conversation
             try next.update(stored.request.id) { try $0.submitted() }

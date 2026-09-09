@@ -13,11 +13,11 @@ import KikigakiCore
         ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: root).aiProfiles
     }
 
-    private func session(_ root: URL, profiles: [ResolvedAIConfig], fake: FakeHerdr) -> MeetingSession {
+    private func session(_ root: URL, profiles: [ResolvedAIConfig], fake: FakeHerdr, recordedSamples: Int = 0) -> MeetingSession {
         let store = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
         var config = ResolvedConfig(config: KikigakiConfig(), home: root)
         config.aiProfiles = profiles
-        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config, aiStore: store)
+        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config, aiStore: store, recordedSamples: recordedSamples)
         session.automaticHelper = URL(fileURLWithPath: "/bin/echo")
         return session
     }
@@ -101,7 +101,8 @@ import KikigakiCore
         autoPrompt = "議事録を更新してください"
         autoIntervalMinutes = 5
         """)
-        let session = session(root, profiles: list, fake: fake)
+        let session = session(root, profiles: list, fake: fake, recordedSamples: 16_000)
+        session.setScheduleTranscriptForTesting("開始時の発話")
         session.startAutomaticSchedule()
         #expect(session.snapshot.aiSchedule.active)
         // 自動は2つ目、手動は既定の1つ目のまま。
@@ -110,6 +111,9 @@ import KikigakiCore
         #expect(session.lastScheduleOptions?.prompt == "議事録を更新してください")
         #expect(session.lastScheduleOptions?.interval == 300)
         #expect(session.snapshot.aiSchedule.text.contains("議事録へ"))
+        await session.submissionTaskForTesting?.value
+        #expect(session.aiRecord?.controller.conversation.questions.first?.state == .submitted)
+        #expect(await fake.commands.contains { $0.prefix(2) == ["agent", "prompt"] })
         session.stopAISchedule()
         #expect(!session.snapshot.aiSchedule.active)
     }

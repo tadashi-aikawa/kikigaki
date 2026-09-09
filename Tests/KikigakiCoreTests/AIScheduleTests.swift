@@ -4,7 +4,7 @@ import KikigakiCore
 
 @Suite struct AIScheduleTests {
     private let now = Date(timeIntervalSince1970: 1_000)
-    @Test func 即時実行は送った時点から期限を打ち直しスキップは期限を変えない() throws {
+    @Test func 即時実行は変更なしでも操作から一間隔待ち送信不可なら期限を保つ() throws {
         var state = try started()
         let immediate = now.addingTimeInterval(42)
         for availability in [AIScheduleAvailability.awaitingResult, .busy, .confirmation, .disconnected] {
@@ -12,7 +12,7 @@ import KikigakiCore
             #expect(state.nextFire == now.addingTimeInterval(180))
         }
         #expect(state.fireNow(now: immediate, availability: .ready, hasChanges: false) == .skipped(.noChange))
-        #expect(state.nextFire == now.addingTimeInterval(180))
+        #expect(state.nextFire == now.addingTimeInterval(222))
         #expect(state.fireNow(now: immediate, availability: .ready, hasChanges: true) == .send(final: false))
         #expect(state.nextFire == now.addingTimeInterval(222))
         #expect(state.tick(now: now.addingTimeInterval(180), availability: .ready, hasChanges: true) == .none)
@@ -25,6 +25,23 @@ import KikigakiCore
         var state = AIScheduleState(meetingID: UUID())
         try state.start(options: .init(prompt: "議事録を更新", interval: 180, workAllowed: false, sendFinal: final), now: now, runID: UUID())
         return state
+    }
+
+    @Test func CLI入力時刻から次の期限を数え旧実行回の後着通知を無視する() throws {
+        var state = try started()
+        let request = UUID(), run = try #require(state.runID), meeting = state.meetingID
+        state.register(requestID: request, meetingID: meeting, runID: run)
+        state.didBeginSending(requestID: request, meetingID: meeting, runID: run, at: now.addingTimeInterval(25))
+        #expect(state.nextFire == now.addingTimeInterval(205))
+        state.stop()
+        try state.start(options: .init(prompt: "新しい回"), now: now.addingTimeInterval(30), runID: UUID())
+        for (id, meetingID, runID) in [(request, meeting, run), (UUID(), meeting, state.runID!), (request, UUID(), state.runID!)] {
+            state.didBeginSending(requestID: id, meetingID: meetingID, runID: runID, at: now.addingTimeInterval(80))
+            #expect(state.nextFire == now.addingTimeInterval(210))
+        }
+        state.stop()
+        state.didBeginSending(requestID: request, meetingID: meeting, runID: run, at: now)
+        #expect(state.nextFire == nil)
     }
 
     @Test func 期限と遅延でも一度だけ判定し元の周期へ戻る() throws {

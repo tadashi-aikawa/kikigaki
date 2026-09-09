@@ -53,14 +53,23 @@ public struct AIScheduleState: Sendable {
     /// 新会議は新しい値を作る。終了・利用者の停止は待機中の最終回も破棄する。
     public mutating func stop() { phase = .stopped; nextFire = nil }
 
-    /// 利用者の即時実行。送れる場合だけ、元の周期を捨てて今から1間隔にする。
+    /// 開始・利用者の即時実行。変更なしでも操作時点から1間隔待つ。
     public mutating func fireNow(now: Date, availability: AIScheduleAvailability, hasChanges: Bool) -> Effect {
         guard phase == .running, let options, now.timeIntervalSince1970.isFinite,
               now.addingTimeInterval(options.interval).timeIntervalSince1970.isFinite else { return .none }
         guard availability == .ready else { return .skipped(.unavailable) }
-        guard hasChanges else { return .skipped(.noChange) }
         nextFire = now.addingTimeInterval(options.interval)
+        guard hasChanges else { return .skipped(.noChange) }
         return .send(final: false)
+    }
+
+    /// 接続待ちを周期に含めず、実際のCLI入力試行から次の期限を数える。
+    /// 登録前・別会議・前回実行の後着通知では期限を変えない。最終回は期限なし。
+    public mutating func didBeginSending(requestID: UUID, meetingID: UUID, runID: UUID, at now: Date) {
+        guard phase == .running, self.meetingID == meetingID, self.runID == runID,
+              requests.contains(requestID), let options, now.timeIntervalSince1970.isFinite,
+              now.addingTimeInterval(options.interval).timeIntervalSince1970.isFinite else { return }
+        nextFire = now.addingTimeInterval(options.interval)
     }
 
     public mutating func tick(now: Date, availability: AIScheduleAvailability, hasChanges: Bool) -> Effect {

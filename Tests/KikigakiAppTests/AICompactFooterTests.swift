@@ -38,7 +38,7 @@ import KikigakiCore
         window.onFireScheduleAI = { fired = true }
         if let index = menu.items.firstIndex(where: { $0.title == "今すぐ送る" }) { menu.performActionForItem(at: index) }
         #expect(fired)
-        state.aiSchedule.skipReason = "返事待ちでスキップ中"; window.apply(state)
+        state.aiSchedule.skipReason = "返事待ちでスキップ中"; state.aiSchedule.canFireNow = false; window.apply(state)
         #expect(window.footerMenu().items.first { $0.title == "今すぐ送る" }?.isEnabled == false)
         #expect(menu.items.filter { ["会話をコピー", "AIセッションを作り直す", "保存を再試行"].contains($0.title) }.allSatisfy { !$0.isEnabled })
     }

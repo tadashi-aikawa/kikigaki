@@ -100,6 +100,9 @@ final class MeetingSession {
     func updateScheduleDraft(_ value: String) { scheduleDraft = value }
     private enum AIPhase { case confirmationWait, preparingAndSending }
     private var aiPhases: [Int: AIPhase] = [:]
+    private var pendingAIDispatch: [Int: UUID] = [:]
+    /// requestの取消対象を、その送信を始めた所有者へ結び付ける。
+    private var aiRequestOwners: [UUID: UUID] = [:]
     private var aiProgresses: [Int: String] = [:]
     private var aiWarning: String?
     private(set) var aiDraft = ""
@@ -169,6 +172,8 @@ final class MeetingSession {
         meetingAI = meetingConfig.aiProfiles.first; scheduleAI = meetingConfig.aiProfiles.first
         boundPrepared = [:]
         aiDraft = ""; aiWarning = nil; aiCompleted = nil
+        pendingAIDispatch = [:]
+        aiRequestOwners = [:]
         aiWorkAllowed = meetingConfig.ai?.allowWork ?? true
     }
 
@@ -684,6 +689,7 @@ final class MeetingSession {
             state.connection = connections[slot] ?? .unknown
             state.warning = aiWarning ?? aiRecord?.saveWarning ?? controller?.warning
             state.progress = aiProgresses[slot]
+            state.isPreparing = !pendingAIDispatch.isEmpty
             let unconfirmed = controller?.conversation.questions.filter { controller!.isReturnUnconfirmed($0) } ?? []
             state.unconfirmed = Set(unconfirmed.map { $0.request.id })
             state.canSubmit = canSubmits[slot] ?? true
@@ -748,7 +754,10 @@ final class MeetingSession {
         } ?? false
         guard aiSubmissionTriggers[slot] == .scheduled, aiTasks[slot] != nil, !awaiting else { return }
         if aiPhases[slot] == .confirmationWait || aiRecord?.controller.isSending == true { cancelAIPreparation(slot: slot) }
-        else { cancelledAutomaticOwners[slot] = aiSubmissionOwners[slot] }
+        else {
+            cancelledAutomaticOwners[slot] = aiSubmissionOwners[slot]
+            pendingAIDispatch[slot] = nil
+        }
     }
 
     func cancelAIPreparation(slot: Int? = nil) {
@@ -757,6 +766,7 @@ final class MeetingSession {
             aiSubmissionOwners[target] = UUID(); aiSubmissionTriggers[target] = nil
             aiTasks[target]?.cancel(); aiTasks[target] = nil
             aiPhases[target] = nil; aiProgresses[target] = nil
+            pendingAIDispatch[target] = nil
         }
         guard let controller = aiRecord?.controller else { return }
         for q in controller.conversation.questions where q.state == .prepared {
@@ -766,7 +776,18 @@ final class MeetingSession {
         }
     }
 
-    func cancelAI(_ id: UUID) { do { try aiRecord?.controller.cancel(id) } catch { aiWarning = "取消を保存できません" }; emit() }
+    func cancelAI(_ id: UUID) {
+        do {
+            let wasPrepared = aiRecord?.controller.conversation.questions.first(where: { $0.request.id == id })?.state == .prepared
+            let owner = aiRequestOwners[id]
+            try aiRecord?.controller.cancel(id)
+            if wasPrepared, let owner, let question = aiRecord?.controller.conversation.questions.first(where: { $0.request.id == id }) {
+                let slot = question.request.envelope.participant.profileSlot ?? aiRecord?.controller.defaultSlot ?? 1
+                if pendingAIDispatch[slot] == owner { pendingAIDispatch[slot] = nil }
+            }
+        } catch { aiWarning = "取消を保存できません" }
+        emit()
+    }
     func readAI(_ id: UUID) { do { try aiRecord?.controller.markRead(id) } catch { aiWarning = "既読を保存できません" }; emit() }
     func recreateAI() {
         // 作り直した接続は準備済みのものではない。以前の表題を残さない。
@@ -817,6 +838,7 @@ final class MeetingSession {
         let workAllowed = suppliedWorkAllowed ?? aiWorkAllowed
         let owner = UUID(), scheduleRun = aiSchedule?.runID
         aiSubmissionOwners[slot] = owner; aiSubmissionTriggers[slot] = trigger
+        pendingAIDispatch[slot] = owner
         if trigger == nil { aiDraft = question; aiCompleted = nil }
         aiWarning = nil; aiProgresses[slot] = "送信の準備中"
         aiPhases[slot] = .confirmationWait
@@ -824,8 +846,10 @@ final class MeetingSession {
             guard let self else { return }
             var request: AIRequest?
             defer {
+                if let request { aiRequestOwners[request.id] = nil }
                 if meetingID == handoff.meetingID, aiSubmissionOwners[slot] == owner {
                     aiTasks[slot] = nil; aiPhases[slot] = nil; aiProgresses[slot] = nil; aiSubmissionTriggers[slot] = nil
+                    if pendingAIDispatch[slot] == owner { pendingAIDispatch[slot] = nil }
                     observeAIScheduleResults(); emit()
                 }
             }
@@ -860,6 +884,7 @@ final class MeetingSession {
                     capturedAt: capturedAt, cutoff: cutoff, tail: capture.tail, config: config, helper: helper, parent: parent, full: full,
                     workAllowed: workAllowed, voiceUtteranceStart: capture.voiceUtteranceStart, trigger: trigger)
                 request = fixed
+                aiRequestOwners[fixed.id] = owner
                 if trigger == .scheduled, let scheduleRun {
                     aiSchedule?.register(requestID: fixed.id, meetingID: meetingID, runID: scheduleRun)
                 }
@@ -873,10 +898,24 @@ final class MeetingSession {
                 let format = DateFormatter(); format.dateFormat = "HH:mm"
                 try await record.controller.connect(config: config, label: "KIKIGAKI \(config.participantName) \(format.string(from: startedAt))", executable: executable, arguments: arguments)
                 try Task.checkCancellation()
-                guard handoff.meetingID == meetingID else { throw CancellationError() }
+                guard handoff.meetingID == meetingID, aiSubmissionOwners[slot] == owner else { throw CancellationError() }
                 guard cancelledAutomaticOwners[slot] != owner else { throw CancellationError() }
                 aiProgresses[slot] = "送信中"; emit()
-                try await record.controller.send(fixed, config: config)
+                try await record.controller.send(fixed, config: config, willBeginSending: { [self] in
+                    guard self.handoff.meetingID == meetingID, self.aiSubmissionOwners[slot] == owner,
+                          self.cancelledAutomaticOwners[slot] != owner,
+                          trigger != .scheduled || self.aiSchedule?.runID == scheduleRun else { throw CancellationError() }
+                }, didBeginSending: { [self] sentAt in
+                    guard self.handoff.meetingID == meetingID, self.aiSubmissionOwners[slot] == owner else { return }
+                    if self.pendingAIDispatch[slot] == owner { self.pendingAIDispatch[slot] = nil }
+                    if trigger == .scheduled, let scheduleRun {
+                        self.aiSchedule?.didBeginSending(requestID: fixed.id, meetingID: meetingID, runID: scheduleRun, at: sentAt)
+                        if CommandLine.arguments.contains("--replay"), ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_AUTO"] != nil {
+                            FileHandle.standardError.write(Data("[schedule-dispatch] at=\(sentAt.timeIntervalSince1970) next=\(self.aiSchedule?.nextFire?.timeIntervalSince1970 ?? 0) request=\(fixed.id)\n".utf8))
+                        }
+                    }
+                    self.emit()
+                })
                 if trigger == nil { aiDraft = ""; aiCompleted = fixed.id }
             } catch is CancellationError {
                 if let request { try? aiStore.records[meetingID]?.controller.cancel(request.id) }
@@ -1057,7 +1096,7 @@ extension MeetingSession {
         }
         RunLoop.main.add(timer, forMode: .common)
         aiScheduleTimer = timer
-        emit()
+        evaluateAISchedule(now: now, immediately: true)
     }
 
     func stopAISchedule() {
@@ -1127,7 +1166,7 @@ extension MeetingSession {
         if CommandLine.arguments.contains("--replay"), ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_AUTO"] != nil,
            let effect, effect != .none {
             let count = aiRecord?.controller.conversation.questions.count ?? 0
-            FileHandle.standardError.write(Data("[schedule] \(effect) availability=\(availability) changed=\(changed) requests=\(count)\n".utf8))
+            FileHandle.standardError.write(Data("[schedule] \(effect) availability=\(availability) changed=\(changed) requests=\(count) at=\(now.timeIntervalSince1970) next=\(aiSchedule?.nextFire?.timeIntervalSince1970 ?? 0) immediate=\(immediately)\n".utf8))
         }
         switch effect {
         case .send:

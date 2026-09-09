@@ -7,6 +7,29 @@ import KikigakiAIIO
 import TOMLKit
 
 @Suite struct AITransportTests {
+    @Test(arguments: ["agent_pane_busy", "agent_not_ready", "agent_start_input_failed"])
+    func 起動前のシェル準備待ちだけ同じ起動を再試行する(code: String) async throws {
+        actor Attempts {
+            var calls: [[String]] = []
+            func run(_ args: [String], code: String) throws -> AIProcessOutput {
+                calls.append(args)
+                if calls.count == 1 {
+                    return AIProcessOutput(status: 1, stdout: Data(), stderr: try JSONSerialization.data(withJSONObject: ["error": ["code": code]]))
+                }
+                return AIProcessOutput(status: 0, stdout: Data("{\"result\":{}}".utf8), stderr: Data())
+            }
+        }
+        let attempts = Attempts()
+        let adapter = AIHerdr(run: { args, _ in try await attempts.run(args, code: code) }, log: { _ in })
+        do {
+            try await adapter.start(.init(workspaceID: "w", paneID: "p", provider: .codex),
+                executable: URL(fileURLWithPath: "/tmp/codex"), arguments: [], customCommand: false)
+            #expect(code == "agent_pane_busy")
+        } catch { #expect(error as? AIHerdrError == .server(code) && code != "agent_pane_busy") }
+        let calls = await attempts.calls
+        #expect(calls.count == (code == "agent_pane_busy" ? 2 : 1))
+        #expect(calls.allSatisfy { $0 == calls.first })
+    }
     @Test(arguments: [1, 2, 100, Int.max]) func agent名は全世代でherdrの32文字制約を満たす(generation: Int) throws {
         let name = try AIHerdr.agentName(generation: generation)
         #expect(name.utf8.count <= 32)

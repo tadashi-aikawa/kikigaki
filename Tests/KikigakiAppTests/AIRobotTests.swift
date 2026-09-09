@@ -71,7 +71,7 @@ import KikigakiCore
         #expect(footer.robot.displayText == "2:30" && footer.timerRunning)
         state.aiSchedule.skipReason = "差分なしでスキップ中"
         footer.update(state, reduceMotion: true, now: now)
-        #expect(footer.robot.displayText == "—" && footer.robot.toolTip == "差分なしでスキップ中 · 議事録へ")
+        #expect(footer.robot.displayText == "2:30" && footer.robot.toolTip == "差分なしでスキップ中 · 議事録へ")
         state = try waitingState()
         footer.update(state, reduceMotion: false, now: now)
         #expect(footer.robot.displayText == "実行中" && footer.timerRunning && footer.robot.eyeOffset == -1.5)
@@ -152,5 +152,80 @@ import KikigakiCore
         #expect(face.midY == badge.midY)
         #expect(footer.robot.headFrame.maxY + 7 <= footer.robot.bounds.height)
         #expect(AIFooterMetrics.labelY == 2)
+    }
+
+    @Test func 準備中とスキップ理由別の表示を分けてタイマーを片付ける() throws {
+        let footer = AICompactFooter(visibility: { true })
+        let now = Date(timeIntervalSince1970: 1000)
+        var schedule = AIScheduleState(meetingID: UUID())
+        try schedule.start(options: .init(prompt: "更新"), now: now, runID: UUID())
+        var state = SessionSnapshot(ai: AIViewState(), state: .recording)
+        for availability in [AIScheduleAvailability.ready, .busy, .confirmation, .disconnected] {
+            state.aiSchedule = AIScheduleViewState(schedule: schedule, availability: availability, hasChanges: false)
+            footer.update(state, reduceMotion: true, now: now)
+            #expect(footer.robot.displayText == (availability == .disconnected ? "—" : "3:00"))
+            #expect(footer.robot.toolTip?.contains(state.aiSchedule.skipReason!) == true)
+        }
+        schedule.recordingStopped()
+        state.aiSchedule = AIScheduleViewState(schedule: schedule)
+        footer.update(state, reduceMotion: false, now: now)
+        #expect(footer.robot.displayText == "—")
+        state.aiSchedule = AIScheduleViewState()
+        state.ai?.isPreparing = true
+        footer.update(state, reduceMotion: false, now: now)
+        #expect(footer.robot.displayText == "準備中" && footer.timerRunning && !footer.robot.isRunning)
+        footer.refresh(now: now.addingTimeInterval(1))
+        #expect(footer.robot.eyeOffset == 1.5)
+        footer.update(state, reduceMotion: true, now: now)
+        #expect(footer.robot.eyeOffset == 0 && !footer.timerRunning)
+        state = try waitingState(); state.ai?.isPreparing = true
+        footer.update(state, reduceMotion: false, now: now)
+        #expect(footer.robot.displayText == "実行中" && !footer.robot.isPreparing)
+        footer.update(SessionSnapshot(), reduceMotion: true)
+        #expect(!footer.timerRunning)
+    }
+
+    @Test func 自動の4状態と目の2コマを600幅の実画面で撮る() throws {
+        guard let output = ProcessInfo.processInfo.environment["KIKIGAKI_STATE_CAPTURE"] else { return }
+        _ = NSApplication.shared
+        let controller = TranscriptWindowController(shouldReduceMotion: { true })
+        let window = try #require(controller.window)
+        window.setFrameAutosaveName("")
+        window.setContentSize(NSSize(width: 600, height: 578))
+        window.setFrameOrigin(NSPoint(x: 20000, y: 20000)); window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        let now = Date(timeIntervalSince1970: 1000)
+        for (name, active, preparing, running, phase) in [
+            ("off", false, false, false, 0), ("countdown", true, false, false, 0),
+            ("preparing-0", true, true, false, 0), ("preparing-1", true, true, false, 1),
+            ("running-0", true, false, true, 0), ("running-1", true, false, true, 1)
+        ] {
+            var state = try waitingState()
+            if !running {
+                var conversation = try #require(state.ai?.conversation)
+                let request = try #require(conversation.questions.first?.request)
+                let event = try AIReceiveEvent(request: request, kind: .answered, recordedAt: Date(),
+                    body: "決定事項\n\n- 会場は本社の大会議室\n- 担当は田中さん\n\n次回までに見積もりを確認します。")
+                try conversation.update(request.id) { _ = try $0.receive(event, at: Date(), order: 1) }
+                state.ai?.conversation = conversation
+            }
+            state.ai?.isPreparing = preparing
+            state.aiSchedule.active = active; state.aiSchedule.nextFire = active ? now.addingTimeInterval(150) : nil
+            state.timeline = .init(startedAt: Date(timeIntervalSince1970: 1_788_759_600))
+            state.elapsed = 754
+            state.utterances = (0..<40).map { index in
+                .init(speaker: index % 3, start: Double(index * 15), end: Double(index * 15 + 10),
+                      text: index % 2 == 0 ? "会場は本社の大会議室にしましょう。担当と期限も確認します。" : "見積もりを金曜日までに共有します。次回は進捗を確認しましょう。")
+            }
+            controller.apply(state)
+            controller.compactFooter.robot.update(schedule: state.aiSchedule, waiting: running, preparing: preparing,
+                animate: true, now: now.addingTimeInterval(Double(phase)))
+            let content = try #require(window.contentView)
+            content.layoutSubtreeIfNeeded(); content.displayIfNeeded()
+            let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: bitmap)
+            try #require(bitmap.representation(using: .png, properties: [:])).write(to:
+                URL(fileURLWithPath: output).appendingPathComponent("\(name)-600.png"))
+        }
     }
 }

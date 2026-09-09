@@ -9,10 +9,13 @@ import KikigakiAIIO
         var action: (() -> Void)?
         func run() { action?() }
     }
-    private func session(_ root: URL, fake: FakeHerdr) throws -> MeetingSession {
+    private func session(_ root: URL, fake: FakeHerdr, failLaunch: Bool = false) throws -> MeetingSession {
         var config = ResolvedConfig(config: try ConfigLoader.parse(toml: ""), home: root)
         config.ai = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path), home: root)
-        let store = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
+        let store = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { args, timeout in
+            if failLaunch && args.prefix(2) == ["workspace", "create"] { throw AIHerdrError.notReady }
+            return try await fake.run(args, timeout)
+        }) })
         let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config, aiStore: store, recordedSamples: 16_000)
         session.setScheduleTranscriptForTesting("試行日は金曜日です")
         return session
@@ -27,6 +30,125 @@ import KikigakiAIIO
         controller.scan()
     }
     private func settle(_ session: MeetingSession) async { await session.submissionTaskForTesting?.value }
+
+    @Test func 古い依頼の取消通知中に始めた同じ枠の準備中を消さない() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = try session(root, fake: FakeHerdr())
+        let helper = URL(fileURLWithPath: "/bin/echo")
+        var replaced = false
+        session.submitAI(question: "古い依頼", full: false, parent: nil, helper: helper, launch: { _, _, controller in
+            let old = try #require(controller.conversation.questions.last?.request.id)
+            session.onChange = { snapshot in
+                guard snapshot.ai?.conversation?.questions.first(where: { $0.request.id == old })?.state == .cancelled else { return }
+                session.onChange = nil
+                session.cancelAIPreparation()
+                session.submitAI(question: "新しい依頼", full: false, parent: nil, helper: helper)
+                replaced = true
+                #expect(session.snapshot.ai?.isPreparing == true)
+            }
+            session.cancelAI(old)
+            #expect(replaced && session.snapshot.ai?.isPreparing == true)
+            session.cancelAIPreparation()
+            throw CancellationError()
+        })
+        await settle(session)
+        #expect(replaced)
+    }
+
+    @Test func 開始操作の直後に期限を待たず本番経路で送る() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), session = try session(root, fake: fake)
+        defer { session.stopAISchedule() }
+        try session.startAISchedule(options: .init(prompt: "今すぐ更新", sendFinal: false), helper: URL(fileURLWithPath: "/bin/echo"))
+        await settle(session)
+        #expect(session.aiRecord?.controller.conversation.questions.first?.state == .submitted)
+        #expect(await fake.commands.contains { $0.prefix(2) == ["agent", "prompt"] })
+        let sentAt = try #require(session.aiRecord?.controller.conversation.questions.first?.sendAttemptedAt)
+        #expect(session.snapshot.aiSchedule.nextFire == sentAt.addingTimeInterval(180))
+        #expect(session.snapshot.ai?.isPreparing == false)
+    }
+
+    @Test func 空会話の開始と今すぐ送るは送らず操作から一間隔カウントダウンする() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        var config = ResolvedConfig(config: try ConfigLoader.parse(toml: ""), home: root)
+        config.ai = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path), home: root)
+        let fake = FakeHerdr()
+        let store = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
+        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config, aiStore: store)
+        defer { session.stopAISchedule() }
+        let now = Date()
+        try session.startAISchedule(options: .init(prompt: "更新", sendFinal: false), helper: URL(fileURLWithPath: "/bin/echo"), now: now)
+        await settle(session)
+        #expect(session.aiRecord == nil && session.snapshot.ai?.isPreparing == false)
+        #expect(session.snapshot.aiSchedule.nextFire == now.addingTimeInterval(180))
+        let footer = AICompactFooter(visibility: { false })
+        footer.update(session.snapshot, reduceMotion: true, now: now)
+        #expect(footer.robot.displayText == "3:00")
+        let window = TranscriptWindowController()
+        window.onFireScheduleAI = { session.fireAIScheduleNow(now: now.addingTimeInterval(42)) }
+        window.apply(session.snapshot)
+        let menu = window.robotMenu()
+        #expect(menu.items[0].isEnabled)
+        menu.performActionForItem(at: 0)
+        #expect(session.snapshot.aiSchedule.nextFire == now.addingTimeInterval(222))
+        #expect(await fake.commands.isEmpty)
+    }
+
+    @Test(arguments: [false, true])
+    func 接続中は準備中でCLI入力直前から実行中になる(manual: Bool) async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), session = try session(root, fake: fake)
+        defer { session.stopAISchedule() }
+        let footer = AICompactFooter(visibility: { true })
+        var preparedSeen = false, runningSeen = false
+        await fake.onCommand { args in
+            await MainActor.run {
+                footer.update(session.snapshot, reduceMotion: false, now: Date(timeIntervalSince1970: 1000))
+                if args.prefix(2) == ["workspace", "create"] {
+                    preparedSeen = true
+                    #expect(footer.robot.isPreparing && !footer.robot.isRunning)
+                    #expect(footer.robot.displayText == "準備中" && footer.robot.eyeColor == Washi.red)
+                    #expect(footer.robot.eyeOffset == -1.5 && footer.timerRunning)
+                }
+                if args.prefix(2) == ["agent", "prompt"] {
+                    runningSeen = true
+                    #expect(!footer.robot.isPreparing && footer.robot.isRunning)
+                    #expect(footer.robot.displayText == "実行中" && footer.robot.eyeColor == .white)
+                }
+            }
+        }
+        if manual { session.submitAI(question: "手動", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo")) }
+        else { try session.startAISchedule(options: .init(prompt: "更新", sendFinal: false), helper: URL(fileURLWithPath: "/bin/echo")) }
+        #expect(session.snapshot.ai?.isPreparing == true)
+        await settle(session)
+        #expect(preparedSeen && runningSeen)
+        footer.update(SessionSnapshot(), reduceMotion: true)
+    }
+
+    @Test(arguments: ["停止", "取消", "失敗", "再開"])
+    func 接続待ちの終了後に準備中を残さず旧実行回を送らない(operation: String) async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), session = try session(root, fake: fake, failLaunch: operation == "失敗")
+        defer { session.stopAISchedule() }
+        let restart = Date().addingTimeInterval(30)
+        await fake.onCommand { args in
+            if args.prefix(2) == ["workspace", "create"] {
+                await MainActor.run {
+                    if operation == "取消", let id = session.aiRecord?.controller.conversation.questions.first?.request.id { session.cancelAI(id) }
+                    if operation == "停止" || operation == "再開" { session.stopAISchedule() }
+                    if operation == "再開" {
+                        try? session.startAISchedule(options: .init(prompt: "次の回", sendFinal: false), helper: URL(fileURLWithPath: "/bin/echo"), now: restart)
+                    }
+                    if operation != "失敗" { #expect(session.snapshot.ai?.isPreparing == false) }
+                }
+            }
+        }
+        try session.startAISchedule(options: .init(prompt: "古い回", sendFinal: false), helper: URL(fileURLWithPath: "/bin/echo"))
+        await settle(session)
+        #expect(session.snapshot.ai?.isPreparing == false)
+        #expect(await fake.commands.filter { $0.prefix(2) == ["agent", "prompt"] }.isEmpty)
+        if operation == "再開" { #expect(session.snapshot.aiSchedule.nextFire == restart.addingTimeInterval(180)) }
+    }
 
     @Test func 範囲表示用の宛先保存失敗でも自動開始と送信を続ける() async throws {
         for failAtStart in [true, false] {
@@ -75,20 +197,24 @@ import KikigakiAIIO
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let session = try session(root, fake: FakeHerdr()), now = Date()
         defer { session.stopAISchedule() }
+        session.beginAIDraft() // 初回は手動シート中で見送り、メニューからの即時送信を単独で確認する。
         try session.startAISchedule(options: .init(prompt: "今すぐ更新", sendFinal: false),
                                     helper: URL(fileURLWithPath: "/bin/echo"), now: now)
+        session.endAIDraft()
+        session.setScheduleTranscriptForTesting("メニューから送る発話")
         let window = TranscriptWindowController()
         window.onFireScheduleAI = { session.fireAIScheduleNow(now: now.addingTimeInterval(42)) }
         window.apply(session.snapshot)
         let menu = window.robotMenu()
         menu.performActionForItem(at: try #require(menu.items.firstIndex { $0.title == "今すぐ送る" }))
         await settle(session)
-        #expect(session.snapshot.aiSchedule.nextFire == now.addingTimeInterval(222))
         let request = try #require(session.aiRecord?.controller.conversation.questions.first)
+        let deadline = try #require(request.sendAttemptedAt).addingTimeInterval(180)
+        #expect(session.snapshot.aiSchedule.nextFire == deadline)
         #expect(request.state == .submitted && request.request.trigger == .scheduled)
         session.fireAIScheduleNow(now: now.addingTimeInterval(43)); await settle(session)
         #expect(session.aiRecord?.controller.conversation.questions.count == 1)
-        #expect(session.snapshot.aiSchedule.nextFire == now.addingTimeInterval(222))
+        #expect(session.snapshot.aiSchedule.nextFire == deadline)
         await session.stop()
     }
 
