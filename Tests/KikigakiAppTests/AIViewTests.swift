@@ -247,7 +247,39 @@ import KikigakiAIIO
         #expect(window.scrollView.contentView.bounds.intersects(nextAnswer.frame))
     }
 
-    @Test(arguments: [false, true]) func 到着でスクロールせず上を読んでいる間は既読にしない(atBottom: Bool) throws {
+    @Test(arguments: [false, true]) func AIの行追加と返事到着も末尾追従し検索中だけ止める(searching: Bool) throws {
+        _ = NSApplication.shared
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
+        let first = try request(1, history: &history, root: root)
+        var conversation = AIConversation(meetingID: meeting)
+        var state = SessionSnapshot(ai: AIViewState(conversation: conversation), state: .recording,
+            utterances: (0..<40).map { Utterance(speaker: 0, start: Double($0 * 5), end: Double($0 * 5 + 2), text: "会議の発言 \($0)") },
+            timeline: MeetingTimeline(startedAt: started), elapsed: 400, markdownURL: root.appendingPathComponent("meeting.md"))
+        let window = TranscriptWindowController(shouldReduceMotion: { true })
+        window.window!.setFrameAutosaveName("")
+        window.window!.setContentSize(NSSize(width: 900, height: 700))
+        let content = window.window!.contentView!
+        window.apply(state); content.layoutSubtreeIfNeeded()
+        let document = window.transcriptDocument
+        document.reflow(anchor: .init(candidates: [], y: 0, atBottom: true))
+        if searching { window.showSearch(nil); content.layoutSubtreeIfNeeded() }
+        let before = window.scrollView.contentView.bounds.minY
+        try conversation.append(first)
+        try conversation.update(first.id) { try $0.beginSending(at: started.addingTimeInterval(330)); try $0.submitted() }
+        state.ai?.conversation = conversation
+        window.apply(state); content.layoutSubtreeIfNeeded()
+        #expect(searching ? abs(window.scrollView.contentView.bounds.minY - before) < 1 : document.anchor().atBottom)
+        _ = try conversation.receive(AIReceiveEvent(request: first, kind: .answered,
+            recordedAt: started.addingTimeInterval(401), body: String(repeating: "長い返事です。\n\n", count: 12)), at: started.addingTimeInterval(402))
+        state.ai?.conversation = conversation
+        window.apply(state); content.layoutSubtreeIfNeeded()
+        #expect(searching ? abs(window.scrollView.contentView.bounds.minY - before) < 1 : document.anchor().atBottom)
+        #expect(document.followsBottom == !searching)
+        try capture(searching ? "feedback-search-900" : "feedback-follow-900", view: content.superview!)
+    }
+
+    @Test func 末尾追従せず上を読んでいる間は到着でスクロールも既読にもしない() throws {
         _ = NSApplication.shared
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
@@ -262,7 +294,7 @@ import KikigakiAIIO
         window.window!.setFrameAutosaveName("")
         let content = window.window!.contentView!
         window.apply(state); content.layoutSubtreeIfNeeded()
-        window.scrollView.contentView.scroll(to: NSPoint(x: 0, y: atBottom ? window.transcriptDocument.frame.height - window.scrollView.contentSize.height : 100))
+        window.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 100))
         let before = window.scrollView.contentView.bounds.minY
         _ = try conversation.receive(AIReceiveEvent(request: first, kind: .needsInput, recordedAt: started.addingTimeInterval(401), body: "社内だけですか？", reason: "clarification"), at: started.addingTimeInterval(402))
         state.ai?.conversation = conversation; window.apply(state); content.layoutSubtreeIfNeeded()

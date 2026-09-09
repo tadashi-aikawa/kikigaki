@@ -232,10 +232,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         var anchor = transcriptDocument.anchor()
         let sameMeeting = previous.timeline.startedAt == snapshot.timeline.startedAt
         if !sameMeeting { rows.removeAll(); aiRows.removeAll(); aiRead.reset(); anchor = .init(candidates: [], y: 0, atBottom: true) }
-        if sameMeeting, previous.utterances == snapshot.utterances, previous.ai?.conversation != snapshot.ai?.conversation {
-            // 回答の到着だけでは末尾へ移動しない。人間の発言が増えたときの追従は従来どおり。
-            anchor = .init(candidates: anchor.candidates, y: anchor.y, atBottom: false)
-        }
+        // AIの追加・状態変化も発話と同じ追従規則にする。上へスクロール中はanchor、
+        // 検索中はfollowsBottomが末尾移動を抑え、読んでいる位置を保つ。
         // 位置はCoreの純関数が決める。AIはUtteranceにしないので併合結果へは混ぜない。
         // 世代と接続はその行を送った宛先のものを引く。選択中の宛先には依存させない。
         let ai = snapshot.ai
