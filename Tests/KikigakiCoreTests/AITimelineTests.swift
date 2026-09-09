@@ -224,4 +224,144 @@ import KikigakiCore
     @Test func 会話がなければ何も返さない() {
         #expect(AITimeline.items(conversation: nil, utterances: [voice("発話", at: 1)], timeline: timeline).isEmpty)
     }
+
+    @Test func 同時刻の返事はrequest番号ではなく記録順で並べる() throws {
+        let meeting = UUID()
+        var conversation = AIConversation(meetingID: meeting)
+        let first = try request(in: meeting, number: 1, question: "先の問い")
+        let second = try request(in: meeting, number: 2, question: "後の問い")
+        try send(&conversation, first, at: 30)
+        try send(&conversation, second, at: 31)
+        // 記録は#2が先。同じ到着時刻でも取り込んだ順を保つ。
+        try answer(&conversation, second, at: 40)
+        try answer(&conversation, first, at: 40)
+        let replies = AITimeline.items(conversation: conversation, utterances: [], timeline: timeline).filter { !$0.isSend }
+        #expect(replies.map(\.number) == [2, 1])
+    }
+
+    @Test func 送信前の失敗は同着の返事より先に置き送信時刻を表示する() throws {
+        let meeting = UUID()
+        var conversation = AIConversation(meetingID: meeting)
+        let failed = try request(in: meeting, number: 1, question: "起動前に失敗")
+        try conversation.append(failed)
+        try conversation.update(failed.id) { try $0.failBeforeSending("接続が切れています") }
+        let answered = try request(in: meeting, number: 2, question: "問い")
+        try send(&conversation, answered, at: 20)
+        try answer(&conversation, answered, at: 30)
+        let items = AITimeline.items(conversation: conversation, utterances: [], timeline: timeline).filter { !$0.isSend }
+        #expect(items.map(\.number) == [1, 2])
+        // 送信前失敗は到着時刻を持たないので、固定した確定時刻で置く。
+        #expect(items[0].date == Date(timeIntervalSince1970: 30))
+    }
+
+    @Test func 日時が単調でない発話列でも間の発話を飛び越えない() throws {
+        let meeting = UUID()
+        var conversation = AIConversation(meetingID: meeting)
+        let value = try request(in: meeting, number: 1, question: "問い")
+        try send(&conversation, value, at: 30)
+        // 手入力の併合や一時停止で、表示上の日時は必ずしも増えていかない。
+        let utterances = [voice("10秒", at: 10), voice("40秒", at: 40), voice("20秒", at: 20)]
+        let send = try #require(AITimeline.items(conversation: conversation, utterances: utterances, timeline: timeline).first)
+        #expect(send.slot == 0)   // 40秒の手前。最後の一致で探すと20秒の後ろへ飛んでしまう
+    }
+
+    @Test func 停止後に届いた返事は時計が飛んでも末尾へ置く() throws {
+        let meeting = UUID()
+        var conversation = AIConversation(meetingID: meeting)
+        let value = try request(in: meeting, number: 1, question: "問い")
+        try send(&conversation, value, at: 30)
+        try answer(&conversation, value, at: 60)
+        let typed = try Utterance(typedText: "後から見える投稿", at: 20, postedAt: Date(timeIntervalSince1970: 500))
+        let utterances = [voice("10秒", at: 10), typed]
+        let ended = Date(timeIntervalSince1970: 50)
+        let without = try #require(AITimeline.items(conversation: conversation, utterances: utterances, timeline: timeline)
+            .first { !$0.isSend })
+        #expect(without.slot == 0)
+        let after = try #require(AITimeline.items(conversation: conversation, utterances: utterances, timeline: timeline,
+                                                  endedAt: ended).first { !$0.isSend })
+        #expect(after.slot == 1)
+    }
+
+    @Test func 取消後に届いた失敗も朱の帯にし注記を併記する() throws {
+        let meeting = UUID()
+        var conversation = AIConversation(meetingID: meeting)
+        let value = try request(in: meeting, number: 1, question: "問い")
+        try send(&conversation, value, at: 30)
+        try conversation.update(value.id) { try $0.cancel(at: Date(timeIntervalSince1970: 33)) }
+        try answer(&conversation, value, at: 40, kind: .failed, body: "接続が切れました", reason: "send_failed")
+        let item = try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline)
+            .first { !$0.isSend })
+        // 取消後の結果は状態がcancelledのまま残るので、結果の種類も見ないと返事に化ける。
+        #expect(item.kind == .failure(reason: "接続が切れました"))
+        #expect(item.notes == ["取消後の返事"])
+    }
+
+    @Test func 複数の返事待ちは送信時刻の順に末尾へ並べる() throws {
+        let meeting = UUID()
+        var conversation = AIConversation(meetingID: meeting)
+        let first = try request(in: meeting, number: 1, question: "先")
+        let second = try request(in: meeting, number: 2, question: "後")
+        // 番号は追加順だが、送信の試行は後の番号が先という並びを作る。
+        try send(&conversation, first, at: 40)
+        try send(&conversation, second, at: 20)
+        let waiting = AITimeline.items(conversation: conversation, utterances: [voice("発話", at: 5)], timeline: timeline)
+            .filter { $0.kind == .reply(.waiting) }
+        #expect(waiting.map(\.number) == [2, 1])
+        #expect(waiting.allSatisfy { $0.anchor == .tail && $0.slot == 0 })
+    }
+
+    @Test func 同じ発話へ複数の声の送信が付いても番号順を保つ() throws {
+        let meeting = UUID()
+        var conversation = AIConversation(meetingID: meeting)
+        let first = try request(in: meeting, number: 1, anchor: 10)
+        let second = try request(in: meeting, number: 2, anchor: 12)
+        try send(&conversation, first, at: 30)
+        try send(&conversation, second, at: 40)
+        // 元の開始位置が消えても、その位置以下の最も近い先行発話へ付け直す。
+        let utterances = [voice("先行の発話", at: 8), voice("後続の発話", at: 60)]
+        let sends = AITimeline.items(conversation: conversation, utterances: utterances, timeline: timeline).filter(\.isSend)
+        #expect(sends.map(\.anchor) == [.afterUtterance(0), .afterUtterance(0)])
+        #expect(sends.map(\.number) == [1, 2])
+    }
+
+    @Test func 発話と同時刻のAIは発話の後ろへ置く() throws {
+        let meeting = UUID()
+        var conversation = AIConversation(meetingID: meeting)
+        let value = try request(in: meeting, number: 1, question: "問い")
+        try send(&conversation, value, at: 10)
+        let item = try #require(AITimeline.items(conversation: conversation, utterances: [voice("同時刻の発話", at: 10)],
+                                                 timeline: timeline).first)
+        #expect(item.slot == 0)
+    }
+
+    @Test(arguments: [1, 2]) func 旧接続の注記は現在の世代より小さいときだけ付ける(generation: Int) throws {
+        let meeting = UUID()
+        var conversation = AIConversation(meetingID: meeting)
+        let value = try request(in: meeting, number: 1, question: "問い", generation: 1)
+        try send(&conversation, value, at: 30)
+        try answer(&conversation, value, at: 40)
+        let reply = try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline,
+                                                  generation: generation).first { !$0.isSend })
+        #expect(reply.notes.contains("旧接続からの返事") == (generation == 2))
+    }
+
+    @Test func 返事待ちの注記は接続の観測から作り対象範囲も持つ() throws {
+        let meeting = UUID()
+        var conversation = AIConversation(meetingID: meeting)
+        let value = try request(in: meeting, number: 1, question: "問い",
+                                lines: ["[00:00:10] 話者A: 一行目", "[00:00:20] 話者A: 二行目"])
+        try send(&conversation, value, at: 30)
+        func notes(_ connection: AIConnectionStatus, unconfirmed: Set<UUID> = []) throws -> [String] {
+            try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline,
+                                          connection: connection, unconfirmed: unconfirmed).first { !$0.isSend }).notes
+        }
+        let blocked = try notes(.blocked), disconnected = try notes(.disconnected)
+        let idle = try notes(.idle), unconfirmed = try notes(.idle, unconfirmed: [value.id])
+        #expect(blocked == ["ペインで確認してください"])
+        #expect(disconnected == ["接続が切れています"])
+        #expect(idle.isEmpty)
+        #expect(unconfirmed == ["返送未確認"])
+        let send = try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline).first)
+        #expect(send.timeRange?.start == "00:00:10" && send.timeRange?.end == "00:00:20")
+    }
 }
