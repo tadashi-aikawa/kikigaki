@@ -39,7 +39,7 @@ final class AvatarStore {
     }
 
     nonisolated static func load(_ source: String, cacheDirectory: URL, session: URLSession = .shared) async throws -> Data {
-        guard source.hasPrefix("https://") || source.hasPrefix("http://") else {
+        guard source.lowercased().hasPrefix("https://") || source.lowercased().hasPrefix("http://") else {
             return try Data(contentsOf: URL(fileURLWithPath: (source as NSString).expandingTildeInPath))
         }
         guard let url = URL(string: source) else { throw URLError(.badURL) }

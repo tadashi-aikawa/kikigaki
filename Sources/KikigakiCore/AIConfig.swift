@@ -85,7 +85,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
         if let avatar {
             guard AIValidation.singleLine(avatar) else { throw invalid("avatar must be non-empty and single-line") }
             if avatar.contains("://") {
-                guard let url = URL(string: avatar), ["http", "https"].contains(url.scheme),
+                guard let url = URL(string: avatar), ["http", "https"].contains(url.scheme?.lowercased()),
                       let host = url.host, !host.isEmpty else { throw invalid("avatar URL must use http or https and include a host") }
             }
         }
@@ -199,7 +199,8 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         effort = config.effort
         address = config.address?.trimmingCharacters(in: .whitespaces) ?? "迅雷へ"
         avatar = config.avatar.map {
-            $0.hasPrefix("http://") || $0.hasPrefix("https://") ? $0 : ResolvedConfig.expand($0, home: home).path
+            $0.lowercased().hasPrefix("http://") || $0.lowercased().hasPrefix("https://")
+                ? $0 : ResolvedConfig.expand($0, home: home).path
         }
         cwd = ResolvedConfig.expand(config.cwd ?? Self.defaultCWD, home: home)
         extraArgs = config.extraArgs ?? []; prompt = config.prompt ?? ""

@@ -4,6 +4,19 @@ import KikigakiCore
 @testable import Kikigaki
 
 @Suite(.timeLimit(.minutes(1))) @MainActor struct TypedEntryTests {
+    @Test func 会話範囲の始点と終点はフォールバックも秒を表示する() throws {
+        let start = Date(timeIntervalSince1970: 0)
+        let voice = Utterance(speaker: 0, start: 61, end: 62, text: "確認")
+        var state = SessionSnapshot(utterances: [voice], timeline: MeetingTimeline(startedAt: start), elapsed: 72)
+        let preview = try #require(HandoffHistory().preview(utterances: [voice], names: SpeakerNames(), timeline: state.timeline))
+        let expectedStart = state.timeline.clock(at: 61, seconds: true)
+        #expect(state.contextStartClock(preview) == expectedStart)
+        #expect(state.contextEndClock == state.timeline.clock(at: 72, seconds: true))
+        state.utterances = []
+        #expect(state.contextStartClock(preview) == expectedStart)
+        state.utterances = [try .init(typedText: "手入力", at: 72, postedAt: start.addingTimeInterval(95))]
+        #expect(state.contextEndClock == state.timeline.clock(at: 95, seconds: true))
+    }
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
     private func config(_ root: URL) throws -> ResolvedConfig {
         var value = ResolvedConfig(config: try ConfigLoader.parse(toml: ""), home: root)
@@ -207,7 +220,7 @@ import KikigakiCore
         try enter(controller.typedEntry.editor)
         #expect(entries.count == 2 && entries[1].start == 105)
         try capture("paused-post")
-        #expect(state.contextEndClock == TranscriptRenderer.clock(for: entries[1], timeline: state.timeline, seconds: false))
+        #expect(state.contextEndClock == TranscriptRenderer.clock(for: entries[1], timeline: state.timeline))
         state.timeline = .init(startedAt: startedAt, pauses: [.init(audioTime: 105, duration: 180)])
         voices.append(.init(speaker: 1, start: 110, end: 115, text: "再開します。会場案内も確認できました。"))
         state.elapsed = 120

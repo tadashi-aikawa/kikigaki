@@ -7,7 +7,8 @@ import Testing
     private let home = URL(fileURLWithPath: "/Users/test")
 
     @Test func AIのアバターは話者と同じパス解決で旧設定も読める() throws {
-        for source in ["~/Pictures/ai.png", "/tmp/ai.png", "https://example.com/ai.png", "http://example.com/ai.png"] {
+        for source in ["~/Pictures/ai.png", "/tmp/ai.png", "https://example.com/ai.png", "http://example.com/ai.png",
+                       "HTTPS://example.com/AI.png", "HtTp://example.com/AI.png"] {
             let config = try ConfigLoader.parse(toml: "[[ai]]\navatar = \"\(source)\"")
             let resolved = try #require(ResolvedConfig(config: config, home: home).ai)
             #expect(resolved.avatar == (source.hasPrefix("~/") ? "/Users/test/Pictures/ai.png" : source))

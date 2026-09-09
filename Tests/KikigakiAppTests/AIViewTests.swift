@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Testing
 import KikigakiCore
 import KikigakiAIIO
@@ -14,11 +15,19 @@ import KikigakiAIIO
         try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: output).appendingPathComponent(name + ".png"))
     }
     private let started = Date(timeIntervalSince1970: 1_788_759_600)
+    @Test func 大文字スキームのアバターもURLキャッシュから読む() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let source = "HTTPS://example.com/AI.png"
+        let data = Data("cached avatar".utf8)
+        let key = SHA256.hash(data: Data(source.utf8)).map { String(format: "%02x", $0) }.joined()
+        try data.write(to: root.appendingPathComponent(key))
+        #expect(try await AvatarStore.load(source, cacheDirectory: root) == data)
+    }
     @Test func AIの画像は非同期で反映され未指定や取得失敗は紫のイニシャルになる() async throws {
         _ = NSApplication.shared
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
-        let first = try request(1, history: &history, root: root)
+        let first = try request(1, history: &history, root: root, name: "会議の決定事項を整理する迅雷")
         var conversation = AIConversation(meetingID: meeting)
         try conversation.append(first)
         try conversation.update(first.id) { try $0.beginSending(at: started.addingTimeInterval(330)); try $0.submitted() }
@@ -50,15 +59,20 @@ import KikigakiAIIO
         #expect(clocks.count == 4) // 発話・手入力・人側の送信・AIの返事
         #expect(clocks.allSatisfy { $0.frame.width >= $0.intrinsicContentSize.width })
         try capture("feedback-avatar-900", view: content.superview!)
+        state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
+        window.window!.setContentSize(NSSize(width: 600, height: 750))
+        window.apply(state); content.layoutSubtreeIfNeeded()
+        try capture("feedback-long-address-pills-600", view: content.superview!)
+        window.window!.setContentSize(NSSize(width: 900, height: 750))
         state.ai?.avatarSources[1] = nil
         window.apply(state)
-        #expect(avatar.image == nil && avatar.initial == "迅")
+        #expect(avatar.image == nil && avatar.initial == "会")
         #expect(avatar.accent?.background == Washi.ai.background)
         try capture("feedback-initial-900", view: content.superview!)
         state.ai?.avatarSources[1] = root.appendingPathComponent("missing.png").path
         window.apply(state)
         try await Task.sleep(for: .milliseconds(50))
-        #expect(avatar.image == nil && avatar.initial == "迅")
+        #expect(avatar.image == nil && avatar.initial == "会")
     }
     private func request(_ number: Int, history: inout AIStreamHistory, root: URL, question: String = "抜けている観点はありますか",
                          voiceStart: Double? = nil, parent: UUID? = nil, name: String = "迅雷",

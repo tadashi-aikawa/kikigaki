@@ -36,15 +36,15 @@ struct SessionSnapshot {
     var contextEndClock: String {
         if let latest = utterances.filter({ $0.kind == .typed }).compactMap(\.postedAt).max(),
            latest > timeline.date(at: contextEnd) {
-            return MeetingTimeline(startedAt: latest).clock(at: 0)
+            return MeetingTimeline(startedAt: latest).clock(at: 0, seconds: true)
         }
-        return timeline.clock(at: contextEnd)
+        return timeline.clock(at: contextEnd, seconds: true)
     }
 
     func contextStartClock(_ preview: HandoffPreview) -> String {
         let index = preview.startLine - 1
         if utterances.indices.contains(index) { return TranscriptRenderer.clock(for: utterances[index], timeline: timeline) }
-        return timeline.clock(at: preview.startTime)
+        return timeline.clock(at: preview.startTime, seconds: true)
     }
 
     var canShare: Bool {
