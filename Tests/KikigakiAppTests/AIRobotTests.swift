@@ -74,7 +74,12 @@ import KikigakiCore
         footer.update(state, reduceMotion: false, now: now)
         #expect(footer.robot.displayText == "実行中" && footer.timerRunning && footer.robot.eyeOffset == -1.5)
         #expect(footer.robot.isRunning && footer.robot.eyeColor == .white)
-        #expect(footer.robot.statusFont.pointSize == 11)
+        #expect(footer.robot.statusFont == footer.unread.labelFont)
+        #expect(footer.robot.statusFont.pointSize == 9)
+        let countdownWidths = ["1:11", "2:30", "8:88"].map {
+            ($0 as NSString).size(withAttributes: [.font: footer.robot.statusFont]).width
+        }
+        #expect(Set(countdownWidths).count == 1)
         #expect(("実行中" as NSString).size(withAttributes: [.font: footer.robot.statusFont]).width <= 36)
         footer.refresh(now: now.addingTimeInterval(1))
         #expect(footer.robot.eyeOffset == 1.5 && footer.robot.tint == Washi.red)

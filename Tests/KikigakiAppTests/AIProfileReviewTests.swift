@@ -22,6 +22,43 @@ import KikigakiCore
     }
     private let started = Date(timeIntervalSince1970: 1_788_759_600)
 
+    @Test func 宛先の展開メニューを画像付きで撮る() async throws {
+        guard let output = ProcessInfo.processInfo.environment["KIKIGAKI_UI_CAPTURE"],
+              let avatar = ProcessInfo.processInfo.environment["KIKIGAKI_UI_AVATAR"] else { return }
+        _ = NSApplication.shared
+        let sheet = AIQuestionSheet(participant: "迅雷", parentNumber: nil, draft: "会議の決定事項をまとめてください", voice: "", range: "3発言", tentative: false, canSubmit: true)
+        sheet.updateDestinations([
+            .init(slot: 1, name: "迅雷", prepared: [.init(id: UUID(), label: "議事録 · 13:05起動")], avatar: avatar),
+            .init(slot: 2, name: "相談", avatar: "/missing/avatar.png"),
+            .init(slot: 3, name: "確認")
+        ], selected: 1, participant: "迅雷")
+        let popup = try #require(descendants(sheet.window.contentView!).compactMap { $0 as? NSPopUpButton }.first)
+        let initial = popup.itemArray[0].image
+        for _ in 0..<100 {
+            if popup.itemArray[0].image !== initial { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        sheet.window.setFrameOrigin(NSPoint(x: 20000, y: 20000)); sheet.window.orderFront(nil)
+        defer { sheet.close() }
+        try capture("destination-avatar-sheet", sheet.window.contentView!, to: output)
+        let menu = try #require(popup.menu)
+        var captured = false
+        let finish: @MainActor @Sendable () -> Void = {
+            defer { menu.cancelTracking() }
+            for window in NSApp.windows where String(describing: type(of: window)).contains("Menu") {
+                guard let view = window.contentView else { continue }
+                do { try capture("destination-popup", view, to: output); captured = true }
+                catch { Issue.record(error) }
+            }
+        }
+        let timer = Timer(timeInterval: 0.3, repeats: false) { _ in MainActor.assumeIsolated { finish() } }
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .eventTracking)
+        popup.performClick(nil)
+        timer.invalidate()
+        #expect(captured)
+    }
+
     private func request(_ number: Int, slot: Int, profile: String, participant: String,
                          history: inout AIStreamHistory, root: URL, question: String,
                          trigger: AIParticipantContext.Trigger? = nil) throws -> AIRequest {
@@ -95,6 +132,7 @@ import KikigakiCore
             .init(speaker: 1, start: 330, end: 335, text: "抜けている観点はありますか。"),
             .init(speaker: 0, start: 370, end: 376, text: "会場は本社の大会議室にしましょう。"),
         ], timeline: .init(startedAt: started), elapsed: 400, markdownURL: root.appendingPathComponent("meeting.md"))
+        state.detectedSpeakerSlots = [0, 1, 2]
         state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
         state.aiSchedule = AIScheduleViewState(schedule: nil, warning: nil, destination: "議事録")
 

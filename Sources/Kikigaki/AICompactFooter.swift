@@ -5,6 +5,7 @@ enum AIFooterMetrics {
     /// 40ptの部品内で、顔と未読の丸の中心、下ラベルの原点を揃える。
     static let iconCenterY: CGFloat = 24.5
     static let labelY: CGFloat = 2
+    static let labelFont = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium)
 }
 
 /// フッターのアイコン操作。無効時は地を足さず色だけを抜く。
@@ -37,6 +38,7 @@ final class AIFooterCount: AIFooterButton {
     let kind: AIBadgeKind
     var count = 0
     var badgeFrame: NSRect { NSRect(x: 8, y: AIFooterMetrics.iconCenterY - 10, width: 20, height: 20) }
+    var labelFont: NSFont { AIFooterMetrics.labelFont }
     init(kind: AIBadgeKind) {
         self.kind = kind
         super.init(symbol: "questionmark.bubble.fill", label: kind == .unread ? "未読" : "要返答")
@@ -54,10 +56,13 @@ final class AIFooterCount: AIFooterButton {
                 .draw(in: NSRect(x: 1, y: AIFooterMetrics.iconCenterY - 9.5, width: 19, height: 19))
             (String(count) as NSString).draw(at: NSPoint(x: 23, y: AIFooterMetrics.iconCenterY - 8), withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: color])
         }
-        centered(kind == .unread ? "未読" : "要返答", y: AIFooterMetrics.labelY, size: 9, color: Washi.muted)
+        centered(kind == .unread ? "未読" : "要返答", y: AIFooterMetrics.labelY, font: labelFont, color: Washi.muted)
     }
     private func centered(_ text: String, y: CGFloat, size: CGFloat, color: NSColor) {
-        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: size, weight: .medium), .foregroundColor: color]
+        centered(text, y: y, font: .systemFont(ofSize: size, weight: .medium), color: color)
+    }
+    private func centered(_ text: String, y: CGFloat, font: NSFont, color: NSColor) {
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
         let width = (text as NSString).size(withAttributes: attributes).width
         (text as NSString).draw(at: NSPoint(x: (bounds.width - width) / 2, y: y), withAttributes: attributes)
     }
@@ -67,7 +72,7 @@ final class AIRobotButton: AIFooterButton {
     private(set) var displayText = ""
     private(set) var eyeOffset: CGFloat = 0
     private(set) var isRunning = false
-    let statusFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+    var statusFont: NSFont { AIFooterMetrics.labelFont }
     var eyeColor: NSColor { isRunning && isEnabled ? .white : isEnabled ? Washi.red : Washi.muted }
     var headFrame: NSRect { NSRect(x: bounds.midX - 11.5, y: AIFooterMetrics.iconCenterY - 8.5, width: 23, height: 17) }
     init() { super.init(symbol: "", label: "AIの操作") }
