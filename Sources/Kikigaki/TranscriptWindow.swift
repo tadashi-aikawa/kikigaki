@@ -289,9 +289,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             guard let self, let view: NSView = aiRows[id] else { return }
             view.scrollToVisible(view.bounds); scrolled()
         }
-        compactFooter.ask.callback = { [weak self] in self?.askPressed() }
-        compactFooter.gauge.onConfigure = { [weak self] in self?.onScheduleAI?() }
-        compactFooter.gauge.onFire = { [weak self] in self?.onFireScheduleAI?() }
+        compactFooter.robot.callback = { [weak self] in self?.showRobotMenu() }
         compactFooter.more.callback = { [weak self] in self?.showFooterMenu() }
         let footer = compactFooter
         Washi.surface(footer)
@@ -420,8 +418,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         if snapshot.aiSchedule.active {
             add("今すぐ送る", #selector(fireAutomaticPressed),
-                enabled: snapshot.aiSchedule.nextFire != nil && snapshot.aiSchedule.skipReason == nil)
-            add("自動送信を停止", #selector(stopAutomaticPressed))
+                enabled: canFireAutomatic)
         }
         add("AIセッションを準備…", #selector(preparePressed), enabled: snapshot.ai?.canPrepare == true)
         menu.items.last?.toolTip = snapshot.ai?.preparedToolTip
@@ -439,9 +436,37 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         NSPoint(x: compactFooter.more.bounds.maxX - menu.size.width,
                 y: compactFooter.more.bounds.maxY + menu.size.height + 6)
     }
+    private var canFireAutomatic: Bool {
+        snapshot.aiSchedule.active && snapshot.aiSchedule.nextFire != nil && snapshot.aiSchedule.skipReason == nil
+            && snapshot.ai?.conversation?.questions.contains { $0.isAwaitingResult } != true
+    }
+    func robotMenu() -> NSMenu {
+        let menu = NSMenu(); menu.autoenablesItems = false
+        func add(_ title: String, _ action: Selector, enabled: Bool) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self; item.isEnabled = enabled; menu.addItem(item)
+        }
+        if snapshot.aiSchedule.active {
+            add("今すぐ送る", #selector(fireAutomaticPressed), enabled: canFireAutomatic)
+            add("自動実行解除", #selector(stopAutomaticPressed), enabled: snapshot.ai != nil)
+        } else {
+            add("自動実行…", #selector(configureAutomaticPressed),
+                enabled: snapshot.ai != nil && (snapshot.state == .recording || snapshot.state == .paused))
+        }
+        add("手動実行…", #selector(askPressed), enabled: snapshot.ai != nil && snapshot.canShare)
+        return menu
+    }
+    func robotMenuPosition(_ menu: NSMenu) -> NSPoint {
+        NSPoint(x: 0, y: compactFooter.robot.bounds.maxY + menu.size.height + 6)
+    }
+    private func showRobotMenu() {
+        let menu = robotMenu()
+        menu.popUp(positioning: nil, at: robotMenuPosition(menu), in: compactFooter.robot)
+    }
+    @objc private func configureAutomaticPressed() { onScheduleAI?() }
     @objc private func stopAutomaticPressed() { onStopScheduleAI?() }
     @objc private func fireAutomaticPressed() {
-        guard snapshot.aiSchedule.active, snapshot.aiSchedule.nextFire != nil, snapshot.aiSchedule.skipReason == nil else { return }
+        guard canFireAutomatic else { return }
         onFireScheduleAI?()
     }
     @objc private func preparePressed() { onPrepareAI?() }

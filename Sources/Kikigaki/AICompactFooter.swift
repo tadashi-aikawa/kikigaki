@@ -54,92 +54,78 @@ final class AIFooterCount: AIFooterButton {
     }
 }
 
-final class AIScheduleGauge: AIFooterButton {
-    var onConfigure: (() -> Void)?
-    var onFire: (() -> Void)?
-    private(set) var scheduleState = AIScheduleViewState()
+final class AIRobotButton: AIFooterButton {
     private(set) var displayText = ""
-    var disabledReason = "録音中・一時停止中に自動送信を設定できます"
-    private var fraction: CGFloat = 0
-    init() {
-        super.init(symbol: "", label: "自動送信")
-        callback = { [weak self] in
-            guard let self, !scheduleState.active else { return }
-            onConfigure?()
-        }
-    }
+    private(set) var eyeOffset: CGFloat = 0
+    init() { super.init(symbol: "", label: "AIの操作") }
     required init?(coder: NSCoder) { fatalError() }
-    func update(_ state: AIScheduleViewState, now: Date) {
-        self.scheduleState = state
-        let remaining = max(0, Int(ceil(state.nextFire?.timeIntervalSince(now) ?? 0)))
-        let countdown = remaining >= 60 ? String(format: "%d:%02d", remaining / 60, remaining % 60) : String(remaining)
-        displayText = !state.active ? "" : state.skipReason != nil ? "—" : countdown
-        fraction = state.active && state.skipReason == nil ? CGFloat(min(1, max(0, Double(remaining) / state.interval))) : 0
-        if !isEnabled { toolTip = disabledReason }
-        else if !state.active { toolTip = "クリックで自動送信を設定" }
-        else {
-            toolTip = [state.skipReason ?? "次 \(countdown)", state.destination.map { $0 + "へ" },
-                       state.skipReason == nil ? "ダブルクリックで今すぐ送る" : nil]
-                .compactMap { $0 }.joined(separator: " · ")
-        }
-        setAccessibilityLabel("自動送信、" + (toolTip ?? ""))
+    func update(schedule: AIScheduleViewState, waiting: Bool, animate: Bool, now: Date) {
+        let remaining = max(0, Int(ceil(schedule.nextFire?.timeIntervalSince(now) ?? 0)))
+        let countdown = String(format: "%d:%02d", remaining / 60, remaining % 60)
+        displayText = waiting ? "実行中" : !schedule.active ? "" :
+            schedule.skipReason != nil || schedule.nextFire == nil ? "—" : countdown
+        eyeOffset = waiting && animate ? (Int(now.timeIntervalSince1970) % 2 == 0 ? -1.5 : 1.5) : 0
+        let status = waiting ? "AI実行中・返事待ち" : !schedule.active ? "クリックで自動実行・手動実行を選択" :
+            schedule.skipReason ?? (schedule.nextFire == nil ? "最終送信を待っています" : "次 " + countdown)
+        toolTip = isEnabled ? [status, schedule.active ? schedule.destination.map { $0 + "へ" } : nil,
+            waiting ? schedule.skipReason : nil].compactMap { $0 }.joined(separator: " · ") : "AI連携が設定されていません"
+        setAccessibilityLabel("AIの操作、" + (toolTip ?? ""))
         needsDisplay = true
     }
-    func activate(clickCount: Int) {
-        guard isEnabled else { return }
-        if !scheduleState.active { onConfigure?() }
-        else if clickCount == 2, scheduleState.skipReason == nil { onFire?() }
-    }
-    override func mouseDown(with event: NSEvent) { activate(clickCount: event.clickCount) }
     override func draw(_ dirtyRect: NSRect) {
-        let rect = NSRect(x: (bounds.width - 28) / 2, y: (bounds.height - 28) / 2, width: 28, height: 28)
-        Washi.rule.setStroke(); let circle = NSBezierPath(ovalIn: rect); circle.lineWidth = 2; circle.stroke()
-        if fraction > 0 && isEnabled {
-            Washi.color(0xC4801F).setStroke()
-            let arc = NSBezierPath(); arc.lineWidth = 2; arc.lineCapStyle = .round
-            arc.appendArc(withCenter: NSPoint(x: bounds.midX, y: bounds.midY), radius: 14,
-                          startAngle: 90, endAngle: 90 - 360 * fraction, clockwise: true); arc.stroke()
+        let color = isEnabled ? Washi.red : Washi.muted
+        let x = bounds.midX - 11.5
+        color.setStroke()
+        let head = NSBezierPath(roundedRect: NSRect(x: x, y: 14, width: 23, height: 17), xRadius: 4, yRadius: 4)
+        head.lineWidth = 1.7; head.stroke()
+        let antenna = NSBezierPath(); antenna.lineWidth = 1.7
+        antenna.move(to: NSPoint(x: bounds.midX, y: 31)); antenna.line(to: NSPoint(x: bounds.midX, y: 35)); antenna.stroke()
+        color.setFill()
+        NSBezierPath(ovalIn: NSRect(x: bounds.midX - 1.5, y: 35, width: 3, height: 3)).fill()
+        for eye: CGFloat in [6, 16] {
+            NSBezierPath(ovalIn: NSRect(x: x + eye + eyeOffset - 1.5, y: 21, width: 3, height: 3)).fill()
         }
-        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: displayText.contains(":") ? 8 : 11, weight: .medium),
-            .foregroundColor: scheduleState.skipReason == nil && isEnabled ? Washi.ink : Washi.muted]
-        let size = (displayText as NSString).size(withAttributes: attributes)
-        (displayText as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2), withAttributes: attributes)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 8, weight: .medium),
+            .foregroundColor: displayText == "実行中" ? color : Washi.muted]
+        let width = (displayText as NSString).size(withAttributes: attributes).width
+        (displayText as NSString).draw(at: NSPoint(x: bounds.midX - width / 2, y: 1), withAttributes: attributes)
     }
 }
 
 /// 1秒単位の更新だけ。CALayerへ連続アニメーションを登録しない。
 final class AICompactFooter: NSStackView {
-    let gauge = AIScheduleGauge()
+    let robot = AIRobotButton()
+    private let rule = NSView()
     let unread = AIFooterCount(kind: .unread)
     let confirmation = AIFooterCount(kind: .confirmation)
     let warning = AIFooterButton(symbol: "exclamationmark.triangle", label: "警告")
-    let ask = AIFooterButton(symbol: "sparkles", label: "AIへ送る")
     let more = AIFooterButton(symbol: "ellipsis", label: "その他の操作")
     var onSelect: ((String) -> Void)?
     private var state = SessionSnapshot()
     private var reduceMotion = false
     private var timer: Timer?
-    private(set) var pulseDimmed = false
-    init() {
+    private let visibility: (() -> Bool)?
+    private var observers: [any NSObjectProtocol] = []
+    var timerRunning: Bool { timer != nil }
+    init(visibility: (() -> Bool)? = nil) {
+        self.visibility = visibility
         super.init(frame: .zero)
         orientation = .horizontal; alignment = .centerY; spacing = 8
         edgeInsets = NSEdgeInsets(top: 6, left: 16, bottom: 6, right: 16)
-        let rule = NSView(); Washi.surface(rule, color: Washi.rule)
+        Washi.surface(rule, color: Washi.rule)
         rule.widthAnchor.constraint(equalToConstant: 1).isActive = true
         rule.heightAnchor.constraint(equalToConstant: 24).isActive = true
-        for view in [gauge, rule, unread, confirmation, warning, ask, NSView(), more] { addArrangedSubview(view) }
+        for view in [robot, rule, unread, confirmation, warning, NSView(), more] { addArrangedSubview(view) }
         more.tint = Washi.muted
         Washi.surface(self)
     }
     required init?(coder: NSCoder) { fatalError() }
-    deinit { timer?.invalidate() }
+    deinit { timer?.invalidate(); observers.forEach { NotificationCenter.default.removeObserver($0) } }
     func update(_ state: SessionSnapshot, reduceMotion: Bool, now: Date = Date()) {
         self.state = state; self.reduceMotion = reduceMotion
-        gauge.isEnabled = state.ai != nil && (state.aiSchedule.active || state.state == .recording || state.state == .paused)
-        gauge.disabledReason = state.ai == nil ? "AI連携が設定されていません" : "録音中・一時停止中に自動送信を設定できます"
-        ask.isHidden = state.ai == nil
-        ask.isEnabled = state.canShare
-        ask.toolTip = ["AIへ依頼する " + (state.ai?.shortcut ?? ""), state.ai?.progress].compactMap { $0 }.joined(separator: "\n")
+        robot.isEnabled = state.ai != nil
+        robot.isHidden = state.ai == nil; rule.isHidden = robot.isHidden
         let questions = state.ai?.conversation?.questions ?? []
         for button in [unread, confirmation] {
             let matching = questions.filter { button.kind.matches($0, in: questions) }
@@ -160,19 +146,44 @@ final class AICompactFooter: NSStackView {
             if let first = failures.first { self?.onSelect?((first.state == .deliveryUnknown ? AIBadgeKind.unknown : .failed).rowID(first)) }
         }
         refresh(now: now)
-        let needsTimer = state.aiSchedule.active || (!reduceMotion && questions.contains { $0.isAwaitingResult })
+        updateVisibility()
+    }
+    private var displayed: Bool {
+        if isHiddenOrHasHiddenAncestor { return false }
+        if let visibility { return visibility() }
+        guard let window else { return false }
+        return window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
+    }
+    func updateVisibility() {
+        let waiting = state.ai?.conversation?.questions.contains { $0.isAwaitingResult } == true
+        let needsTimer = displayed && (waiting ? !reduceMotion : state.aiSchedule.active)
         if needsTimer && timer == nil {
             let value = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
-                MainActor.assumeIsolated { guard let self else { timer.invalidate(); return }; self.refresh(now: Date()) }
+                MainActor.assumeIsolated {
+                    guard let self else { timer.invalidate(); return }
+                    self.updateVisibility()
+                    if self.timer != nil { self.refresh(now: Date()) }
+                }
             }
             value.tolerance = 0.1; RunLoop.main.add(value, forMode: .common); timer = value
         } else if !needsTimer { timer?.invalidate(); timer = nil }
     }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        observers.forEach { NotificationCenter.default.removeObserver($0) }; observers = []
+        if let window {
+            for name in [NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification] {
+                observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.updateVisibility() }
+                })
+            }
+        }
+        updateVisibility()
+    }
+    override func viewDidHide() { super.viewDidHide(); updateVisibility() }
+    override func viewDidUnhide() { super.viewDidUnhide(); updateVisibility() }
     func refresh(now: Date) {
-        gauge.update(state.aiSchedule, now: now)
         let waiting = state.ai?.conversation?.questions.contains { $0.isAwaitingResult } == true
-        pulseDimmed = waiting && !reduceMotion && Int(now.timeIntervalSince1970) % 2 == 1
-        ask.tint = pulseDimmed ? Washi.red.withAlphaComponent(0.35) : Washi.red
-        ask.needsDisplay = true
+        robot.update(schedule: state.aiSchedule, waiting: waiting, animate: !reduceMotion && displayed, now: now)
     }
 }

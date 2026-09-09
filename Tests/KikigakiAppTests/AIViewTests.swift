@@ -48,7 +48,7 @@ import KikigakiAIIO
             content.layoutSubtreeIfNeeded()
             #expect(window.compactFooter.frame.height <= 54)
             #expect(window.compactFooter.unread.count == 1 && window.compactFooter.confirmation.count == 1)
-            #expect(window.compactFooter.gauge.displayText == "1:42")
+            #expect(window.compactFooter.robot.displayText == "1:42")
             try capture("footer-recording-\(width)", view: content.superview!)
             state.state = .idle; state.saved = true; state.aiSchedule = AIScheduleViewState()
             window.apply(state); window.compactFooter.refresh(now: now)
@@ -62,14 +62,14 @@ import KikigakiAIIO
         for width in [600, 900] {
             window.window!.setContentSize(NSSize(width: width, height: 650)); window.apply(state)
             for second in [0, 1] {
-                window.compactFooter.refresh(now: Date(timeIntervalSince1970: Double(1000 + second)))
-                #expect(window.compactFooter.pulseDimmed == (second == 1))
-                #expect(window.compactFooter.ask.layer?.animationKeys()?.isEmpty != false)
+                window.compactFooter.robot.update(schedule: state.aiSchedule, waiting: true, animate: true, now: Date(timeIntervalSince1970: Double(1000 + second)))
+                #expect(window.compactFooter.robot.eyeOffset == (second == 1 ? 1.5 : -1.5))
+                #expect(window.compactFooter.robot.layer?.animationKeys()?.isEmpty != false)
                 try capture("footer-pulse-\(second)-\(width)", view: window.window!.contentView!.superview!)
             }
         }
         window.compactFooter.update(state, reduceMotion: true, now: Date(timeIntervalSince1970: 1001))
-        #expect(!window.compactFooter.pulseDimmed)
+        #expect(window.compactFooter.robot.eyeOffset == 0)
         if ProcessInfo.processInfo.environment["KIKIGAKI_UI_MENU_CAPTURE"] == "1",
            let output = ProcessInfo.processInfo.environment["KIKIGAKI_UI_CAPTURE"] {
             NSApplication.shared.setActivationPolicy(.regular)
@@ -78,7 +78,7 @@ import KikigakiAIIO
                 window.window!.setContentSize(NSSize(width: width, height: 650))
                 window.window!.setFrameOrigin(NSPoint(x: 100, y: 100)); window.show()
                 RunLoop.main.run(until: Date().addingTimeInterval(0.2))
-                let menu = window.footerMenu()
+                let menu = window.robotMenu()
                 var captureError: Error?
                 let timer = Timer(timeInterval: 1, repeats: false) { _ in
                     MainActor.assumeIsolated {
@@ -86,9 +86,9 @@ import KikigakiAIIO
                             let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
                             let frame = window.window!.frame
                             let y = (NSScreen.screens.first?.frame.maxY ?? 0) - frame.maxY
-                            process.arguments = ["-x", "-T", "1", "-R\(Int(frame.minX)),\(Int(y)),\(Int(frame.width)),\(Int(frame.height))", output + "/footer-menu-\(width).png"]
+                            process.arguments = ["-x", "-T", "1", "-R\(Int(frame.minX)),\(Int(y)),\(Int(frame.width)),\(Int(frame.height))", output + "/robot-menu-\(width).png"]
                             process.terminationHandler = { process in
-                                DispatchQueue.main.async {
+                                RunLoop.main.perform(inModes: [.common]) {
                                     if process.terminationStatus != 0 { captureError = CocoaError(.fileWriteUnknown) }
                                     menu.cancelTracking()
                                 }
@@ -98,7 +98,7 @@ import KikigakiAIIO
                     }
                 }
                 RunLoop.main.add(timer, forMode: .common)
-                menu.popUp(positioning: nil, at: window.footerMenuPosition(menu), in: window.compactFooter.more)
+                menu.popUp(positioning: nil, at: window.robotMenuPosition(menu), in: window.compactFooter.robot)
                 if let captureError { throw captureError }
             }
             window.window?.orderOut(nil)

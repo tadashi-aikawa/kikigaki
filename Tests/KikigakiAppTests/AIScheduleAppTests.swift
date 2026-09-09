@@ -71,7 +71,7 @@ import KikigakiAIIO
         #expect(noAI.scheduleLinesBuildCount == 0)
     }
 
-    @Test func ゲージの即時実行が本番の送信経路へ入り期限を更新する() async throws {
+    @Test func ロボットメニューの即時実行が本番の送信経路へ入り期限を更新する() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let session = try session(root, fake: FakeHerdr()), now = Date()
         defer { session.stopAISchedule() }
@@ -80,7 +80,8 @@ import KikigakiAIIO
         let window = TranscriptWindowController()
         window.onFireScheduleAI = { session.fireAIScheduleNow(now: now.addingTimeInterval(42)) }
         window.apply(session.snapshot)
-        window.compactFooter.gauge.activate(clickCount: 2)
+        let menu = window.robotMenu()
+        menu.performActionForItem(at: try #require(menu.items.firstIndex { $0.title == "今すぐ送る" }))
         await settle(session)
         #expect(session.snapshot.aiSchedule.nextFire == now.addingTimeInterval(222))
         let request = try #require(session.aiRecord?.controller.conversation.questions.first)
