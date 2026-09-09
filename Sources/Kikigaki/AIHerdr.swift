@@ -43,8 +43,10 @@ struct AIHerdr: Sendable {
         let pane_id: String; let workspace_id: String
         let agent: String?; let agent_status: String?; let interactive_ready: Bool?
         let agent_session: Session?; let terminal_id: String?
+        let display_agent: String?; let cwd: String?; let terminal_title_stripped: String?
     }
     private struct AgentReply: Decodable { let agent: Agent }
+    private struct AgentList: Decodable { let agents: [Agent] }
     private struct Failure: Decodable {
         struct Detail: Decodable { let code: String }
         let error: Detail
@@ -82,6 +84,16 @@ struct AIHerdr: Sendable {
         let result = try await call(["workspace", "create", "--cwd", cwd.path, "--no-focus", "--label", label], as: Created.self)
         guard Self.identifier(result.workspace.workspace_id), Self.identifier(result.root_pane.pane_id) else { throw AIProcessError.invalidResponse }
         return AIHerdrConnection(workspaceID: result.workspace.workspace_id, paneID: result.root_pane.pane_id, provider: provider)
+    }
+    /// 稼働中のagentを列挙する。`agent start <NAME>` で付けた名前はここにも `agent get` にも
+    /// 返らないので(実測)、指せるのは cwd・display_agent・pane_id だけである。
+    func list() async throws -> [AIAgentCandidate] {
+        try await call(["agent", "list"], as: AgentList.self).agents.compactMap { agent in
+            guard Self.identifier(agent.pane_id), Self.identifier(agent.workspace_id) else { return nil }
+            return AIAgentCandidate(paneID: agent.pane_id, workspaceID: agent.workspace_id, kind: agent.agent,
+                displayAgent: agent.display_agent, cwd: agent.cwd, sessionID: agent.agent_session?.value,
+                terminalID: agent.terminal_id, title: agent.terminal_title_stripped)
+        }
     }
     func label(_ target: AIHerdrConnection, participant: String) async throws {
         _ = try await call(["pane", "report-metadata", target.paneID, "--source", "owlery", "--display-agent", participant], as: Empty.self)

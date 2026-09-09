@@ -12,9 +12,11 @@ struct AILaunchConfiguration {
         let defaultCWD = ResolvedAIConfig(config: AIConfig(), home: FileManager.default.homeDirectoryForCurrentUser).cwd
         if config.cwd == defaultCWD { try FileManager.default.createDirectory(at: config.cwd, withIntermediateDirectories: true) }
         var isDirectory: ObjCBool = false
+        let sessionURL = controller.sessionURL(slot: config.slot)
+        let generation = controller.generation(slot: config.slot)
         guard FileManager.default.fileExists(atPath: config.cwd.path, isDirectory: &isDirectory), isDirectory.boolValue,
-              let token = controller.sessionToken else { throw AIError.invalid("AI launch configuration") }
-        let notify = [helper.path, "notify", "--provider", config.cli.rawValue, "--session", controller.sessionURL.path, "--token", token]
+              let token = controller.sessionToken(slot: config.slot) else { throw AIError.invalid("AI launch configuration") }
+        let notify = [helper.path, "notify", "--provider", config.cli.rawValue, "--session", sessionURL.path, "--token", token]
         var args: [String] = []
         if let model = config.model { args += [config.cli == .codex ? "-m" : "--model", model] }
         // 専用キーの effort をCLIごとの引数へ翻訳する。extraArgs との二重指定は設定検証で拒否済み。
@@ -25,7 +27,8 @@ struct AILaunchConfiguration {
             // Codexの workspace-write サンドボックスは cwd と writable_roots 以外へ書けない。同梱CLIが返送を
             // 保存する会議の `ai/` を許可先へ足す(実測: 保存先が ~/Documents だと unsafe_file で返送に失敗した)。
             // `-c` は同じキーを置き換えるため、利用者の設定にある許可先を先に写して失わない。
-            let aiDirectory = controller.sessionURL.deletingLastPathComponent().deletingLastPathComponent().path
+            let aiDirectory = controller.outputDirectory.appendingPathComponent(".kikigaki-context")
+                .appendingPathComponent(controller.meetingID.uuidString).appendingPathComponent("ai").path
             var roots = CodexUserConfig.writableRoots(at: codexConfigURL)
             if !roots.contains(aiDirectory) { roots.append(aiDirectory) }
             args += ["-c", "sandbox_workspace_write.writable_roots=" + String(decoding: try encoder.encode(roots), as: UTF8.self)]
@@ -36,11 +39,12 @@ struct AILaunchConfiguration {
                 "permissions": ["allow": ["Bash(\(helper.path) *)"]],
                 "hooks": ["Stop": [["hooks": [["type": "command", "command": AIShell.command(notify), "timeout": 10]]]]]
             ]
-            let name = "\(controller.generation).settings.json"
-            let base = [".kikigaki-context", controller.meetingID.uuidString, "ai", "sessions"]
+            // 設定ファイルはsession recordの隣へ置く。プロファイルを分けた会議では枝の中になる。
+            let components: [String] = sessionURL.deletingLastPathComponent().pathComponents
+            let parts = Array(components.drop(while: { $0 != ".kikigaki-context" })) + ["\(generation).settings.json"]
             let files = AIFileStore(root: controller.outputDirectory)
-            try files.write(JSONSerialization.data(withJSONObject: settings, options: [.sortedKeys]), to: base + [name])
-            args += ["--settings", (base + [name]).reduce(controller.outputDirectory) { $0.appendingPathComponent($1) }.path]
+            try files.write(JSONSerialization.data(withJSONObject: settings, options: [.sortedKeys]), to: parts)
+            args += ["--settings", parts.reduce(controller.outputDirectory) { $0.appendingPathComponent($1) }.path]
         }
         arguments = args + config.extraArgs
     }

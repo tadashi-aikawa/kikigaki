@@ -45,6 +45,7 @@ import Testing
         model = "gpt-5.4-codex"
         effort = "high"
         address = "迅雷へ"
+        attach = true
         cwd = "~/work/minutes"
         displayAgent = "迅雷"
         autoStart = true
@@ -179,12 +180,23 @@ import Testing
 
     // MARK: - 接続先の解決
 
-    @Test func 接続条件は明示されたcwdかdisplayAgentが要る() throws {
+    @Test func 接続はattachの宣言が要りcwd単独では新規起動のまま() throws {
         #expect(try resolved("[[ai]]\nname = \"既定\"")[0].connectsToExistingPane == false)
-        let byCWD = try resolved("[[ai]]\nname = \"接続\"\ncwd = \"~/work\"")[0]
+        // 既存の cwd 指定は新規起動の作業ディレクトリのまま。接続型へ化けさせない。
+        let launch = try resolved("[[ai]]\nname = \"新規\"\ncwd = \"~/work/project\"")[0]
+        #expect(!launch.connectsToExistingPane && launch.criteria == nil)
+        #expect(launch.cwd.path == "/home/person/work/project" && launch.cwdSpecified)
+
+        let byCWD = try resolved("[[ai]]\nname = \"接続\"\nattach = true\ncwd = \"~/work\"")[0]
         #expect(byCWD.connectsToExistingPane && byCWD.criteria?.cwd == "/home/person/work")
-        let byName = try resolved("[[ai]]\nname = \"接続\"\ndisplayAgent = \"迅雷\"")[0]
+        #expect(byCWD.criteria?.displayAgent == nil)
+        let byName = try resolved("[[ai]]\nname = \"接続\"\nattach = true\ndisplayAgent = \"迅雷\"")[0]
         #expect(byName.connectsToExistingPane && byName.criteria?.displayAgent == "迅雷" && byName.criteria?.cwd == nil)
+    }
+
+    @Test func attachに条件が無い設定とattach無しのdisplayAgentを拒否する() throws {
+        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "[[ai]]\nname = \"接続\"\nattach = true") }
+        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "[[ai]]\nname = \"新規\"\ndisplayAgent = \"迅雷\"") }
     }
 
     @Test func 同じ条件へ解決する2プロファイルを拒否する() throws {
@@ -192,17 +204,19 @@ import Testing
             try ConfigLoader.parse(toml: """
             [[ai]]
             name = "一"
+            attach = true
             cwd = "~/work"
             displayAgent = "迅雷"
 
             [[ai]]
             name = "二"
+            attach = true
             cwd = "~/work"
             displayAgent = "迅雷"
             """)
         }
-        // 既定cwdの新規起動プロファイルは条件を持たないので、いくつ並べても衝突しない。
-        #expect(try resolved("[[ai]]\nname = \"一\"\n\n[[ai]]\nname = \"二\"").count == 2)
+        // 新規起動のプロファイルは条件を持たないので、同じcwdでいくつ並べても衝突しない。
+        #expect(try resolved("[[ai]]\nname = \"一\"\ncwd = \"~/work\"\n\n[[ai]]\nname = \"二\"\ncwd = \"~/work\"").count == 2)
     }
 
     private func candidate(_ pane: String, kind: String? = "codex", agent: String? = nil, cwd: String? = nil) -> AIAgentCandidate {
@@ -314,6 +328,7 @@ import Testing
         name = "議事録"
         cli = "claude"
         effort = "xhigh"
+        attach = true
         cwd = "~/work"
         displayAgent = "迅雷"
         autoStart = true
@@ -322,7 +337,7 @@ import Testing
         let decoded = try AIJSON.decode(ResolvedAIConfig.self, from: AIJSON.encode(profile))
         #expect(decoded == profile)
         #expect(decoded.slot == 1 && decoded.name == "議事録" && decoded.effort == "xhigh")
-        #expect(decoded.displayAgent == "迅雷" && decoded.cwdSpecified && decoded.autoStart)
+        #expect(decoded.displayAgent == "迅雷" && decoded.cwdSpecified && decoded.autoStart && decoded.attach)
     }
 
     @Test func 新しい項目を持たない旧manifestを既定として読む() throws {
@@ -332,7 +347,7 @@ import Testing
         """
         let decoded = try AIJSON.decode(ResolvedAIConfig.self, from: Data(legacy.utf8))
         #expect(decoded.slot == 1 && decoded.name == "迅雷" && decoded.effort == nil)
-        #expect(decoded.displayAgent == nil && !decoded.cwdSpecified && !decoded.autoStart)
+        #expect(decoded.displayAgent == nil && !decoded.cwdSpecified && !decoded.autoStart && !decoded.attach)
         #expect(decoded.connectsToExistingPane == false && decoded.allowWork)
     }
 }

@@ -22,8 +22,9 @@ cli = "codex"
 model = "gpt-5.4-codex"
 effort = "high"
 address = "迅雷へ"
-cwd = "~/work/minutes"         # 明示すると、このcwdの稼働中ペインへ接続する。省略時は従来どおり新規起動
-displayAgent = "迅雷"          # 同じcwdに複数のペインが並ぶときの追加の絞り込み。省略可
+attach = true                  # 稼働中のペインへ接続する。省略時は従来どおり新規起動
+cwd = "~/work/minutes"         # attach のときは接続先の絞り込み条件。省略時は新規起動の作業ディレクトリ
+displayAgent = "迅雷"          # 同じcwdに複数のペインが並ぶときの追加の絞り込み。attach のときだけ書ける
 autoStart = true
 autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
 autoIntervalMinutes = 3
@@ -45,8 +46,9 @@ address = "ネオへ"                # cwd も displayAgent も無いので、�
 | --- | --- |
 | name | 省略時は `address` 末尾の「へ」を除いた参加者名。空・改行・NUL・前後空白のみを拒否し、64バイトまで。配列内の重複を拒否する。 |
 | effort | 省略時はCLIの既定。単一行でNULを拒否し、CLIごとの値域で検証する。 |
-| cwd | 省略時は従来どおり固定の `~/Library/Application Support/KIKIGAKI/ai-work/` を作って新規起動する。**明示すると接続先の絞り込み条件になる。** |
-| displayAgent | 稼働中ペインの `display_agent` との完全一致。`cwd` と併せて絞り込む追加条件で、単独でも使える。 |
+| attach | false。trueで稼働中ペインへ接続する。`cwd` と `displayAgent` の少なくとも一方が無ければ設定エラー。 |
+| cwd | 省略時は従来どおり固定の `~/Library/Application Support/KIKIGAKI/ai-work/`。`attach` のときだけ接続先の絞り込み条件になり、それ以外は新規起動の作業ディレクトリのまま。 |
+| displayAgent | 稼働中ペインの `display_agent` との完全一致。`attach` のときだけ書ける。`cwd` と併せて絞り込む追加条件で、単独でも使える。 |
 | autoStart | false。trueは配列全体で1つまで。`autoPrompt` が空なら設定エラー。 |
 | hotkey | 1つ目のプロファイルにだけ書ける。2つ目以降にあれば設定エラー。 |
 | その他 | 既存の `[ai]` と同じ。`cli` `command` `herdrCommand` `model` `address` `extraArgs` `prompt` `notifySound` `allowWork` `autoPrompt` `autoIntervalMinutes` を要素ごとに持つ。 |
@@ -82,6 +84,8 @@ codexの `-c` の値はTOMLとして解釈されるので、文字列はクォ�
 
 `herdr agent list` と `agent get` が返すのは `pane_id` / `workspace_id` / `agent`(CLI種別)/ `agent_session.value` / `agent_status` / `cwd` / `foreground_cwd` / `display_agent` / `terminal_id` / `terminal_title` である。**`agent start <NAME>` で付けた名前はどちらにも返らない。** よって「herdrのagent名で指す」設計は成立せず、指せるのは `cwd` か `display_agent` か `pane_id` だけになる。設定キーを `agent` ではなく `cwd` + `displayAgent` にするのはこのため。
 
+接続するかどうかは `attach = true` で明示させる。`cwd` の有無で判定すると、新規起動の作業ディレクトリとして `cwd` を指定していた既存の設定がすべて接続型に化けてしまう。
+
 ### 絞り込みの純関数
 
 接続先の決定は `AIAgentResolver.resolve(candidates:criteria:provider:)` に閉じる。候補配列を受けて、一意の候補か失敗理由を返すだけの純関数で、herdr呼び出しも副作用も持たない。どのキーで絞るかは `AIAgentCriteria` に集めてあり、後から差し替えられる。
@@ -114,7 +118,7 @@ Codexの読み取り側は `workspace-write` でも広いため、cwd外の会�
 
 `autoStart = true` のプロファイルがあれば、録音開始で既存の `startAISchedule` を呼ぶ。プロンプトは `autoPrompt`、間隔は `autoIntervalMinutes`、作業許可は `allowWork`、録音停止時の最後の1回はON。既存契約どおり即時送信はせず、開始から1間隔後を初回期限にする。
 
-接続先が解決できない場合(条件に合うペインが無い、または複数該当)は、その場で失敗を表示して自動送信を開始しない。新規起動へは倒さない。`cwd` も `displayAgent` も持たないプロファイルは従来どおり初回送信時に新規起動する。
+接続先が解決できない場合(条件に合うペインが無い、または複数該当)は、その場で失敗を表示して自動送信を開始しない。新規起動へは倒さない。`attach` を持たないプロファイルは従来どおり初回送信時に新規起動する。
 
 開始後の操作は既存と同じ。「自動送信を停止」で録音を続けたまま止められ、設定を変えるにはいったん止めてシートを開き直す。状態行は「自動送信 3分 · 次 12:34 · 議事録へ」とし、宛先を含める。稼働状態は新会議・再起動で引き継がない。
 
@@ -134,11 +138,15 @@ controllerをプロファイルごとに複数へ分ける案は採らない。`
 
 `AIRecordStore.Record` は会議に1つのまま。`saveResult` `savedConversation` `needsRecovery` と登録簿の扱いは変えない。
 
+警告は会議に1つの文字列として出す。プロファイルが2つ以上ある会議だけ「議事録: 送達を確認できません」のように名前を添える。表示の系統を増やさずに、どの宛先の話かを示せる。
+
 ### パスとenvelope
 
 session recordの置き場を `ai/sessions/<slot>/<generation>.json` へ変える。`<slot>` は会議開始時にプロファイルへ割り当てた1始まりの整数で、設定の並び順から作る。`name` は日本語や記号を含むためパスへ持ち込まない。
 
-`AIParticipantContext` に任意キー `profile`(表示名)と `profile_slot`(整数)を足す。`trigger` と同じ扱いで、`schema_version` は1のまま、欠損は既定プロファイル・slot 1として読む。`AIEnvelope.validate` の `sessionPath` 検証は、slotがあれば `ai/sessions/<slot>/<generation>.json`、無ければ従来の `ai/sessions/<generation>.json` を要求する。
+ただし**プロファイルが1つだけの会議は従来の平置き** `ai/sessions/<generation>.json` のままにする。単一プロファイルの設定でファイル配置が動くと、旧会議と新会議で形が食い違う理由がないのに増える。Claudeの `--settings` もsession recordの隣へ置き、同じ規則で枝に入る。
+
+`AIParticipantContext` に任意キー `profile`(表示名)と `profile_slot`(整数)を足す。`trigger` と同じ扱いで、`schema_version` は1のまま、欠損は既定プロファイル・slot 1として読む。単一プロファイルの会議ではこの2つも付けない。片方だけの指定は拒否する。`AIEnvelope.validate` の `sessionPath` 検証は、slotがあれば `ai/sessions/<slot>/<generation>.json`、無ければ従来の `ai/sessions/<generation>.json` を要求する。
 
 manifestは `schemaVersion` を2へ上げ、`config` を `profiles: [ResolvedAIProfile]` の配列にする。schemaVersion 1のmanifestは、slot 1・`name` を参加者名としたプロファイル1つとして読む。
 
@@ -166,8 +174,8 @@ manifestは `schemaVersion` を2へ上げ、`config` を `profiles: [ResolvedAIP
 | 段 | 内容 |
 | --- | --- |
 | 2・Core | `AIProfileList` の解析(配列・単数互換・name重複・autoStart重複・hotkeyの位置・effort値域・extraArgs二重指定・同条件の重複)、`AIEffort` の翻訳、接続先解決の純関数 `AIAgentResolver`、`participant.profile` / `profile_slot` の往復と旧欠損、`sessionPath` の新旧検証、manifest schemaVersion 2と1の読み分け。**完了** |
-| 3・アプリ | チャネル化した `AIConversationController`、`herdr agent list` の解釈と接続型の `connect`、両シートのポップアップと会議内の記憶、`autoStart`、状態行・警告・ピルの宛先表示、接続型でのフック判定の無効化 |
-| 3・実画面 | 600・900幅でポップアップ、複数プロファイルの印が積んだ会議、接続型の警告、解決失敗の表示を撮影して目視 |
+| 3・アプリ | チャネル化した `AIConversationController`、`herdr agent list` の解釈と接続型の `connect`、両シートのポップアップと会議内の記憶、`autoStart`、状態行・警告・ピルの宛先表示、接続型でのフック判定の無効化。**完了** |
+| 3・実画面 | 600・900幅でポップアップ、複数プロファイルの印が積んだ会議、返事待ちの無効状態、単一プロファイルでの非表示を撮影して目視。**完了** |
 | 4・replay | 手動と自動で別プロファイルへ同時送信、片方の返事待ちがもう片方を止めないこと、`autoStart` の初回期限、接続先解決失敗で自動送信が始まらないこと |
 | 4・実herdr | 稼働中ペインへの接続と返送、Codex接続型での `unsafe_file` の再現と回避、`displayAgent` 重複時の失敗、ペイン消失後の切断表示 |
 
@@ -196,5 +204,5 @@ manifestは `schemaVersion` を2へ上げ、`config` を `profiles: [ResolvedAIP
 
 タダシへ確認する。段3の前に決まればよい。
 
-1. **接続先の指定キー**。採用案は `cwd` で候補を絞り、`displayAgent` を任意の追加条件にする(少なくとも一方が必要、0件と複数件は失敗)。理由: `display_agent` だけでは同じメンバーの複数セッションが日常的に並んで失敗し続ける。会議前に用意するペインはワークスペースごとに立つので、`cwd` のほうが安定した鍵になる。代替は `displayAgent` だけで絞る案と、ペインの表題で絞る案。表題は作業内容で刻々と変わるので推さない。
+1. **接続先の指定キー**。採用案は `attach = true` で接続を宣言し、`cwd` で候補を絞り、`displayAgent` を任意の追加条件にする(少なくとも一方が必要、0件と複数件は失敗)。理由: `display_agent` だけでは同じメンバーの複数セッションが日常的に並んで失敗し続ける。会議前に用意するペインはワークスペースごとに立つので、`cwd` のほうが安定した鍵になる。代替は `displayAgent` だけで絞る案と、ペインの表題で絞る案。表題は作業内容で刻々と変わるので推さない。
 2. **Codex接続型の返送**。推奨は、接続先がcodexのとき利用者の `~/.codex/config.toml` の `writable_roots` に会議の保存先が含まれるかを起動前に読んで確認し、無ければシートに警告を出す。既存の `CodexUserConfig.writableRoots` をそのまま使える。理由: KIKIGAKIが起動しない以上 `-c` を渡せず、設定ファイルの自動書き換えは既存契約で禁じている。代替はClaudeを接続型に使うこと(Bashに同じ制限が無いと実測済み)。

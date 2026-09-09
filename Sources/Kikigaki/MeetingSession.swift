@@ -64,7 +64,12 @@ final class MeetingSession {
     private var handoff = HandoffHistory()
     private let diagnostics = Diagnostics()
     private let aiStore: AIRecordStore?
+    /// 会議開始時に固定したプロファイル。並び順が宛先ポップアップの並びになる
+    private(set) var meetingAIProfiles: [ResolvedAIConfig] = []
+    /// 手動送信の宛先。会議内では前回の選択を覚える
     private var meetingAI: ResolvedAIConfig?
+    /// 自動送信の宛先。手動と別に覚え、別プロファイルなら同時に使える
+    private var scheduleAI: ResolvedAIConfig?
     private var aiTask: Task<Void, Never>?
     private var aiSubmissionOwner = UUID()
     private var aiSubmissionTrigger: AIParticipantContext.Trigger?
@@ -72,6 +77,8 @@ final class MeetingSession {
     private var aiSchedule: AIScheduleState?
     private var aiScheduleTimer: Timer?
     private var aiScheduleHelper: URL?
+    /// 同梱CLIの置き場。録音開始で自動送信を始めるときに使う。バンドル実行でない検証では差し替える
+    var automaticHelper: URL? = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
     private var aiScheduleWarning: String?
     private var manualAISheetOpen = false
     private(set) var lastScheduleOptions: AIScheduleOptions?
@@ -88,10 +95,38 @@ final class MeetingSession {
     var aiMeetingID: UUID { handoff.meetingID }
     var aiRecord: AIRecordStore.Record? { aiStore?.records[handoff.meetingID] }
     var aiConfiguration: ResolvedAIConfig? { meetingAI }
+    /// 自動送信の宛先。未選択なら手動と同じ既定を使う
+    var aiScheduleConfiguration: ResolvedAIConfig? { scheduleAI ?? meetingAI }
+
+    /// 宛先を選び直す。会議の固定プロファイルとその場限りの接続先だけを受け付ける。
+    func selectAIProfile(slot: Int, forSchedule: Bool = false) {
+        guard let profile = meetingAIProfiles.first(where: { $0.slot == slot }) else { return }
+        if forSchedule { scheduleAI = profile } else { meetingAI = profile }
+        emit()
+    }
+    /// 稼働中ペインをその場限りの宛先として加える。同じペインの候補は作り直さない。
+    @discardableResult
+    func addAdHocAIProfile(for candidate: AIAgentCandidate) -> ResolvedAIConfig? {
+        if let existing = meetingAIProfiles.first(where: { $0.displayAgent == candidate.displayAgent
+            && $0.cwd.path == candidate.cwd && $0.connectsToExistingPane }) { return existing }
+        guard let base = meetingAIProfiles.first,
+              let profile = base.attaching(to: candidate, slot: (meetingAIProfiles.map(\.slot).max() ?? 0) + 1,
+                                           home: FileManager.default.homeDirectoryForCurrentUser) else { return nil }
+        meetingAIProfiles.append(profile)
+        // 送信済みの会議では固定値の記録にも足す。requestが参照する定義を残すため。
+        if let record = aiRecord { try? aiStore?.register(profile, for: record) }
+        emit()
+        return profile
+    }
+    /// シートの宛先ポップアップへ並べる稼働中ペイン。設定のプロファイルと同じ条件のものは除く。
+    func runningAIAgents() async -> [AIAgentCandidate] {
+        if let controller = aiRecord?.controller, let agents = try? await controller.runningAgents() { return agents }
+        return await aiStore?.runningAgents() ?? []
+    }
 
     init(config: ResolvedConfig, models: @escaping () async throws -> SortformerModelStore.Loaded, log: @escaping (String) -> Void, aiStore: AIRecordStore? = nil) {
         self.config = config
-        self.aiStore = aiStore; meetingAI = config.ai
+        self.aiStore = aiStore; meetingAIProfiles = config.aiProfiles; meetingAI = config.ai
         aiWorkAllowed = config.ai?.allowWork ?? true
         self.models = models
         self.log = log
@@ -120,7 +155,10 @@ final class MeetingSession {
         preparationID = preparation
         // 準備中や録音中の再読込で、同じ会議の保存方針を途中から切り替えない。
         let meetingConfig = config
-        meetingAI = meetingConfig.ai; aiDraft = ""; aiWarning = nil; aiCompleted = nil
+        // 宛先の選択とその場限りの接続先は会議をまたいで引き継がない。
+        meetingAIProfiles = meetingConfig.aiProfiles
+        meetingAI = meetingConfig.ai; scheduleAI = nil
+        aiDraft = ""; aiWarning = nil; aiCompleted = nil
         aiWorkAllowed = meetingConfig.ai?.allowWork ?? true
         consumedAudioTime = 0
         dropRepeatedBackchannels = meetingConfig.dropRepeatedBackchannels
@@ -173,6 +211,7 @@ final class MeetingSession {
             snapshot.state = .recording
             snapshot.markdownURL = markdownURL
             snapshot.message = nil
+            startAutomaticSchedule()
             emit()
             return true
         } catch {
@@ -365,17 +404,23 @@ final class MeetingSession {
         snapshot.previousAIUnread = aiStore?.records.values.filter { $0.manifest.meetingID != handoff.meetingID }
             .reduce(0) { $0 + $1.controller.conversation.questions.filter(\.isUnread).count } ?? 0
         snapshot.aiRecoveryWarning = aiStore?.warnings.first
-        snapshot.aiSchedule = AIScheduleViewState(schedule: aiSchedule, warning: aiScheduleWarning)
+        snapshot.aiSchedule = AIScheduleViewState(schedule: aiSchedule, warning: aiScheduleWarning,
+            destination: meetingAIProfiles.count > 1 ? aiScheduleConfiguration?.name : nil)
         if let config = meetingAI {
             let controller = aiRecord?.controller
             snapshot.ai = AIViewState(conversation: controller?.conversation, hotkey: config.hotkey,
-                participant: config.participantName, connection: controller?.connectionStatus ?? .unknown,
+                participant: config.participantName, connection: controller?.connectionStatus(slot: config.slot) ?? .unknown,
                 warning: aiWarning ?? aiRecord?.saveWarning ?? controller?.warning, progress: aiProgress,
                 unconfirmed: Set(controller?.conversation.questions.filter { controller!.isReturnUnconfirmed($0) }.map { $0.request.id } ?? []),
-                canSubmit: snapshot.canShare && aiTask == nil && (controller?.canSend ?? true), submissionID: aiCompleted, draft: aiDraft,
-                canOpenPane: controller?.connection != nil,
-                canRecreate: controller != nil && aiTask == nil && (aiWarning != nil || controller?.connectionStatus == .disconnected),
-                saveFailed: aiRecord?.saveWarning != nil, generation: controller?.generation ?? 1)
+                canSubmit: snapshot.canShare && aiTask == nil && (controller?.canSend(slot: config.slot) ?? true),
+                submissionID: aiCompleted, draft: aiDraft,
+                canOpenPane: controller?.connection(slot: config.slot) != nil,
+                // 接続型は準備済みの文脈が目的なので、空のセッションを起こす「作り直す」を出さない。
+                canRecreate: controller != nil && aiTask == nil && !config.connectsToExistingPane
+                    && (aiWarning != nil || controller?.connectionStatus(slot: config.slot) == .disconnected),
+                saveFailed: aiRecord?.saveWarning != nil, generation: controller?.generation(slot: config.slot) ?? 1,
+                profiles: meetingAIProfiles.map { ($0.slot, $0.name) }, selectedSlot: config.slot,
+                attached: config.connectsToExistingPane)
         } else { snapshot.ai = nil }
         onChange?(snapshot)
     }
@@ -415,14 +460,21 @@ final class MeetingSession {
 
     func cancelAI(_ id: UUID) { do { try aiRecord?.controller.cancel(id) } catch { aiWarning = "取消を保存できません" }; emit() }
     func readAI(_ id: UUID) { do { try aiRecord?.controller.markRead(id) } catch { aiWarning = "既読を保存できません" }; emit() }
-    func recreateAI() { do { try aiRecord?.controller.newGeneration(); aiWarning = nil } catch { aiWarning = "接続を作り直せません" }; emit() }
-    func showAIPane() { Task { do { try await aiRecord?.controller.showPane() } catch { aiWarning = "herdrのペインを開けません"; emit() } } }
+    func recreateAI() {
+        do { try aiRecord?.controller.newGeneration(slot: meetingAI?.slot); aiWarning = nil }
+        catch { aiWarning = "接続を作り直せません" }
+        emit()
+    }
+    func showAIPane() {
+        let slot = meetingAI?.slot
+        Task { do { try await aiRecord?.controller.showPane(slot: slot) } catch { aiWarning = "herdrのペインを開けません"; emit() } }
+    }
 
     func aiRangePreview(full: Bool) -> String {
         let lines = TranscriptRenderer.lines(snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
         guard let url = snapshot.markdownURL else { return "確定した会話はまだありません" }
         let context: AIContextSnapshot?
-        if let controller = aiRecord?.controller { context = try? controller.preview(lines: lines, full: full) }
+        if let controller = aiRecord?.controller { context = try? controller.preview(lines: lines, full: full, slot: meetingAI?.slot) }
         else {
             var history = try? AIStreamHistory(meetingID: aiMeetingID)
             context = try? history?.prepare(lines: lines, outputDirectory: url.deletingLastPathComponent(), full: full)
@@ -435,8 +487,10 @@ final class MeetingSession {
     /// 手動と自動の共通入口。収録位置・宛先・問いは最初に固定し、待ち中の追加発話を混ぜない。
     func submitAI(question: String, full: Bool, parent: UUID?, helper: URL,
                   launch: ((ResolvedAIConfig, URL, AIConversationController) throws -> (URL, [String]))? = nil,
-                  trigger: AIParticipantContext.Trigger? = nil, workAllowed suppliedWorkAllowed: Bool? = nil) {
-        guard snapshot.canShare, aiTask == nil, let config = meetingAI, let url = snapshot.markdownURL, let aiStore else { return }
+                  trigger: AIParticipantContext.Trigger? = nil, workAllowed suppliedWorkAllowed: Bool? = nil,
+                  profile: ResolvedAIConfig? = nil) {
+        let selected = profile ?? (trigger == .scheduled ? aiScheduleConfiguration : meetingAI)
+        guard snapshot.canShare, aiTask == nil, let config = selected, let url = snapshot.markdownURL, let aiStore else { return }
         let meetingID = handoff.meetingID, capturedAt = Date(), cutoff = snapshot.state == .idle ? snapshot.elapsed : pause.audioTime
         let names = snapshot.names, timeline = snapshot.timeline, typed = typedEntries
         let workAllowed = suppliedWorkAllowed ?? aiWorkAllowed
@@ -455,8 +509,9 @@ final class MeetingSession {
                 }
             }
             do {
-                let record = try aiStore.begin(meetingID: meetingID, markdownURL: url, config: config)
-                guard record.controller.canSend else { throw AIHerdrError.notReady }
+                let record = try aiStore.begin(meetingID: meetingID, markdownURL: url, profiles: meetingAIProfiles)
+                try record.controller.register(meetingAIProfiles)
+                guard record.controller.canSend(slot: config.slot) else { throw AIHerdrError.notReady }
                 if snapshot.state == .idle, var archive, record.archive == nil {
                     let saved = aiStore.save(&archive, for: meetingID); self.archive = archive
                     guard saved.succeeded else { throw AIError.unsafeFile }
@@ -476,7 +531,7 @@ final class MeetingSession {
                 try Task.checkCancellation()
                 guard aiSubmissionOwner == owner else { throw CancellationError() }
                 guard consumedAudioTime >= cutoff else { throw AIError.invalid("audio not processed") }
-                if trigger == .scheduled, !record.controller.hasChanges(lines: capture.lines) { return }
+                if trigger == .scheduled, !record.controller.hasChanges(lines: capture.lines, slot: config.slot) { return }
                 // prepareの通知から録音停止が始まっても、確定待ちの取消へ戻さない。
                 aiPhase = .preparingAndSending
                 let fixed = try record.controller.prepare(lines: capture.lines, question: question, voiceQuestion: capture.voice,
@@ -632,10 +687,24 @@ final class MeetingSession {
 }
 
 extension MeetingSession {
-    func startAISchedule(options: AIScheduleOptions, helper: URL, now: Date = Date()) throws {
+    /// `autoStart` のプロファイルがあれば、録音開始と同時に自動送信を始める。
+    /// 設定だけで決まる非対話の開始なので、接続先を解決できなければ理由を出して開始しない。
+    func startAutomaticSchedule(now: Date = Date()) {
+        guard let profile = meetingAIProfiles.first(where: \.autoStart), let helper = automaticHelper else { return }
+        do {
+            let options = try AIScheduleOptions(prompt: profile.autoPrompt, interval: Double(profile.autoIntervalMinutes) * 60,
+                workAllowed: profile.allowWork, sendFinal: true)
+            try startAISchedule(options: options, helper: helper, now: now, profile: profile)
+        } catch {
+            aiScheduleWarning = "設定の自動送信を開始できません。宛先と依頼を確認してください"
+            log("autoStartを開始できません: \(error)")
+        }
+    }
+    func startAISchedule(options: AIScheduleOptions, helper: URL, now: Date = Date(), profile: ResolvedAIConfig? = nil) throws {
         guard snapshot.state == .recording || snapshot.state == .paused, meetingAI != nil else {
             throw AIError.invalid("schedule recording state")
         }
+        if let profile { scheduleAI = profile }
         if aiSchedule == nil { aiSchedule = AIScheduleState(meetingID: aiMeetingID) }
         try aiSchedule?.start(options: options, now: now, runID: UUID())
         lastScheduleOptions = options; aiScheduleHelper = helper; aiScheduleWarning = nil
@@ -663,15 +732,22 @@ extension MeetingSession {
 
     private var scheduleAvailability: AIScheduleAvailability {
         let controller = aiRecord?.controller
-        if let controller, controller.connection != nil,
-           controller.connectionStatus == .disconnected || controller.connectionStatus == .blocked || controller.connectionStatus == .unknown {
-            return .disconnected
+        let slot = aiScheduleConfiguration?.slot ?? 1
+        if let controller, controller.connection(slot: slot) != nil {
+            let status = controller.connectionStatus(slot: slot)
+            if status == .disconnected || status == .blocked || status == .unknown { return .disconnected }
         }
-        if aiTask != nil || manualAISheetOpen { return .busy }
+        // 手動シートを開いている間に止めるのは同じ宛先のときだけ。別プロファイルなら同時に使える。
+        let sameTarget = aiScheduleConfiguration?.slot == meetingAI?.slot
+        if aiTask != nil || (manualAISheetOpen && sameTarget) { return .busy }
         if let controller {
-            let current = controller.conversation.questions.filter { $0.request.envelope.participant.sessionGeneration == controller.generation }
+            let generation = controller.generation(slot: slot)
+            let current = controller.conversation.questions.filter {
+                ($0.request.envelope.participant.profileSlot ?? controller.defaultSlot) == slot
+                    && $0.request.envelope.participant.sessionGeneration == generation
+            }
             if current.contains(where: { $0.isAwaitingResult }) { return .awaitingResult }
-            if !controller.canSend { return controller.connectionStatus == .working ? .busy : .disconnected }
+            if !controller.canSend(slot: slot) { return controller.connectionStatus(slot: slot) == .working ? .busy : .disconnected }
             if current.contains(where: { $0.state == .needsInput && $0.answeredByRequestID == nil }) { return .confirmation }
         }
         return .ready
@@ -685,7 +761,7 @@ extension MeetingSession {
         guard aiSchedule?.phase == .awaitingFinal ||
               (aiSchedule?.phase == .running && aiSchedule?.nextFire.map({ now >= $0 }) == true) else { return }
         let lines = TranscriptRenderer.lines(snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
-        let changed = aiRecord?.controller.hasChanges(lines: lines) ?? !lines.isEmpty
+        let changed = aiRecord?.controller.hasChanges(lines: lines, slot: aiScheduleConfiguration?.slot) ?? !lines.isEmpty
         let availability = scheduleAvailability
         let effect: AIScheduleState.Effect?
         if phase == .awaitingFinal {

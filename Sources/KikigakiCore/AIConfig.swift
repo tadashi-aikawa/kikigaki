@@ -31,6 +31,8 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var effort: String?
     public var address: String?
     public var cwd: String?
+    /// 稼働中herdrペインへ接続する。宣言したときだけ cwd と displayAgent が絞り込み条件になる
+    public var attach: Bool?
     /// 稼働中herdrペインの display_agent。cwd と併せて接続先を絞る
     public var displayAgent: String?
     public var extraArgs: [String]?
@@ -44,14 +46,16 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var hotkey: KikigakiConfig.Hotkey?
 
     public init(name: String? = nil, cli: AIProvider? = nil, command: String? = nil, herdrCommand: String? = nil, model: String? = nil,
-                effort: String? = nil, address: String? = nil, cwd: String? = nil, displayAgent: String? = nil,
+                effort: String? = nil, address: String? = nil, cwd: String? = nil, attach: Bool? = nil,
+                displayAgent: String? = nil,
                 extraArgs: [String]? = nil, prompt: String? = nil, notifySound: Bool? = nil,
                 hotkey: KikigakiConfig.Hotkey? = nil, allowWork: Bool? = nil,
                 autoPrompt: String? = nil, autoIntervalMinutes: Int? = nil, autoStart: Bool? = nil) {
         self.name = name
         self.cli = cli; self.command = command; self.herdrCommand = herdrCommand; self.model = model; self.effort = effort
         self.address = address
-        self.cwd = cwd; self.displayAgent = displayAgent; self.extraArgs = extraArgs; self.prompt = prompt
+        self.cwd = cwd; self.attach = attach; self.displayAgent = displayAgent
+        self.extraArgs = extraArgs; self.prompt = prompt
         self.notifySound = notifySound; self.hotkey = hotkey
         self.allowWork = allowWork
         self.autoPrompt = autoPrompt; self.autoIntervalMinutes = autoIntervalMinutes; self.autoStart = autoStart
@@ -83,6 +87,11 @@ public struct AIConfig: Codable, Equatable, Sendable {
             || displayAgent.trimmingCharacters(in: .whitespaces).isEmpty {
             throw invalid("displayAgent must be non-empty and single-line")
         }
+        // 接続先の絞り込みは attach を宣言したときだけ。cwd 単独は従来どおり新規起動の作業ディレクトリ。
+        if attach == true, cwd == nil, displayAgent == nil {
+            throw invalid("attach requires cwd or displayAgent")
+        }
+        if attach != true, displayAgent != nil { throw invalid("displayAgent requires attach = true") }
         if let effort, !AIEffort.values(for: cli ?? .codex).contains(effort) {
             throw invalid("effort must be one of " + AIEffort.values(for: cli ?? .codex).joined(separator: ", "))
         }
@@ -158,6 +167,8 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public let cwd: URL
     /// cwd が設定に明示されたか。接続先の絞り込みに使えるのは明示された場合だけ
     public let cwdSpecified: Bool
+    /// 稼働中ペインへ接続する宣言。既存の cwd 指定を接続型へ化けさせないため明示のキーで受ける
+    public let attach: Bool
     public let displayAgent: String?
     public let extraArgs: [String]
     public let prompt: String
@@ -169,13 +180,31 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public let hotkey: KikigakiConfig.Hotkey
     public var participantName: String { address.hasSuffix("へ") ? String(address.dropLast()) : address }
     /// 稼働中ペインへ接続するプロファイル。KIKIGAKIは workspace を作らず agent も起こさない
-    public var connectsToExistingPane: Bool { criteria != nil }
-    /// 接続先の絞り込み条件。cwd と displayAgent の少なくとも一方が要る
+    public var connectsToExistingPane: Bool { attach }
+    /// 接続先の絞り込み条件。attach を宣言したときだけ持ち、cwd と displayAgent の少なくとも一方が要る
     public var criteria: AIAgentCriteria? {
-        AIAgentCriteria(cwd: cwdSpecified ? cwd.path : nil, displayAgent: displayAgent)
+        guard attach else { return nil }
+        return AIAgentCriteria(cwd: cwdSpecified ? cwd.path : nil, displayAgent: displayAgent)
     }
     /// 起動引数へ翻訳した effort。接続型ではKIKIGAKIが起動しないので渡せない
     public var effortArguments: [String] { AIEffort.arguments(effort, provider: cli) }
+
+    /// シートで選んだ稼働中ペインを、その場限りのプロファイルにする。
+    /// requestのenvelopeがプロファイルを参照するので、記録の側にも定義が要る。
+    /// 宛名と表示名はペインから採り、補助指示や作業許可は選択元の設定を引き継ぐ。
+    public func attaching(to candidate: AIAgentCandidate, slot: Int, home: URL) -> ResolvedAIConfig? {
+        guard let kind = candidate.kind, let cli = AIProvider(rawValue: kind) else { return nil }
+        let participant = candidate.displayAgent?.trimmingCharacters(in: .whitespaces)
+        let label = participant?.isEmpty == false ? participant! : candidate.paneID
+        var config = AIConfig(name: String(label.prefix(32)) + " (" + candidate.paneID + ")", cli: cli,
+            herdrCommand: herdrCommand, address: label + "へ", cwd: candidate.cwd, attach: true,
+            displayAgent: participant?.isEmpty == false ? participant : nil,
+            prompt: prompt, notifySound: notifySound, allowWork: allowWork)
+        // ペインのcwdが読めない場合は display_agent だけで絞る。両方無いものは接続先にできない。
+        if config.cwd == nil, config.displayAgent == nil { return nil }
+        config.hotkey = hotkey
+        return ResolvedAIConfig(config: config, home: home, slot: slot)
+    }
 
     public init(config: AIConfig, home: URL, slot: Int = 1) {
         self.slot = slot
@@ -185,6 +214,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         address = config.address?.trimmingCharacters(in: .whitespaces) ?? "迅雷へ"
         cwd = ResolvedConfig.expand(config.cwd ?? Self.defaultCWD, home: home)
         cwdSpecified = config.cwd != nil
+        attach = config.attach ?? false
         displayAgent = config.displayAgent?.trimmingCharacters(in: .whitespaces)
         extraArgs = config.extraArgs ?? []; prompt = config.prompt ?? ""
         notifySound = config.notifySound ?? false; hotkey = config.hotkey ?? Self.defaultHotkey
@@ -196,7 +226,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case cli, command, herdrCommand, model, address, cwd, extraArgs, prompt, notifySound, hotkey, allowWork
         case autoPrompt, autoIntervalMinutes
-        case slot, name, effort, cwdSpecified, displayAgent, autoStart
+        case slot, name, effort, cwdSpecified, attach, displayAgent, autoStart
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -219,6 +249,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         effort = try values.decodeIfPresent(String.self, forKey: .effort)
         displayAgent = try values.decodeIfPresent(String.self, forKey: .displayAgent)
         cwdSpecified = try values.contains(.cwdSpecified) ? values.decode(Bool.self, forKey: .cwdSpecified) : false
+        attach = try values.contains(.attach) ? values.decode(Bool.self, forKey: .attach) : false
         autoStart = try values.contains(.autoStart) ? values.decode(Bool.self, forKey: .autoStart) : false
         let fallbackName = address.hasSuffix("へ") ? String(address.dropLast()) : address
         name = try values.contains(.name) ? values.decode(String.self, forKey: .name) : fallbackName

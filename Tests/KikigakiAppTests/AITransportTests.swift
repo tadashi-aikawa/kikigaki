@@ -233,6 +233,9 @@ actor FakeHerdr {
     var promptFailure = false
     var startFailure = false
     var beforePrompt: (@Sendable () throws -> Void)?
+    /// `agent list` が返す稼働中ペイン。接続型の解決に使う
+    var listed: [(pane: String, workspace: String, kind: String, display: String?, cwd: String?)] = []
+    func setListed(_ value: [(pane: String, workspace: String, kind: String, display: String?, cwd: String?)]) { listed = value }
     func setStatuses(_ value: [String]) { statuses = value }
     func setSession(_ value: String?) { session = value }
     func setProvider(_ value: String) { provider = value }
@@ -246,13 +249,24 @@ actor FakeHerdr {
             startFailure = false
             return AIProcessOutput(status: 1, stdout: Data(), stderr: Data("{\"error\":{\"code\":\"invalid_agent_name\"}}".utf8))
         case ["workspace", "create"]: response = ["workspace": ["workspace_id": "w"], "root_pane": ["pane_id": "p"]]
+        case ["agent", "list"]:
+            response = ["agents": listed.map { entry -> [String: Any] in
+                var agent: [String: Any] = ["pane_id": entry.pane, "workspace_id": entry.workspace,
+                                            "agent": entry.kind, "agent_status": "idle"]
+                if let display = entry.display { agent["display_agent"] = display }
+                if let cwd = entry.cwd { agent["cwd"] = cwd }
+                return agent
+            }]
         case ["agent", "get"]:
             let status = statuses.count > 1 ? statuses.removeFirst() : statuses[0]
             // "missing" は herdr がまだagentを検知していない状態(pane run 直後の実測)
             if status == "missing" {
                 return AIProcessOutput(status: 1, stdout: Data(), stderr: Data("{\"error\":{\"code\":\"agent_not_found\"}}".utf8))
             }
-            var agent: [String: Any] = ["workspace_id": "w", "pane_id": "p", "agent": provider, "agent_status": status, "interactive_ready": true]
+            let pane = args.count > 2 ? args[2] : "p"
+            let workspace = listed.first { $0.pane == pane }?.workspace ?? "w"
+            var agent: [String: Any] = ["workspace_id": workspace, "pane_id": pane, "agent": provider,
+                                        "agent_status": status, "interactive_ready": true]
             if let session { agent["agent_session"] = ["value": session] }
             response = ["agent": agent]
         case ["agent", "prompt"]:

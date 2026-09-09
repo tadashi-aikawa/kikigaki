@@ -7,6 +7,9 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
     var onStart: ((AIScheduleOptions) -> Void)?
     var onCancel: (() -> Void)?
     var onDraft: ((String) -> Void)?
+    var onDestination: ((AIDestinationPicker.Choice) -> Void)?
+    private let destination = AIDestinationPicker()
+    private let title = Washi.label("", size: 17, weight: .semibold)
     private let editor = AIQuestionEditor()
     private let interval = NSPopUpButton()
     private let work = NSButton(checkboxWithTitle: "作業を許可する(ファイル編集・コマンド実行)", target: nil, action: nil)
@@ -20,7 +23,8 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         window.appearance = NSAppearance(named: .aqua); window.backgroundColor = Washi.paper
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
-        let title = Washi.label("\(participant)へ 自動送信", size: 17, weight: .semibold)
+        title.stringValue = "\(participant)へ 自動送信"
+        destination.onChange = { [weak self] in self?.onDestination?($0) }
         editor.placeholder = "毎回送る依頼を書いてください"
         editor.onSubmit = { [weak self] in self?.start() }
         editor.onCancel = { [weak self] in self?.cancel() }
@@ -44,13 +48,21 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         let cancel = NSButton(title: "取消", target: self, action: #selector(cancel))
         cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
         let actions = NSStackView(views: [NSView(), cancel, startButton]); actions.spacing = 12
-        for view in [title, scroll, frequency, hint, work, final, actions] {
+        for view in [title, destination, scroll, frequency, hint, work, final, actions] {
             stack.addArrangedSubview(view)
             view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
         }
         window.contentView = stack
         textDidChange(Notification(name: NSText.didChangeNotification))
     }
+
+    /// 宛先の一覧と選択を差し替える。稼働中ペインの一覧は後から届く。
+    func updateDestinations(profiles: [(slot: Int, name: String)], selected: AIDestinationPicker.Choice,
+                            agents: [AIAgentCandidate] = [], participant: String) {
+        destination.update(profiles: profiles, selected: selected, agents: agents)
+        title.stringValue = "\(participant)へ 自動送信"
+    }
+    func destinationAgent(for paneID: String) -> AIAgentCandidate? { destination.agent(for: paneID) }
 
     func present(on parent: NSWindow) { parent.beginSheet(window); window.makeFirstResponder(editor) }
     func close() { if let parent = window.sheetParent { parent.endSheet(window) }; window.orderOut(nil) }

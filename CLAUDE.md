@@ -60,17 +60,40 @@ avatar = "~/Pictures/avatars/tanaka.png"
 name = "迅雷"
 avatar = "https://example.com/jinrai.webp"
 
-# AI参加を有効にする。省略するとAI機能は無効
-[ai]
+# AI参加を有効にする。省略するとAI機能は無効。単数の [ai] は互換で読み、1つ目が既定
+[[ai]]
+name = "議事録"           # 省略時は address から導く参加者名。重複は不可
 cli = "codex"
 address = "迅雷へ"
+effort = "high"           # 推論の強さ。CLIごとの引数へ翻訳する。extraArgs との二重指定は不可
 notifySound = false
-# 自動送信シートの初期値。設定だけでは開始しない
+attach = true             # 会議前に用意した稼働中ペインへ接続する。省略時は新規起動
+cwd = "~/work/minutes"    # attach のときは接続先の絞り込み。省略時は新規起動の作業ディレクトリ
+displayAgent = "迅雷"     # 同じcwdに複数のペインが並ぶときの追加の絞り込み。attach のときだけ
+autoStart = true          # 録音開始で自動送信を始める。配列で1つまで
+# 自動送信シートの初期値。autoStart が無ければ設定だけでは開始しない
 autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください" # 省略時は空欄
 autoIntervalMinutes = 3 # 1〜60分、省略時は3分
+
+# ホットキーは1つ目のプロファイルにだけ書ける
+[ai.hotkey]
+modifiers = ["ctrl", "alt", "cmd"]
+key = "a"
+
+[[ai]]
+name = "相談"
+cli = "claude"
+effort = "max"
+address = "ネオへ"
 ```
 
-定期送信は録音中・一時停止中にフッターの「自動送信…」から開始します。シートで毎回の依頼、間隔、作業許可を設定すると、開始から指定間隔後に最初の送信を行い、状態行へ次の時刻を表示します。手動の「AIへ…」と同じAIセッションを使い、受領済みの会話から変更がない回や返事待ちの回はスキップします。
+`effort` の値域はCLIごとに違います。Codexは none / minimal / low / medium / high / xhigh / max / ultra を `-c model_reasoning_effort` へ渡し、Claudeは low / medium / high / xhigh / max を `--effort` へ渡します。実際に通る値はモデルによります。`extraArgs` での effort 指定は二重指定になるため設定エラーにします。
+
+`[[ai]]` を複数書くと、「AIへ…」と「自動送信…」のシートで送信ごとに宛先を選べます。既定は1つ目で、会議内では手動と自動が別々に前回の選択を覚えるため、自動は議事録、手動は相談のように同時に使えます。ポップアップには稼働中のherdr agentも並び、選ぶとその場限りの宛先になります。会議内の番号は全体の通しで、印とMarkdownの宛名で見分けます。
+
+`attach = true` のプロファイルはKIKIGAKIがCLIを起動しません。**フック(Claudeの `--settings`、Codexのnotify)を仕込めないので返し忘れの検知が使えず、Codexのサンドボックス許可も渡せません。** 保存先が接続先の書き込み許可に入っていないと返送が失敗します。接続先が0件でも複数件でも新規起動へは倒さず、理由を表示して止まります。
+
+`autoStart = true` のプロファイルがあれば録音開始と同時に自動送信を始めます。接続先を解決できなければ理由を表示して開始しません。それ以外は次のとおり、定期送信は録音中・一時停止中にフッターの「自動送信…」から開始します。シートで毎回の依頼、間隔、作業許可を設定すると、開始から指定間隔後に最初の送信を行い、状態行へ次の時刻を表示します。手動の「AIへ…」と同じAIセッションを使い、受領済みの会話から変更がない回や返事待ちの回はスキップします。
 
 「自動送信を停止」は録音を続けたまま自動送信を止めます。シートの「録音停止時に最後の1回を送る」は既定ONです。最終処理と保存が成功し、変更があれば送信し、返事待ちなら到着後まで保留します。保留中も同じ停止操作で取りやめられます。
 
@@ -100,7 +123,10 @@ autoIntervalMinutes = 3 # 1〜60分、省略時は3分
 
 会議中・停止後の「会話をコピー」は、固定したローカル会話ファイルへの参照と読む範囲をコピーします。AI側には `skills/kikigaki` を導入します。続きのコピー、訂正、再コピーの契約は [AIへの受け渡し](docs/ai-handoff.md) を参照してください。話者名はウィンドウ上部の「話者名…」でまとめて変更できます。
 
-`[ai]` を設定すると、herdrの専用ペインへ依頼や返答を送り、返事を同じ会議へ回収できます。既定はCodex・宛名「迅雷へ」・通知音なし・ショートカット `ctrl+alt+cmd+A`。CLI種別や設定は会議開始時に固定し、変更は次の会議から反映します。初回は固定cwdへの信頼を利用者がherdrペインで承認します。CLIとherdrの実行ファイルはPATHのほか `~/.local/bin`・miseのshims・Homebrewを探し、見つからないときは `command` / `herdrCommand` の絶対パスで指定します。詳細は [AI参加者の設計](docs/ai-participant.md) を参照してください。
+`[ai]` を設定すると、herdrの専用ペインへ依頼や返答を送り、返事を同じ会議へ回収できます。既定はCodex・宛名「迅雷へ」・通知音なし・ショートカット `ctrl+alt+cmd+A`。CLI種別や設定は会議開始時に固定し、変更は次の会議から反映します。初回は固定cwdへの信頼を利用者がherdrペインで承認します。CLIとherdrの実行ファイルはPATHのほか `~/.local/bin`・miseのshims・Homebrewを探し、見つからないときは `command` / `herdrCommand` の絶対パスで指定します。詳細は次の2つを参照してください。
+
+- 会議参加モードの契約: [AI参加者の設計](docs/ai-participant.md)
+- 複数プロファイルと接続先の選択: [AI設定の複数プロファイル](docs/ai-profiles.md)
 
 - `KikigakiCore`: AI設定、独立stream履歴、envelope、質問と受信イベント、Markdown。herdr・AppKit・Processを置かない
 - `KikigakiAIIO`: アプリと返送CLIが共有するfd検証、原子的な保存、sessionとフック観測の型

@@ -1,4 +1,5 @@
 import AppKit
+import KikigakiCore
 
 final class AIQuestionWindow: NSWindow {
     override func sendEvent(_ event: NSEvent) {
@@ -39,6 +40,9 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     var onCancel: (() -> Void)?
     var onDraft: ((String) -> Void)?
     var onWorkAllowedChange: ((Bool) -> Void)?
+    var onDestination: ((AIDestinationPicker.Choice) -> Void)?
+    private let destination = AIDestinationPicker()
+    private let title = Washi.label("", size: 17, weight: .semibold)
     private let editor = AIQuestionEditor()
     private let sendButton = NSButton(title: "送信 ⏎", target: nil, action: nil)
     private let hint = NSTextField(wrappingLabelWithString: "")
@@ -56,7 +60,8 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         window.appearance = NSAppearance(named: .aqua); window.backgroundColor = Washi.paper
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
-        let title = Washi.label(parentNumber.map { "#\($0)への返答" } ?? "\(participant)へ", size: 17, weight: .semibold)
+        title.stringValue = parentNumber.map { "#\($0)への返答" } ?? "\(participant)へ"
+        destination.onChange = { [weak self] in self?.onDestination?($0) }
         self.range.stringValue = range
         full.target = self; full.action = #selector(updateRange)
         work.state = workAllowed ? .on : .off
@@ -77,7 +82,11 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         let cancel = NSButton(title: "取消", target: self, action: #selector(cancel)); cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
         pane.isBordered = false; pane.target = self; pane.action = #selector(openPane)
         let actions = NSStackView(views: [pane, NSView(), cancel, sendButton]); actions.orientation = .horizontal; actions.spacing = 12
-        var views: [NSView] = [title, self.range]
+        // 確認への返答は元質問と同じ宛先へ返す。宛先を選び直させない。
+        destination.isHidden = parentNumber != nil
+        var views: [NSView] = [title]
+        if parentNumber == nil { views.append(destination) }
+        views.append(self.range)
         if let confirmation {
             let context = NSTextField(wrappingLabelWithString: "? " + confirmation)
             context.font = .systemFont(ofSize: 12); context.textColor = Washi.ink
@@ -92,6 +101,14 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         window.contentView = stack
         editor.onSubmit = { [weak self] in self?.submit() }; editor.onCancel = { [weak self] in self?.cancel() }
     }
+    /// 宛先の一覧と選択を差し替える。稼働中ペインの一覧は後から届く。
+    func updateDestinations(profiles: [(slot: Int, name: String)], selected: AIDestinationPicker.Choice,
+                            agents: [AIAgentCandidate] = [], participant: String) {
+        destination.update(profiles: profiles, selected: selected, agents: agents)
+        title.stringValue = "\(participant)へ"
+    }
+    func destinationAgent(for paneID: String) -> AIAgentCandidate? { destination.agent(for: paneID) }
+
     func present(on parent: NSWindow) { parent.beginSheet(window); window.makeFirstResponder(editor) }
     func close() { if let parent = window.sheetParent { parent.endSheet(window) }; window.orderOut(nil) }
     func update(progress: String?, canSubmit: Bool, warning: String? = nil) {
