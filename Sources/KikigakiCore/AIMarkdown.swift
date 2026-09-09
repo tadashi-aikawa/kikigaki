@@ -81,7 +81,7 @@ public enum AIMarkdown {
                 lines.append("- 返事: " + date(result.recordedAt, timeZone: timeZone))
                 if question.cancelledAt != nil { lines.append("- 補足: 取消後の返事") }
                 if participant.sessionGeneration < generation { lines.append("- 補足: 旧接続からの返事") }
-                if question.answeredByRequestID != nil { lines.append("- 確認: 返答済み") }
+                if AIQuestion.isAnswered(question, in: conversation.questions) { lines.append("- 確認: 返答済み") }
                 if result.kind == .needsInput { lines.append("- 状態: 確認待ち") }
                 if result.kind == .failed { lines.append("- 状態: 失敗") }
                 lines += ["", "#### 返事", "", result.body ?? ""]

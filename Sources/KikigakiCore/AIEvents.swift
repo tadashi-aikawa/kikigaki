@@ -195,8 +195,10 @@ public struct AIQuestion: Codable, Equatable, Sendable {
         guard state == .needsInput, answeredByRequestID == nil || replacing else { throw AIError.invalidTransition }
         answeredByRequestID = id
     }
-    /// 返答済みかどうか。失敗・取消で終わった返答は返答済みとして数えない。
-    static func isAnswered(_ parent: AIQuestion, in questions: [AIQuestion]) -> Bool {
+    /// 確認質問が返答済みかどうか。**失敗・取消で終わった返答は返答済みとして数えない。**
+    /// 送り直せる状態なのに「返答済み」と見えると、返答の導線も件数も消えてしまう。
+    /// 表示・件数・自動送信の抑止はすべてこの判定を通す。
+    public static func isAnswered(_ parent: AIQuestion, in questions: [AIQuestion]) -> Bool {
         guard let id = parent.answeredByRequestID else { return false }
         guard let child = questions.first(where: { $0.request.id == id }) else { return true }
         return child.state != .failed && child.state != .cancelled

@@ -225,11 +225,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             anchor = .init(candidates: anchor.candidates, y: anchor.y, atBottom: false)
         }
         // 位置はCoreの純関数が決める。AIはUtteranceにしないので併合結果へは混ぜない。
-        let items = AITimeline.items(conversation: snapshot.ai?.conversation, utterances: snapshot.utterances,
-                                     timeline: snapshot.timeline, generation: snapshot.ai?.generation ?? 1,
+        // 世代と接続はその行を送った宛先のものを引く。選択中の宛先には依存させない。
+        let ai = snapshot.ai
+        let items = AITimeline.items(conversation: ai?.conversation, utterances: snapshot.utterances,
+                                     timeline: snapshot.timeline,
+                                     generation: { ai?.generation(for: $0) ?? 1 },
                                      endedAt: snapshot.state == .idle ? snapshot.timeline.date(at: snapshot.elapsed) : nil,
-                                     connection: snapshot.ai?.connection ?? .unknown,
-                                     unconfirmed: snapshot.ai?.unconfirmed ?? [])
+                                     connection: { ai?.connection(for: $0) ?? .unknown },
+                                     unconfirmed: ai?.unconfirmed ?? [])
         var attached: [Int: [AITimeline.Item]] = [:]
         for item in items { attached[item.slot, default: []].append(item) }
         let animated = sameMeeting && !shouldReduceMotion()

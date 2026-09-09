@@ -62,8 +62,10 @@ final class AIRecordStore {
             self.manifest = manifest; self.controller = controller; self.recovered = recovered
         }
         var needsRecovery: Bool {
-            hasUnpersistedChanges || controller.conversation.questions.contains {
-                $0.sendAttemptedAt != nil && ($0.result == nil || ($0.state == .needsInput && $0.answeredByRequestID == nil))
+            let questions = controller.conversation.questions
+            return hasUnpersistedChanges || questions.contains {
+                $0.sendAttemptedAt != nil
+                    && ($0.result == nil || ($0.state == .needsInput && !AIQuestion.isAnswered($0, in: questions)))
             }
         }
     }

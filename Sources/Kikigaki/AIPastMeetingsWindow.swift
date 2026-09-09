@@ -91,7 +91,8 @@ import KikigakiCore
         // 旧会議は発話を持たないので、声の送信もアンカーを解決できず日時順の細い1行になる。
         let rows = AITimeline.items(conversation: state.conversation, utterances: [],
                                     timeline: MeetingTimeline(startedAt: Date(timeIntervalSince1970: 0)),
-                                    generation: state.generation, connection: state.connection,
+                                    generation: { state.generation(for: $0) },
+                                    connection: { state.connection(for: $0) },
                                     unconfirmed: state.unconfirmed).map { item -> any DocumentRow in
             let row: any AITimelineRowView
             if let existing = marks[item.rowID] { existing.update(item, state: state); row = existing }

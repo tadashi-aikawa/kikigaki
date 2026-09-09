@@ -797,7 +797,11 @@ extension MeetingSession {
             }
             if current.contains(where: { $0.isAwaitingResult }) { return .awaitingResult }
             if !controller.canSend(slot: slot) { return controller.connectionStatus(slot: slot) == .working ? .busy : .disconnected }
-            if current.contains(where: { $0.state == .needsInput && $0.answeredByRequestID == nil }) { return .confirmation }
+            // 失敗・取消で終わった返答は返答済みと数えない。まだ返答できる確認は自動送信を止める。
+            let questions = controller.conversation.questions
+            if current.contains(where: { $0.state == .needsInput && !AIQuestion.isAnswered($0, in: questions) }) {
+                return .confirmation
+            }
         }
         return .ready
     }

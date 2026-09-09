@@ -8,10 +8,11 @@ enum AINoticeTone {
 
 enum AIBadgeKind: String, CaseIterable {
     case unread = "未読", confirmation = "確認待ち", waiting = "返事待ち", unknown = "送達不明", failed = "失敗"
-    func matches(_ question: AIQuestion) -> Bool {
+    /// 確認待ちの判定に会話全体が要る。失敗・取消で終わった返答は返答済みと数えないため。
+    func matches(_ question: AIQuestion, in questions: [AIQuestion]) -> Bool {
         switch self {
         case .unread: return question.isUnread && question.result?.kind != .needsInput
-        case .confirmation: return question.state == .needsInput && question.answeredByRequestID == nil
+        case .confirmation: return question.state == .needsInput && !AIQuestion.isAnswered(question, in: questions)
         case .waiting: return question.isAwaitingResult && question.state != .deliveryUnknown
         case .unknown: return question.state == .deliveryUnknown
         case .failed: return question.state == .failed
@@ -67,7 +68,7 @@ final class AIBadgeBar: NSStackView {
     func update(_ state: AIViewState?) {
         let questions = state?.conversation?.questions ?? []
         for kind in AIBadgeKind.allCases {
-            let matching = questions.filter(kind.matches), button = buttons[kind]!
+            let matching = questions.filter { kind.matches($0, in: questions) }, button = buttons[kind]!
             button.isHidden = matching.isEmpty
             button.title = "\(kind.rawValue) \(matching.count)"; button.invalidateIntrinsicContentSize(); button.needsDisplay = true
             button.setAccessibilityLabel(button.title + "、最初の行へ移動")
@@ -118,7 +119,9 @@ struct AIViewState {
     var noticeTone: AINoticeTone { warning == nil ? .normal : .warning }
     var badges: String {
         let questions = conversation?.questions ?? []
-        let counts = AIBadgeKind.allCases.map { kind in (kind.rawValue, questions.filter(kind.matches).count) }
+        let counts = AIBadgeKind.allCases.map { kind in
+            (kind.rawValue, questions.filter { kind.matches($0, in: questions) }.count)
+        }
         return counts.filter { $0.1 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
     }
     var shortcut: String {

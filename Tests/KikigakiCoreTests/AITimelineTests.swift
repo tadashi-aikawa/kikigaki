@@ -180,8 +180,8 @@ import KikigakiCore
         try conversation.update(value.id) { try $0.cancel(at: Date(timeIntervalSince1970: 33)) }
         try answer(&conversation, value, at: 35)
 
-        let reply = try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline, generation: 2)
-            .first { !$0.isSend })
+        let reply = try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline,
+                                                  generation: { _ in 2 }).first { !$0.isSend })
         #expect(reply.notes == ["取消後の返事", "旧接続からの返事"])
         #expect(reply.body == "返事")
     }
@@ -239,23 +239,38 @@ import KikigakiCore
         #expect(try #require(adjacent.last).question.isEmpty)
     }
 
-    @Test func 失敗した返答は同じ確認へ送り直せる() throws {
+    @Test(arguments: [true, false]) func 失敗と取消で終わった返答は返答済みと数えず送り直せる(byFailure: Bool) throws {
         let meeting = UUID()
         var conversation = AIConversation(meetingID: meeting)
         let ask = try request(in: meeting, number: 1, anchor: 10)
         try send(&conversation, ask, at: 30)
         try answer(&conversation, ask, at: 31, kind: .needsInput, body: "社外の方も含みますか", reason: "clarification")
         let parent = try #require(conversation.questions.first)
-        let failed = try request(in: meeting, number: 2, question: "社内だけです", parent: parent)
-        try send(&conversation, failed, at: 40)
-        try answer(&conversation, failed, at: 41, kind: .failed, body: "送信できませんでした", reason: "send_failed")
-        // 失敗した返答が親に登録されたままだと、同じ確認への再送が「返答済み」で拒否される。
+        let first = try request(in: meeting, number: 2, question: "社内だけです", parent: parent)
+        try send(&conversation, first, at: 40)
+        func confirmation(_ conversation: AIConversation) throws -> AITimeline.Item {
+            try #require(AITimeline.items(conversation: conversation, utterances: [voice("対象", at: 10)], timeline: timeline)
+                .first { $0.number == 1 && !$0.isSend })
+        }
+        // 返答を送った直後は返答済み。確認待ちの導線を畳む。
+        #expect(try confirmation(conversation).needsAnswer == false)
+
+        if byFailure {
+            try answer(&conversation, first, at: 41, kind: .failed, body: "送信できませんでした", reason: "send_failed")
+        } else {
+            try conversation.update(first.id) { try $0.cancel(at: Date(timeIntervalSince1970: 41)) }
+        }
+        // 送り直せる状態に戻るので「返答する」も件数も戻る。注記も消す。
+        #expect(try confirmation(conversation).needsAnswer)
+        #expect(try confirmation(conversation).notes.allSatisfy { !$0.contains("で返答") })
+        #expect(!AIQuestion.isAnswered(conversation.questions[0], in: conversation.questions))
+
         let resent = try request(in: meeting, number: 3, question: "社内だけです", parent: conversation.questions[0])
         try send(&conversation, resent, at: 50)
         #expect(conversation.questions[0].answeredByRequestID == resent.id)
         #expect(try AIJSON.decode(AIConversation.self, from: AIJSON.encode(conversation)) == conversation)
+        #expect(try confirmation(conversation).notes == ["#3で返答"])
         let items = AITimeline.items(conversation: conversation, utterances: [voice("対象", at: 10)], timeline: timeline)
-        #expect(try #require(items.first { $0.number == 1 && !$0.isSend }).notes == ["#3で返答"])
         #expect(items.filter { $0.number == 3 }.map(\.kind) == [.sendRow, .reply(.waiting)])
     }
 
@@ -379,7 +394,7 @@ import KikigakiCore
         try send(&conversation, value, at: 30)
         try answer(&conversation, value, at: 40)
         let reply = try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline,
-                                                  generation: generation).first { !$0.isSend })
+                                                  generation: { _ in generation }).first { !$0.isSend })
         #expect(reply.notes.contains("旧接続からの返事") == (generation == 2))
     }
 
@@ -391,7 +406,7 @@ import KikigakiCore
         try send(&conversation, value, at: 30)
         func notes(_ connection: AIConnectionStatus, unconfirmed: Set<UUID> = []) throws -> [String] {
             try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline,
-                                          connection: connection, unconfirmed: unconfirmed).first { !$0.isSend }).notes
+                                          connection: { _ in connection }, unconfirmed: unconfirmed).first { !$0.isSend }).notes
         }
         let blocked = try notes(.blocked), disconnected = try notes(.disconnected)
         let idle = try notes(.idle), unconfirmed = try notes(.idle, unconfirmed: [value.id])

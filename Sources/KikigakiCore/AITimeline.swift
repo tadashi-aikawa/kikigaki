@@ -57,12 +57,15 @@ public enum AITimeline {
     }
 
     /// 表示順に並べた要素を返す。`slot` の昇順で、同じslotの中もこの順で置ける。
-    /// - generation: 現在のAIセッション世代。旧接続からの返事の注記に使う。
+    /// - generation: そのrequestを送った宛先の現在の世代。旧接続からの返事の注記に使う。
     /// - endedAt: 録音を停止した日時。これ以後に届いた返事は末尾へ置く。
     /// - connection・unconfirmed: 返事待ちの注記を作るための接続の観測。描画側で補わない。
+    ///
+    /// 宛先が複数あるので、世代と接続はrequestごとに引く。選択中の宛先の値を使うと、
+    /// 別の宛先へ送った行に関係のない「接続が切れています」や「旧接続からの返事」が付く。
     public static func items(conversation: AIConversation?, utterances: [Utterance], timeline: MeetingTimeline,
-                             generation: Int = 1, endedAt: Date? = nil,
-                             connection: AIConnectionStatus = .unknown,
+                             generation: (AIRequest) -> Int = { _ in 1 }, endedAt: Date? = nil,
+                             connection: (AIRequest) -> AIConnectionStatus = { _ in .unknown },
                              unconfirmed: Set<UUID> = []) -> [Item] {
         guard let conversation else { return [] }
         let dates = utterances.map { TranscriptRenderer.date(for: $0, timeline: timeline) }
@@ -103,14 +106,15 @@ public enum AITimeline {
             let anchor: Anchor = waiting ? .tail : .at(arrival)
             var notes: [String] = []
             if question.cancelledAt != nil { notes.append("取消後の返事") }
-            if participant.sessionGeneration < generation { notes.append("旧接続からの返事") }
+            if participant.sessionGeneration < generation(request) { notes.append("旧接続からの返事") }
             // どの依頼で返したかを番号で結ぶ。「返答済み」だけでは往復を追えない。
-            if let child = question.answeredByRequestID,
+            // 失敗・取消で終わった返答は返答済みと数えないので注記も出さない。
+            if AIQuestion.isAnswered(question, in: conversation.questions), let child = question.answeredByRequestID,
                let number = conversation.questions.first(where: { $0.request.id == child })?.request.number {
                 notes.append("#\(number)で返答")
             }
             if waiting {
-                switch connection {
+                switch connection(request) {
                 case .blocked: notes.append("ペインで確認してください")
                 case .disconnected: notes.append("接続が切れています")
                 default: if unconfirmed.contains(request.id) { notes.append("返送未確認") }
@@ -124,7 +128,8 @@ public enum AITimeline {
                                date: waiting ? nil : arrival,
                                question: quote, parentNumber: parentNumber, body: question.result?.body ?? "",
                                notes: notes, timeRange: request.timeRange, isUnread: question.isUnread,
-                               needsAnswer: question.state == .needsInput && question.answeredByRequestID == nil),
+                               needsAnswer: question.state == .needsInput
+                                 && !AIQuestion.isAnswered(question, in: conversation.questions)),
                           rank: rank(anchor), sortDate: arrival, side: 1,
                           // 返事同士は記録順。記録の無い送信前失敗は同着の先頭へ置く。
                           order: question.resultOrder ?? -1))
