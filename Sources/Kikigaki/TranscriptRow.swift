@@ -9,6 +9,10 @@ final class AvatarView: NSView {
     var slot: Int?
     var tentative = false
     var typed = false
+    /// 話者枡の代わりに使う色。AI参加者だけが指定する。
+    var accent: Washi.SpeakerColor?
+    /// typedのとき、鉛筆の代わりに描く記号。
+    var glyph: NSImage?
     private let pencil = NSImage(systemSymbolName: "pencil", accessibilityDescription: "手入力")?
         .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [Washi.paper]))
     var image: NSImage? { didSet { if image !== oldValue { needsDisplay = true } } }
@@ -26,7 +30,7 @@ final class AvatarView: NSView {
             dashed.stroke()
             return
         }
-        let color = Washi.speakerColor(for: slot)
+        let color = accent ?? Washi.speakerColor(for: slot)
         (typed ? Washi.ink : color.background).setFill()
         let shape = NSBezierPath(ovalIn: NSRect(x: 0, y: 0, width: 24, height: 24))
         let tail = NSBezierPath()
@@ -38,8 +42,8 @@ final class AvatarView: NSView {
         shape.windingRule = .nonZero
         shape.fill()
         if typed {
-            pencil?.draw(in: NSRect(x: 5, y: 5, width: 14, height: 14), from: .zero,
-                         operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            (glyph ?? pencil)?.draw(in: NSRect(x: 5, y: 5, width: 14, height: 14), from: .zero,
+                                    operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             return
         }
         if let image {

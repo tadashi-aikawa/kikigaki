@@ -30,9 +30,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let aiNotice = Washi.label(size: 11, color: Washi.muted)
     private lazy var reconnectAI = AIActionButton("AIセッションを作り直す") { [weak self] in self?.onRecreateAI?() }
     private lazy var retryAISave = AIActionButton("保存を再試行") { [weak self] in self?.onRetryAISave?() }
+    private lazy var openPaneAI = AIActionButton("ペインを開く") { [weak self] in self?.onOpenAIPane?() }
     private let aiStatusRow = NSStackView()
     private let askButton = WashiActionButton(title: "AIへ…", target: nil, action: nil)
-    private var aiMarks: [String: AIMarkRow] = [:]
+    private var aiRows: [String: any AITimelineRowView] = [:]
+    private var aiReadSince: [String: Date] = [:]
+    private var aiReadTimer: Timer?
+    /// 既読の可視化判定でウィンドウが見られているとみなす条件。テストから差し替える。
+    var aiReadWindowActive: (() -> Bool)?
     private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
     private var speakerSettingsPopover: SpeakerSettingsPopover?
     private let startStopButton = WashiActionButton()
@@ -117,7 +122,10 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         aiNotice.textColor = value.ai?.noticeTone.color ?? Washi.muted
         reconnectAI.isHidden = value.ai?.canRecreate != true
         retryAISave.isHidden = value.ai?.saveFailed != true
-        aiStatusRow.isHidden = aiNotice.isHidden && reconnectAI.isHidden && retryAISave.isHidden
+        // 展開が既定になり全ての返事の行に同じボタンが並ぶため、接続の操作はフッターへ集める。
+        openPaneAI.isHidden = value.ai?.canOpenPane != true
+        openPaneAI.toolTip = "AIのherdrペインを開きます"
+        aiStatusRow.isHidden = aiNotice.isHidden && reconnectAI.isHidden && retryAISave.isHidden && openPaneAI.isHidden
         askButton.isHidden = value.ai == nil
         scheduleRow.isHidden = value.ai == nil
         scheduleAI.isHidden = value.aiSchedule.active
@@ -211,32 +219,27 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private func updateRows(previous: SessionSnapshot) {
         var anchor = transcriptDocument.anchor()
         let sameMeeting = previous.timeline.startedAt == snapshot.timeline.startedAt
-        if !sameMeeting { rows.removeAll(); aiMarks.removeAll(); anchor = .init(candidates: [], y: 0, atBottom: true) }
+        if !sameMeeting { rows.removeAll(); aiRows.removeAll(); aiReadSince.removeAll(); anchor = .init(candidates: [], y: 0, atBottom: true) }
         if sameMeeting, previous.utterances == snapshot.utterances, previous.ai?.conversation != snapshot.ai?.conversation {
             // 回答の到着だけでは末尾へ移動しない。人間の発言が増えたときの追従は従来どおり。
             anchor = .init(candidates: anchor.candidates, y: anchor.y, atBottom: false)
         }
-        let allMarks = AIInlineMark.ordered(snapshot.ai?.conversation)
-        var attached: [Int: [AIInlineMark]] = [:]
-        let marks = allMarks.filter { mark in
-            if mark.kind == .question, let index = mark.question.request.voiceAnchorIndex(in: snapshot.utterances) {
-                attached[index, default: []].append(mark); return false
-            }
-            return true
-        }
-        var markIndex = 0
+        // 位置はCoreの純関数が決める。AIはUtteranceにしないので併合結果へは混ぜない。
+        let items = AITimeline.items(conversation: snapshot.ai?.conversation, utterances: snapshot.utterances,
+                                     timeline: snapshot.timeline, generation: snapshot.ai?.generation ?? 1,
+                                     endedAt: snapshot.state == .idle ? snapshot.timeline.date(at: snapshot.elapsed) : nil,
+                                     connection: snapshot.ai?.connection ?? .unknown,
+                                     unconfirmed: snapshot.ai?.unconfirmed ?? [])
+        var attached: [Int: [AITimeline.Item]] = [:]
+        for item in items { attached[item.slot, default: []].append(item) }
         let animated = sameMeeting && !shouldReduceMotion()
         var next: [RowID: TranscriptRow] = [:]
         var ordered: [any DocumentRow] = []
         var occurrences: [RowKey: Int] = [:]
         var inserted: [TranscriptRow] = []
         var changed: [TranscriptRow] = []
+        for item in attached[-1, default: []] { ordered.append(aiRowView(item)) }
         for (index, utterance) in snapshot.utterances.enumerated() {
-            while markIndex < marks.count, marks[markIndex].date < TranscriptRenderer.date(for: utterance, timeline: snapshot.timeline) {
-                let mark = marks[markIndex]
-                let view = markView(mark)
-                aiMarks[mark.id] = view; ordered.append(view); markIndex += 1
-            }
             if snapshot.hasCopied, snapshot.handoffPreview?.startLine == index + 1 { ordered.append(boundary) }
             let key = RowKey(kind: utterance.kind, start: utterance.start)
             let occurrence = occurrences[key, default: 0]
@@ -250,23 +253,18 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             row.onRename = { [weak self] slot, view in self?.showRename(slot: slot, relativeTo: view) }
             next[id] = row
             ordered.append(row)
-            for mark in attached[index, default: []] {
-                let view = markView(mark); aiMarks[mark.id] = view; ordered.append(view)
-            }
-        }
-        while markIndex < marks.count {
-            let mark = marks[markIndex]
-            let view = markView(mark)
-            aiMarks[mark.id] = view; ordered.append(view); markIndex += 1
+            for item in attached[index, default: []] { ordered.append(aiRowView(item)) }
         }
         if let tentative = snapshot.tentativeText {
             tentativeRow.updateTentative(tentative)
             ordered.append(tentativeRow)
         }
         rows = next
-        let markIDs = Set(allMarks.map(\.id))
-        aiMarks = aiMarks.filter { markIDs.contains($0.key) }
+        let rowIDs = Set(items.map(\.rowID))
+        aiRows = aiRows.filter { rowIDs.contains($0.key) }
+        aiReadSince = aiReadSince.filter { rowIDs.contains($0.key) }
         transcriptDocument.setRows(ordered, anchor: anchor)
+        refreshAIReadTimer()
         for row in inserted {
             row.appear(animated: animated && snapshot.canSubmitTyped)
             // 停止時の再分割で開始位置が変わった行も、最終結果の変更として同時に点灯する。
@@ -345,7 +343,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         ])
         let title = Washi.label("AIへ渡す会話", size: 13, weight: .semibold)
         aiBadges.onSelect = { [weak self] id in
-            guard let self, let view = aiMarks[id] else { return }
+            guard let self, let view: NSView = aiRows[id] else { return }
             view.scrollToVisible(view.bounds); scrolled()
         }
         title.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -353,7 +351,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         aiStatusRow.orientation = .horizontal; aiStatusRow.alignment = .centerY; aiStatusRow.spacing = 12
         aiNotice.lineBreakMode = .byTruncatingTail
         aiNotice.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        for view in [aiNotice, reconnectAI, retryAISave] { aiStatusRow.addArrangedSubview(view) }
+        for view in [aiNotice, openPaneAI, reconnectAI, retryAISave] { aiStatusRow.addArrangedSubview(view) }
         aiStatusRow.isHidden = true
         let leftSpace = NSView(), rightSpace = NSView()
         let footerButtons = row([leftSpace, askButton, copyButton, rightSpace], spacing: 12)
@@ -439,23 +437,70 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         return view
     }
     @objc private func startStopPressed() { onStartStop?() }
-    private func markView(_ mark: AIInlineMark) -> AIMarkRow {
+    /// 行IDごとにビューを再利用する。送信の形はrequestで固定なので、
+    /// 到着で変わりうるのはAIの行だけ。同じ行を状態更新するので高さが跳ねない。
+    private func aiRowView(_ item: AITimeline.Item) -> any DocumentRow {
         let state = snapshot.ai ?? AIViewState()
-        let view = aiMarks[mark.id] ?? AIMarkRow(mark: mark, state: state)
-        view.update(mark, state: state)
-        let id = mark.question.request.id
-        view.onRead = { [weak self] in self?.onReadAI?(id) }
-        view.onReply = { [weak self] in self?.onAskAI?(id) }
-        view.onCancel = { [weak self] in self?.onCancelAI?(id) }
-        view.onPane = { [weak self] in self?.onOpenAIPane?() }
-        view.onToggle = { [weak self, weak view] in
-            guard let self, let view else { return }
-            let y = scrollView.contentView.bounds.minY
-            // 開いた行の見出しをその場に保つ。末尾追従で全文の末尾へ飛ばさない。
-            transcriptDocument.reflow(anchor: .init(candidates: [(view, view.frame.minY - y)], y: y, atBottom: false))
-            scrolled()
+        let view: any AITimelineRowView
+        if let existing = aiRows[item.rowID] { existing.update(item, state: state); view = existing }
+        else {
+            switch item.kind {
+            case .sendLine: view = AISendLineRow(item: item, state: state)
+            case .sendRow: view = AITypedSendRow(item: item, state: state)
+            case .reply, .failure: view = AIReplyRow(item: item, state: state)
+            }
         }
+        if let reply = view as? AIReplyRow {
+            let id = item.requestID
+            reply.onRead = { [weak self] in self?.onReadAI?(id) }
+            reply.onReply = { [weak self] in self?.onAskAI?(id) }
+            reply.onCancel = { [weak self] in self?.onCancelAI?(id) }
+            reply.onRetry = { [weak self] in self?.onAskAI?(nil) }
+            reply.onResize = { [weak self, weak reply] in
+                guard let self, let reply else { return }
+                let y = scrollView.contentView.bounds.minY
+                // 引用を伸ばした行の上端をその場に保つ。末尾追従で全文の末尾へ飛ばさない。
+                transcriptDocument.reflow(anchor: .init(candidates: [(reply, reply.frame.minY - y)], y: y, atBottom: false))
+                scrolled()
+            }
+        }
+        aiRows[item.rowID] = view
         return view
+    }
+
+    private func refreshAIReadTimer() {
+        let hasUnread = aiRows.values.contains { ($0 as? AIReplyRow).map { $0.item.isUnread && !$0.isFailure } == true }
+        if hasUnread, aiReadTimer == nil {
+            aiReadTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.evaluateAIRead() }
+            }
+        } else if !hasUnread {
+            aiReadTimer?.invalidate(); aiReadTimer = nil; aiReadSince.removeAll()
+        }
+    }
+
+    /// 展開が既定になったので、印を開く操作の代わりに可視化で既読にする。
+    /// 行の上端が可視域へ入り、ウィンドウを見ている状態のまま連続1秒留まったら既読。
+    /// 到着した返事は末尾追従の対象外なので、読まずに既読になる場面は限られる。
+    func evaluateAIRead(now: Date = Date(), dwell: TimeInterval = 1) {
+        let active = aiReadWindowActive?() ?? (window?.isKeyWindow == true)
+        let clip = scrollView.contentView.bounds
+        var seen: Set<String> = []
+        var read: [UUID] = []
+        // 画面の上から順に見る。辞書の順で回すと既読になる順が実行ごとに変わる。
+        for reply in transcriptDocument.rows.compactMap({ $0 as? AIReplyRow }) {
+            let id = reply.item.rowID
+            guard reply.item.isUnread, !reply.isFailure else { continue }
+            let top = reply.frame.minY
+            guard active, top >= clip.minY, top <= clip.maxY - 8 else { continue }
+            seen.insert(id)
+            let since = aiReadSince[id] ?? now
+            aiReadSince[id] = since
+            if now.timeIntervalSince(since) >= dwell { read.append(reply.item.requestID) }
+        }
+        aiReadSince = aiReadSince.filter { seen.contains($0.key) }
+        // 既読の保存は再構築を呼ぶので、走査を終えてから通知する。
+        for id in read { onReadAI?(id) }
     }
     @objc private func askPressed() { onAskAI?(nil) }
     @objc private func pausePressed() { onPauseResume?() }

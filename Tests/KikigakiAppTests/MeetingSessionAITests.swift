@@ -71,9 +71,13 @@ import KikigakiCore
         await task.value
         let first = try #require(session.aiRecord?.controller.conversation.questions.first)
         #expect(first.state == .submitted && first.request.envelope.participant.workAllowed == !defaultAllowed)
-        let mark = AIMarkRow(mark: .init(question: first, kind: .question), state: AIViewState())
-        mark.toggleExpanded()
-        #expect(descendants(mark).compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains("作業許可: " + (!defaultAllowed ? "あり" : "なし")) })
+        var conversation = AIConversation(meetingID: first.request.envelope.meetingID)
+        try conversation.append(first.request)
+        try conversation.update(first.request.id) { try $0.beginSending(at: Date()); try $0.submitted() }
+        let sendItem = try #require(AITimeline.items(conversation: conversation, utterances: [],
+                                                     timeline: MeetingTimeline(startedAt: Date())).first)
+        // 許可されているのが通常なので、注記は許可していないときだけ出す。
+        #expect(sendItem.notes.contains("作業許可なし") == defaultAllowed)
         session.updateAIWorkAllowed(!defaultAllowed)
         session.update(config: config)
         let secondSheet = sheet()

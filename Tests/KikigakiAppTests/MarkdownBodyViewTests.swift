@@ -75,18 +75,19 @@ import KikigakiCore
         window.setContentSize(NSSize(width: 600, height: 1100))
         let content = try #require(window.contentView)
         controller.apply(state); content.layoutSubtreeIfNeeded()
-        let row = try #require(controller.transcriptDocument.rows.compactMap { $0 as? AIMarkRow }.first { $0.mark.kind == .result })
+        let row = try #require(controller.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.first)
         controller.onReadAI = { id in
             try! conversation.update(id) { $0.markRead() }
             state.ai?.conversation = conversation
             controller.apply(state)
         }
-        row.toggleExpanded(); content.layoutSubtreeIfNeeded()
+        // 展開は既定なので開く操作はない。未読の印を押して既読にする。
+        row.onRead?(); content.layoutSubtreeIfNeeded()
         let body = try #require(descendants(row).compactMap { $0 as? MarkdownBodyView }.first)
         #expect(descendants(row).compactMap { $0 as? NSTextView }.count == 1)
         #expect(!body.isEditable && body.isSelectable)
         #expect(body.layoutManager != nil && body.textLayoutManager == nil)
-        #expect(row.accent == .muted)
+        #expect(row.accent == nil)
         let selection = (body.string as NSString).range(of: "初参加")
         body.setSelectedRange(selection)
         let storage = try #require(body.textStorage)
@@ -110,9 +111,7 @@ import KikigakiCore
             if let previous = heights[width] { #expect(abs(previous - row.frame.height) < 1) }
             heights[width] = row.frame.height
             try assertFits(body)
-            let detail = try #require(descendants(row).compactMap { $0 as? NSTextField }.first { $0.stringValue.hasPrefix("到着:") })
-            #expect(detail.frame.minY >= body.frame.maxY)
-            #expect(detail.frame.maxY <= row.bounds.height)
+            #expect(body.frame.maxY <= row.bounds.height)
             #expect(body.frame.width == max(44, row.bounds.width - 90))
             body.setSelectedRange(NSRange(location: 0, length: 0))
             try capture("minutes-\(width)", view: content.superview!)
@@ -123,12 +122,9 @@ import KikigakiCore
         state.names = SpeakerNames([0: "佐藤 太郎"])
         state.utterances.append(.init(speaker: 0, start: 92, end: 94, text: "担当はこの内容で進めましょう。"))
         controller.apply(state); content.layoutSubtreeIfNeeded()
-        #expect(body.selectedRange() == selection && row.expanded && row.accent == .muted)
+        // 改名と発話追加だけの更新では、本文の選択もtextStorageも作り直さない。
+        #expect(body.selectedRange() == selection && row.accent == nil && !body.isHidden)
         #expect(body.textStorage === storage)
-        row.toggleExpanded()
-        #expect(row.height(for: 600) == 28 && body.isHidden)
-        row.toggleExpanded(); content.layoutSubtreeIfNeeded()
-        #expect(body.selectedRange() == selection)
 
         // NSTextViewの標準の選択書き出しを使う。利用者のクリップボードには触れない。
         let clipboard = NSPasteboard(name: .init("KIKIGAKI-markdown-" + UUID().uuidString))

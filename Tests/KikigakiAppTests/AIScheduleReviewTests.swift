@@ -99,8 +99,11 @@ import KikigakiAIIO
             warning: "入力準備を確認できません。herdrで確認してください", canSubmit: false, canRecreate: true)
         state.aiSchedule = AIScheduleViewState(warning: "接続できないため最後の1回を中止しました")
         window.apply(state); try capture("schedule-warning", view)
-        #expect(AIInlineMark(question: conversation.questions[0], kind: .result).title.hasSuffix(" · 自動"))
-        #expect(AIInlineMark(question: conversation.questions[0], kind: .question).excerpt == "対象: 2発言")
-        #expect(AIInlineMark(question: conversation.questions[0], kind: .result).excerpt == conversation.questions[0].result?.body?.trimmingCharacters(in: .newlines))
+        let items = AITimeline.items(conversation: conversation, utterances: [], timeline: MeetingTimeline(startedAt: Date()))
+        #expect(items.map(\.kind) == [.sendLine(automatic: true), .reply(.answered)])
+        #expect(try #require(items.first).notes == ["対象: 2発言"])
+        #expect(try #require(items.last).body == conversation.questions[0].result?.body)
+        // 自動のansweredは取り込み時点で既読なので、印も帯も出さない。
+        #expect(items.allSatisfy { !$0.isUnread })
     }
 }
