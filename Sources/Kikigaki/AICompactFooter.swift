@@ -73,12 +73,13 @@ final class AIRobotButton: AIFooterButton {
     private(set) var eyeOffset: CGFloat = 0
     private(set) var isRunning = false
     var statusFont: NSFont { AIFooterMetrics.labelFont }
-    var eyeColor: NSColor { isRunning && isEnabled ? .white : isEnabled ? Washi.red : Washi.muted }
+    var eyeColor: NSColor { isRunning && isEnabled ? .white : isEnabled ? tint : Washi.muted }
     var headFrame: NSRect { NSRect(x: bounds.midX - 11.5, y: AIFooterMetrics.iconCenterY - 8.5, width: 23, height: 17) }
     init() { super.init(symbol: "", label: "AIの操作") }
     required init?(coder: NSCoder) { fatalError() }
     func update(schedule: AIScheduleViewState, waiting: Bool, animate: Bool, now: Date) {
         isRunning = waiting
+        tint = waiting || schedule.active ? Washi.red : Washi.muted
         let remaining = max(0, Int(ceil(schedule.nextFire?.timeIntervalSince(now) ?? 0)))
         let countdown = String(format: "%d:%02d", remaining / 60, remaining % 60)
         displayText = waiting ? "実行中" : !schedule.active ? "" :
@@ -93,7 +94,7 @@ final class AIRobotButton: AIFooterButton {
     }
     override func draw(_ dirtyRect: NSRect) {
         drawHoverBackground()
-        let color = isEnabled ? Washi.red : Washi.muted
+        let color = isEnabled ? tint : Washi.muted
         let face = headFrame
         let x = face.minX
         color.setStroke()
