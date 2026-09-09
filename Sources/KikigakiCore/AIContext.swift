@@ -126,9 +126,11 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
               // 片方だけのプロファイル指定は、パス検証も表示も決められないので拒否する。
               (profile == nil) == (profileSlot == nil) else { throw AIError.invalid("participant") }
         if let profile, let profileSlot {
+            // 長さは設定の解析側でだけ見る。`name` を省くと宛名から補うので、
+            // 長い宛名の設定は解析を通るのに送信準備で落ちる、という食い違いになる。
+            // 宛名の長さは単数設定の頃から制限していない。`participant_name` と同じ基準にする。
             guard profileSlot > 0, AIValidation.singleLine(profile),
-                  !profile.trimmingCharacters(in: .whitespaces).isEmpty,
-                  profile.utf8.count <= AILimits.profileNameBytes else { throw AIError.invalid("profile") }
+                  !profile.trimmingCharacters(in: .whitespaces).isEmpty else { throw AIError.invalid("profile") }
         }
         try AIValidation.text(question, limit: AILimits.questionBytes)
         if trigger == .scheduled {

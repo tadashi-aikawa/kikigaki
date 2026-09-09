@@ -46,8 +46,8 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
 
     public func validate() throws {
         guard profileSlot > 0, config.slot == profileSlot,
+              // 長さは設定の解析側でだけ見る。宛名から補った名前は制限の対象外。
               !profileName.trimmingCharacters(in: .whitespaces).isEmpty,
-              profileName.utf8.count <= AILimits.profileNameBytes,
               !token.isEmpty, token.utf8.count <= 256,
               startedAt.timeIntervalSince1970.isFinite else { throw AIError.invalid("prepared session") }
         if let connection, connection.provider != config.cli { throw AIError.mismatch }

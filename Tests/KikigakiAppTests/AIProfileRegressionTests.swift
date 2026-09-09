@@ -373,24 +373,33 @@ import KikigakiAIIO
         #expect(controller.isReturnUnconfirmed(questions[0], now: later))
     }
 
-    /// 接続待ちで止まっている送信を作る。取消・停止の競合はこの状態でしか起きない。
+    /// 接続待ちで止まっている送信を作り、そのTaskを返す。取消・停止の競合はこの状態でしか起きない。
+    /// 取消はTask参照をnilにするので、**呼び手は取消の前にこれを受け取っておく**。
+    @discardableResult
     private func stalledSubmit(_ session: MeetingSession, profile: ResolvedAIConfig,
-                               fake: FakeHerdr, trigger: AIParticipantContext.Trigger? = nil) async throws {
+                               fake: FakeHerdr, trigger: AIParticipantContext.Trigger? = nil) async throws -> Task<Void, Never> {
         await fake.setStatuses(["unknown"])
         session.submitAI(question: "接続待ちの依頼", full: false, parent: nil,
                          helper: URL(fileURLWithPath: "/bin/echo"), trigger: trigger, profile: profile)
-        // requestを保存し、接続の生存確認で止まるところまで待つ。
-        try await waitUntil {
-            session.aiRecord?.controller.conversation.questions.contains {
-                $0.request.envelope.participant.profileSlot == profile.slot
-            } == true
+        let task = try #require(session.submissionTaskForTesting(slot: profile.slot))
+        // requestが保存され、接続先が決まり、その接続の生存確認まで走ったことを確かめる。
+        // ここまで来ていなければ「接続待ち」ではないので、競合を再現できていない。
+        try await waitUntil("接続待ちに入る") {
+            guard let controller = session.aiRecord?.controller,
+                  controller.conversation.questions.contains(where: {
+                      $0.request.envelope.participant.profileSlot == profile.slot }),
+                  let pane = controller.connection(slot: profile.slot)?.paneID else { return false }
+            return await fake.commands.contains { Array($0.prefix(3)) == ["agent", "get", pane] }
         }
+        return task
     }
-    private func waitUntil(_ condition: () -> Bool, limit: Int = 400) async throws {
+    /// 条件が満たされるまで待つ。時間切れは失敗にする(黙って進むと競合を再現できていない)。
+    private func waitUntil(_ what: String, limit: Int = 400, _ condition: () async -> Bool) async throws {
         for _ in 0..<limit {
-            if condition() { return }
+            if await condition() { return }
             try await Task.sleep(for: .milliseconds(10))
         }
+        Issue.record("\(what)まで待てなかった")
     }
 
     /// 【中】手動シートの取消が、送信を始めた枠ではなく取消時点の選択枠を見ていた。
@@ -403,14 +412,15 @@ import KikigakiAIIO
         let session = session(root, profiles: list, fake: fake)
         let before = await fake.commands.filter { Array($0.prefix(2)) == ["agent", "prompt"] }.count
 
-        try await stalledSubmit(session, profile: list[0], fake: fake)
+        // 取消はTask参照をnilにするので、先に受け取っておく。
+        let task = try await stalledSubmit(session, profile: list[0], fake: fake)
         // 接続待ちのまま宛先をBへ変える。シートは送信を始めた枠を持ち続ける。
         session.selectAIProfile(slot: 2)
         #expect(session.aiConfiguration?.slot == 2)
         session.cancelAIPreparation(slot: 1)
         // 取消の後で接続が整っても、送ってはいけない。
         await fake.setStatuses(["idle"])
-        if let task = session.submissionTaskForTesting(slot: 1) { await task.value }
+        await task.value
         let after = await fake.commands.filter { Array($0.prefix(2)) == ["agent", "prompt"] }.count
         #expect(after == before)
         let controller = try #require(session.aiRecord?.controller)
@@ -454,11 +464,11 @@ import KikigakiAIIO
 
         try session.startAISchedule(options: try AIScheduleOptions(prompt: "議事録を更新して", interval: 60),
                                     helper: URL(fileURLWithPath: "/bin/echo"), profile: list[1])
-        try await stalledSubmit(session, profile: list[1], fake: fake, trigger: .scheduled)
+        let task = try await stalledSubmit(session, profile: list[1], fake: fake, trigger: .scheduled)
         session.stopAISchedule()
         #expect(!session.snapshot.aiSchedule.active)
         await fake.setStatuses(["idle"])
-        if let task = session.submissionTaskForTesting(slot: 2) { await task.value }
+        await task.value
         let after = await fake.commands.filter { Array($0.prefix(2)) == ["agent", "prompt"] }.count
         #expect(after == before)
         let scheduled = try #require(controller.conversation.questions.last)
@@ -479,13 +489,41 @@ import KikigakiAIIO
         try session.startAISchedule(options: try AIScheduleOptions(prompt: "議事録を更新して", interval: 0.01),
                                     helper: URL(fileURLWithPath: "/bin/echo"), profile: list[1])
         // Bの自動送信は止まらない。Aのシートを開いていても対象が違う。
-        try await waitUntil { session.aiRecord?.controller.conversation.questions.isEmpty == false }
+        try await waitUntil("Bの自動送信が始まる") { session.aiRecord?.controller.conversation.questions.isEmpty == false }
         if let task = session.submissionTaskForTesting(slot: 2) { await task.value }
         let controller = try #require(session.aiRecord?.controller)
         let sent = try #require(controller.conversation.questions.first)
         #expect(sent.request.envelope.participant.profileSlot == 2)
         #expect(sent.request.trigger == .scheduled)
         session.endAIDraft()
+    }
+
+    /// 【中】宛名から補った長い名前が、設定は通るのに送信準備で落ちていた。
+    /// 設定側と送信側で検証条件が食い違うと、複数プロファイルにした途端に送れなくなる。
+    @Test func 宛名から補った長い名前でも送信できる() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let long = String(repeating: "あ", count: 22)
+        #expect(long.utf8.count > AILimits.profileNameBytes)
+        let list = try profiles(root, toml: """
+        [[ai]]
+        name = "議事録"
+        command = "/bin/echo"
+        cwd = "\(root.path)"
+
+        [[ai]]
+        command = "/bin/echo"
+        cwd = "\(root.path)"
+        address = "\(long)へ"
+        """)
+        #expect(list[1].name == long)
+        let session = session(root, profiles: list, fake: fake)
+        try await submit(session, profile: list[1])
+        let request = try #require(session.aiRecord?.controller.conversation.questions.first?.request)
+        #expect(request.envelope.participant.profile == long)
+        #expect(request.envelope.participant.participantName == long)
+        #expect(session.aiRecord?.controller.conversation.questions.first?.state == .submitted)
     }
 
     /// 【中】共通のherdrCommandを後続で省略できる。

@@ -41,7 +41,15 @@ struct ReplayScheduleTests {
         #expect(value.askProfile == "相談")
     }
 
-    @Test(arguments: ["", "  ", "相談\n議事録", "相談\0", String(repeating: "あ", count: 22)])
+    /// 長い名前は拒否しない。宛名から補ったプロファイル名は64バイトを超え得る。
+    @Test func 宛名から補った長い宛先も指定できる() throws {
+        let long = String(repeating: "あ", count: 22)
+        let value = try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"],
+                                                environment: ["KIKIGAKI_DEBUG_AI_ASK_PROFILE": long])
+        #expect(value.askProfile == long)
+    }
+
+    @Test(arguments: ["", "  ", "相談\n議事録", "相談\0"])
     func 不正な宛先指定をsmokeでも拒否する(input: String) {
         #expect(throws: (any Error).self) {
             try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"],

@@ -51,8 +51,9 @@ struct ReplayDebugOptions {
             result.automaticSeconds = seconds
         }
         if let input = env["KIKIGAKI_DEBUG_AI_ASK_PROFILE"] {
+            // 長い宛名から補ったプロファイル名も指定できるよう、長さは制限しない。
             guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !input.contains("\0"),
-                  !input.contains(where: \.isNewline), input.utf8.count <= AILimits.profileNameBytes else {
+                  !input.contains(where: \.isNewline) else {
                 throw AIError.invalid("KIKIGAKI_DEBUG_AI_ASK_PROFILE")
             }
             result.askProfile = input
