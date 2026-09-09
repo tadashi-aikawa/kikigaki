@@ -698,6 +698,9 @@ final class MeetingSession {
             state.progresses = progresses
             state.participants = participants
             state.openablePanes = openablePanes
+            state.avatarSources = Dictionary(uniqueKeysWithValues: meetingAIProfiles.compactMap { profile in
+                profile.avatar.map { (profile.slot, $0) }
+            })
             snapshot.ai = state
         } else { snapshot.ai = nil }
         onChange?(snapshot)

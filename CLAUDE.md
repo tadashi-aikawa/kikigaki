@@ -65,6 +65,7 @@ avatar = "https://example.com/jinrai.webp"
 name = "議事録"           # 省略時は address から導く参加者名。重複は不可
 cli = "codex"
 address = "迅雷へ"
+avatar = "~/Pictures/jinrai.png" # 省略時は紫のイニシャル。http/httpsのURLも使える
 effort = "high"           # 推論の強さ。CLIごとの引数へ翻訳する。extraArgs との二重指定は不可
 notifySound = false       # プロファイルごとに効く。返答元の設定で鳴らす
 cwd = "~/work/minutes"    # 起動時の作業ディレクトリ。省略時は固定の既定
@@ -86,6 +87,8 @@ address = "ネオへ"
 ```
 
 `effort` の値域はCLIごとに違います。Codexは none / minimal / low / medium / high / xhigh / max / ultra を `-c model_reasoning_effort` へ渡し、Claudeは low / medium / high / xhigh / max を `--effort` へ渡します。実際に通る値はモデルによります。`extraArgs` での effort 指定は二重指定になるため設定エラーにします。
+
+`[[ai]].avatar` は話者台帳と同じローカルパス・HTTP・HTTPSの画像に対応します。AIの返事行に使い、省略・取得失敗時は従来の紫のイニシャルを表示します。URL画像は共通の `~/Library/Caches/kikigaki/avatars/` に保存します。アバターの設定も会議開始時に固定され、過去会議は保存済みのプロファイルから表示します。
 
 `[[ai]]` を複数書くと、「AIへ…」と「自動送信…」のシートで送信ごとに宛先を選べます。既定はどちらも1つ目で、会議内では手動と自動が独立に前回の選択を覚えるため、自動は議事録、手動は相談のように同時に使えます。会議内の番号は全体の通しで、印とMarkdownの宛名で見分けます。確認質問への返答は元の質問と同じ宛先へ返ります。
 

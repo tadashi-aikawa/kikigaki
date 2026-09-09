@@ -50,7 +50,7 @@ AIの行は既定で展開する。畳む操作は持たせない。畳んだ状
 
 | 部品 | 内容 |
 |---|---|
-| アバター | 参加者名の頭文字。AI専用色の紫。返事待ちの間は破線の丸 |
+| アバター | プロファイルの `avatar` 画像。省略・取得失敗時は参加者名の頭文字とAI専用色の紫。返事待ちの間は破線の丸 |
 | 名前 | `participant.participantName`。`AIViewState.participant` ではなくrequestの固定値を読む |
 | チップ | 手動は「AI」、`trigger == .scheduled` は「自動」。10pt・`rule` の枠・薄墨 |
 | 時刻 | 到着時刻 `resultReceivedAt`。返事待ちの間は出さない |

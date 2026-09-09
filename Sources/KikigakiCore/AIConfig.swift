@@ -30,6 +30,8 @@ public struct AIConfig: Codable, Equatable, Sendable {
     /// 推論の強さ。CLIごとの引数へ翻訳する。extraArgs との二重指定は拒否する
     public var effort: String?
     public var address: String?
+    /// 話者と同じ画像ソース。省略・読込失敗時はイニシャルを使う。
+    public var avatar: String?
     public var cwd: String?
     /// 取り下げた接続案のキー。書かれていたら設定エラーにして移行先を示す
     public var attach: Bool?
@@ -46,14 +48,14 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var hotkey: KikigakiConfig.Hotkey?
 
     public init(name: String? = nil, cli: AIProvider? = nil, command: String? = nil, herdrCommand: String? = nil, model: String? = nil,
-                effort: String? = nil, address: String? = nil, cwd: String? = nil, attach: Bool? = nil,
+                effort: String? = nil, address: String? = nil, avatar: String? = nil, cwd: String? = nil, attach: Bool? = nil,
                 displayAgent: String? = nil,
                 extraArgs: [String]? = nil, prompt: String? = nil, notifySound: Bool? = nil,
                 hotkey: KikigakiConfig.Hotkey? = nil, allowWork: Bool? = nil,
                 autoPrompt: String? = nil, autoIntervalMinutes: Int? = nil, autoStart: Bool? = nil) {
         self.name = name
         self.cli = cli; self.command = command; self.herdrCommand = herdrCommand; self.model = model; self.effort = effort
-        self.address = address
+        self.address = address; self.avatar = avatar
         self.cwd = cwd; self.attach = attach; self.displayAgent = displayAgent
         self.extraArgs = extraArgs; self.prompt = prompt
         self.notifySound = notifySound; self.hotkey = hotkey
@@ -80,6 +82,13 @@ public struct AIConfig: Codable, Equatable, Sendable {
             throw invalid("cwd must be absolute or start with ~/")
         }
         if let model, !AIValidation.singleLine(model) { throw invalid("model must be non-empty and single-line") }
+        if let avatar {
+            guard AIValidation.singleLine(avatar) else { throw invalid("avatar must be non-empty and single-line") }
+            if avatar.contains("://") {
+                guard let url = URL(string: avatar), ["http", "https"].contains(url.scheme),
+                      let host = url.host, !host.isEmpty else { throw invalid("avatar URL must use http or https and include a host") }
+            }
+        }
         if let address, !AIValidation.singleLine(address) || address.trimmingCharacters(in: .whitespaces) == "へ" {
             throw invalid("address must contain one non-empty participant name")
         }
@@ -169,6 +178,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public let model: String?
     public let effort: String?
     public let address: String
+    public let avatar: String?
     public let cwd: URL
     public let extraArgs: [String]
     public let prompt: String
@@ -188,6 +198,9 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         cli = config.cli ?? .codex; command = config.command; herdrCommand = config.herdrCommand; model = config.model
         effort = config.effort
         address = config.address?.trimmingCharacters(in: .whitespaces) ?? "迅雷へ"
+        avatar = config.avatar.map {
+            $0.hasPrefix("http://") || $0.hasPrefix("https://") ? $0 : ResolvedConfig.expand($0, home: home).path
+        }
         cwd = ResolvedConfig.expand(config.cwd ?? Self.defaultCWD, home: home)
         extraArgs = config.extraArgs ?? []; prompt = config.prompt ?? ""
         notifySound = config.notifySound ?? false; hotkey = config.hotkey ?? Self.defaultHotkey
@@ -199,7 +212,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case cli, command, herdrCommand, model, address, cwd, extraArgs, prompt, notifySound, hotkey, allowWork
         case autoPrompt, autoIntervalMinutes
-        case slot, name, effort, autoStart
+        case slot, name, effort, autoStart, avatar
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -208,6 +221,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         herdrCommand = try values.decodeIfPresent(String.self, forKey: .herdrCommand)
         model = try values.decodeIfPresent(String.self, forKey: .model)
         address = try values.decode(String.self, forKey: .address)
+        avatar = try values.decodeIfPresent(String.self, forKey: .avatar)
         cwd = try values.decode(URL.self, forKey: .cwd)
         extraArgs = try values.decode([String].self, forKey: .extraArgs)
         prompt = try values.decode(String.self, forKey: .prompt)
@@ -227,7 +241,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         // 宛名から補った名前には長さの制限を掛けない。旧manifestは `name` を持たず、
         // 長い宛名の会議が復号できなくなると未完了の回収まで止まる。
         // 明示された `name` は設定の解析時と同じ基準で検証する。
-        try AIConfig(name: name == fallbackName ? nil : name, cli: cli, effort: effort,
+        try AIConfig(name: name == fallbackName ? nil : name, cli: cli, effort: effort, avatar: avatar,
                      autoPrompt: autoPrompt, autoIntervalMinutes: autoIntervalMinutes).validate()
     }
 }

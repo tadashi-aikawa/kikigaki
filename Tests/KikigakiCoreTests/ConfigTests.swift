@@ -6,6 +6,20 @@ import Testing
 @Suite struct ConfigTests {
     private let home = URL(fileURLWithPath: "/Users/test")
 
+    @Test func AIのアバターは話者と同じパス解決で旧設定も読める() throws {
+        for source in ["~/Pictures/ai.png", "/tmp/ai.png", "https://example.com/ai.png", "http://example.com/ai.png"] {
+            let config = try ConfigLoader.parse(toml: "[[ai]]\navatar = \"\(source)\"")
+            let resolved = try #require(ResolvedConfig(config: config, home: home).ai)
+            #expect(resolved.avatar == (source.hasPrefix("~/") ? "/Users/test/Pictures/ai.png" : source))
+            #expect(try JSONDecoder().decode(ResolvedAIConfig.self, from: JSONEncoder().encode(resolved)) == resolved)
+        }
+        let old = ResolvedAIConfig(config: AIConfig(), home: home)
+        #expect(try JSONDecoder().decode(ResolvedAIConfig.self, from: JSONEncoder().encode(old)).avatar == nil)
+        for value in ["\"\"", "\"   \"", "\"ftp://example.com/ai.png\"", "\"https://\"", "12", "\"a\\n.png\""] {
+            #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: "[[ai]]\navatar = \(value)") }
+        }
+    }
+
     @Test func 台帳は省略でき枡数より多く登録できる() throws {
         #expect(ResolvedConfig(config: try ConfigLoader.parse(toml: "")).speakers.isEmpty)
         let toml = (0..<12).map { "[[speakers]]\nname = \"参加者\($0)\"" }.joined(separator: "\n")

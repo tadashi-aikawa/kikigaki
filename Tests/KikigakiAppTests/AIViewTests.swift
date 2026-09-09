@@ -14,6 +14,47 @@ import KikigakiAIIO
         try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: output).appendingPathComponent(name + ".png"))
     }
     private let started = Date(timeIntervalSince1970: 1_788_759_600)
+    @Test func AIの画像は非同期で反映され未指定や取得失敗は紫のイニシャルになる() async throws {
+        _ = NSApplication.shared
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
+        let first = try request(1, history: &history, root: root)
+        var conversation = AIConversation(meetingID: meeting)
+        try conversation.append(first)
+        try conversation.update(first.id) { try $0.beginSending(at: started.addingTimeInterval(330)); try $0.submitted() }
+        _ = try conversation.receive(AIReceiveEvent(request: first, kind: .answered, recordedAt: started.addingTimeInterval(331),
+            body: "確認しました。\n\n- 会場は本社会議室です\n- 受付は9時30分に始めます"), at: started.addingTimeInterval(332))
+        let imagePath = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Resources/kikigaki.icns").path
+        var ai = AIViewState(conversation: conversation)
+        ai.selectedSlot = 2
+        ai.avatarSources = [1: imagePath, 2: root.appendingPathComponent("missing.png").path]
+        var state = SessionSnapshot(ai: ai, state: .recording,
+            utterances: [.init(speaker: 0, start: 310, end: 312, text: "会場と受付の時間を確認しましょう。"),
+                         try .init(typedText: "案内には会場の地図も添えます。", at: 315,
+                                   postedAt: started.addingTimeInterval(315))],
+            timeline: MeetingTimeline(startedAt: started), elapsed: 350, markdownURL: root.appendingPathComponent("meeting.md"))
+        let window = TranscriptWindowController(shouldReduceMotion: { true })
+        window.aiRead.isActive = { false }
+        window.window!.setFrameAutosaveName("")
+        window.window!.setContentSize(NSSize(width: 900, height: 750))
+        let content = window.window!.contentView!
+        window.apply(state); content.layoutSubtreeIfNeeded()
+        let row = try #require(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.first)
+        let avatar = try #require(descendants(row).compactMap { $0 as? AvatarView }.first)
+        for _ in 0..<100 where avatar.image == nil { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(avatar.image != nil)
+        try capture("feedback-avatar-900", view: content.superview!)
+        state.ai?.avatarSources[1] = nil
+        window.apply(state)
+        #expect(avatar.image == nil && avatar.initial == "迅")
+        #expect(avatar.accent?.background == Washi.ai.background)
+        try capture("feedback-initial-900", view: content.superview!)
+        state.ai?.avatarSources[1] = root.appendingPathComponent("missing.png").path
+        window.apply(state)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(avatar.image == nil && avatar.initial == "迅")
+    }
     private func request(_ number: Int, history: inout AIStreamHistory, root: URL, question: String = "抜けている観点はありますか",
                          voiceStart: Double? = nil, parent: UUID? = nil, name: String = "迅雷",
                          trigger: AIParticipantContext.Trigger? = nil) throws -> AIRequest {

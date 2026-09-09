@@ -97,6 +97,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         avatars.onChange = { [weak self] in
             guard let self else { return }
             for row in rows.values { row.updateAvatar(speakers: snapshot.speakers, store: avatars, editable: snapshot.canShare) }
+            for row in aiRows.values { (row as? AIReplyRow)?.updateAvatar(store: avatars) }
             renamePopover?.refreshAvatars()
         }
         connectAIRead()
@@ -472,6 +473,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         (view as? AISendLineRow)?.onCancel = { [weak self] in self?.onCancelAI?(id) }
         (view as? AITypedSendRow)?.onCancel = { [weak self] in self?.onCancelAI?(id) }
         if let reply = view as? AIReplyRow {
+            reply.updateAvatar(store: avatars)
             reply.onRead = { [weak self] in self?.onReadAI?(id) }
             reply.onReply = { [weak self] in self?.onAskAI?(id) }
             reply.onCancel = { [weak self] in self?.onCancelAI?(id) }

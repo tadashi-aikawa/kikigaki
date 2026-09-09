@@ -295,6 +295,9 @@ final class AIReplyRow: NSView, AITimelineRowView {
     var noteText: String { notes.isHidden ? "" : notes.stringValue }
     var failureText: String { failureLabel.stringValue }
     var quoteButton: AIQuoteButton { quote }
+    func updateAvatar(store: AvatarStore) {
+        avatar.image = store.image(for: state.avatarSource(for: item.requestID))
+    }
     var statusPill: AIStatusPill { pill }
 
     var isFailure: Bool { if case .failure = item.kind { return true }; return false }

@@ -15,6 +15,7 @@ import KikigakiCore
         Task { try? await record.controller.showPane() }
     }
     private var marks: [String: any AITimelineRowView] = [:]
+    private let avatars = AvatarStore()
     /// 書き起こしウィンドウと同じ可視化の既読判定を使う。
     private(set) lazy var aiRead = AIReadWatcher(window: { [weak self] in self?.window })
     private var boundsObserver: (any NSObjectProtocol)?
@@ -27,6 +28,10 @@ import KikigakiCore
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 480), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.title = "前の会議のAIの返事"; window.isReleasedWhenClosed = false
         super.init(window: window)
+        avatars.onChange = { [weak self] in
+            guard let self else { return }
+            for row in marks.values { (row as? AIReplyRow)?.updateAvatar(store: avatars) }
+        }
         let actions = NSStackView(views: [openPane, retry]); actions.orientation = .horizontal; actions.spacing = 12
         let stack = NSStackView(views: [picker, warning, badges, actions, scroll]); stack.orientation = .vertical; stack.alignment = .leading
         stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
@@ -91,13 +96,16 @@ import KikigakiCore
             participants[slot] = participant.participantName
             if controller.connection(slot: slot) != nil { openablePanes.insert(slot) }
         }
-        let state = AIViewState(conversation: controller.conversation, participant: record.manifest.config.participantName,
+        var state = AIViewState(conversation: controller.conversation, participant: record.manifest.config.participantName,
             warning: record.saveWarning,
             unconfirmed: Set(controller.conversation.questions.filter { controller.isReturnUnconfirmed($0) }.map { $0.request.id }),
             canSubmit: false, readOnly: true, canOpenPane: controller.connection != nil,
             saveFailed: record.saveWarning != nil, generation: controller.generation,
             defaultSlot: controller.defaultSlot, connections: connections, generations: generations,
             participants: participants, openablePanes: openablePanes)
+        state.avatarSources = Dictionary(uniqueKeysWithValues: record.manifest.profiles.compactMap { profile in
+            profile.avatar.map { (profile.slot, $0) }
+        })
         badges.update(state)
         warning.stringValue = (store.warnings + [record.saveWarning].compactMap { $0 }).joined(separator: "\n")
         warning.isHidden = warning.stringValue.isEmpty
@@ -121,6 +129,7 @@ import KikigakiCore
                 }
             }
             if let reply = row as? AIReplyRow {
+                reply.updateAvatar(store: avatars)
                 reply.onRead = { [weak self, weak record] in
                     try? record?.controller.markRead(item.requestID)
                     self?.update()
