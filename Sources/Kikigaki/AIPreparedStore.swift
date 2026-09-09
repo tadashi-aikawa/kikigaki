@@ -93,6 +93,9 @@ final class AIPreparedStore {
             config: profile, token: UUID().uuidString + UUID().uuidString,
             contextRoot: outputDirectory, contextMeetingID: context)
         do {
+            // 録音前は保存先もまだ無いことがある。会議開始と同じ方法で親を作り、
+            // 以下のsession保存で権限0700の .kikigaki-context を作ってから起動引数へ渡す。
+            try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
             let record = AISessionRecord(meetingID: context, generation: 1, provider: profile.cli, token: session.token)
             let store = AIFileStore(root: outputDirectory)
             let base = [".kikigaki-context", context.uuidString, "ai"]

@@ -64,6 +64,38 @@ import KikigakiAIIO
         if let task = session.submissionTaskForTesting(slot: profile.slot) { await task.value }
     }
 
+    @Test func 未作成の保存先でも録音前に準備して許可先を作る() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("new/meetings")
+        let context = output.appendingPathComponent(".kikigaki-context")
+        let fake = FakeHerdr()
+        let profile = try profiles(root)[0]
+        let prepared = AIPreparedStore(directory: root,
+            makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
+        prepared.load()
+        #expect(!FileManager.default.fileExists(atPath: output.path))
+        await fake.onCommand { args in
+            guard Array(args.prefix(2)) == ["pane", "run"] else { return }
+            // 起動時点で実在するディレクトリを許可先に渡す。
+            #expect(FileManager.default.fileExists(atPath: context.path))
+            #expect(args.contains { $0.contains("sandbox_workspace_write.writable_roots=")
+                && $0.contains(context.path) })
+        }
+
+        await prepare(prepared, profile, root: output)
+
+        #expect(prepared.warning == nil)
+        let entry = try #require(prepared.unbound.first)
+        #expect(FileManager.default.fileExists(atPath: entry.sessionURL.path))
+        let permissions = try FileManager.default.attributesOfItem(atPath: context.path)[.posixPermissions] as? NSNumber
+        #expect(permissions?.intValue == 0o700)
+        let commands = await fake.commands
+        #expect(commands.contains { Array($0.prefix(2)) == ["pane", "run"] })
+        let reloaded = AIPreparedStore(directory: root)
+        reloaded.load()
+        #expect(reloaded.unbound.map(\.id) == [entry.id])
+    }
+
     /// 紐づけシートを出している間に `autoStart` が動くと、選ぶ前の新しいセッションへ1回目が飛ぶ。
     @Test func 紐づけを選ぶまで設定の自動送信を始めない() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
