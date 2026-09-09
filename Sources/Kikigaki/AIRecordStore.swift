@@ -130,13 +130,13 @@ final class AIRecordStore {
         bind(record); try controller.watch()
         return record
     }
-    /// 稼働中のagent一覧。まだ会議を始めていなくても宛先を選べるように、記録とは独立して引く。
-    func runningAgents() async -> [AIAgentCandidate] {
-        guard let herdr = try? makeHerdr() else { return [] }
-        return (try? await herdr.list()) ?? []
+    /// 稼働中のpane ID。準備済みセッションの生存確認に使う。
+    func alivePaneIDs() async -> Set<String>? {
+        guard let herdr = try? makeHerdr() else { return nil }
+        return try? await herdr.alivePaneIDs()
     }
 
-    /// その場限りの接続先を固定値の記録へ足す。requestが参照する定義を残すため、
+    /// プロファイルの定義を固定値の記録へ足す。requestが参照する定義を残すため、
     /// 既存のプロファイルは書き換えず、新しいslotの追加だけを許す。
     func register(_ profile: ResolvedAIConfig, for record: Record) throws {
         guard !record.recovered, !record.manifest.profiles.contains(where: { $0.slot == profile.slot }) else { return }

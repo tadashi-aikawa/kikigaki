@@ -31,9 +31,9 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var effort: String?
     public var address: String?
     public var cwd: String?
-    /// 稼働中herdrペインへ接続する。宣言したときだけ cwd と displayAgent が絞り込み条件になる
+    /// 取り下げた接続案のキー。書かれていたら設定エラーにして移行先を示す
     public var attach: Bool?
-    /// 稼働中herdrペインの display_agent。cwd と併せて接続先を絞る
+    /// 取り下げた接続案のキー。書かれていたら設定エラーにして移行先を示す
     public var displayAgent: String?
     public var extraArgs: [String]?
     public var prompt: String?
@@ -83,15 +83,14 @@ public struct AIConfig: Codable, Equatable, Sendable {
         if let address, !AIValidation.singleLine(address) || address.trimmingCharacters(in: .whitespaces) == "へ" {
             throw invalid("address must contain one non-empty participant name")
         }
-        if let displayAgent, !AIValidation.singleLine(displayAgent)
-            || displayAgent.trimmingCharacters(in: .whitespaces).isEmpty {
-            throw invalid("displayAgent must be non-empty and single-line")
+        // 稼働中ペインへ接続する案は取り下げた。黙って無視すると、接続するつもりの設定で
+        // 新規起動が始まってしまうため、書かれていたら止めて移行先を示す。
+        if attach != nil {
+            throw invalid("attach is no longer supported. prepare a session from the app instead")
         }
-        // 接続先の絞り込みは attach を宣言したときだけ。cwd 単独は従来どおり新規起動の作業ディレクトリ。
-        if attach == true, cwd == nil, displayAgent == nil {
-            throw invalid("attach requires cwd or displayAgent")
+        if displayAgent != nil {
+            throw invalid("displayAgent is no longer supported. prepare a session from the app instead")
         }
-        if attach != true, displayAgent != nil { throw invalid("displayAgent requires attach = true") }
         if let effort, !AIEffort.values(for: cli ?? .codex).contains(effort) {
             throw invalid("effort must be one of " + AIEffort.values(for: cli ?? .codex).joined(separator: ", "))
         }
@@ -165,11 +164,6 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public let effort: String?
     public let address: String
     public let cwd: URL
-    /// cwd が設定に明示されたか。接続先の絞り込みに使えるのは明示された場合だけ
-    public let cwdSpecified: Bool
-    /// 稼働中ペインへ接続する宣言。既存の cwd 指定を接続型へ化けさせないため明示のキーで受ける
-    public let attach: Bool
-    public let displayAgent: String?
     public let extraArgs: [String]
     public let prompt: String
     public let notifySound: Bool
@@ -179,32 +173,8 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public let autoStart: Bool
     public let hotkey: KikigakiConfig.Hotkey
     public var participantName: String { address.hasSuffix("へ") ? String(address.dropLast()) : address }
-    /// 稼働中ペインへ接続するプロファイル。KIKIGAKIは workspace を作らず agent も起こさない
-    public var connectsToExistingPane: Bool { attach }
-    /// 接続先の絞り込み条件。attach を宣言したときだけ持ち、cwd と displayAgent の少なくとも一方が要る
-    public var criteria: AIAgentCriteria? {
-        guard attach else { return nil }
-        return AIAgentCriteria(cwd: cwdSpecified ? cwd.path : nil, displayAgent: displayAgent)
-    }
-    /// 起動引数へ翻訳した effort。接続型ではKIKIGAKIが起動しないので渡せない
+    /// 起動引数へ翻訳した effort
     public var effortArguments: [String] { AIEffort.arguments(effort, provider: cli) }
-
-    /// シートで選んだ稼働中ペインを、その場限りのプロファイルにする。
-    /// requestのenvelopeがプロファイルを参照するので、記録の側にも定義が要る。
-    /// 宛名と表示名はペインから採り、補助指示や作業許可は選択元の設定を引き継ぐ。
-    public func attaching(to candidate: AIAgentCandidate, slot: Int, home: URL) -> ResolvedAIConfig? {
-        guard let kind = candidate.kind, let cli = AIProvider(rawValue: kind) else { return nil }
-        let participant = candidate.displayAgent?.trimmingCharacters(in: .whitespaces)
-        let label = participant?.isEmpty == false ? participant! : candidate.paneID
-        var config = AIConfig(name: String(label.prefix(32)) + " (" + candidate.paneID + ")", cli: cli,
-            herdrCommand: herdrCommand, address: label + "へ", cwd: candidate.cwd, attach: true,
-            displayAgent: participant?.isEmpty == false ? participant : nil,
-            prompt: prompt, notifySound: notifySound, allowWork: allowWork)
-        // ペインのcwdが読めない場合は display_agent だけで絞る。両方無いものは接続先にできない。
-        if config.cwd == nil, config.displayAgent == nil { return nil }
-        config.hotkey = hotkey
-        return ResolvedAIConfig(config: config, home: home, slot: slot)
-    }
 
     public init(config: AIConfig, home: URL, slot: Int = 1) {
         self.slot = slot
@@ -213,9 +183,6 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         effort = config.effort
         address = config.address?.trimmingCharacters(in: .whitespaces) ?? "迅雷へ"
         cwd = ResolvedConfig.expand(config.cwd ?? Self.defaultCWD, home: home)
-        cwdSpecified = config.cwd != nil
-        attach = config.attach ?? false
-        displayAgent = config.displayAgent?.trimmingCharacters(in: .whitespaces)
         extraArgs = config.extraArgs ?? []; prompt = config.prompt ?? ""
         notifySound = config.notifySound ?? false; hotkey = config.hotkey ?? Self.defaultHotkey
         allowWork = config.allowWork ?? true
@@ -226,7 +193,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case cli, command, herdrCommand, model, address, cwd, extraArgs, prompt, notifySound, hotkey, allowWork
         case autoPrompt, autoIntervalMinutes
-        case slot, name, effort, cwdSpecified, attach, displayAgent, autoStart
+        case slot, name, effort, autoStart
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -247,9 +214,6 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         // 複数プロファイル以前のmanifestは1つ目の新規起動プロファイルとして読む。
         slot = try values.contains(.slot) ? values.decode(Int.self, forKey: .slot) : 1
         effort = try values.decodeIfPresent(String.self, forKey: .effort)
-        displayAgent = try values.decodeIfPresent(String.self, forKey: .displayAgent)
-        cwdSpecified = try values.contains(.cwdSpecified) ? values.decode(Bool.self, forKey: .cwdSpecified) : false
-        attach = try values.contains(.attach) ? values.decode(Bool.self, forKey: .attach) : false
         autoStart = try values.contains(.autoStart) ? values.decode(Bool.self, forKey: .autoStart) : false
         let fallbackName = address.hasSuffix("へ") ? String(address.dropLast()) : address
         name = try values.contains(.name) ? values.decode(String.self, forKey: .name) : fallbackName

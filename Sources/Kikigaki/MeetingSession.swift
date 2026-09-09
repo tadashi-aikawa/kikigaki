@@ -106,24 +106,10 @@ final class MeetingSession {
         if forSchedule { scheduleAI = profile } else { meetingAI = profile }
         emit()
     }
-    /// 稼働中ペインをその場限りの宛先として加える。同じペインの候補は作り直さない。
-    @discardableResult
-    func addAdHocAIProfile(for candidate: AIAgentCandidate) -> ResolvedAIConfig? {
-        if let existing = meetingAIProfiles.first(where: { $0.displayAgent == candidate.displayAgent
-            && $0.cwd.path == candidate.cwd && $0.connectsToExistingPane }) { return existing }
-        guard let base = meetingAIProfiles.first,
-              let profile = base.attaching(to: candidate, slot: (meetingAIProfiles.map(\.slot).max() ?? 0) + 1,
-                                           home: FileManager.default.homeDirectoryForCurrentUser) else { return nil }
-        meetingAIProfiles.append(profile)
-        // 送信済みの会議では固定値の記録にも足す。requestが参照する定義を残すため。
-        if let record = aiRecord { try? aiStore?.register(profile, for: record) }
-        emit()
-        return profile
-    }
-    /// シートの宛先ポップアップへ並べる稼働中ペイン。設定のプロファイルと同じ条件のものは除く。
-    func runningAIAgents() async -> [AIAgentCandidate] {
-        if let controller = aiRecord?.controller, let agents = try? await controller.runningAgents() { return agents }
-        return await aiStore?.runningAgents() ?? []
+
+    /// 宛先ポップアップへ並べる項目。準備済みセッションの表示は段7で足す。
+    var aiDestinationItems: [AIDestinationPicker.Item] {
+        meetingAIProfiles.map { .init(slot: $0.slot, name: $0.name, prepared: nil) }
     }
 
     init(config: ResolvedConfig, models: @escaping () async throws -> SortformerModelStore.Loaded, log: @escaping (String) -> Void, aiStore: AIRecordStore? = nil) {
@@ -417,12 +403,10 @@ final class MeetingSession {
                 canSubmit: snapshot.canShare && aiTask == nil && (controller?.canSend(slot: config.slot) ?? true),
                 submissionID: aiCompleted, draft: aiDraft,
                 canOpenPane: controller?.connection(slot: config.slot) != nil,
-                // 接続型は準備済みの文脈が目的なので、空のセッションを起こす「作り直す」を出さない。
-                canRecreate: controller != nil && aiTask == nil && !config.connectsToExistingPane
+                canRecreate: controller != nil && aiTask == nil
                     && (aiWarning != nil || controller?.connectionStatus(slot: config.slot) == .disconnected),
                 saveFailed: aiRecord?.saveWarning != nil, generation: controller?.generation(slot: config.slot) ?? 1,
-                profiles: meetingAIProfiles.map { ($0.slot, $0.name) }, selectedSlot: config.slot,
-                attached: config.connectsToExistingPane)
+                profiles: meetingAIProfiles.map { ($0.slot, $0.name) }, selectedSlot: config.slot)
         } else { snapshot.ai = nil }
         onChange?(snapshot)
     }
@@ -543,15 +527,11 @@ final class MeetingSession {
                 if trigger == .scheduled, let scheduleRun {
                     aiSchedule?.register(requestID: fixed.id, meetingID: meetingID, runID: scheduleRun)
                 }
-                var executable = helper, arguments: [String] = []
-                // 接続型はKIKIGAKIが起動しないので、起動引数もCLIの実在確認も要らない。
-                // フック設定を書いても誰も読まないため作らない。
-                if !config.connectsToExistingPane {
-                    if let launch { (executable, arguments) = try launch(config, helper, record.controller) }
-                    else {
-                        let settings = try AILaunchConfiguration(config: config, helper: helper, controller: record.controller)
-                        executable = settings.executable; arguments = settings.arguments
-                    }
+                let executable: URL, arguments: [String]
+                if let launch { (executable, arguments) = try launch(config, helper, record.controller) }
+                else {
+                    let settings = try AILaunchConfiguration(config: config, helper: helper, controller: record.controller)
+                    executable = settings.executable; arguments = settings.arguments
                 }
                 aiProgress = "AIの入力準備を確認中。初回設定はherdrで確認してください"; emit()
                 let format = DateFormatter(); format.dateFormat = "HH:mm"
@@ -705,27 +685,9 @@ extension MeetingSession {
                 interval: automaticIntervalOverride ?? Double(profile.autoIntervalMinutes) * 60,
                 workAllowed: profile.allowWork, sendFinal: true)
             try startAISchedule(options: options, helper: helper, now: now, profile: profile)
-            verifyAutomaticTarget(profile)
         } catch {
             aiScheduleWarning = "設定の自動送信を開始できません。宛先と依頼を確認してください"
             log("autoStartを開始できません: \(error)")
-        }
-    }
-    /// 設定だけで始まる自動送信は、宛先を決められないまま何分も待たせない。
-    /// 接続型なら開始直後に候補を引いて確かめ、決まらなければ理由を出して止める。
-    private func verifyAutomaticTarget(_ profile: ResolvedAIConfig) {
-        guard profile.connectsToExistingPane else { return }
-        let meetingID = handoff.meetingID, run = aiSchedule?.runID
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let agents = await runningAIAgents()
-            guard handoff.meetingID == meetingID, aiSchedule?.runID == run, aiSchedule?.phase != .stopped else { return }
-            guard case .failure(let failure) = AIAgentResolver.resolve(candidates: agents, criteria: profile.criteria,
-                                                                      provider: profile.cli) else { return }
-            stopAISchedule()
-            aiScheduleWarning = "自動送信の宛先を決められません。" + failure.message
-            log("autoStartの宛先を解決できない: \(failure.message)")
-            emit()
         }
     }
 

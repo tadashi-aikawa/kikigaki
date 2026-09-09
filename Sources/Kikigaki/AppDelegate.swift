@@ -452,13 +452,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             draft: session.aiDraft, voice: snapshot.voiceQuestionPlaceholder,
             range: range, tentative: snapshot.tentativeText != nil, canSubmit: snapshot.ai?.canSubmit == true, confirmation: question?.result?.body,
             workAllowed: session.aiWorkAllowed)
-        sheet.updateDestinations(profiles: session.meetingAIProfiles.map { ($0.slot, $0.name) },
-            selected: .profile(slot: config.slot), participant: config.participantName)
-        loadRunningAgents(into: sheet, session: session, forSchedule: false)
-        sheet.onDestination = { [weak sheet] choice in
-            guard let profile = Self.applyDestination(choice, session: session, sheet: sheet, forSchedule: false) else { return }
-            sheet?.updateDestinations(profiles: session.meetingAIProfiles.map { ($0.slot, $0.name) },
-                selected: .profile(slot: profile.slot), participant: profile.participantName)
+        sheet.updateDestinations(session.aiDestinationItems, selected: config.slot, participant: config.participantName)
+        sheet.onDestination = { [weak sheet] slot in
+            session.selectAIProfile(slot: slot)
+            guard let profile = session.aiConfiguration else { return }
+            sheet?.updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
         }
         sheet.onDraft = { session.updateAIDraft($0) }
         sheet.onWorkAllowedChange = { session.updateAIWorkAllowed($0) }
@@ -483,13 +481,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             minutes: previous.map { Int($0.interval / 60) } ?? target.autoIntervalMinutes,
             workAllowed: previous?.workAllowed ?? session.aiWorkAllowed, sendFinal: previous?.sendFinal ?? true,
             participant: target.participantName)
-        sheet.updateDestinations(profiles: session.meetingAIProfiles.map { ($0.slot, $0.name) },
-            selected: .profile(slot: target.slot), participant: target.participantName)
-        loadRunningAgents(into: sheet, session: session, forSchedule: true)
-        sheet.onDestination = { [weak sheet] choice in
-            guard let profile = Self.applyDestination(choice, session: session, sheet: sheet, forSchedule: true) else { return }
-            sheet?.updateDestinations(profiles: session.meetingAIProfiles.map { ($0.slot, $0.name) },
-                selected: .profile(slot: profile.slot), participant: profile.participantName)
+        sheet.updateDestinations(session.aiDestinationItems, selected: target.slot, participant: target.participantName)
+        sheet.onDestination = { [weak sheet] slot in
+            session.selectAIProfile(slot: slot, forSchedule: true)
+            guard let profile = session.aiScheduleConfiguration else { return }
+            sheet?.updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
         }
         sheet.onDraft = { session.updateScheduleDraft($0) }
         sheet.onCancel = { [weak self] in self?.scheduleSheet = nil }
@@ -506,36 +502,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         scheduleSheet = sheet; scheduleSheetMeetingID = session.aiMeetingID
         window?.show(); sheet.present(on: parent)
-    }
-
-    /// 選んだ宛先を会議へ反映する。稼働中ペインはその場限りのプロファイルにしてから選ぶ。
-    private static func applyDestination(_ choice: AIDestinationPicker.Choice, session: MeetingSession,
-                                         sheet: AnyObject?, forSchedule: Bool) -> ResolvedAIConfig? {
-        switch choice {
-        case .profile(let slot):
-            session.selectAIProfile(slot: slot, forSchedule: forSchedule)
-        case .agent(let paneID):
-            let candidate = (sheet as? AIQuestionSheet)?.destinationAgent(for: paneID)
-                ?? (sheet as? AIScheduleSheet)?.destinationAgent(for: paneID)
-            guard let candidate, let added = session.addAdHocAIProfile(for: candidate) else { return nil }
-            session.selectAIProfile(slot: added.slot, forSchedule: forSchedule)
-        }
-        return forSchedule ? session.aiScheduleConfiguration : session.aiConfiguration
-    }
-
-    /// 稼働中ペインの一覧はherdrへの問い合わせなので、シートを開いてから差し替える。
-    private func loadRunningAgents(into sheet: AnyObject, session: MeetingSession, forSchedule: Bool) {
-        Task { @MainActor [weak self, weak sheet] in
-            let agents = await session.runningAIAgents()
-            guard let sheet, self != nil, !agents.isEmpty else { return }
-            let profiles = session.meetingAIProfiles.map { ($0.slot, $0.name) }
-            let target = (forSchedule ? session.aiScheduleConfiguration : session.aiConfiguration)
-            guard let target else { return }
-            (sheet as? AIQuestionSheet)?.updateDestinations(profiles: profiles, selected: .profile(slot: target.slot),
-                agents: agents, participant: target.participantName)
-            (sheet as? AIScheduleSheet)?.updateDestinations(profiles: profiles, selected: .profile(slot: target.slot),
-                agents: agents, participant: target.participantName)
-        }
     }
 
     private func showPreviousAI() {

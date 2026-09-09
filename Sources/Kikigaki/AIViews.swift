@@ -94,8 +94,6 @@ struct AIViewState {
     /// 会議で使えるプロファイル。宛先ポップアップの並び
     var profiles: [(slot: Int, name: String)] = []
     var selectedSlot = 1
-    /// 稼働中ペインへ接続した宛先。フックを仕込めないので返送未確認の表示を出さない
-    var attached = false
     var noticeTone: AINoticeTone { warning == nil ? .normal : .warning }
     var badges: String {
         let questions = conversation?.questions ?? []

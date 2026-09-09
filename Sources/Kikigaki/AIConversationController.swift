@@ -181,9 +181,6 @@ final class AIConversationController {
         return request
     }
 
-    /// 接続先の候補。稼働中ペインへの接続と、シートの宛先一覧で使う。
-    func runningAgents() async throws -> [AIAgentCandidate] { try await herdr.list() }
-
     func connect(config: ResolvedAIConfig, label: String, executable: URL, arguments: [String], readinessTimeout: TimeInterval = 30) async throws {
         guard readinessTimeout.isFinite, readinessTimeout > 0 else { throw AIProcessError.invalidInput }
         let channel = try channel(config.slot)
@@ -194,32 +191,10 @@ final class AIConversationController {
         defer { channel.connecting = false; onChange?() }
         try files.write(AIJSON.encode(Date()), to: launchPath(channel), replacing: false)
         channel.launchingAttempted = true
-        if config.connectsToExistingPane {
-            try await attach(channel, config: config)
-        } else {
-            try await launch(channel, config: config, label: label, executable: executable, arguments: arguments)
-        }
+        try await launch(channel, config: config, label: label, executable: executable, arguments: arguments)
         // pane run で起こした直後は herdr がまだagentを検知しておらず `agent get` が agent_not_found を返す
         // (実測: 初回の質問だけ「送信を完了できません」になった)。起動直後の待ちに限り、未検知は切断ではなく待ちとして扱う。
-        try await waitUntilReady(channel, timeout: readinessTimeout, tolerateMissing: !config.connectsToExistingPane)
-    }
-
-    /// 会議前に利用者が用意したペインへ繋ぐ。workspaceも作らず、agentも起こさない。
-    /// KIKIGAKIが起動しないので、フック・サンドボックス許可・権限規則は渡せない。
-    private func attach(_ channel: Channel, config: ResolvedAIConfig) async throws {
-        let candidates: [AIAgentCandidate]
-        do { candidates = try await herdr.list() }
-        catch { channel.warning = "稼働中のペインを一覧できません"; throw error }
-        switch AIAgentResolver.resolve(candidates: candidates, criteria: config.criteria, provider: config.cli) {
-        case .success(let target):
-            let connection = AIHerdrConnection(workspaceID: target.workspaceID, paneID: target.paneID,
-                provider: config.cli, sessionID: target.sessionID, terminalID: target.terminalID)
-            try saveConnection(channel, connection, replacing: false)
-            channel.inputAttempted = true
-        case .failure(let failure):
-            channel.warning = failure.message
-            throw failure
-        }
+        try await waitUntilReady(channel, timeout: readinessTimeout, tolerateMissing: true)
     }
 
     private func launch(_ channel: Channel, config: ResolvedAIConfig, label: String, executable: URL, arguments: [String]) async throws {
@@ -302,11 +277,10 @@ final class AIConversationController {
     }
 
     /// 利用者の明示操作からだけ呼ぶ。旧質問は残し、新しいstreamを発行する。
-    /// 接続型のチャネルでは呼ばない。準備済みの文脈が接続の目的なので、空のセッションを起こしても意味がない。
     func newGeneration(slot: Int? = nil) throws {
         let target = slot ?? defaultSlot
         guard let channel = channels[target], allowsSending, !channel.isSending, !channel.connecting,
-              channel.generation < Int.max, profiles[target]?.connectsToExistingPane != true else { throw AIHerdrError.notReady }
+              channel.generation < Int.max else { throw AIHerdrError.notReady }
         let next = try AIStreamHistory(meetingID: meetingID, sessionGeneration: channel.generation + 1)
         try files.write(AIJSON.encode(next.sessionGeneration), to: base + ["sessions", "\(target)", "generation.json"])
         channel.history = next; channel.connection = nil; channel.session = nil; channel.snapshots = []
@@ -370,15 +344,13 @@ final class AIConversationController {
     func isReturnUnconfirmed(_ q: AIQuestion, now: Date = Date(), backgroundRunning: Bool = false) -> Bool {
         let target = slot(of: q.request)
         guard let channel = channels[target], q.request.envelope.participant.sessionGeneration == channel.generation else { return false }
-        // 接続型ではフックを仕込めないので、返し忘れの検知そのものが成り立たない。
-        guard profiles[target]?.connectsToExistingPane != true else { return false }
         return AIReturnStatus.isUnconfirmed(question: q, connection: channel.connectionStatus, idleSince: channel.idleSince,
             now: now, hasRunningBackgroundTasks: backgroundRunning || channel.hookBackgroundRunning)
     }
 
     private func scanHooks(_ channel: Channel) {
         channel.hookBackgroundRunning = false
-        guard let session = channel.session, profiles[channel.slot]?.connectsToExistingPane != true else { return }
+        guard let session = channel.session else { return }
         do {
             let inbox = try files.directory(base + ["inbox"], create: false)
             let names = try FileManager.default.contentsOfDirectory(atPath: inbox.path)

@@ -104,28 +104,29 @@ import KikigakiCore
             try capture("profiles-crowded-\(width)", content.superview!, to: output)
         }
 
-        let agent = AIAgentCandidate(paneID: "w9:p1", workspaceID: "w9", kind: "codex",
-                                     displayAgent: "オブシディア", cwd: "/Users/me/work/vault", title: "議事録の下ごしらえ")
+        // 「議事録」には準備済みセッションがある想定。
+        let items: [AIDestinationPicker.Item] = [.init(slot: 1, name: "議事録", prepared: "13:05"),
+                                                 .init(slot: 2, name: "相談", prepared: nil)]
         let ask = AIQuestionSheet(participant: "迅雷", parentNumber: nil, draft: "この段取りで抜けはありますか",
             voice: "", range: "対象: 3〜7行(14:05:20〜14:06:16) · 送信時に確定", tentative: false, canSubmit: true)
-        ask.updateDestinations(profiles: profiles, selected: .profile(slot: 1), agents: [agent], participant: "迅雷")
+        ask.updateDestinations(items, selected: 1, participant: "迅雷")
         try capture("profiles-sheet-ask", ask.window.contentView!, to: output)
 
         // 返事待ちで送信できない状態。無効の部品は面を足さず色を抜く。
         let busy = AIQuestionSheet(participant: "ネオ", parentNumber: nil, draft: "", voice: "空欄なら声の末尾を送ります",
             range: "追加の確定行なし · 送信時点で範囲を確定", tentative: false, canSubmit: false)
-        busy.updateDestinations(profiles: profiles, selected: .profile(slot: 2), agents: [agent], participant: "ネオ")
+        busy.updateDestinations(items, selected: 2, participant: "ネオ")
         try capture("profiles-sheet-busy", busy.window.contentView!, to: output)
 
         let schedule = AIScheduleSheet(prompt: "会議の決定事項と担当・期限をMarkdown議事録へ更新してください",
             minutes: 3, workAllowed: true, sendFinal: true, participant: "迅雷")
-        schedule.updateDestinations(profiles: profiles, selected: .profile(slot: 1), agents: [agent], participant: "迅雷")
+        schedule.updateDestinations(items, selected: 1, participant: "迅雷")
         try capture("profiles-sheet-schedule", schedule.window.contentView!, to: output)
 
-        // プロファイルが1つの会議では宛先の行そのものを出さない。
+        // プロファイルが1つで準備済みも無い会議では、宛先の行そのものを出さない。
         let single = AIQuestionSheet(participant: "迅雷", parentNumber: nil, draft: "", voice: "",
             range: "追加の確定行なし", tentative: false, canSubmit: true)
-        single.updateDestinations(profiles: [(1, "迅雷")], selected: .profile(slot: 1), participant: "迅雷")
+        single.updateDestinations([.init(slot: 1, name: "迅雷", prepared: nil)], selected: 1, participant: "迅雷")
         try capture("profiles-sheet-single", single.window.contentView!, to: output)
     }
 }

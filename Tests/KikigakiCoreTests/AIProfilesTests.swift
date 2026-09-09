@@ -45,9 +45,7 @@ import Testing
         model = "gpt-5.4-codex"
         effort = "high"
         address = "迅雷へ"
-        attach = true
         cwd = "~/work/minutes"
-        displayAgent = "迅雷"
         autoStart = true
         autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
         autoIntervalMinutes = 3
@@ -64,7 +62,7 @@ import Testing
         """)
         #expect(profiles.count == 2)
         #expect(profiles[0].hotkey == ResolvedAIConfig.defaultHotkey && profiles[1].hotkey == ResolvedAIConfig.defaultHotkey)
-        #expect(profiles[0].connectsToExistingPane && !profiles[1].connectsToExistingPane)
+        #expect(profiles[0].cwd.path == "/home/person/work/minutes")
         #expect(profiles[0].effortArguments == ["-c", "model_reasoning_effort=\"high\""])
         #expect(profiles[1].effortArguments == ["--effort", "max"])
     }
@@ -178,101 +176,21 @@ import Testing
         }
     }
 
-    // MARK: - 接続先の解決
+    // MARK: - 取り下げた接続案
 
-    @Test func 接続はattachの宣言が要りcwd単独では新規起動のまま() throws {
-        #expect(try resolved("[[ai]]\nname = \"既定\"")[0].connectsToExistingPane == false)
-        // 既存の cwd 指定は新規起動の作業ディレクトリのまま。接続型へ化けさせない。
-        let launch = try resolved("[[ai]]\nname = \"新規\"\ncwd = \"~/work/project\"")[0]
-        #expect(!launch.connectsToExistingPane && launch.criteria == nil)
-        #expect(launch.cwd.path == "/home/person/work/project" && launch.cwdSpecified)
-
-        let byCWD = try resolved("[[ai]]\nname = \"接続\"\nattach = true\ncwd = \"~/work\"")[0]
-        #expect(byCWD.connectsToExistingPane && byCWD.criteria?.cwd == "/home/person/work")
-        #expect(byCWD.criteria?.displayAgent == nil)
-        let byName = try resolved("[[ai]]\nname = \"接続\"\nattach = true\ndisplayAgent = \"迅雷\"")[0]
-        #expect(byName.connectsToExistingPane && byName.criteria?.displayAgent == "迅雷" && byName.criteria?.cwd == nil)
+    /// 稼働中ペインへ接続する案は取り下げた。黙って無視すると、接続するつもりの設定で
+    /// 新規起動が始まってしまうので、書かれていたら止める。
+    @Test(arguments: ["attach = true", "attach = false", "displayAgent = '迅雷'"])
+    func 取り下げた接続の設定を拒否する(_ field: String) throws {
+        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "[[ai]]\nname = \"議事録\"\n" + field) }
+        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "[ai]\n" + field) }
     }
 
-    @Test func attachに条件が無い設定とattach無しのdisplayAgentを拒否する() throws {
-        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "[[ai]]\nname = \"接続\"\nattach = true") }
-        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "[[ai]]\nname = \"新規\"\ndisplayAgent = \"迅雷\"") }
-    }
-
-    @Test func 同じ条件へ解決する2プロファイルを拒否する() throws {
-        #expect(throws: ConfigError.self) {
-            try ConfigLoader.parse(toml: """
-            [[ai]]
-            name = "一"
-            attach = true
-            cwd = "~/work"
-            displayAgent = "迅雷"
-
-            [[ai]]
-            name = "二"
-            attach = true
-            cwd = "~/work"
-            displayAgent = "迅雷"
-            """)
-        }
-        // 新規起動のプロファイルは条件を持たないので、同じcwdでいくつ並べても衝突しない。
-        #expect(try resolved("[[ai]]\nname = \"一\"\ncwd = \"~/work\"\n\n[[ai]]\nname = \"二\"\ncwd = \"~/work\"").count == 2)
-    }
-
-    private func candidate(_ pane: String, kind: String? = "codex", agent: String? = nil, cwd: String? = nil) -> AIAgentCandidate {
-        AIAgentCandidate(paneID: pane, workspaceID: String(pane.prefix(3)), kind: kind, displayAgent: agent, cwd: cwd)
-    }
-
-    @Test func cwdで絞りdisplayAgentで追加に絞る() throws {
-        let candidates = [candidate("w1:p1", agent: "迅雷", cwd: "/work/a"),
-                          candidate("w2:p1", agent: "ネオ", cwd: "/work/a"),
-                          candidate("w3:p1", agent: "迅雷", cwd: "/work/b")]
-        let byBoth = AIAgentResolver.resolve(candidates: candidates,
-            criteria: AIAgentCriteria(cwd: "/work/a", displayAgent: "迅雷"), provider: .codex)
-        #expect(try byBoth.get().paneID == "w1:p1")
-        let byAgentOnly = AIAgentResolver.resolve(candidates: candidates,
-            criteria: AIAgentCriteria(cwd: nil, displayAgent: "ネオ"), provider: .codex)
-        #expect(try byAgentOnly.get().paneID == "w2:p1")
-        let byCWDOnly = AIAgentResolver.resolve(candidates: candidates,
-            criteria: AIAgentCriteria(cwd: "/work/b", displayAgent: nil), provider: .codex)
-        #expect(try byCWDOnly.get().paneID == "w3:p1")
-    }
-
-    @Test func 末尾のスラッシュを吸収して同じcwdとみなす() throws {
-        let result = AIAgentResolver.resolve(candidates: [candidate("w1:p1", cwd: "/work/a")],
-            criteria: AIAgentCriteria(cwd: "/work/a/", displayAgent: nil), provider: .codex)
-        #expect(try result.get().paneID == "w1:p1")
-    }
-
-    @Test func 条件なし0件複数件は失敗させ新規起動へ倒さない() throws {
-        let candidates = [candidate("w1:p1", agent: "迅雷", cwd: "/work/a"),
-                          candidate("w2:p1", agent: "迅雷", cwd: "/work/a")]
-        #expect(AIAgentResolver.resolve(candidates: candidates, criteria: nil, provider: .codex)
-            == .failure(.noCriteria))
-        #expect(AIAgentResolver.resolve(candidates: candidates,
-            criteria: AIAgentCriteria(cwd: "/work/none", displayAgent: nil), provider: .codex) == .failure(.notFound))
-        #expect(AIAgentResolver.resolve(candidates: candidates,
-            criteria: AIAgentCriteria(cwd: "/work/a", displayAgent: "迅雷"), provider: .codex) == .failure(.ambiguous(count: 2)))
-    }
-
-    @Test func CLI種別は絞り込みに使わず最後に拒否する() throws {
-        // 種別で絞ると、条件が甘いまま偶然1件になった候補へ送ってしまう。
-        let candidates = [candidate("w1:p1", kind: "claude", agent: "迅雷", cwd: "/work/a"),
-                          candidate("w2:p1", kind: "codex", agent: "ネオ", cwd: "/work/a")]
-        #expect(AIAgentResolver.resolve(candidates: candidates,
-            criteria: AIAgentCriteria(cwd: "/work/a", displayAgent: nil), provider: .codex) == .failure(.ambiguous(count: 2)))
-        #expect(AIAgentResolver.resolve(candidates: candidates,
-            criteria: AIAgentCriteria(cwd: nil, displayAgent: "迅雷"), provider: .codex)
-            == .failure(.kindMismatch(expected: "codex", found: "claude")))
-        #expect(AIAgentResolver.resolve(candidates: [candidate("w1:p1", kind: nil, agent: "迅雷")],
-            criteria: AIAgentCriteria(cwd: nil, displayAgent: "迅雷"), provider: .codex)
-            == .failure(.kindMismatch(expected: "codex", found: nil)))
-    }
-
-    @Test func 同じペインへ解決した重複を数える() throws {
-        let panes = [candidate("w1:p1"), candidate("w2:p1"), candidate("w1:p1")]
-        #expect(AIAgentResolver.duplicatedPanes(panes) == ["w1:p1"])
-        #expect(AIAgentResolver.duplicatedPanes([candidate("w1:p1"), candidate("w2:p1")]).isEmpty)
+    @Test func cwdは起動時の作業ディレクトリのまま() throws {
+        let profile = try resolved("[[ai]]\nname = \"議事録\"\ncwd = \"~/work/project\"")[0]
+        #expect(profile.cwd.path == "/home/person/work/project")
+        // 同じcwdのプロファイルが並んでも設定エラーにしない。
+        #expect(try resolved("[[ai]]\nname = \"一\"\ncwd = \"~/w\"\n\n[[ai]]\nname = \"二\"\ncwd = \"~/w\"").count == 2)
     }
 
     // MARK: - envelopeのプロファイル
@@ -322,22 +240,20 @@ import Testing
 
     // MARK: - manifestの固定値
 
-    @Test func 解決した設定の往復で新しい項目を保つ() throws {
+    @Test func 解決した設定の往復で追加した項目を保つ() throws {
         let profile = try resolved("""
         [[ai]]
         name = "議事録"
         cli = "claude"
         effort = "xhigh"
-        attach = true
         cwd = "~/work"
-        displayAgent = "迅雷"
         autoStart = true
         autoPrompt = "更新して"
         """)[0]
         let decoded = try AIJSON.decode(ResolvedAIConfig.self, from: AIJSON.encode(profile))
         #expect(decoded == profile)
         #expect(decoded.slot == 1 && decoded.name == "議事録" && decoded.effort == "xhigh")
-        #expect(decoded.displayAgent == "迅雷" && decoded.cwdSpecified && decoded.autoStart && decoded.attach)
+        #expect(decoded.cwd.path == "/home/person/work" && decoded.autoStart)
     }
 
     @Test func 新しい項目を持たない旧manifestを既定として読む() throws {
@@ -347,7 +263,10 @@ import Testing
         """
         let decoded = try AIJSON.decode(ResolvedAIConfig.self, from: Data(legacy.utf8))
         #expect(decoded.slot == 1 && decoded.name == "迅雷" && decoded.effort == nil)
-        #expect(decoded.displayAgent == nil && !decoded.cwdSpecified && !decoded.autoStart && !decoded.attach)
-        #expect(decoded.connectsToExistingPane == false && decoded.allowWork)
+        #expect(!decoded.autoStart && decoded.allowWork)
+        // 取り下げた案の項目が残ったmanifestも、未知のキーとして読み飛ばせる。
+        let extra = ",\"attach\":true,\"displayAgent\":\"迅雷\",\"cwdSpecified\":true}"
+        let withdrawn = try AIJSON.decode(ResolvedAIConfig.self, from: Data((legacy.dropLast() + extra).utf8))
+        #expect(withdrawn.name == "迅雷" && !withdrawn.autoStart)
     }
 }

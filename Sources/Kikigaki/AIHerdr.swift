@@ -85,15 +85,11 @@ struct AIHerdr: Sendable {
         guard Self.identifier(result.workspace.workspace_id), Self.identifier(result.root_pane.pane_id) else { throw AIProcessError.invalidResponse }
         return AIHerdrConnection(workspaceID: result.workspace.workspace_id, paneID: result.root_pane.pane_id, provider: provider)
     }
-    /// 稼働中のagentを列挙する。`agent start <NAME>` で付けた名前はここにも `agent get` にも
-    /// 返らないので(実測)、指せるのは cwd・display_agent・pane_id だけである。
-    func list() async throws -> [AIAgentCandidate] {
-        try await call(["agent", "list"], as: AgentList.self).agents.compactMap { agent in
-            guard Self.identifier(agent.pane_id), Self.identifier(agent.workspace_id) else { return nil }
-            return AIAgentCandidate(paneID: agent.pane_id, workspaceID: agent.workspace_id, kind: agent.agent,
-                displayAgent: agent.display_agent, cwd: agent.cwd, sessionID: agent.agent_session?.value,
-                terminalID: agent.terminal_id, title: agent.terminal_title_stripped)
-        }
+    /// 稼働中のpane IDを列挙する。準備済みセッションの生存確認にだけ使い、
+    /// 宛先の候補には使わない(利用者が手で起こしたペインへ繋ぐ案は取り下げた)。
+    func alivePaneIDs() async throws -> Set<String> {
+        Set(try await call(["agent", "list"], as: AgentList.self).agents
+            .map(\.pane_id).filter(Self.identifier))
     }
     func label(_ target: AIHerdrConnection, participant: String) async throws {
         _ = try await call(["pane", "report-metadata", target.paneID, "--source", "owlery", "--display-agent", participant], as: Empty.self)

@@ -7,7 +7,7 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
     var onStart: ((AIScheduleOptions) -> Void)?
     var onCancel: (() -> Void)?
     var onDraft: ((String) -> Void)?
-    var onDestination: ((AIDestinationPicker.Choice) -> Void)?
+    var onDestination: ((Int) -> Void)?
     private let destination = AIDestinationPicker()
     private let title = Washi.label("", size: 17, weight: .semibold)
     private let editor = AIQuestionEditor()
@@ -56,13 +56,11 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         textDidChange(Notification(name: NSText.didChangeNotification))
     }
 
-    /// 宛先の一覧と選択を差し替える。稼働中ペインの一覧は後から届く。
-    func updateDestinations(profiles: [(slot: Int, name: String)], selected: AIDestinationPicker.Choice,
-                            agents: [AIAgentCandidate] = [], participant: String) {
-        destination.update(profiles: profiles, selected: selected, agents: agents)
+    /// 宛先の一覧と選択を差し替える。
+    func updateDestinations(_ items: [AIDestinationPicker.Item], selected: Int, participant: String) {
+        destination.update(items: items, selected: selected)
         title.stringValue = "\(participant)へ 自動送信"
     }
-    func destinationAgent(for paneID: String) -> AIAgentCandidate? { destination.agent(for: paneID) }
 
     func present(on parent: NSWindow) { parent.beginSheet(window); window.makeFirstResponder(editor) }
     func close() { if let parent = window.sheetParent { parent.endSheet(window) }; window.orderOut(nil) }

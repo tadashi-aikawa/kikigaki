@@ -1,20 +1,21 @@
 import AppKit
 import KikigakiCore
 
-/// 送信ごとの宛先を選ぶポップアップ。上段が設定のプロファイル、区切りの下が稼働中のherdrペイン。
-/// 稼働中の一覧は後から届くので、選択中の項目を保ったまま差し替える。
+/// 送信ごとの宛先を選ぶポップアップ。並ぶのは設定のプロファイルだけで、
+/// そのプロファイルに未紐づけの準備済みセッションがあれば行に添えて示す。
 @MainActor
 final class AIDestinationPicker: NSStackView {
-    enum Choice: Equatable {
-        case profile(slot: Int)
-        case agent(paneID: String)
+    /// 1行ぶんの表示。`prepared` は「議事録 (準備済み 13:05)」の括弧の中身
+    struct Item: Equatable {
+        let slot: Int
+        let name: String
+        var prepared: String?
     }
-    var onChange: ((Choice) -> Void)?
+    var onChange: ((Int) -> Void)?
     private let popup = NSPopUpButton()
     private let label = Washi.label("宛先", size: 13)
-    private var profiles: [(slot: Int, name: String)] = []
-    private var agents: [AIAgentCandidate] = []
-    private(set) var selected: Choice = .profile(slot: 1)
+    private(set) var items: [Item] = []
+    private(set) var selected = 1
 
     init() {
         super.init(frame: .zero)
@@ -25,40 +26,22 @@ final class AIDestinationPicker: NSStackView {
     }
     required init?(coder: NSCoder) { nil }
 
-    /// プロファイルが1つで稼働中の候補も無ければ、選ぶものが無いので行ごと隠す。
-    func update(profiles: [(slot: Int, name: String)], selected: Choice, agents: [AIAgentCandidate] = []) {
-        self.profiles = profiles; self.agents = agents; self.selected = selected
+    /// プロファイルが1つで準備済みも無ければ、選ぶものが無いので行ごと隠す。
+    func update(items: [Item], selected: Int) {
+        self.items = items; self.selected = selected
         popup.removeAllItems()
-        for profile in profiles {
-            popup.addItem(withTitle: profile.name)
-            popup.lastItem?.representedObject = Choice.profile(slot: profile.slot)
+        for item in items {
+            popup.addItem(withTitle: item.prepared.map { "\(item.name) (準備済み \($0))" } ?? item.name)
+            popup.lastItem?.representedObject = item.slot
         }
-        let known = Set(profiles.map(\.name))
-        let extra = agents.filter { !known.contains(Self.title(for: $0)) }
-        if !extra.isEmpty {
-            popup.menu?.addItem(.separator())
-            for agent in extra {
-                popup.addItem(withTitle: Self.title(for: agent))
-                popup.lastItem?.representedObject = Choice.agent(paneID: agent.paneID)
-                popup.lastItem?.toolTip = [agent.cwd, agent.title].compactMap { $0 }.joined(separator: " · ")
-            }
-        }
-        let index = popup.itemArray.firstIndex { ($0.representedObject as? Choice) == selected }
+        let index = popup.itemArray.firstIndex { ($0.representedObject as? Int) == selected }
         popup.selectItem(at: index ?? 0)
-        isHidden = profiles.count <= 1 && extra.isEmpty
-    }
-
-    func agent(for paneID: String) -> AIAgentCandidate? { agents.first { $0.paneID == paneID } }
-
-    /// 表題は表示名を主にし、同じ表示名のペインが並ぶときだけ pane ID で見分ける。
-    static func title(for agent: AIAgentCandidate) -> String {
-        let name = agent.displayAgent?.trimmingCharacters(in: .whitespaces)
-        return (name?.isEmpty == false ? name! : agent.paneID) + " (" + agent.paneID + ")"
+        isHidden = items.count <= 1 && items.allSatisfy { $0.prepared == nil }
     }
 
     @objc private func changed() {
-        guard let choice = popup.selectedItem?.representedObject as? Choice else { return }
-        selected = choice
-        onChange?(choice)
+        guard let slot = popup.selectedItem?.representedObject as? Int else { return }
+        selected = slot
+        onChange?(slot)
     }
 }

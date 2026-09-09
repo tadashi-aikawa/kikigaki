@@ -159,15 +159,6 @@ public enum ConfigLoader {
             }
         }
         let resolved = ResolvedConfig(config: config)
-        // 同じ条件の2プロファイルは同じペインへ解決する。streamと世代が別のまま会話が混ざるので止める。
-        var criteria = Set<String>()
-        for profile in resolved.aiProfiles {
-            guard let target = profile.criteria else { continue }
-            let key = (target.cwd ?? "") + "\n" + (target.displayAgent ?? "")
-            guard criteria.insert(key).inserted else {
-                throw ConfigError.invalid(description: "ai: two profiles resolve to the same pane: \(profile.name)")
-            }
-        }
         var hotkeys = [("toggleRecording", resolved.toggleRecording), ("togglePause", resolved.togglePause)]
         if let ai = resolved.ai { hotkeys.append(("ai", ai.hotkey)) }
         for (label, hotkey) in hotkeys {
