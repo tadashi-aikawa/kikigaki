@@ -65,10 +65,10 @@ AIの行は既定で展開する。畳む操作は持たせない。畳んだ状
 
 `TranscriptEntries.merge` は変えない。AIの行はUtteranceではないので、併合結果へ混ぜず、別の純関数で位置だけを決める。
 
-`KikigakiCore/AITimeline.swift` に副作用のない `AITimeline.items(conversation:utterances:)` を置く。返すのは表示に必要な値だけを持つ `AITimelineItem` の列で、AppKit型・色・フォントを含めない。
+`KikigakiCore/AITimeline.swift` に副作用のない `AITimeline.items(conversation:utterances:timeline:generation:)` を置く。返すのは表示に必要な値だけを持つ `AITimeline.Item` の列で、AppKit型・色・フォント・時刻の書式を含めない。時刻はDateのまま返す。
 
 ```swift
-public struct AITimelineItem: Equatable, Sendable {
+public enum AITimeline {
     public enum Kind: Equatable, Sendable {
         case sendLine(automatic: Bool)   // 細い1行
         case sendRow                     // 人側の送信行
@@ -80,12 +80,16 @@ public struct AITimelineItem: Equatable, Sendable {
         case at(Date)              // 日時順
         case tail                  // 末尾。返事待ちの行だけ
     }
-    public let requestID: UUID
-    public let kind: Kind
-    public let anchor: Anchor
-    ...
+    public struct Item: Equatable, Sendable {
+        public let kind: Kind
+        public let anchor: Anchor
+        public let slot: Int       // 直前に置く発話の添字。-1は全発話より前
+        ...
+    }
 }
 ```
+
+`Item` は行が要る値を全て持つ。`participantName`・`automatic`・`date`・`question`・`parentNumber`・`body`・`notes`・`isUnread`・`needsAnswer`・`rowID` で、描画側に判定を残さない。`notes` は「対象: 4発言」「作業許可なし」「暫定末尾を含む」「送達不明」「取消後の返事」などの完成した文字列にする。`AIRequest.automaticLabel` と同じく、表示用の短い文字列はCoreに置く。
 
 順序の規則は次のとおり。
 
@@ -110,7 +114,7 @@ public struct AITimelineItem: Equatable, Sendable {
 
 ## 既読
 
-これまでの既読は「畳んだ印を開く」ことだった。展開が既定になるとこの操作が無くなるため、成立条件を決め直す必要がある。判断依頼1で扱う。
+これまでの既読は「畳んだ印を開く」ことだった。展開が既定になるとこの操作が無くなるため、決定1のとおり、行の上端が可視域へ入りウィンドウがキーのまま連続1秒留まったら既読とし、未読ピルのクリックでも既読にする。
 
 どの案でも次は共通にする。
 
@@ -121,20 +125,22 @@ public struct AITimelineItem: Equatable, Sendable {
 
 ## 検索・過去会議・複数プロファイル
 
-- **検索**: `TranscriptWindowSearch` は `snapshot.utterances` だけを走査し、ヒットを `RowID` へ紐づける。AIの行はUtteranceではないので現状は対象外で、本文が常に見える形になると対象外であることが目立つ。判断依頼6で扱う
+- **検索**: `TranscriptWindowSearch` は `snapshot.utterances` だけを走査し、ヒットを `RowID` へ紐づける。AIの行はUtteranceではないので対象外のままにする。本文が常に見える形になると対象外であることは目立つが、このタスクでは扱わず別タスクへ切り出す
 - **過去会議**: `AIPastMeetingsWindow` は発話を持たず、`AIInlineMark.ordered` の列だけを並べている。同じ行部品を使い、`utterances` を空として `AITimeline.items` を呼ぶ。発話が無いので `afterUtterance` は解決できず、その場合は `at(sendAttemptedAt)` へ落として日時順に置く。返事は同じく展開既定、操作は「返答する」を出さない読み取り専用のままにする
-- **複数プロファイル**: `feature/ai-profiles` は宛名をプロファイルごとに持ち、会議内の `#n` は全体で通す。この設計では宛名を `question.request.envelope.participant.participantName` からだけ読み、会議単位の既定値へ依存しない。細い1行と宛名ピルにその名前を入れれば、統合の順序に関係なく同じ結果になる。行の色は判断依頼2で扱う。統合順は本人が決めるので、この文書ではプロファイル側のAPIへ触れない
+- **複数プロファイル**: `feature/ai-profiles` は宛名をプロファイルごとに持ち、会議内の `#n` は全体で通す。この設計では宛名を `question.request.envelope.participant.participantName` からだけ読み、会議単位の既定値へ依存しない。細い1行と宛名ピルにその名前を入れれば、統合の順序に関係なく同じ結果になる。行の色は決定2のとおり全プロファイルで同色にする。統合順は本人が決めるので、この文書ではプロファイル側のAPIへ触れない
 
-## 判断依頼
+## 決定した論点
 
-| # | 論点 | 推奨 | 理由 |
+段1のレビューで7件とも下記のとおり採用した。
+
+| # | 論点 | 決定 | 理由 |
 |---|---|---|---|
 | 1 | 既読の成立条件 | 行の上端が可視域へ入り、ウィンドウがキーのまま連続1秒留まったら既読。加えて未読ピルのクリックでも既読にする | 展開の操作が無くなるので、可視化が最も近い等価物になる。到着した返事は末尾追従の対象外で勝手に画面へ入らないため、読まずに既読になる場面が限られる。ピルのクリックを残すのは、長い返事で上端しか見えていない場合の明示手段 |
 | 2 | AIのアバター色 | `Washi` へAI専用色を1つ足す。複数プロファイルでも同色にし、名前で区別する | モックは枡3の藍緑を流用しているが、これは4人目の話者の色と同じで、4枡使う会議で人とAIが同色になる。プロファイルごとに色を配ると枡の色と衝突する組合せが増えるため、AIは1色に固定して名前で分ける |
-| 3 | 人側の送信行の名前 | 「手入力」を流用せず、墨の丸に `paperplane` のアバター、名前は「AIへ送信」、右端のピルで宛名を出す | モックは「手入力」の見た目をそのまま使っているが、「手入力」は会話へ残る投稿の固定名で、会議Markdownの `## 書き起こし` にも出る。AIへ送っただけの文が議事録に載っていると誤解される。行の形は決定どおり人側のまま変えない |
-| 4 | 引用の全文の出し方 | クリックでその行を全文へ伸ばし、再クリックで1行へ戻す | ポップオーバーやtooltipは、本文と並べて読み比べられない。既存の開閉と同じ `reflow` の経路を使えるので、位置の保ち方も既に検証済みのものを流用できる |
+| 3 | 人側の送信行の名前 | 「手入力」を流用せず、墨の丸に `paperplane` のアバター、名前は「AIへ送信」、右端のピルで宛名を出す | 「手入力」は会話へ残る投稿の固定名で、会議Markdownの `## 書き起こし` にも出る。AIへ送っただけの文が議事録に載っていると誤解される。行の形は決定どおり人側のまま変えない |
+| 4 | 引用の全文の出し方 | クリックでその行を全文へ伸ばし、再クリックで1行へ戻す | ポップオーバーやtooltipは、本文と並べて読み比べられない。既存の開閉と同じ `reflow` の経路を使えるので、位置の保ち方も検証済みのものを流用できる |
 | 5 | 「ペインを開く」の置き場所 | 行から外し、フッターへ1つだけ置く | 展開が既定になると全ての返事の行に同じボタンが並ぶ。接続の作り直しや保存の再試行は既にフッターにあり、接続の操作はそこへ揃う |
-| 6 | AIの本文を検索対象へ入れるか | 今回は入れず、別タスクにする | `SearchHit` は `RowID` と発話の添字に紐づいており、AIの行を入れると検索の設計自体が変わる。Markdown描画の `NSTextStorage` へのハイライトも別の作業になる。表示の刷新と同じ段で混ぜると、どちらの検証も薄くなる |
+| 6 | AIの本文を検索対象へ入れるか | **このタスクの対象外**とし、別タスクにする | `SearchHit` は `RowID` と発話の添字に紐づいており、AIの行を入れると検索の設計自体が変わる。Markdown描画の `NSTextStorage` へのハイライトも別の作業になる。表示の刷新と同じ段で混ぜると、どちらの検証も薄くなる |
 | 7 | 自動送信の返事待ちを行として出すか | 出す。人の送信と同じ「考え中…」の行にする | 「状態が分からない」が今回の対象で、自動だけ状態を隠すと3分ごとに理由の分からない行が生えることになる。目立たせないのはチップと薄墨で足りる |
 
 ## 実装順と検証
@@ -145,4 +151,16 @@ public struct AITimelineItem: Equatable, Sendable {
 | 3 | 行ビューの実装と `AIMarkRow` の廃止 | 4種類の行の高さと折り返し、引用の開閉、返事待ちから返事への状態更新でビューが同一であること、既読の配線、フッターのピルからの移動、過去会議ウィンドウ |
 | 4 | 実画面と混雑した会議 | 600・900幅で通常と混雑を撮影。未読・確認待ち・返事待ち・失敗・自動の5状態を1枚に含める。上へスクロールした状態と検索を開いた状態で返事を受ける挙動。`KIKIGAKI_DEBUG_AI_ASK` と `KIKIGAKI_DEBUG_AI_AUTO` に `KIKIGAKI_DEBUG_REPLAY_HOLD` を併用して撮る |
 
-各段のコミット前に `swift build` と `swift test` を通す。段3の実画面は本人からクロディーヌのレビューへ回す。判断依頼への回答が出るまで段2へ進まない。
+各段のコミット前に `swift build` と `swift test` を通す。段3の実画面は本人からクロディーヌのレビューへ回す。
+
+### 段2のCore実装
+
+`AITimeline.items` を実装した。`AIConversation` を走査し、requestごとに送信の要素を必ず1つ、返事・失敗の要素を条件付きで1つ作る。
+
+- 送信の形は `trigger == .scheduled` → 細い1行、`question_source == .voice` → 細い1行、それ以外 → 人側の行の順に決める。**自動送信は `question_source` がtypedなので、この順序でないと人側の行になってしまう**
+- 返事側は失敗・結果あり・返事待ちの順に判定する。`delivery_unknown` は成否が分からないので要素を作らず、送信の注記へ「送達不明」を足すだけにする。「考え中…」を出すと送れた前提の嘘になる
+- 取消後に届いた結果は要素を作り、「取消後の返事」の注記を付ける。`AIInlineMark` の既存の扱いを引き継ぐ
+- 引用は `sendRow` のときだけ非空にする。声は発話そのものが送信文で、自動は毎回同じ定型文になる
+- 並べ替えは `(slot, rank, 日時, 送信か返事か, request番号, 生成順)` で全順序にする。`rank` は afterUtterance・at・tail の順。同じ入力からは必ず同じ列になる
+
+`AIInlineMark` と `AIMarkRow` はまだ残してあり、差し替えは段3で行う。段2では既存の描画経路に触れていない。
