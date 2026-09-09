@@ -9,16 +9,18 @@ import KikigakiCore
     private func request(in meeting: UUID, number: Int, question: String = "", anchor: Double? = nil,
                          name: String = "迅雷", generation: Int = 1, workAllowed: Bool = true,
                          tail: AITentativeTail? = nil, trigger: AIParticipantContext.Trigger? = nil,
-                         parent: AIQuestion? = nil, lines: [String] = ["[00:00:10] 話者A: 元の会話"]) throws -> AIRequest {
+                         parent: AIQuestion? = nil, lines: [String] = ["[00:00:10] 話者A: 元の会話"],
+                         profile: String? = nil, slot: Int? = nil) throws -> AIRequest {
         var history = try AIStreamHistory(meetingID: meeting, sessionGeneration: generation)
         let snapshot = try history.prepare(lines: lines, outputDirectory: root)
         let participant = AIParticipantContext(streamID: snapshot.streamID, requestID: UUID(), sessionGeneration: generation,
             participantName: name, cliPath: "/tmp/helper",
-            sessionPath: root.appendingPathComponent(".kikigaki-context/\(meeting)/ai/sessions/\(generation).json").path,
+            sessionPath: root.appendingPathComponent(".kikigaki-context/\(meeting)/"
+                + AIEnvelope.sessionPath(slot: slot, generation: generation)).path,
             requestToken: "test", question: question, capturedAt: Date(timeIntervalSince1970: 30),
             audioCutoffSeconds: 60, tentativeTail: tail,
             inReplyToRequestID: parent?.request.id, inReplyToEventID: parent?.result?.eventID,
-            workAllowed: workAllowed, trigger: trigger)
+            workAllowed: workAllowed, trigger: trigger, profile: profile, profileSlot: slot)
         return try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant), number: number,
                              voiceQuestion: "声の問い", snapshot: snapshot, voiceUtteranceStart: anchor)
     }
@@ -200,11 +202,16 @@ import KikigakiCore
         try answer(&conversation, returned, at: 51, kind: .failed, body: "読めませんでした\n詳細", reason: "read_failed")
 
         let items = AITimeline.items(conversation: conversation, utterances: [], timeline: timeline)
-        #expect(items.first { $0.number == 1 && !$0.isSend }?.kind == .failure(reason: "接続が切れています"))
-        #expect(items.first { $0.number == 3 && !$0.isSend }?.kind == .failure(reason: "読めませんでした"))
-        // 成否が分からないので「考え中…」は出さず、送信の行の注記だけにする。
+        // 送信できなかった失敗と、モデルが返した失敗報告を区別する。
+        #expect(items.first { $0.number == 1 && !$0.isSend }?.kind == .failure(reason: "接続が切れています", returned: false))
+        let report = try #require(items.first { $0.number == 3 && !$0.isSend })
+        #expect(report.kind == .failure(reason: "読めませんでした", returned: true))
+        #expect(report.body == "読めませんでした\n詳細")   // 画面で全文を読めるように本文も持つ
+        // 成否が分からないので「考え中…」は出さず、送信の行の注記と取消だけにする。
         #expect(!items.contains { $0.number == 2 && !$0.isSend })
         #expect(try #require(items.first { $0.number == 2 }).notes.contains("送達不明"))
+        #expect(try #require(items.first { $0.number == 2 }).canCancel)
+        #expect(items.filter { $0.number != 2 }.allSatisfy { !$0.canCancel })
         #expect(try #require(items.first { $0.number == 1 }).notes.contains("1発言"))
         #expect(items.filter { !$0.isSend }.allSatisfy { $0.rowID.hasSuffix("/reply") })
         #expect(items.filter(\.isSend).allSatisfy { $0.rowID.hasSuffix("/send") })
@@ -272,6 +279,27 @@ import KikigakiCore
         #expect(try confirmation(conversation).notes == ["#3で返答"])
         let items = AITimeline.items(conversation: conversation, utterances: [voice("対象", at: 10)], timeline: timeline)
         #expect(items.filter { $0.number == 3 }.map(\.kind) == [.sendRow, .reply(.waiting)])
+    }
+
+    @Test func 旧接続の判定は宛先ごとに分ける() throws {
+        let meeting = UUID()
+        var conversation = AIConversation(meetingID: meeting)
+        // 議事録(枠1)だけ世代2へ進み、相談(枠2)は世代1のまま。
+        let advice = try request(in: meeting, number: 1, question: "相談", name: "ネオ", generation: 1,
+                                 profile: "相談", slot: 2)
+        try send(&conversation, advice, at: 30)
+        try answer(&conversation, advice, at: 31)
+        let minutes = try request(in: meeting, number: 2, question: "議事録", name: "迅雷", generation: 2,
+                                  profile: "議事録", slot: 1)
+        try send(&conversation, minutes, at: 40)
+        try answer(&conversation, minutes, at: 41)
+
+        let items = AITimeline.items(conversation: conversation, utterances: [], timeline: timeline,
+                                     generation: { $0.envelope.participant.profileSlot == 1 ? 2 : 1 })
+        #expect(items.filter { !$0.isSend }.allSatisfy { $0.notes.isEmpty })
+        // 全体の最大世代で見ると、枠2の正常な返事まで旧接続扱いになる。
+        let markdown = AIMarkdown.section(conversation)
+        #expect(!markdown.contains("旧接続からの返事"))
     }
 
     @Test func 会話がなければ何も返さない() {
@@ -345,7 +373,7 @@ import KikigakiCore
         let item = try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline)
             .first { !$0.isSend })
         // 取消後の結果は状態がcancelledのまま残るので、結果の種類も見ないと返事に化ける。
-        #expect(item.kind == .failure(reason: "接続が切れました"))
+        #expect(item.kind == .failure(reason: "接続が切れました", returned: true))
         #expect(item.notes == ["取消後の返事"])
     }
 

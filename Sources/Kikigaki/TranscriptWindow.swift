@@ -453,8 +453,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             case .reply, .failure: view = AIReplyRow(item: item, state: state)
             }
         }
+        let id = item.requestID
+        // 送達不明の送信行にも取消を置く。返事の行を作らないので、他に取り消す場所がない。
+        (view as? AISendLineRow)?.onCancel = { [weak self] in self?.onCancelAI?(id) }
+        (view as? AITypedSendRow)?.onCancel = { [weak self] in self?.onCancelAI?(id) }
         if let reply = view as? AIReplyRow {
-            let id = item.requestID
             reply.onRead = { [weak self] in self?.onReadAI?(id) }
             reply.onReply = { [weak self] in self?.onAskAI?(id) }
             reply.onCancel = { [weak self] in self?.onCancelAI?(id) }

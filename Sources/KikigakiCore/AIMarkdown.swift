@@ -60,7 +60,13 @@ public enum AIMarkdown {
 
     public static func section(_ conversation: AIConversation, timeZone: TimeZone = .current) -> String {
         guard !conversation.questions.isEmpty else { return "" }
-        let generation = conversation.questions.map { $0.request.envelope.participant.sessionGeneration }.max() ?? 1
+        // 世代は宛先ごとに進むので、枠ごとに最大を取る。全体の最大で見ると、
+        // 片方の宛先を作り直しただけで、もう片方の返事まで旧接続扱いになる。
+        var generations: [Int?: Int] = [:]
+        for question in conversation.questions {
+            let participant = question.request.envelope.participant
+            generations[participant.profileSlot] = max(generations[participant.profileSlot] ?? 1, participant.sessionGeneration)
+        }
         var lines = ["## AIとのやりとり"]
         for question in conversation.questions {
             let request = question.request
@@ -80,7 +86,9 @@ public enum AIMarkdown {
             if let result = question.result {
                 lines.append("- 返事: " + date(result.recordedAt, timeZone: timeZone))
                 if question.cancelledAt != nil { lines.append("- 補足: 取消後の返事") }
-                if participant.sessionGeneration < generation { lines.append("- 補足: 旧接続からの返事") }
+                if participant.sessionGeneration < generations[participant.profileSlot] ?? 1 {
+                    lines.append("- 補足: 旧接続からの返事")
+                }
                 if AIQuestion.isAnswered(question, in: conversation.questions) { lines.append("- 確認: 返答済み") }
                 if result.kind == .needsInput { lines.append("- 状態: 確認待ち") }
                 if result.kind == .failed { lines.append("- 状態: 失敗") }

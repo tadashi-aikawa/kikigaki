@@ -3,7 +3,8 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
-/// 複数プロファイルの見た目を撮る。`KIKIGAKI_UI_CAPTURE` を渡したときだけ動く。
+/// 複数プロファイルの行とシートを検証する。検証は常に動き、
+/// 画像の書き出しだけ `KIKIGAKI_UI_CAPTURE` を渡したときに行う。
 @Suite @MainActor struct AIProfileReviewTests {
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
     private func capture(_ name: String, _ view: NSView, to output: String) throws {
@@ -75,7 +76,8 @@ import KikigakiCore
     }
 
     @Test func 混雑した会議とシートを幅ごとに撮る() throws {
-        guard let output = ProcessInfo.processInfo.environment["KIKIGAKI_UI_CAPTURE"] else { return }
+        // 撮影は環境変数がある時だけだが、検証は常に走らせる。
+        let output = ProcessInfo.processInfo.environment["KIKIGAKI_UI_CAPTURE"]
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let conversation = try crowded(root: root)
@@ -97,11 +99,18 @@ import KikigakiCore
             window.apply(state)
             let content = window.window!.contentView!
             content.layoutSubtreeIfNeeded()
-            let titles = descendants(content).compactMap { $0 as? NSButton }.map(\.title)
-            // 宛名で見分けられること。番号は会議内の通しのまま。
-            #expect(titles.contains { $0.contains("#1 迅雷へ") } && titles.contains { $0.contains("#2 ネオへ") })
-            #expect(titles.contains { $0.contains("#4 ネオから") || $0.contains("#4 ネオ") })
-            try capture("profiles-crowded-\(width)", content.superview!, to: output)
+            // 宛名で見分けられること。行はrequestごとの宛名を出し、選択中の宛先に依存しない。
+            let sends = window.transcriptDocument.rows.compactMap { $0 as? AISendLineRow }
+            let typed = window.transcriptDocument.rows.compactMap { $0 as? AITypedSendRow }
+            let replies = window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }
+            #expect(sends.contains { $0.displayText.hasPrefix("└ 迅雷へ") } || typed.contains { $0.addressText == "迅雷へ" })
+            #expect(sends.contains { $0.displayText.hasPrefix("└ ネオへ") } || typed.contains { $0.addressText == "ネオへ" })
+            #expect(Set(replies.map(\.item.participantName)) == ["迅雷", "ネオ"])
+            // 送信の行と返事の行は同じrequestを指す。
+            let requests = Set(conversation.questions.map(\.request.id))
+            let rows = window.transcriptDocument.rows.compactMap { $0 as? (any AITimelineRowView) }
+            #expect(!rows.isEmpty && rows.allSatisfy { requests.contains($0.item.requestID) })
+            if let output { try capture("profiles-crowded-\(width)", content.superview!, to: output) }
         }
 
         // 「議事録」には準備済みセッションがある想定。
@@ -111,18 +120,31 @@ import KikigakiCore
         let ask = AIQuestionSheet(participant: "迅雷", parentNumber: nil, draft: "この段取りで抜けはありますか",
             voice: "", range: "対象: 3〜7行(14:05:20〜14:06:16) · 送信時に確定", tentative: false, canSubmit: true)
         ask.updateDestinations(items, selected: 1, participant: "迅雷")
-        try capture("profiles-sheet-ask", ask.window.contentView!, to: output)
+        if let output { try capture("profiles-sheet-ask", ask.window.contentView!, to: output) }
 
         // 返事待ちで送信できない状態。無効の部品は面を足さず色を抜く。
         let busy = AIQuestionSheet(participant: "ネオ", parentNumber: nil, draft: "", voice: "空欄なら声の末尾を送ります",
             range: "追加の確定行なし · 送信時点で範囲を確定", tentative: false, canSubmit: false)
         busy.updateDestinations(items, selected: 2, participant: "ネオ")
-        try capture("profiles-sheet-busy", busy.window.contentView!, to: output)
+        if let output { try capture("profiles-sheet-busy", busy.window.contentView!, to: output) }
+
+        // 失敗の再送は宛先を固定する。選択欄を出さず、選び直しても取消の宛先が動かない。
+        let resend = AIQuestionSheet(participant: "ネオ", parentNumber: nil, draft: "担当と期限を確定してください",
+            voice: "", range: "対象: 3発言", tentative: false, canSubmit: true, fixedSlot: 2)
+        resend.updateDestinations(items, selected: 1, participant: "議事録")
+        #expect(resend.owningSlot == 2)
+        #expect(!descendants(resend.window.contentView!).contains { $0 is AIDestinationPicker && !$0.isHidden })
+        let resendTitle = try #require(descendants(resend.window.contentView!).compactMap { $0 as? NSTextField }.first)
+        #expect(resendTitle.stringValue == "ネオへ")
+        let resendSend = try #require(descendants(resend.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "送信 ⏎" })
+        resendSend.performClick(nil)
+        #expect(resend.owningSlot == 2)   // 送信後も取消の宛先は元のまま
+        if let output { try capture("profiles-sheet-resend", resend.window.contentView!, to: output) }
 
         let schedule = AIScheduleSheet(prompt: "会議の決定事項と担当・期限をMarkdown議事録へ更新してください",
             minutes: 3, workAllowed: true, sendFinal: true, participant: "迅雷")
         schedule.updateDestinations(items, selected: 1, participant: "迅雷")
-        try capture("profiles-sheet-schedule", schedule.window.contentView!, to: output)
+        if let output { try capture("profiles-sheet-schedule", schedule.window.contentView!, to: output) }
 
         // 送信を始めた後。宛先は選び直せない。無効の部品は面を足さず色を抜く。
         let locked = AIQuestionSheet(participant: "議事録", parentNumber: nil, draft: "この段取りで抜けはありますか",
@@ -131,12 +153,12 @@ import KikigakiCore
         let send = try #require(descendants(locked.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "送信 ⏎" })
         send.performClick(nil)
         locked.update(progress: "AIの入力準備を確認中。初回設定はherdrで確認してください", canSubmit: false)
-        try capture("profiles-sheet-sending", locked.window.contentView!, to: output)
+        if let output { try capture("profiles-sheet-sending", locked.window.contentView!, to: output) }
 
         // プロファイルが1つで準備済みも無い会議では、宛先の行そのものを出さない。
         let single = AIQuestionSheet(participant: "迅雷", parentNumber: nil, draft: "", voice: "",
             range: "追加の確定行なし", tentative: false, canSubmit: true)
         single.updateDestinations([.init(slot: 1, name: "迅雷", prepared: nil)], selected: 1, participant: "迅雷")
-        try capture("profiles-sheet-single", single.window.contentView!, to: output)
+        if let output { try capture("profiles-sheet-single", single.window.contentView!, to: output) }
     }
 }

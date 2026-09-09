@@ -217,7 +217,8 @@ import KikigakiAIIO
         // 時刻は人の発話と同じ粒度。秒はtooltipへ。
         let clock = DateFormatter(); clock.locale = Locale(identifier: "en_US_POSIX"); clock.dateFormat = "HH:mm"
         #expect(send.displayText == "└ 迅雷へ送信 · 2発言 · " + clock.string(from: started.addingTimeInterval(343)))
-        #expect(send.height(for: 680) == 24)
+        // 取消の有無で高さが変わらない。結果の到着で行が縮むと末尾の画面が動く。
+        #expect(send.height(for: 680) == 26)
         let answer = try #require(rows.compactMap { $0 as? AIReplyRow }.first)
         // 声の送信は発話そのものが送信文なので、返事へ引用を重ねない。
         #expect(answer.item.question.isEmpty && answer.quoteButton.isHidden)
@@ -305,7 +306,8 @@ import KikigakiAIIO
         try conversation.append(request)
         try conversation.update(request.id) { try $0.beginSending(at: started.addingTimeInterval(330)); try $0.submitted() }
         _ = try conversation.receive(AIReceiveEvent(request: request, kind: .failed, recordedAt: started.addingTimeInterval(340),
-                                                    body: "書き込みに失敗しました", reason: "write_failed"), at: started.addingTimeInterval(341))
+                                                    body: "一部の更新に失敗しました\n\n- 更新済み: A\n- 未更新: B", reason: "write_failed"),
+                                     at: started.addingTimeInterval(341))
         var state = SessionSnapshot(ai: AIViewState(conversation: conversation), state: .recording,
             utterances: [.init(speaker: 0, start: 320, end: 322, text: "議事録の担当を決めましょう。")],
             timeline: .init(startedAt: started), elapsed: 350, markdownURL: root.appendingPathComponent("meeting.md"))
@@ -318,6 +320,11 @@ import KikigakiAIIO
         let failed = try #require(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.first)
         // 返送された失敗はCoreが未読にする。印から既読にでき、可視化の対象にもなる。
         #expect(failed.isFailure && failed.item.isUnread && failed.pillStyle == .unread)
+        // 送信できなかった失敗とは言い方を分け、本文は画面から全部読める。
+        #expect(failed.isReturnedFailure && failed.failureText.hasPrefix("迅雷から失敗の報告"))
+        let detail = try #require(descendants(failed).compactMap { $0 as? MarkdownBodyView }.first)
+        #expect(!detail.isHidden && detail.string.contains("未更新: B"))
+        #expect(failed.height(for: 680) > 34 && detail.frame.maxY <= failed.height(for: 680))
         #expect(!failed.statusPill.isHidden && failed.statusPill.title == "未読" && failed.statusPill.isEnabled)
         #expect(state.ai?.badges.contains("未読 1") == true)
         var resent: UUID?
@@ -336,6 +343,48 @@ import KikigakiAIIO
         window.aiRead.evaluate(now: now); window.aiRead.evaluate(now: now + 1.2)
         #expect(read == [request.id])
         #expect(failed.statusPill.isHidden && state.ai?.badges.contains("未読") != true)
+    }
+
+    @Test func 送達不明は考え中を出さず送信の行から取り消せる() throws {
+        _ = NSApplication.shared
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
+        let voice = try request(1, history: &history, root: root, question: "", voiceStart: 320)
+        let typed = try request(2, history: &history, root: root, question: "担当を確定してください")
+        var conversation = AIConversation(meetingID: meeting)
+        for value in [voice, typed] {
+            try conversation.append(value)
+            // 送信を試みたまま応答が失われた状態。isAwaitingResult は残る。
+            try conversation.update(value.id) { try $0.beginSending(at: started.addingTimeInterval(330)) }
+        }
+        let state = SessionSnapshot(ai: AIViewState(conversation: conversation), state: .recording,
+            utterances: [.init(speaker: 0, start: 320, end: 322, text: "担当を決めましょう。")],
+            timeline: .init(startedAt: started), elapsed: 350, markdownURL: root.appendingPathComponent("meeting.md"))
+        let window = TranscriptWindowController(shouldReduceMotion: { true })
+        window.window!.setFrameAutosaveName("")
+        window.window!.setFrame(NSRect(x: 20000, y: 20000, width: 680, height: 700), display: false)
+        let content = window.window!.contentView!
+        window.apply(state); content.layoutSubtreeIfNeeded()
+        // 成否が分からないので「考え中…」は出さない。取消はこの行にしか置けない。
+        #expect(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.isEmpty)
+        var cancelled: [UUID] = []
+        window.onCancelAI = { cancelled.append($0) }
+        let line = try #require(window.transcriptDocument.rows.compactMap { $0 as? AISendLineRow }.first)
+        let row = try #require(window.transcriptDocument.rows.compactMap { $0 as? AITypedSendRow }.first)
+        for view in [line as NSView, row as NSView] {
+            let cancel = try #require(descendants(view).compactMap { $0 as? NSButton }.first { $0.title == "取消" })
+            #expect(!cancel.isHidden); cancel.performClick(nil)
+        }
+        #expect(cancelled == [voice.id, typed.id])
+        #expect(line.displayText.contains("送達不明") && row.noteText.contains("送達不明"))
+        // 取消の有無で行の高さを変えない。結果が届いて取消が消えると末尾の画面が動く。
+        let heights = (line.height(for: 680), row.height(for: 680))
+        try conversation.update(voice.id) { try $0.submitted() }
+        try conversation.update(typed.id) { try $0.submitted() }
+        var next = state; next.ai?.conversation = conversation
+        window.apply(next); content.layoutSubtreeIfNeeded()
+        #expect((line.height(for: 680), row.height(for: 680)) == heights)
+        #expect(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.allSatisfy { $0.isWaiting })
     }
 
     @Test func 引用は押して全文へ伸び待機から返事へ同じビューで変わる() throws {

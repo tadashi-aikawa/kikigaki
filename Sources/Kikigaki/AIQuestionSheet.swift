@@ -54,7 +54,12 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     var rangePreview: ((Bool) -> String)?
     private var sent = false
 
-    init(participant: String, parentNumber: Int?, draft: String, voice: String, range: String, tentative: Bool, canSubmit: Bool, confirmation: String? = nil, workAllowed: Bool = true) {
+    /// 宛先を選ばせないシートの枠。確認への返答と失敗の再送が使う。
+    /// 選択欄を隠すだけでは `owningSlot` が選択値を見るので、取消の宛先が動く。
+    private let fixedSlot: Int?
+
+    init(participant: String, parentNumber: Int?, draft: String, voice: String, range: String, tentative: Bool, canSubmit: Bool, confirmation: String? = nil, workAllowed: Bool = true, fixedSlot: Int? = nil) {
+        self.fixedSlot = fixedSlot
         window = AIQuestionWindow(contentRect: NSRect(x: 0, y: 0, width: 504, height: 344), styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
         window.appearance = NSAppearance(named: .aqua); window.backgroundColor = Washi.paper
@@ -82,10 +87,10 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         let cancel = NSButton(title: "取消", target: self, action: #selector(cancel)); cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
         pane.isBordered = false; pane.target = self; pane.action = #selector(openPane)
         let actions = NSStackView(views: [pane, NSView(), cancel, sendButton]); actions.orientation = .horizontal; actions.spacing = 12
-        // 確認への返答は元質問と同じ宛先へ返す。宛先を選び直させない。
-        destination.isHidden = parentNumber != nil
+        // 確認への返答と再送は元質問と同じ宛先へ送る。宛先を選び直させない。
+        destination.isHidden = fixedSlot != nil
         var views: [NSView] = [title]
-        if parentNumber == nil { views.append(destination) }
+        if fixedSlot == nil { views.append(destination) }
         views.append(self.range)
         if let confirmation {
             let context = NSTextField(wrappingLabelWithString: "? " + confirmation)
@@ -104,12 +109,12 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     /// このシートが送信を始めた枠。取消はここへ返す。
     /// 送信後に宛先を選び直せると、接続待ちの依頼を取り消せなくなる。
     private(set) var activeSlot: Int?
-    /// 送信を始めていなければ現在の選択、始めていればそのときの枠
-    var owningSlot: Int { activeSlot ?? destination.selected }
+    /// 固定した枠があればそれ、送信を始めていなければ現在の選択、始めていればそのときの枠
+    var owningSlot: Int { fixedSlot ?? activeSlot ?? destination.selected }
 
-    /// 宛先の一覧と選択を差し替える。送信を始めた後は差し替えない。
+    /// 宛先の一覧と選択を差し替える。固定した枠と送信を始めた後は差し替えない。
     func updateDestinations(_ items: [AIDestinationPicker.Item], selected: Int, participant: String) {
-        guard activeSlot == nil else { return }
+        guard activeSlot == nil, fixedSlot == nil else { return }
         destination.update(items: items, selected: selected)
         title.stringValue = "\(participant)へ"
     }

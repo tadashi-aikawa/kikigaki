@@ -20,7 +20,8 @@ public enum AITimeline {
         /// 人側の送信行。問い欄へ入力した手動送信と、確認への返答だけが使う。
         case sendRow
         case reply(ReplyState)
-        case failure(reason: String)
+        /// returned はモデルが返した失敗報告。送信そのものができなかった失敗と区別する。
+        case failure(reason: String, returned: Bool)
     }
 
     public struct Item: Equatable, Sendable {
@@ -44,6 +45,8 @@ public enum AITimeline {
         public let timeRange: AIContextTimeRange?
         public let isUnread: Bool
         public let needsAnswer: Bool
+        /// 送信の行に取消を出すか。送達不明は返事の行を作らないので、ここでしか取り消せない。
+        public let canCancel: Bool
 
         public var isSend: Bool {
             switch kind {
@@ -97,7 +100,9 @@ public enum AITimeline {
                                automatic: automatic, kind: sendKind, anchor: sendAnchor,
                                slot: slot(for: sendAnchor, dates: dates, endedAt: endedAt), date: sendDate,
                                question: request.displayQuestion, parentNumber: parentNumber, body: "",
-                               notes: sendNotes, timeRange: request.timeRange, isUnread: false, needsAnswer: false),
+                               notes: sendNotes, timeRange: request.timeRange, isUnread: false, needsAnswer: false,
+                               // 送達不明は「考え中…」を出さないので、取消はこの行に置くしかない。
+                               canCancel: question.state == .deliveryUnknown && question.isAwaitingResult),
                           rank: rank(sendAnchor), sortDate: sendDate, side: 0, order: request.number))
 
             guard let reply = replyKind(question) else { continue }
@@ -129,7 +134,8 @@ public enum AITimeline {
                                question: quote, parentNumber: parentNumber, body: question.result?.body ?? "",
                                notes: notes, timeRange: request.timeRange, isUnread: question.isUnread,
                                needsAnswer: question.state == .needsInput
-                                 && !AIQuestion.isAnswered(question, in: conversation.questions)),
+                                 && !AIQuestion.isAnswered(question, in: conversation.questions),
+                               canCancel: false),
                           rank: rank(anchor), sortDate: arrival, side: 1,
                           // 返事同士は記録順。記録の無い送信前失敗は同着の先頭へ置く。
                           order: question.resultOrder ?? -1))
@@ -161,9 +167,10 @@ public enum AITimeline {
     private static func replyKind(_ question: AIQuestion) -> Kind? {
         // 取消後に届いた失敗は状態がcancelledのまま残るので、結果の種類も見る。
         if question.state == .failed || question.result?.kind == .failed {
+            let returned = question.result?.kind == .failed
             let text = question.failure ?? question.result?.body ?? question.result?.reason ?? ""
             let line = text.components(separatedBy: .newlines).first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            return .failure(reason: line ?? "原因不明")
+            return .failure(reason: line ?? "原因不明", returned: returned)
         }
         if let result = question.result { return .reply(result.kind == .needsInput ? .needsInput : .answered) }
         // 送達不明は成否が分からないので「考え中…」を出さない。送信の行の注記に留める。

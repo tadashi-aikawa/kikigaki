@@ -486,7 +486,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             draft: session.aiDraft, voice: snapshot.voiceQuestionPlaceholder,
             range: range, tentative: snapshot.tentativeText != nil,
             canSubmit: snapshot.ai?.canSubmit(slot: slot) == true, confirmation: question?.result?.body,
-            workAllowed: session.aiWorkAllowed)
+            workAllowed: session.aiWorkAllowed, fixedSlot: fixed ? slot : nil)
         sheet.updateDestinations(session.aiDestinationItems, selected: slot, participant: config.participantName)
         if !fixed {
             sheet.onDestination = { [weak self, weak sheet] chosen in

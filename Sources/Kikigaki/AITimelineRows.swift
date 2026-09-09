@@ -134,11 +134,14 @@ final class AISendLineRow: NSView, AITimelineRowView {
     override var isFlipped: Bool { true }
     private(set) var item: AITimeline.Item
     private let label = Washi.label(size: 11, color: Washi.muted)
+    /// 送達不明は返事の行を作らないので、取消はこの行に置く。
+    private lazy var cancelAction = AIActionButton("取消", size: 11) { [weak self] in self?.onCancel?() }
+    var onCancel: (() -> Void)?
     var displayText: String { label.stringValue }
     init(item: AITimeline.Item, state: AIViewState) {
         self.item = item
         super.init(frame: .zero)
-        addSubview(label)
+        addSubview(label); addSubview(cancelAction)
         label.lineBreakMode = .byTruncatingTail
         update(item, state: state)
     }
@@ -156,12 +159,18 @@ final class AISendLineRow: NSView, AITimelineRowView {
         label.toolTip = ([label.stringValue, seconds, range, item.question.isEmpty ? nil : item.question]
             .compactMap { $0 }).joined(separator: "\n")
         label.setAccessibilityLabel(label.stringValue)
+        cancelAction.isHidden = !item.canCancel || state.readOnly
         needsLayout = true
     }
-    func height(for width: CGFloat) -> CGFloat { 24 }
+    /// 取消は同じ行の右端へ置く。段を足すと、結果が届いて取消が消えたときに行が縮み、
+    /// 末尾を読んでいる利用者の画面が動く。
+    func height(for width: CGFloat) -> CGFloat { 26 }
     override func layout() {
         super.layout()
-        label.frame = NSRect(x: AIRowMetrics.bodyX, y: 3, width: max(0, bounds.width - AIRowMetrics.bodyX - 20), height: 18)
+        let width = cancelAction.isHidden ? 0 : cancelAction.measuredWidth
+        cancelAction.frame = NSRect(x: bounds.width - 20 - width, y: 1, width: width, height: 24)
+        let right = cancelAction.isHidden ? bounds.width - 20 : cancelAction.frame.minX - 8
+        label.frame = NSRect(x: AIRowMetrics.bodyX, y: 4, width: max(0, right - AIRowMetrics.bodyX), height: 18)
     }
 }
 
@@ -179,6 +188,9 @@ final class AITypedSendRow: NSView, AITimelineRowView {
     /// 枠つきピルは状態専用に残し、枠の有無をそのまま「注意が要るか」にする。
     private let address = Washi.label(size: 11, color: Washi.muted)
     private let body = NSTextField(wrappingLabelWithString: "")
+    /// 送達不明は返事の行を作らないので、取消はこの行に置く。
+    private lazy var cancelAction = AIActionButton("取消", size: 11) { [weak self] in self?.onCancel?() }
+    var onCancel: (() -> Void)?
     private var measured: CGFloat = 0
     var displayName: String { nameLabel.stringValue }
     var addressText: String { address.stringValue }
@@ -194,7 +206,7 @@ final class AITypedSendRow: NSView, AITimelineRowView {
         body.isSelectable = true
         body.maximumNumberOfLines = 0
         body.lineBreakMode = .byWordWrapping
-        for view in [avatar, nameLabel, timeLabel, noteLabel, address, body] { addSubview(view) }
+        for view in [avatar, nameLabel, timeLabel, noteLabel, address, body, cancelAction] { addSubview(view) }
         update(item, state: state)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -221,8 +233,11 @@ final class AITypedSendRow: NSView, AITimelineRowView {
         }
         avatar.alphaValue = pending ? 0.5 : 1
         avatar.needsDisplay = true
+        cancelAction.isHidden = !item.canCancel || state.readOnly
         needsLayout = true
     }
+    /// 取消は見出しの行へ置く。段を足すと、結果が届いて取消が消えたときに行が縮み、
+    /// 末尾を読んでいる利用者の画面が動く。
     func height(for width: CGFloat) -> CGFloat {
         measured = AIRowMetrics.measure(body, width: AIRowMetrics.bodyWidth(width))
         return max(20, measured) + 36
@@ -235,8 +250,11 @@ final class AITypedSendRow: NSView, AITimelineRowView {
         timeLabel.frame = NSRect(x: AIRowMetrics.bodyX + nameWidth + 12, y: 8, width: 48, height: 18)
         let addressWidth = ceil(address.intrinsicContentSize.width) + 2
         address.frame = NSRect(x: bounds.width - 20 - addressWidth, y: 9, width: addressWidth, height: 16)
+        let width = cancelAction.isHidden ? 0 : cancelAction.measuredWidth
+        cancelAction.frame = NSRect(x: address.frame.minX - 8 - width, y: 5, width: width, height: 24)
         let noteX = timeLabel.frame.maxX + 8
-        noteLabel.frame = NSRect(x: noteX, y: 9, width: max(0, address.frame.minX - noteX - 8), height: 16)
+        let noteRight = cancelAction.isHidden ? address.frame.minX : cancelAction.frame.minX
+        noteLabel.frame = NSRect(x: noteX, y: 9, width: max(0, noteRight - noteX - 8), height: 16)
         body.frame = NSRect(x: AIRowMetrics.bodyX, y: 31, width: AIRowMetrics.bodyWidth(bounds.width), height: max(20, bounds.height - 36))
     }
 }
@@ -280,6 +298,8 @@ final class AIReplyRow: NSView, AITimelineRowView {
     var statusPill: AIStatusPill { pill }
 
     var isFailure: Bool { if case .failure = item.kind { return true }; return false }
+    /// モデルが返した失敗報告。送信そのものができなかった失敗と区別し、本文を全部見せる。
+    var isReturnedFailure: Bool { if case let .failure(_, returned) = item.kind { return returned }; return false }
     var isWaiting: Bool { item.kind == .reply(.waiting) }
     /// 未読は朱、未返答の確認は金。既読と返答済みは薄墨へ戻す。
     var accent: NSColor? {
@@ -328,11 +348,13 @@ final class AIReplyRow: NSView, AITimelineRowView {
         if let style = pillStyle { pill.update(style) }
         markdownBody.update(item.body)
         quote.update(item.question)
-        if case let .failure(reason) = item.kind {
+        if case let .failure(reason, returned) = item.kind {
             // 帯は1行なので、取消後・旧接続などの注記も同じ行へ連ねる。
-            failureLabel.stringValue = ([item.participantName + "へ送信できませんでした", reason] + item.notes).joined(separator: " · ")
+            // 返送された失敗は「送信できなかった」ではないので言い方を分け、本文は下へ全部出す。
+            let heading = returned ? item.participantName + "から失敗の報告" : item.participantName + "へ送信できませんでした"
+            failureLabel.stringValue = ([heading, reason] + item.notes).joined(separator: " · ")
             failureLabel.textColor = Washi.red
-            failureLabel.toolTip = failureLabel.stringValue
+            failureLabel.toolTip = ([failureLabel.stringValue, returned ? item.body : nil].compactMap { $0 }).joined(separator: "\n")
         }
         // 注記はCoreが作る。接続の観測もitemsへ渡してあるので描画側で補わない。
         let text = item.notes.joined(separator: " · ")
@@ -357,7 +379,8 @@ final class AIReplyRow: NSView, AITimelineRowView {
         pill.isHidden = pillStyle == nil
         quote.isHidden = failure || item.question.isEmpty
         quoteRule.isHidden = quote.isHidden
-        markdownBody.isHidden = failure || isWaiting
+        // 返送された失敗の本文は画面から読めるようにする。保存にだけ残る状態にしない。
+        markdownBody.isHidden = (failure && !isReturnedFailure) || isWaiting
         waitingBody.isHidden = failure || !isWaiting
         confirmationMark.isHidden = failure || item.kind != .reply(.needsInput)
         notes.isHidden = failure || notes.stringValue.isEmpty
@@ -367,16 +390,24 @@ final class AIReplyRow: NSView, AITimelineRowView {
             : item.participantName + "、" + (isWaiting ? "返事待ち" : chip.text) + (pillStyle == .unread ? "、未読" : ""))
     }
 
+    /// 測る前に表示と同じ幅の枠を与える。幅0のまま測るとTextKitが器の寸法を誤り、
+    /// 表やコードを含む返事の高さが一度だけ跳ね上がったまま計測値に残る。
+    private func measureMarkdown(_ width: CGFloat) -> CGFloat {
+        if markdownBody.frame.width != width {
+            markdownBody.setFrameSize(NSSize(width: width, height: markdownBody.frame.height))
+        }
+        return markdownBody.height(for: width)
+    }
+
     func height(for width: CGFloat) -> CGFloat {
-        if isFailure { return 34 }
+        if isFailure {
+            guard isReturnedFailure else { return 34 }
+            measuredBody = measureMarkdown(AIRowMetrics.bodyWidth(width))
+            return 34 + measuredBody + 8
+        }
         let bodyWidth = AIRowMetrics.bodyWidth(width)
         measuredQuote = item.question.isEmpty ? 0 : quote.height(for: bodyWidth - 12) + 8
-        // 測る前に表示と同じ幅の枠を与える。幅0のまま測るとTextKitが器の寸法を誤り、
-        // 表やコードを含む返事の高さが一度だけ跳ね上がったまま計測値に残る。
-        if markdownBody.frame.width != bodyWidth {
-            markdownBody.setFrameSize(NSSize(width: bodyWidth, height: markdownBody.frame.height))
-        }
-        measuredBody = isWaiting ? 20 : markdownBody.height(for: bodyWidth)
+        measuredBody = isWaiting ? 20 : measureMarkdown(bodyWidth)
         measuredNotes = notes.isHidden ? 0 : AIRowMetrics.measure(notes, width: bodyWidth) + 6
         // 返事待ちの「取消」は「考え中…」と同じ行の右端へ寄せる。まだ何も無い行を4段にしない。
         let actions = replyAction.isHidden ? 0.0 : 30
@@ -396,6 +427,10 @@ final class AIReplyRow: NSView, AITimelineRowView {
             pill.frame = NSRect(x: timeLabel.frame.minX - 8 - pillWidth, y: 5, width: pillWidth, height: 20)
             let end = pill.isHidden ? timeLabel.frame.minX : pill.frame.minX
             failureLabel.frame = NSRect(x: AIRowMetrics.bodyX, y: 7, width: max(0, end - AIRowMetrics.bodyX - 8), height: 18)
+            if isReturnedFailure {
+                markdownBody.frame = NSRect(x: AIRowMetrics.bodyX, y: 34, width: AIRowMetrics.bodyWidth(bounds.width),
+                                            height: max(20, measuredBody))
+            }
             return
         }
         avatar.frame = AIRowMetrics.avatar

@@ -78,9 +78,26 @@ import KikigakiCore
         // 会議を切り替えたら滞在時間を捨てる。前の会議で見ていた時間を持ち越さない。
         if changedMeeting { marks = [:]; aiRead.reset() }
         displayedMeeting = record.manifest.meetingID
-        let state = AIViewState(conversation: record.controller.conversation, participant: record.manifest.config.participantName,
-            warning: record.saveWarning, canSubmit: false, readOnly: true, canOpenPane: record.controller.connection != nil,
-            saveFailed: record.saveWarning != nil, generation: record.controller.generation)
+        // 現在の会議と同じ形で枠ごとの状態を渡す。全体の値で塗ると、片方の宛先を
+        // 作り直しただけで、もう片方の正常な返事まで「旧接続から」になる。
+        let controller = record.controller
+        var connections: [Int: AIConnectionStatus] = [:], generations: [Int: Int] = [:]
+        var participants: [Int: String] = [:], openablePanes: Set<Int> = []
+        for question in controller.conversation.questions {
+            let participant = question.request.envelope.participant
+            let slot = participant.profileSlot ?? controller.defaultSlot
+            connections[slot] = controller.connectionStatus(slot: slot)
+            generations[slot] = controller.generation(slot: slot)
+            participants[slot] = participant.participantName
+            if controller.connection(slot: slot) != nil { openablePanes.insert(slot) }
+        }
+        let state = AIViewState(conversation: controller.conversation, participant: record.manifest.config.participantName,
+            warning: record.saveWarning,
+            unconfirmed: Set(controller.conversation.questions.filter { controller.isReturnUnconfirmed($0) }.map { $0.request.id }),
+            canSubmit: false, readOnly: true, canOpenPane: controller.connection != nil,
+            saveFailed: record.saveWarning != nil, generation: controller.generation,
+            defaultSlot: controller.defaultSlot, connections: connections, generations: generations,
+            participants: participants, openablePanes: openablePanes)
         badges.update(state)
         warning.stringValue = (store.warnings + [record.saveWarning].compactMap { $0 }).joined(separator: "\n")
         warning.isHidden = warning.stringValue.isEmpty
