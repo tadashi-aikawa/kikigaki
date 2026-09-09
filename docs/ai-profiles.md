@@ -316,17 +316,18 @@ manifestは `schemaVersion` を2へ上げ、`config` を `profiles: [ResolvedAIP
 | 6・Core | 台帳 `AIPreparedLedger` の値型(復号・検証・未紐づけの抽出・設定の等価性・紐づけ・破棄・生存確認)、`attach` / `displayAgent` の拒否、`AIAgentResolver` と `AIHerdr.list` の宛先候補の削除。**完了** |
 | 7・アプリ | 準備の起動経路(会議に紐づかない `connect`)、台帳の保存と起動時の生存確認、ペイン表題の取得、「AIセッションを準備…」と一覧、録音開始の紐づけシート、宛先ポップアップの準備済み表示、`autoStart` の順序、送信との排他。**完了** |
 | 7・実画面 | 準備シート・一覧・紐づけシート・宛先ポップアップの準備済み表示を600と900幅で撮る。クロディーヌのモックを先に見る。**完了** |
-| 8・replay と実herdr | 録音中に別セッションを準備し、次の録音で紐づけて自動送信が回ること。連続する2会議を通しで確かめる |
+| 8・replay と実herdr | 録音中に別セッションを準備し、次の録音で紐づけて自動送信が回ること。連続する2会議を通しで確かめる。**完了** |
 
 replayの追加入力はこれまでの2つを引き継ぐ。どちらも通常起動では解釈せず、`--smoke --replay` で形式だけ検証できる。
 
 - `KIKIGAKI_DEBUG_AI_AUTO_SECONDS=<秒>`: 設定の `autoStart` の間隔を秒へ上書きする。分単位の設定値ではreplayの実行時間に収まらない
 - `KIKIGAKI_DEBUG_AI_ASK_PROFILE=<name>`: 手動送信の宛先を固定する。自動と別のプロファイルへ同時に送ることを確かめる
 
-段8では、準備の起動と紐づけの選択をreplayから駆動する入力が要る。紐づけシートはreplayでは出さず(段7の実装)、次の2つを足す想定で段8に決める。
+段8で足した入力は3つ。紐づけシートはreplayでは出さないので、同じ経路を直接通す。
 
-- 準備の起動: プロファイル名を指定して録音前に1件起こす
-- 紐づけの選択: 枠ごとに「最も古い準備済み」「新規」のどちらかを選ぶ
+- `KIKIGAKI_DEBUG_AI_PREPARE=<name>[;<name>]`: 録音を始める前に、本番の `prepare` でそのプロファイルを起こす
+- `KIKIGAKI_DEBUG_AI_ATTACH=<slot>=oldest|new[;...]`: 枠ごとの紐づけの選択。本番の `applyPreparedSelection` を通す
+- `KIKIGAKI_DEBUG_AI_ATTACH_CANCEL=1`: 「取消(録音を始めない)」と同じ `abandon()` を通す
 
 結果は [複数プロファイルの結合検証](ai-profiles-verification.md) に記録する。
 

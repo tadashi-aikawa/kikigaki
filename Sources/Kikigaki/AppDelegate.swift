@@ -16,6 +16,13 @@ struct ReplayDebugOptions {
     var automaticSeconds: Double?
     /// 手動送信の宛先。自動と別のプロファイルへ同時に送ることを試す
     var askProfile: String?
+    /// 録音を始める前に起こしておくプロファイル名。連続する会議の準備を再現する
+    var prepareProfiles: [String] = []
+    /// 枠ごとの紐づけの選択。`oldest` は最も古い準備済み、`new` は新規に起動する
+    enum Attach: String { case oldest, new }
+    var attach: [Int: Attach] = [:]
+    /// 紐づけシートの「取消(録音を始めない)」を再現する。開始直後に取り止める
+    var attachCancel = false
     @MainActor static func recoverForNextQuestion(_ controller: AIConversationController?, preparing: Bool) throws {
         guard !preparing, let controller, !controller.canSend,
               let previous = controller.conversation.questions.last,
@@ -57,6 +64,28 @@ struct ReplayDebugOptions {
                 throw AIError.invalid("KIKIGAKI_DEBUG_AI_ASK_PROFILE")
             }
             result.askProfile = input
+        }
+        if let input = env["KIKIGAKI_DEBUG_AI_PREPARE"], !input.isEmpty {
+            let names = input.split(separator: ";", omittingEmptySubsequences: false).map(String.init)
+            guard names.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !$0.contains("\0") && !$0.contains(where: \.isNewline) }) else {
+                throw AIError.invalid("KIKIGAKI_DEBUG_AI_PREPARE")
+            }
+            result.prepareProfiles = names
+        }
+        if let input = env["KIKIGAKI_DEBUG_AI_ATTACH"], !input.isEmpty {
+            for entry in input.split(separator: ";", omittingEmptySubsequences: false) {
+                let pair = entry.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                guard pair.count == 2, let slot = Int(pair[0]), slot > 0,
+                      let choice = Attach(rawValue: String(pair[1])), result.attach[slot] == nil else {
+                    throw AIError.invalid("KIKIGAKI_DEBUG_AI_ATTACH")
+                }
+                result.attach[slot] = choice
+            }
+        }
+        if let input = env["KIKIGAKI_DEBUG_AI_ATTACH_CANCEL"] {
+            guard ["0", "1"].contains(input) else { throw AIError.invalid("KIKIGAKI_DEBUG_AI_ATTACH_CANCEL") }
+            result.attachCancel = input == "1"
         }
         if let input = env["KIKIGAKI_DEBUG_REPLAY_HOLD"] {
             guard let seconds = Double(input), seconds.isFinite, (0...86400).contains(seconds) else {
@@ -334,12 +363,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // 紐づけシートを出す間は設定の自動送信を待たせる。先に始めると、紐づける前の
         // 新しいセッションへ1回目が飛んでしまう。判定は開始前に済ませる。
+        // replayは録音の前に準備を起こす。本番の `prepare` をそのまま通す。
+        if replayURL != nil, let preparedStore, let config, !replayDebug.prepareProfiles.isEmpty {
+            for name in replayDebug.prepareProfiles {
+                guard let profile = config.aiProfiles.first(where: { $0.name == name }) else {
+                    Self.log("replay 準備するプロファイルが設定にない: \(name)"); exit(1)
+                }
+                await preparedStore.prepare(profile: profile, helper: helperURL, outputDirectory: config.outputDir)
+                Self.log("replay 準備: \(profile.name)(slot \(profile.slot)) 未紐づけ \(preparedStore.unbound.count)件")
+            }
+        }
         // 候補を出す前に生存と表題を引き直す。消えたペインを選ばせない。
         if replayURL == nil, let preparedStore { await preparedStore.refresh() }
         let choices = attachChoices()
-        session.deferAutomaticStart = !choices.isEmpty
+        // replayは紐づけシートを出さない代わりに、指定した選択を同じ経路へ当てる。
+        let replayAttach = replayURL == nil ? [:] : replayDebug.attach
+        session.deferAutomaticStart = !choices.isEmpty || !replayAttach.isEmpty
         let started = await session.start(source: source)
         if started, !choices.isEmpty { presentAttachSheet(choices) }
+        else if started, replayURL != nil, replayDebug.attachCancel {
+            // 「取消(録音を始めない)」と同じ経路。何も残らないことを実機で確かめる。
+            await session.abandon()
+            let context = config?.outputDir.appendingPathComponent(".kikigaki-context")
+                .appendingPathComponent(session.aiMeetingID.uuidString)
+            Self.log("replay 取消: 保存 \(session.snapshot.saved) 置き場 \(context.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)")
+            NSApp.terminate(nil)
+            return
+        }
+        else if started, !replayAttach.isEmpty, let preparedStore {
+            var selection: [Int: UUID?] = [:]
+            for (slot, choice) in replayAttach {
+                guard let profile = session.meetingAIProfiles.first(where: { $0.slot == slot }) else {
+                    Self.log("replay 紐づけ先の枠が設定にない: \(slot)"); exit(1)
+                }
+                let oldest = preparedStore.available(for: profile, contextRoot: session.aiContextRoot).first
+                if choice == .oldest, oldest == nil {
+                    Self.log("replay 紐づける準備済みが無い: slot \(slot)"); exit(1)
+                }
+                selection[slot] = choice == .oldest ? oldest?.id : nil
+            }
+            let failed = await session.applyPreparedSelection(selection)
+            let summary = selection.keys.sorted()
+                .map { "\($0)=" + (selection[$0]! == nil ? "new" : "oldest") }.joined(separator: ",")
+            Self.log("replay 紐づけ: \(summary) 失敗 \(failed.sorted())")
+            if !failed.isEmpty { exit(1) }
+        }
         else { session.deferAutomaticStart = false }
         // 宛先の指定は録音開始のリセットより後に当てる。start()が先頭へ戻すので、
         // 前に当てると2つ目を指定しても先頭へ送ってしまう。

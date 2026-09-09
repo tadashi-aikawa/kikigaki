@@ -79,3 +79,79 @@ requestは `failed` で終わり、session recordは書かれず(起動意図の
 `swift build` と全352テストが成功。`CODESIGN_IDENTITY=none ./scripts/make-app.sh` で組んだ `.app` と同梱CLIを使い、返送を模倣するfixtureは使っていない。実際のClaudeが改訂Skillを読み、`accept` と `reply` を呼んだ。
 
 replayの追加入力は通常起動では解釈せず、`--smoke --replay` で空・0・負数・非有限秒・上限超過・改行・NULを拒否することをテストで固定した。
+
+---
+
+# 準備済みセッションの結合検証(段8)
+
+2026-09-09、`feature/ai-prepared` の段8で実施。上の記録とは別の案(会議に紐づかない準備済みセッションを起こして紐づける)の検証で、こちらが現行の設計。
+
+音声は `say -v Kyoko` で作った架空の会議24秒だけ。実データを含み得る既存WAVは使っていない。音声認識の精度を測る検証ではない。
+
+## 設定
+
+```toml
+outputDir = ".../out2"
+
+[[ai]]                                   # 自動の宛先。準備済みを紐づける
+name = "議事録"
+cli = "claude"
+address = "迅雷へ"
+autoStart = true
+autoPrompt = "この会議の決定事項を3行以内で箇条書きにして返してください。ファイルは作らないでください"
+autoIntervalMinutes = 1
+
+[[ai]]                                   # 手動の宛先。準備済みを紐づける
+name = "相談"
+cli = "codex"
+address = "ネオへ"
+```
+
+`cwd` は省略し、既定の `~/Library/Application Support/KIKIGAKI/ai-work` を使った。新しいディレクトリを指定するとClaudeもCodexも初回の信頼確認でペインが `blocked` のまま止まる。**これは設計どおりの挙動**(利用者がペインで承認する)で、検証を自動で回すために既に信頼済みのcwdを選んだ。
+
+## replayの追加入力
+
+段8で足した3つ。通常起動では解釈せず、`--smoke --replay` で形式だけ検証できる。
+
+- `KIKIGAKI_DEBUG_AI_PREPARE="議事録;相談"`: 録音を始める前に、本番の `prepare` でその名前のプロファイルを起こす
+- `KIKIGAKI_DEBUG_AI_ATTACH="1=oldest;2=oldest"`: 枠ごとの紐づけの選択。`oldest` は最も古い準備済み、`new` は新規に起動する。本番の `applyPreparedSelection` を通す
+- `KIKIGAKI_DEBUG_AI_ATTACH_CANCEL=1`: 紐づけシートの「取消(録音を始めない)」と同じ `abandon()` を通す
+
+## 連続2会議
+
+同じ設定・同じ保存先で2回続けて実行した。どちらの会議も、開始前に2つのプロファイルを準備し、両方の枠へ最も古い準備済みを紐づけた。
+
+| | 会議1 | 会議2 |
+| --- | --- | --- |
+| 準備 | 議事録・相談の2件 | 議事録・相談の2件(会議1のものは使用済み) |
+| 紐づけ | `1=oldest,2=oldest` 失敗なし | `1=oldest,2=oldest` 失敗なし |
+| 自動送信 | 議事録(Claude)へ25秒後 | 議事録(Claude)へ20秒後 |
+| 手動送信 | 音声が24秒で終わり未到達 | 相談(Codex)へ10.5秒 |
+| 返送 | `answered` 1件を回収し保存 | `answered`(議事録)と `needs_input`(相談)を回収し保存 |
+
+会議2の保存Markdownには、手動 `#1 ネオへ`・自動 `#2 迅雷へ(自動)`・`#1 の確認`・`#2 からの返事` が通し番号で並んだ。**準備済みの2つのCLIが同じ会議で並走し、それぞれのstreamで受領した。**
+
+### Codexの返送許可(`contextWide`)
+
+会議2の相談(Codex)は、準備時に `sandbox_workspace_write.writable_roots` へ `out2/.kikigaki-context` 全体を許可した状態で起動している。紐づけた先の会議は起動時には決まっていない別UUIDの枝だが、`accept` と `reply` は落ちずに `needs_input` を書き込めた。**会議ごとの枝だけを許可していた実装では、ここで `unsafe_file` になる。**
+
+Claude側は `permissions.allow` に同梱CLIのBash実行を1つ足すだけでパスを条件にしていないため、準備済みでも会議から起こしたものと同じ規則で足りることを実機でも確認した。
+
+## 取消(録音を始めない)
+
+準備を1件起こしてから録音を開始し、`abandon()` を通した。結果は次のとおり。
+
+- 保存 `false`。保存先に新しい `.md` は増えていない
+- その会議の `.kikigaki-context/<会議ID>` は存在しない
+- `ai-roots.json` にその会議IDは無い
+- 準備した1件は**未紐づけのまま台帳に残り**、次の録音で選べる
+
+## 段8で分かったこと
+
+- 準備の起動そのものは `herdr agent start: agent_not_ready` を1回報告することがある。これは `pane run` で起こした直後にherdrがまだagentを検知していない既知の状態で、その後の起動と送信は通った
+- ペインの表題はClaudeが起動後すぐに設定した(`kikigaki 会議の決定事項`)。Codexは `ai-work` のままだった。**表題が無い・素っ気ない状態は異常ではない**という設計の判断どおり
+
+## 自動テスト
+
+`swift build` と全429テストが成功。`.app` と同梱CLIを使い、返送を模倣するfixtureは使っていない。実際のClaudeとCodexが `accept` と `reply` を呼んだ。
+

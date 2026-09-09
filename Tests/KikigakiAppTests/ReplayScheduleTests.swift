@@ -56,4 +56,47 @@ struct ReplayScheduleTests {
                                         environment: ["KIKIGAKI_DEBUG_AI_ASK_PROFILE": input])
         }
     }
+
+    /// 段8の入力。準備の起動と紐づけの選択もreplayから駆動する。
+    @Test func 準備と紐づけの指定はreplayだけで効く() throws {
+        let env = ["KIKIGAKI_DEBUG_AI_PREPARE": "議事録;相談",
+                   "KIKIGAKI_DEBUG_AI_ATTACH": "1=oldest;2=new"]
+        let ignored = try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke"], environment: env)
+        #expect(ignored.prepareProfiles.isEmpty && ignored.attach.isEmpty)
+        let value = try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"], environment: env)
+        #expect(value.prepareProfiles == ["議事録", "相談"])
+        #expect(value.attach == [1: .oldest, 2: .new])
+    }
+
+    /// 空は「指定なし」。既存のASKと同じ扱いにする。
+    @Test(arguments: ["  ", "議事録\n相談", "議事録\0"])
+    func 不正な準備の指定をsmokeでも拒否する(input: String) {
+        #expect(throws: (any Error).self) {
+            try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"],
+                                        environment: ["KIKIGAKI_DEBUG_AI_PREPARE": input])
+        }
+    }
+
+    @Test(arguments: ["1", "1=", "0=oldest", "-1=new", "1=both", "1=oldest;1=new", "a=new"])
+    func 不正な紐づけの指定をsmokeでも拒否する(input: String) {
+        #expect(throws: (any Error).self) {
+            try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"],
+                                        environment: ["KIKIGAKI_DEBUG_AI_ATTACH": input])
+        }
+    }
+
+    /// 「取消(録音を始めない)」の実機確認をreplayから駆動する。
+    @Test func 取消の指定はreplayだけで効く() throws {
+        let env = ["KIKIGAKI_DEBUG_AI_ATTACH_CANCEL": "1"]
+        #expect(try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke"], environment: env).attachCancel == false)
+        #expect(try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"], environment: env).attachCancel)
+    }
+
+    @Test(arguments: ["", "2", "true", "yes"])
+    func 不正な取消指定をsmokeでも拒否する(input: String) {
+        #expect(throws: (any Error).self) {
+            try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke", "--replay"],
+                                        environment: ["KIKIGAKI_DEBUG_AI_ATTACH_CANCEL": input])
+        }
+    }
 }

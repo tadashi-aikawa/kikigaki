@@ -185,6 +185,9 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - 環境変数 `KIKIGAKI_DEBUG_AI_AUTO="3:議事録を更新してください"`: replay開始時に本番の自動送信を開始する。間隔は有限の正の秒数、プロンプトは必須。最初のコロンだけで分割し、以後のコロン・改行を保持する。作業許可は設定値、停止時の最後の1回はON。通常回の差分なし・返事待ちをスキップし、自動で世代を再作成しない。判定時の効果・接続可否・変更の有無・request数をstderrへ出す。ASKと併用でき、停止後の最終待機と返送回収にはHOLDを設定する。この変数も通常起動では無視し、`--smoke --replay <wav>` で形式だけ検証できる
 - 環境変数 `KIKIGAKI_DEBUG_AI_AUTO_SECONDS=20`: 設定の `autoStart` の送信間隔を秒へ上書きする。0より大きく3600秒以下。分単位の設定値ではreplayの実行時間に収まらないため。開始そのものは本番の経路を通る
 - 環境変数 `KIKIGAKI_DEBUG_AI_ASK_PROFILE="相談"`: `KIKIGAKI_DEBUG_AI_ASK` の送信先プロファイルを名前で固定する。`autoStart` と別のプロファイルを指定すると、手動と自動が同時に別のAIへ飛ぶことを確かめられる。設定に無い名前なら起動時に止まる
+- 環境変数 `KIKIGAKI_DEBUG_AI_PREPARE="議事録;相談"`: 録音を始める前に、本番の準備経路でそのプロファイルのAIセッションを起こす。設定に無い名前なら起動時に止まる
+- 環境変数 `KIKIGAKI_DEBUG_AI_ATTACH="1=oldest;2=new"`: 枠ごとの紐づけの選択。`oldest` は最も古い準備済み、`new` は新規に起動する。紐づけシートを出さずに本番の選択経路を通す。紐づけに失敗したら止まる
+- 環境変数 `KIKIGAKI_DEBUG_AI_ATTACH_CANCEL=1`: 紐づけシートの「取消(録音を始めない)」と同じ経路で録音を取り止め、保存も置き場も残さずに終了する
 - 環境変数 `KIKIGAKI_DEBUG_REPLAY_HOLD=180`: replayの停止・保存後に指定秒だけ終了を遅らせる。0〜86400秒、既定0。到達済みの送信待ちと回答回収を継続する
 - 環境変数 `KIKIGAKI_DEBUG_AI_RENAME="0=田中"`: HOLD中に結果が届いた時点で0始まりの枡を一度改名する。結果がなければHOLD終了直前に行う。この3変数は通常起動では無視し、`--smoke --replay <wav>` で入力形式だけ検証できる
 - 環境変数 `KIKIGAKI_DEBUG_TYPED_ENTRIES='[{"seconds":20,"text":"https://example.com:8080/a;b"}]'`: replayの処理済み音声秒が指定位置に達したら本番のsubmitTypedで投稿する。startは実際の受付時点の収録位置で、処理が遅れていれば指定秒より後になる。JSON配列なのでURL中のコロン・セミコロンを保持し、同じ指定秒では配列順を保つ
