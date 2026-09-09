@@ -13,7 +13,7 @@ public struct AIHerdrConnection: Codable, Equatable, Sendable {
     }
 }
 
-public struct AISessionRecord: Codable, Sendable {
+public struct AISessionRecord: Codable, Sendable, Equatable {
     public let schemaVersion: Int
     public let meetingID: UUID
     public let generation: Int

@@ -235,6 +235,11 @@ actor FakeHerdr {
     /// 作成済みpaneの台帳。ここに無いpaneへは整合する応答を返さない。
     /// 既定の `p` は、workspaceを作らず直接観測する既存テストのために最初から入れておく
     var createdPanes: [String: String] = ["p": "w"]
+    /// paneごとの表題。`pane list` が返す `terminal_title_stripped`
+    var paneTitles: [String: String] = [:]
+    func setPaneTitles(_ value: [String: String]) { paneTitles = value }
+    /// 一覧から消すペイン。準備済みの消失を再現する
+    func removePane(_ pane: String) { createdPanes[pane] = nil; listed.removeAll { $0.pane == pane } }
     /// paneごとのCLI種別。指定が無ければ `provider` を使う
     var providersByPane: [String: String] = [:]
     /// paneごとのagent session。世代や置き換えの検証で使う
@@ -252,7 +257,11 @@ actor FakeHerdr {
     func setProvider(_ value: String) { provider = value }
     func rejectNextStart() { startFailure = true }
     func failPrompt(_ check: @escaping @Sendable () throws -> Void) { promptFailure = true; beforePrompt = check }
-    func run(_ args: [String], _ timeout: TimeInterval) throws -> AIProcessOutput {
+    /// どのコマンドの直前にも走る差し込み。待ちの最中に起きることを再現する
+    var beforeCommand: (@Sendable ([String]) async -> Void)?
+    func onCommand(_ body: @escaping @Sendable ([String]) async -> Void) { beforeCommand = body }
+    func run(_ args: [String], _ timeout: TimeInterval) async throws -> AIProcessOutput {
+        await beforeCommand?(args)
         commands.append(args)
         let response: [String: Any]
         switch Array(args.prefix(2)) {
@@ -291,6 +300,15 @@ actor FakeHerdr {
                                         "agent_status": status, "interactive_ready": true]
             if let value = sessionsByPane[pane] ?? session { agent["agent_session"] = ["value": value] }
             response = ["agent": agent]
+        case ["pane", "list"]:
+            // 生存と表題はpane一覧から引く。作成済みのペインと、明示した稼働中ペインを返す。
+            let ids = Set(createdPanes.keys).union(listed.map(\.pane))
+            response = ["panes": ids.sorted().map { pane -> [String: Any] in
+                var value: [String: Any] = ["pane_id": pane,
+                                            "workspace_id": createdPanes[pane] ?? listed.first { $0.pane == pane }?.workspace ?? "w"]
+                if let title = paneTitles[pane] { value["terminal_title_stripped"] = title }
+                return value
+            }]
         case ["agent", "prompt"]:
             try beforePrompt?()
             if promptFailure { throw AIProcessError.timeout }

@@ -76,10 +76,11 @@ import KikigakiCore
 
         for width in [600, 900] {
             for (name, state) in [("idle", RecordingState.idle), ("recording", .recording)] {
+                // 待機中はまだ会議の保存先が無い。「AIへ…」は従来どおり押せない。
                 var snapshot = SessionSnapshot(ai: ai, state: state, utterances: state == .idle ? [] : [
                     .init(speaker: 0, start: 320, end: 324, text: "社内で体験会を開きます。"),
                 ], timeline: .init(startedAt: started), elapsed: state == .idle ? 0 : 400,
-                    markdownURL: root.appendingPathComponent("meeting.md"))
+                    markdownURL: state == .idle ? nil : root.appendingPathComponent("meeting.md"))
                 snapshot.aiSchedule = AIScheduleViewState(schedule: nil, warning: nil, destination: "議事録")
                 let window = TranscriptWindowController(shouldReduceMotion: { true })
                 window.window!.setFrameAutosaveName("")

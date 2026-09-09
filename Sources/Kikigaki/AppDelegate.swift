@@ -175,6 +175,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let session = MeetingSession(config: config, models: { try await modelsTask.value }, log: Self.log, aiStore: aiStore)
         session.preparedStore = preparedStore
         preparedStore.onChange = { [weak self] in self?.preparedChanged() }
+        // 同じ枠の送信と準備の起動を重ねない。判定はどちらの入口からも同じものを見る。
+        preparedStore.isSlotBusy = { [weak session] in session?.isAIBusy(slot: $0) ?? false }
         self.session = session
 
         let window = TranscriptWindowController()
@@ -332,6 +334,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // 紐づけシートを出す間は設定の自動送信を待たせる。先に始めると、紐づける前の
         // 新しいセッションへ1回目が飛んでしまう。判定は開始前に済ませる。
+        // 候補を出す前に生存と表題を引き直す。消えたペインを選ばせない。
+        if replayURL == nil, let preparedStore, !preparedStore.unbound.isEmpty { await preparedStore.refresh() }
         let choices = attachChoices()
         session.deferAutomaticStart = !choices.isEmpty
         let started = await session.start(source: source)
@@ -453,21 +457,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishAttach(_ selection: [Int: UUID?]) async {
         guard let session else { return }
+        // 紐づけはawaitを跨ぐ。この選択が属する会議を固定し、途中で録音が入れ替わったら止める。
+        let meetingID = session.aiMeetingID
         for (slot, id) in selection.sorted(by: { $0.key < $1.key }) {
+            guard session.aiMeetingID == meetingID else { return }
             guard let id, let profile = session.meetingAIProfiles.first(where: { $0.slot == slot }) else { continue }
             await session.adoptPrepared(id, profile: profile)
         }
+        guard session.aiMeetingID == meetingID else { return }
         session.deferAutomaticStart = false
         // 選び終えてから設定の自動送信を始める。
         if session.snapshot.state == .recording || session.snapshot.state == .paused {
             session.startAutomaticSchedule()
         }
+        // 紐づけた直後の生存と表題を引き直す。候補から消え、閉じた表題が最新になる。
+        if let preparedStore { await preparedStore.refresh() }
     }
 
-    /// 宛先ポップアップで準備済みを選んだ。紐づけてから一覧を引き直す。
-    private func adoptPrepared(slot: Int, id: UUID) {
+    /// 宛先ポップアップで準備済みを選んだ。紐づけてから送信先も切り替える。
+    /// 表示だけ変えて送信先が元のままにならないよう、`session` 側で選択も動かす。
+    private func adoptPrepared(slot: Int, id: UUID, forSchedule: Bool, then: @escaping (Bool) -> Void) {
         guard let session, let profile = session.meetingAIProfiles.first(where: { $0.slot == slot }) else { return }
-        Task { await session.adoptPrepared(id, profile: profile); self.preparedChanged() }
+        Task {
+            let bound = await session.adoptPrepared(id, profile: profile, forSchedule: forSchedule)
+            self.preparedChanged()
+            then(bound)
+        }
     }
 
     private func openOutputDir() {
@@ -558,6 +573,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.config = config
         session?.update(config: config)
+        // AI設定を足した直後でも準備の入口を使えるようにする。開いているシートも作り直す。
+        preparedChanged()
         Self.log("設定を再読込した")
     }
 
@@ -620,17 +637,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             canSubmit: snapshot.ai?.canSubmit(slot: slot) == true, confirmation: question?.result?.body,
             workAllowed: session.aiWorkAllowed, fixedSlot: fixed ? slot : nil)
         sheet.updateDestinations(session.aiDestinationItems, selected: slot, participant: config.participantName)
-        if !fixed {
-            sheet.onDestination = { [weak self, weak sheet] chosen in
-                session.selectAIProfile(slot: chosen)
-                guard let profile = session.aiConfiguration else { return }
-                // シートが持つ枠も選び直しに追随させる。開始処理と抑制判定の対象を揃える。
-                session.beginAIDraft(slot: profile.slot)
-                self?.aiSheetSlot = profile.slot
-                sheet?.updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
+        // 宛先の選び直しで動かすもの。準備済みの行を選んだときも、紐づけたあとに同じ処理を通す。
+        let applyDestination: @MainActor (Int) -> Void = { [weak self, weak sheet] chosen in
+            session.selectAIProfile(slot: chosen)
+            guard let profile = session.aiConfiguration else { return }
+            // シートが持つ枠も選び直しに追随させる。開始処理と抑制判定の対象を揃える。
+            session.beginAIDraft(slot: profile.slot)
+            self?.aiSheetSlot = profile.slot
+            sheet?.updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
+        }
+        if !fixed { sheet.onDestination = applyDestination }
+        sheet.onPrepared = { [weak self, weak sheet] chosen, id in
+            // 返答シートは親の枠に固定なので、紐づけても送信先は動かさない。
+            self?.adoptPrepared(slot: chosen, id: id, forSchedule: false) { bound in
+                if bound, !fixed { applyDestination(chosen) }
+                else if let session = self?.session, let sheet {
+                    let owning = sheet.owningSlot
+                    let name = session.meetingAIProfiles.first { $0.slot == owning }?.participantName ?? ""
+                    sheet.updateDestinations(session.aiDestinationItems, selected: owning, participant: name)
+                }
             }
         }
-        sheet.onPrepared = { [weak self] slot, id in self?.adoptPrepared(slot: slot, id: id) }
         sheet.onDraft = { session.updateAIDraft($0) }
         sheet.onWorkAllowedChange = { session.updateAIWorkAllowed($0) }
         // 返答シートは親の枠に固定。それ以外は開いている間の選び直しへ追随する。
@@ -651,6 +678,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         aiSheet = sheet; aiSheetMeetingID = session.aiMeetingID
         aiSheetSlot = slot
         self.window?.show(); sheet.present(on: window)
+        // 宛先の準備済みも出すたびに引き直す。消えたペインを候補に残さない。
+        if let preparedStore, !preparedStore.unbound.isEmpty { Task { await preparedStore.refresh() } }
     }
     private func showScheduleSheet() {
         guard let session, let config = session.aiConfiguration, let parent = window?.window,
@@ -663,12 +692,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             workAllowed: previous?.workAllowed ?? session.aiWorkAllowed, sendFinal: previous?.sendFinal ?? true,
             participant: target.participantName)
         sheet.updateDestinations(session.aiDestinationItems, selected: target.slot, participant: target.participantName)
-        sheet.onDestination = { [weak sheet] slot in
+        let applySchedule: @MainActor (Int) -> Void = { [weak sheet] slot in
             session.selectAIProfile(slot: slot, forSchedule: true)
             guard let profile = session.aiScheduleConfiguration else { return }
             sheet?.updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
         }
-        sheet.onPrepared = { [weak self] slot, id in self?.adoptPrepared(slot: slot, id: id) }
+        sheet.onDestination = applySchedule
+        sheet.onPrepared = { [weak self, weak sheet] slot, id in
+            self?.adoptPrepared(slot: slot, id: id, forSchedule: true) { bound in
+                if bound { applySchedule(slot) }
+                else if let session = self?.session, let target = session.aiScheduleConfiguration {
+                    sheet?.updateDestinations(session.aiDestinationItems, selected: target.slot,
+                                              participant: target.participantName)
+                }
+            }
+        }
         sheet.onDraft = { session.updateScheduleDraft($0) }
         sheet.onCancel = { [weak self] in self?.scheduleSheet = nil }
         sheet.onStart = { [weak self, weak sheet] options in
@@ -684,6 +722,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         scheduleSheet = sheet; scheduleSheetMeetingID = session.aiMeetingID
         window?.show(); sheet.present(on: parent)
+        if let preparedStore, !preparedStore.unbound.isEmpty { Task { await preparedStore.refresh() } }
     }
 
     private func showPreviousAI() {

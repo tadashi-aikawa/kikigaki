@@ -48,6 +48,9 @@ struct AIHerdr: Sendable {
     }
     private struct AgentReply: Decodable { let agent: Agent }
     private struct AgentList: Decodable { let agents: [Agent] }
+    /// `pane list` はagentが検知される前のペインも返す。起動直後の準備済みを
+    /// 「消えた」と誤判定しないよう、生存と表題はこちらから取る。
+    private struct PaneList: Decodable { let panes: [Agent] }
     private struct Failure: Decodable {
         struct Detail: Decodable { let code: String }
         let error: Detail
@@ -93,7 +96,7 @@ struct AIHerdr: Sendable {
     /// 稼働中のペインと表題。表題はCLIがOSCで設定する値なので、表示のたびに引き直す。
     /// `terminal_title` には状態記号が付くため、素の `terminal_title_stripped` を先に使う。
     func panes() async throws -> [(paneID: String, title: String?)] {
-        try await call(["agent", "list"], as: AgentList.self).agents
+        try await call(["pane", "list"], as: PaneList.self).panes
             .filter { Self.identifier($0.pane_id) }
             .map { ($0.pane_id, $0.terminal_title_stripped ?? $0.terminal_title) }
     }

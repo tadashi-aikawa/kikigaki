@@ -113,6 +113,8 @@ final class AIConversationController {
         return nil
     }
 
+    /// 引き継いだフックの置き場。世代を作り直すと消えることの検証に使う
+    func hookContextMeetingForTesting(slot: Int) -> UUID? { channels[slot]?.hookContext?.meetingID }
     func generation(slot: Int) -> Int { channels[slot]?.generation ?? 1 }
     func connection(slot: Int) -> AIHerdrConnection? { channels[slot]?.connection }
     func connectionStatus(slot: Int) -> AIConnectionStatus { channels[slot]?.connectionStatus ?? .unknown }
@@ -193,16 +195,31 @@ final class AIConversationController {
     func adopt(_ prepared: AIPreparedSession, config: ResolvedAIConfig) async throws {
         try register([config])
         let channel = try channel(config.slot)
+        guard prepared.matches(config), let connection = prepared.connection else { throw AIError.mismatch }
+        // 会議側だけ済んでいる同じ紐づけのやり直しは、そのまま成功として扱う。
+        // 台帳の保存に失敗した紐づけを、利用者がもう一度選べるようにするため。
+        if let existing = channel.session, existing.token == prepared.token,
+           existing.connection == connection, channel.configuration == config { onChange?(); return }
         guard allowsSending, channel.session == nil, channel.connection == nil,
               !channel.launchingAttempted else { throw AIHerdrError.notReady }
-        guard prepared.matches(config), let connection = prepared.connection else { throw AIError.mismatch }
+        // 何も書く前に生存を確かめる。消えたペインを引き継ぐと枠が塞がり、別の準備済みを選び直せない。
+        _ = try await herdr.observe(connection)
+        // await後にもう一度見る。待っている間に同じ枠で起動や別の紐づけが進んでいることがある。
+        guard channel.session == nil, channel.connection == nil, !channel.launchingAttempted else { throw AIHerdrError.notReady }
         // フック用トークンは準備時のものを引き継ぐ。起動引数へ焼き付いていて変えられない。
         var record = AISessionRecord(schemaVersion: 1, meetingID: meetingID, generation: channel.generation,
                                      provider: config.cli, token: prepared.token)
         record.connection = connection
+        // **保存してから公開する。** 先に channel を書き換えると、保存に失敗した紐づけを
+        // やり直せない(2回目の adopt が session ありで弾かれる)。
+        do { try files.write(AIJSON.encode(record), to: sessionParts(channel), replacing: false) }
+        catch AIError.conflict {
+            // 会議側だけ保存できていた同じ紐づけのやり直し。中身が同じときに限って先へ進む。
+            let stored = try AIJSON.decode(AISessionRecord.self, from: files.read(sessionParts(channel)))
+            guard stored == record else { throw AIError.conflict }
+        }
         channel.session = record
         channel.configuration = config
-        try files.write(AIJSON.encode(record), to: sessionParts(channel), replacing: false)
         channel.connection = connection
         channel.launchingAttempted = true; channel.inputAttempted = true
         channel.hookContext = (prepared.contextRoot, prepared.contextMeetingID)
@@ -316,6 +333,9 @@ final class AIConversationController {
         channel.history = next; channel.connection = nil; channel.session = nil; channel.snapshots = []
         channel.launchingAttempted = false; channel.inputAttempted = false
         channel.connectionStatus = .unknown; channel.idleSince = nil; channel.warning = nil
+        // 作り直したCLIのフックは本会議の受信箱へ落ちる。引き継いだ置き場を残すと、
+        // 走査が仮の会議の側を読み続けて背景処理中を拾えなくなる。
+        channel.hookContext = nil; channel.hookBackgroundRunning = false
         onChange?()
     }
 
