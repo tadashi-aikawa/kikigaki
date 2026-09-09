@@ -645,7 +645,8 @@ final class MeetingSession {
             .reduce(0) { $0 + $1.controller.conversation.questions.filter(\.isUnread).count } ?? 0
         snapshot.aiRecoveryWarning = aiStore?.warnings.first
         snapshot.aiSchedule = AIScheduleViewState(schedule: aiSchedule, warning: aiScheduleWarning,
-            destination: meetingAIProfiles.count > 1 ? aiScheduleConfiguration?.name : nil)
+            destination: meetingAIProfiles.count > 1 ? aiScheduleConfiguration?.name : nil,
+            availability: scheduleAvailability, hasChanges: scheduleHasChanges)
         if let config = meetingAI {
             let controller = aiRecord?.controller
             let slot = config.slot
@@ -1083,18 +1084,27 @@ extension MeetingSession {
         return .ready
     }
 
-    func evaluateAISchedule(now: Date = Date()) {
+    private var scheduleHasChanges: Bool {
+        let lines = TranscriptRenderer.lines(snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
+        return aiRecord?.controller.hasChanges(lines: lines, slot: aiScheduleConfiguration?.slot) ?? !lines.isEmpty
+    }
+
+    func fireAIScheduleNow(now: Date = Date()) { evaluateAISchedule(now: now, immediately: true) }
+
+    func evaluateAISchedule(now: Date = Date(), immediately: Bool = false) {
         guard let phase = aiSchedule?.phase, phase != .stopped else {
             aiScheduleTimer?.invalidate(); aiScheduleTimer = nil; return
         }
         observeAIScheduleResults()
-        guard aiSchedule?.phase == .awaitingFinal ||
+        guard immediately || aiSchedule?.phase == .awaitingFinal ||
               (aiSchedule?.phase == .running && aiSchedule?.nextFire.map({ now >= $0 }) == true) else { return }
         let lines = TranscriptRenderer.lines(snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
         let changed = aiRecord?.controller.hasChanges(lines: lines, slot: aiScheduleConfiguration?.slot) ?? !lines.isEmpty
         let availability = scheduleAvailability
         let effect: AIScheduleState.Effect?
-        if phase == .awaitingFinal {
+        if immediately {
+            effect = aiSchedule?.fireNow(now: now, availability: availability, hasChanges: changed)
+        } else if phase == .awaitingFinal {
             effect = aiSchedule?.finalDecision(availability: availability, hasChanges: changed)
         } else {
             effect = aiSchedule?.tick(now: now, availability: availability, hasChanges: changed)

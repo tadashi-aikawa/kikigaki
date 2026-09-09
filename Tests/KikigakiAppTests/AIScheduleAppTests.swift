@@ -28,6 +28,26 @@ import KikigakiAIIO
     }
     private func settle(_ session: MeetingSession) async { await session.submissionTaskForTesting?.value }
 
+    @Test func ゲージの即時実行が本番の送信経路へ入り期限を更新する() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = try session(root, fake: FakeHerdr()), now = Date()
+        defer { session.stopAISchedule() }
+        try session.startAISchedule(options: .init(prompt: "今すぐ更新", sendFinal: false),
+                                    helper: URL(fileURLWithPath: "/bin/echo"), now: now)
+        let window = TranscriptWindowController()
+        window.onFireScheduleAI = { session.fireAIScheduleNow(now: now.addingTimeInterval(42)) }
+        window.apply(session.snapshot)
+        window.compactFooter.gauge.activate(clickCount: 2)
+        await settle(session)
+        #expect(session.snapshot.aiSchedule.nextFire == now.addingTimeInterval(222))
+        let request = try #require(session.aiRecord?.controller.conversation.questions.first)
+        #expect(request.state == .submitted && request.request.trigger == .scheduled)
+        session.fireAIScheduleNow(now: now.addingTimeInterval(43)); await settle(session)
+        #expect(session.aiRecord?.controller.conversation.questions.count == 1)
+        #expect(session.snapshot.aiSchedule.nextFire == now.addingTimeInterval(222))
+        await session.stop()
+    }
+
     @Test func 接続中に手動を開いたら接続を保って未送信の自動だけ譲る() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr(), hook = Hook()

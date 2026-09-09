@@ -4,6 +4,23 @@ import KikigakiCore
 
 @Suite struct AIScheduleTests {
     private let now = Date(timeIntervalSince1970: 1_000)
+    @Test func 即時実行は送った時点から期限を打ち直しスキップは期限を変えない() throws {
+        var state = try started()
+        let immediate = now.addingTimeInterval(42)
+        for availability in [AIScheduleAvailability.awaitingResult, .busy, .confirmation, .disconnected] {
+            #expect(state.fireNow(now: immediate, availability: availability, hasChanges: true) == .skipped(.unavailable))
+            #expect(state.nextFire == now.addingTimeInterval(180))
+        }
+        #expect(state.fireNow(now: immediate, availability: .ready, hasChanges: false) == .skipped(.noChange))
+        #expect(state.nextFire == now.addingTimeInterval(180))
+        #expect(state.fireNow(now: immediate, availability: .ready, hasChanges: true) == .send(final: false))
+        #expect(state.nextFire == now.addingTimeInterval(222))
+        #expect(state.tick(now: now.addingTimeInterval(180), availability: .ready, hasChanges: true) == .none)
+        state.recordingStopped()
+        #expect(state.fireNow(now: immediate, availability: .ready, hasChanges: true) == .none)
+        state.stop()
+        #expect(state.fireNow(now: immediate, availability: .ready, hasChanges: true) == .none)
+    }
     private func started(final: Bool = true) throws -> AIScheduleState {
         var state = AIScheduleState(meetingID: UUID())
         try state.start(options: .init(prompt: "議事録を更新", interval: 180, workAllowed: false, sendFinal: final), now: now, runID: UUID())

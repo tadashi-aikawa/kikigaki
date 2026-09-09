@@ -15,6 +15,96 @@ import KikigakiAIIO
         try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: output).appendingPathComponent(name + ".png"))
     }
     private let started = Date(timeIntervalSince1970: 1_788_759_600)
+    @Test func 一行フッターを600と900で録音停止と明滅の各状態で撮る() throws {
+        _ = NSApplication.shared
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
+        var conversation = AIConversation(meetingID: meeting)
+        for kind in [AIReceiveEvent.Kind.answered, .needsInput] {
+            let request = try request(conversation.questions.count + 1, history: &history, root: root)
+            try conversation.append(request)
+            try conversation.update(request.id) { try $0.beginSending(at: started); try $0.submitted() }
+            _ = try conversation.receive(AIReceiveEvent(request: request, kind: kind, recordedAt: started,
+                body: kind == .answered ? "案内には地図を添えてください。" : "参加者は社内の方だけですか？",
+                reason: kind == .needsInput ? "clarification" : nil), at: started)
+        }
+        let now = started.addingTimeInterval(350)
+        var schedule = AIScheduleState(meetingID: meeting)
+        try schedule.start(options: .init(prompt: "議事録を更新", interval: 180), now: now.addingTimeInterval(-78), runID: UUID())
+        var state = SessionSnapshot(ai: AIViewState(conversation: conversation, warning: "フック観測を確認できません。ペインで状況を確認してください"),
+            previousAIUnread: 1, state: .recording,
+            utterances: [.init(speaker: 0, start: 314, end: 320, text: "説明を十分、体験を二十分に分けますか。"),
+                         .init(speaker: 1, start: 328, end: 338, text: "最後に質問の時間も五分あると安心ですね。")],
+            timeline: MeetingTimeline(startedAt: started), names: SpeakerNames([0: "佐藤", 1: "鈴木"]),
+            elapsed: 350, markdownURL: root.appendingPathComponent("meeting.md"), detectedSpeakerSlots: [0, 1, 2])
+        state.aiSchedule = AIScheduleViewState(schedule: schedule)
+        let window = TranscriptWindowController(shouldReduceMotion: { false })
+        window.aiRead.isActive = { false }
+        window.window!.setFrameAutosaveName("")
+        for width in [600, 900] {
+            window.window!.setContentSize(NSSize(width: width, height: 650))
+            state.state = .recording; state.saved = false; state.aiSchedule = AIScheduleViewState(schedule: schedule)
+            window.apply(state); window.compactFooter.refresh(now: now)
+            let content = window.window!.contentView!
+            content.layoutSubtreeIfNeeded()
+            #expect(window.compactFooter.frame.height <= 54)
+            #expect(window.compactFooter.unread.count == 1 && window.compactFooter.confirmation.count == 1)
+            #expect(window.compactFooter.gauge.displayText == "1:42")
+            try capture("footer-recording-\(width)", view: content.superview!)
+            state.state = .idle; state.saved = true; state.aiSchedule = AIScheduleViewState()
+            window.apply(state); window.compactFooter.refresh(now: now)
+            try capture("footer-stopped-\(width)", view: content.superview!)
+        }
+        let waiting = try request(3, history: &history, root: root)
+        try conversation.append(waiting)
+        try conversation.update(waiting.id) { try $0.beginSending(at: now); try $0.submitted() }
+        state.ai?.conversation = conversation; state.state = .recording
+        state.aiSchedule = AIScheduleViewState(schedule: schedule, availability: .awaitingResult)
+        for width in [600, 900] {
+            window.window!.setContentSize(NSSize(width: width, height: 650)); window.apply(state)
+            for second in [0, 1] {
+                window.compactFooter.refresh(now: Date(timeIntervalSince1970: Double(1000 + second)))
+                #expect(window.compactFooter.pulseDimmed == (second == 1))
+                #expect(window.compactFooter.ask.layer?.animationKeys()?.isEmpty != false)
+                try capture("footer-pulse-\(second)-\(width)", view: window.window!.contentView!.superview!)
+            }
+        }
+        window.compactFooter.update(state, reduceMotion: true, now: Date(timeIntervalSince1970: 1001))
+        #expect(!window.compactFooter.pulseDimmed)
+        if ProcessInfo.processInfo.environment["KIKIGAKI_UI_MENU_CAPTURE"] == "1",
+           let output = ProcessInfo.processInfo.environment["KIKIGAKI_UI_CAPTURE"] {
+            NSApplication.shared.setActivationPolicy(.regular)
+            let menuWidth = Int(ProcessInfo.processInfo.environment["KIKIGAKI_UI_MENU_WIDTH"] ?? "600") ?? 600
+            for width in [menuWidth] {
+                window.window!.setContentSize(NSSize(width: width, height: 650))
+                window.window!.setFrameOrigin(NSPoint(x: 100, y: 100)); window.show()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+                let menu = window.footerMenu()
+                var captureError: Error?
+                let timer = Timer(timeInterval: 1, repeats: false) { _ in
+                    MainActor.assumeIsolated {
+                        do {
+                            let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                            let frame = window.window!.frame
+                            let y = (NSScreen.screens.first?.frame.maxY ?? 0) - frame.maxY
+                            process.arguments = ["-x", "-T", "1", "-R\(Int(frame.minX)),\(Int(y)),\(Int(frame.width)),\(Int(frame.height))", output + "/footer-menu-\(width).png"]
+                            process.terminationHandler = { process in
+                                DispatchQueue.main.async {
+                                    if process.terminationStatus != 0 { captureError = CocoaError(.fileWriteUnknown) }
+                                    menu.cancelTracking()
+                                }
+                            }
+                            try process.run()
+                        } catch { captureError = error; menu.cancelTracking() }
+                    }
+                }
+                RunLoop.main.add(timer, forMode: .common)
+                menu.popUp(positioning: nil, at: window.footerMenuPosition(menu), in: window.compactFooter.more)
+                if let captureError { throw captureError }
+            }
+            window.window?.orderOut(nil)
+        }
+    }
     @Test func 大文字スキームのアバターもURLキャッシュから読む() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let source = "HTTPS://example.com/AI.png"
@@ -159,13 +249,13 @@ import KikigakiAIIO
         func replies() -> [AIReplyRow] { window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow } }
         apply()
         #expect(state.ai?.badges == "未読 1 · 確認待ち 1 · 返事待ち 1 · 失敗 1")
-        #expect(descendants(content).compactMap { $0 as? AIBadgeButton }.filter { !$0.isHidden }.map(\.title) == ["未読 1", "確認待ち 1", "返事待ち 1", "失敗 1"])
+        #expect(window.compactFooter.unread.count == 1 && window.compactFooter.confirmation.count == 1)
+        #expect(!window.compactFooter.warning.isHidden)
         // 手入力の横スクロール欄を除き、AI本文が独立スクロールを作らないことを確認する。
         #expect(descendants(content).compactMap { $0 as? NSScrollView }.filter { !($0 is TypedEntryField) }.count == 1)
         // 畳む操作と「ペインを開く」は行から消し、接続の操作はフッターへ集める。
         #expect(!descendants(content).compactMap { $0 as? NSButton }.contains { $0.title.hasPrefix("▸") || $0.title.hasPrefix("▾") })
-        let pane = try #require(descendants(content).compactMap { $0 as? AIActionButton }.first { $0.title == "ペインを開く" })
-        #expect(!pane.isHidden && pane.superview?.superview !== window.transcriptDocument)
+        #expect(window.footerMenu().items.first { $0.title == "ペインを開く" }?.isEnabled == true)
         let answer = try #require(replies().first { $0.item.requestID == requests[0].id })
         let confirmation = try #require(replies().first { $0.item.requestID == requests[1].id })
         let waiting = try #require(replies().first { $0.item.requestID == requests[2].id })
@@ -189,9 +279,10 @@ import KikigakiAIIO
         state.previousAIUnread = 1; apply()
         var previousOpened = false
         window.onShowPreviousAI = { previousOpened = true }
-        let previous = try #require(descendants(content).compactMap { $0 as? AIBadgeButton }.first { $0.title == "前の会議に返事あり" })
-        previous.performClick(nil); #expect(previousOpened)
-        let footer = try #require(descendants(content).compactMap { $0 as? NSTextField }.first { $0.stringValue == "AIへ渡す会話" }?.superview?.superview)
+        let menu = window.footerMenu()
+        let previous = try #require(menu.items.firstIndex { $0.title == "前の会議に返事あり" })
+        menu.performActionForItem(at: previous); #expect(previousOpened)
+        let footer = window.compactFooter
         try capture("timeline-footer", view: footer)
         var readIDs: [UUID] = []
         window.onReadAI = { id in
@@ -301,7 +392,7 @@ import KikigakiAIIO
         state.ai?.conversation = conversation
         window.apply(state); content.layoutSubtreeIfNeeded()
         window.scrollView.contentView.scroll(to: .zero)
-        let unread = try #require(descendants(content).compactMap { $0 as? AIBadgeButton }.first { $0.kind == .unread })
+        let unread = window.compactFooter.unread
         unread.performClick(nil)
         let nextAnswer = try #require(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.first { $0.item.rowID == next.id.uuidString + "/reply" })
         #expect(window.scrollView.contentView.bounds.intersects(nextAnswer.frame))
@@ -616,8 +707,7 @@ import KikigakiAIIO
         try shoot("timeline-normal-600", width: 600)
         // ピル5種が同時に立つ600幅で、右の時間範囲と接していないかを見る。
         #expect(state.ai?.badges == "未読 1 · 確認待ち 1 · 返事待ち 1 · 送達不明 1 · 失敗 1")
-        let footer = try #require(descendants(content).compactMap { $0 as? NSTextField }
-            .first { $0.stringValue == "AIへ渡す会話" }?.superview?.superview)
+        let footer = window.compactFooter
         try capture("timeline-badges-600", view: footer)
         try shoot("timeline-normal-900", width: 900)
         #expect(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.count == 5)

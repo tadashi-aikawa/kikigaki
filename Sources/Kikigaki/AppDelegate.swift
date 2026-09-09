@@ -242,6 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onResendAI = { [weak self] in self?.showAISheet(parent: nil, resend: $0) }
         window.onScheduleAI = { [weak self] in self?.showScheduleSheet() }
         window.onStopScheduleAI = { [weak session] in session?.stopAISchedule() }
+        window.onFireScheduleAI = { [weak session] in session?.fireAIScheduleNow() }
         window.onReadAI = { session.readAI($0) }
         window.onCancelAI = { session.cancelAI($0) }
         window.onOpenAIPane = { session.showAIPane() }

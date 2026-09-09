@@ -7,11 +7,15 @@ struct AIScheduleViewState {
     var warning: String?
     var tone: AINoticeTone = .normal
     var toolTip = ""
+    var nextFire: Date?
+    var interval: TimeInterval = 180
+    var skipReason: String?
     private static let clock: DateFormatter = {
         let value = DateFormatter(); value.locale = Locale(identifier: "en_US_POSIX"); value.dateFormat = "HH:mm"; return value
     }()
 
-    init(schedule: AIScheduleState? = nil, warning: String? = nil, destination: String? = nil) {
+    init(schedule: AIScheduleState? = nil, warning: String? = nil, destination: String? = nil,
+         availability: AIScheduleAvailability = .ready, hasChanges: Bool = true) {
         self.warning = warning
         // 宛先は複数プロファイルのときだけ添える。1つしか無い会議で行を伸ばさない。
         let target = destination.map { " · " + $0 + "へ" } ?? ""
@@ -19,6 +23,16 @@ struct AIScheduleViewState {
             text = warning ?? ""; toolTip = text; tone = warning == nil ? .normal : .warning; return
         }
         active = true
+        nextFire = schedule.nextFire
+        interval = schedule.options?.interval ?? 180
+        switch availability {
+        case .awaitingResult: skipReason = "返事待ちでスキップ中"
+        case .busy: skipReason = "処理中のためスキップ中"
+        case .confirmation: skipReason = "要返答のためスキップ中"
+        case .disconnected: skipReason = "接続できないためスキップ中"
+        case .ready: if !hasChanges { skipReason = "差分なしでスキップ中" }
+        }
+        if schedule.phase != .running { skipReason = "最後の1回を待っています" }
         toolTip = schedule.options?.prompt ?? ""
         switch schedule.phase {
         case .running:

@@ -53,6 +53,16 @@ public struct AIScheduleState: Sendable {
     /// 新会議は新しい値を作る。終了・利用者の停止は待機中の最終回も破棄する。
     public mutating func stop() { phase = .stopped; nextFire = nil }
 
+    /// 利用者の即時実行。送れる場合だけ、元の周期を捨てて今から1間隔にする。
+    public mutating func fireNow(now: Date, availability: AIScheduleAvailability, hasChanges: Bool) -> Effect {
+        guard phase == .running, let options, now.timeIntervalSince1970.isFinite,
+              now.addingTimeInterval(options.interval).timeIntervalSince1970.isFinite else { return .none }
+        guard availability == .ready else { return .skipped(.unavailable) }
+        guard hasChanges else { return .skipped(.noChange) }
+        nextFire = now.addingTimeInterval(options.interval)
+        return .send(final: false)
+    }
+
     public mutating func tick(now: Date, availability: AIScheduleAvailability, hasChanges: Bool) -> Effect {
         guard phase == .running, let deadline = nextFire, let options,
               now.timeIntervalSince1970.isFinite, now >= deadline else { return .none }
