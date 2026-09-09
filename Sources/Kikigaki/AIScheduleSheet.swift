@@ -56,6 +56,7 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
         }
         window.contentView = stack
+        (window as? AIQuestionWindow)?.onDismiss = { [weak self] in self?.cancel() }
         textDidChange(Notification(name: NSText.didChangeNotification))
     }
 
@@ -74,7 +75,10 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         title.stringValue = "\(participant)へ 自動送信"
     }
 
-    func present(on parent: NSWindow) { parent.beginSheet(window); window.makeFirstResponder(editor) }
+    func present(on parent: NSWindow) {
+        parent.beginSheet(window); window.makeFirstResponder(editor)
+        (window as? AIQuestionWindow)?.monitorOutsideClicks()
+    }
     func close() { if let parent = window.sheetParent { parent.endSheet(window) }; window.orderOut(nil) }
     func focus() { window.makeKeyAndOrderFront(nil); window.makeFirstResponder(editor) }
     func update(warning: String? = nil) {

@@ -65,6 +65,7 @@ final class AIPrepareSheet: NSObject, NSTextFieldDelegate {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
         }
         window.contentView = stack
+        (window as? AIQuestionWindow)?.onDismiss = { [weak self] in self?.close() }
     }
 
     var selectedSlot: Int { profile.selectedItem?.representedObject as? Int ?? 1 }
@@ -104,7 +105,10 @@ final class AIPrepareSheet: NSObject, NSTextFieldDelegate {
         return line
     }
 
-    func present(on parent: NSWindow) { parent.beginSheet(window) }
+    func present(on parent: NSWindow) {
+        parent.beginSheet(window)
+        (window as? AIQuestionWindow)?.monitorOutsideClicks()
+    }
     @objc func close() { if let parent = window.sheetParent { parent.endSheet(window) }; window.orderOut(nil); onCancel?() }
     func controlTextDidChange(_ notification: Notification) { updateNameValidity() }
     private func updateNameValidity() {

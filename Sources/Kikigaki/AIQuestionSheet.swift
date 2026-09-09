@@ -2,7 +2,46 @@ import AppKit
 import KikigakiCore
 
 final class AIQuestionWindow: NSWindow {
+    var onDismiss: (() -> Void)?
+    private var outsideMonitor: Any?
+    var monitorsOutsideClicks: Bool { outsideMonitor != nil }
+    deinit { if let outsideMonitor { NSEvent.removeMonitor(outsideMonitor) } }
+
+    /// シートの背後へのクリックは親の停止ボタン等へ流さず、閉じる操作だけに使う。
+    /// 録音を取り止める紐づけシートでは呼ばない。
+    func monitorOutsideClicks() {
+        stopMonitoringOutsideClicks()
+        outsideMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            guard let self else { return event }
+            return self.handleOutsideClick(event)
+        }
+    }
+    func handleOutsideClick(_ event: NSEvent) -> NSEvent? {
+        guard monitorsOutsideClicks, let parent = sheetParent, parent.attachedSheet === self,
+              event.window === parent, let onDismiss else { return event }
+        let screenPoint = parent.convertPoint(toScreen: event.locationInWindow)
+        guard !frame.contains(screenPoint) else { return event }
+        onDismiss()
+        return nil
+    }
+    private func stopMonitoringOutsideClicks() {
+        if let outsideMonitor { NSEvent.removeMonitor(outsideMonitor); self.outsideMonitor = nil }
+    }
+    override func orderOut(_ sender: Any?) {
+        stopMonitoringOutsideClicks()
+        super.orderOut(sender)
+    }
+    override func cancelOperation(_ sender: Any?) {
+        if let editor = firstResponder as? NSTextView, editor.hasMarkedText() {
+            editor.inputContext?.discardMarkedText(); editor.unmarkText()
+        } else if let onDismiss { onDismiss() }
+        else { super.cancelOperation(sender) }
+    }
     override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, event.keyCode == 53, onDismiss != nil,
+           (firstResponder as? NSTextView)?.hasMarkedText() != true {
+            cancelOperation(nil); return
+        }
         if event.type == .keyDown, let editor = firstResponder as? AIQuestionEditor,
            (event.keyCode == 36 || event.keyCode == 76) ||
            (event.keyCode == 53 && editor.hasMarkedText()) {
@@ -118,6 +157,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         }
         window.contentView = stack
         editor.onSubmit = { [weak self] in self?.submit() }; editor.onCancel = { [weak self] in self?.cancel() }
+        (window as? AIQuestionWindow)?.onDismiss = { [weak self] in self?.cancel() }
     }
     /// 準備済みを選んで紐づけている最中。確定するまで送信させない。
     /// 画面は選んだ先を出すのに送信は前の宛先へ飛ぶ、という食い違いを作らないため
@@ -152,7 +192,10 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         title.stringValue = "\(participant)へ"
     }
 
-    func present(on parent: NSWindow) { parent.beginSheet(window); window.makeFirstResponder(editor) }
+    func present(on parent: NSWindow) {
+        parent.beginSheet(window); window.makeFirstResponder(editor)
+        (window as? AIQuestionWindow)?.monitorOutsideClicks()
+    }
     func close() { if let parent = window.sheetParent { parent.endSheet(window) }; window.orderOut(nil) }
     func update(progress: String?, canSubmit: Bool, warning: String? = nil) {
         if progress == nil { updateRange() }

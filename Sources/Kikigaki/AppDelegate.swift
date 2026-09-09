@@ -774,6 +774,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    /// 閉じる・Esc・外側クリックは表示だけを閉じる。送信準備やAIの実行は継続する。
+    func dismissAISheet() {
+        session?.endAIDraft(); aiSheet = nil; aiSheetSlot = nil
+    }
+
     private func showAISheet(parent: UUID?, resend: UUID? = nil) {
         guard let session, session.snapshot.canShare, let window = window?.window else { return }
         let questions = session.aiRecord?.controller.conversation.questions
@@ -827,12 +832,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sheet.onWorkAllowedChange = { session.updateAIWorkAllowed($0) }
         // 返答シートは親の枠に固定。それ以外は開いている間の選び直しへ追随する。
         sheet.rangePreview = { session.aiRangePreview(full: $0, slot: fixed ? slot : session.aiConfiguration?.slot) }
-        sheet.onCancel = { [weak self, weak sheet] in
-            // 取り消すのは、このシートが送信を始めた枠。取消の時点の選択で決めると、
-            // 送信後に宛先を変えたときに元の依頼が残って接続完了後に飛ぶ。
-            session.cancelAIPreparation(slot: sheet?.owningSlot ?? self?.aiSheetSlot ?? slot)
-            session.endAIDraft(); self?.aiSheet = nil; self?.aiSheetSlot = nil
-        }
+        sheet.onCancel = { [weak self] in self?.dismissAISheet() }
         sheet.onPane = { session.showAIPane(slot: fixed ? slot : session.aiConfiguration?.slot) }
         sheet.onSubmit = { [weak self] text, full in
             let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
