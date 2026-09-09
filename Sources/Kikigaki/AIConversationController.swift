@@ -236,6 +236,28 @@ final class AIConversationController {
         onChange?()
     }
 
+    /// 引き継いだ接続を手放す。「新規に起動する」を選び直したときに使う。
+    /// 保存物も消して、次の起動が同じ世代のまま自分の記録を書けるようにする。
+    /// この世代で依頼を1つでも作った枠は手放さない(送信済みの参照先が消える)。
+    func releaseAdopted(slot: Int) throws {
+        guard allowsSending, let channel = channels[slot], channel.hookContext != nil,
+              !channel.isSending, !channel.connecting,
+              questions(inSlot: slot, generation: channel.generation).isEmpty else { throw AIHerdrError.notReady }
+        let file = sessionParts(channel).reduce(outputDirectory) { $0.appendingPathComponent($1) }
+        if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.removeItem(at: file) }
+        channel.session = nil; channel.connection = nil; channel.configuration = nil
+        channel.launchingAttempted = false; channel.inputAttempted = false
+        channel.connectionStatus = .unknown; channel.idleSince = nil; channel.warning = nil
+        channel.hookContext = nil; channel.hookBackgroundRunning = false
+        onChange?()
+    }
+
+    /// この枠が準備済みセッションを引き継いだ状態か。紐づけの後始末の判定に使う
+    func hasAdopted(slot: Int) -> Bool { channels[slot]?.hookContext != nil }
+
+    /// 監視を止める。取り止めた会議の置き場を消す前に呼ぶ
+    func stopWatching() { monitor?.stop(); monitor = nil }
+
     func connect(config: ResolvedAIConfig, label: String, executable: URL, arguments: [String], readinessTimeout: TimeInterval = 30) async throws {
         guard readinessTimeout.isFinite, readinessTimeout > 0 else { throw AIProcessError.invalidInput }
         let channel = try channel(config.slot)

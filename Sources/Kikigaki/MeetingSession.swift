@@ -102,6 +102,8 @@ final class MeetingSession {
     private var consumedAudioTime: Double = 0
     var aiMeetingID: UUID { handoff.meetingID }
     var aiRecord: AIRecordStore.Record? { aiStore?.records[handoff.meetingID] }
+    /// 取り止めの後始末が登録簿まで届いたかの検証に使う
+    var aiStoreForTesting: AIRecordStore? { aiStore }
     var aiConfiguration: ResolvedAIConfig? { meetingAI }
     /// 自動送信の宛先。手動と独立に覚えるので、手動をBへ変えても自動はAのままにする
     var aiScheduleConfiguration: ResolvedAIConfig? { scheduleAI }
@@ -193,7 +195,13 @@ final class MeetingSession {
         var failed: Set<Int> = []
         for (slot, id) in selection.sorted(by: { $0.key < $1.key }) {
             guard handoff.meetingID == meetingID else { return failed }
-            guard let id, let profile = meetingAIProfiles.first(where: { $0.slot == slot }) else { continue }
+            guard let profile = meetingAIProfiles.first(where: { $0.slot == slot }) else { continue }
+            guard let id else {
+                // 「新規に起動する」。途中まで引き継いだ接続が残っていたら手放す。
+                // 残すと、新規を選んだのに準備済みのペインへ送ってしまう。
+                if !releasePreparedBinding(slot: slot) { failed.insert(slot) }
+                continue
+            }
             if await adoptPrepared(id, profile: profile) == false { failed.insert(slot) }
         }
         guard handoff.meetingID == meetingID else { return failed }
@@ -201,6 +209,22 @@ final class MeetingSession {
         deferAutomaticStart = false
         if snapshot.state == .recording || snapshot.state == .paused { startAutomaticSchedule() }
         return []
+    }
+
+    /// 「新規に起動する」を選んだ枠の後始末。台帳の保存に失敗して途中まで引き継いだ接続を手放す。
+    /// 台帳の紐づけが成功している枠は手放さない(そちらは正しく使われている)。
+    /// - Returns: 手放せた、または手放すものが無ければ true
+    @discardableResult
+    private func releasePreparedBinding(slot: Int) -> Bool {
+        guard let controller = aiRecord?.controller, controller.hasAdopted(slot: slot),
+              boundPrepared[slot] == nil else { return true }
+        do { try controller.releaseAdopted(slot: slot); emit(); return true }
+        catch {
+            aiWarning = "準備済みAIセッションの引き継ぎを解除できません"
+            log("引き継ぎの解除に失敗: \(error)")
+            emit()
+            return false
+        }
     }
 
     /// 準備済みセッションをこの会議のチャネルへ引き継ぐ。
@@ -213,6 +237,8 @@ final class MeetingSession {
         // awaitを跨いで会議が入れ替わることがある(接続確認中に停止して次の録音を始める)。
         // 会議IDを固定し、各await後に照合して、古い処理が次の会議へ書き込まないようにする。
         let meetingID = handoff.meetingID
+        // 失敗したら戻す送信先。選び直しの表示もここへ揃える。
+        let previous = (forSchedule ? scheduleAI?.slot : meetingAI?.slot) ?? profile.slot
         bindingSlots.insert(profile.slot); emit()
         defer { bindingSlots.remove(profile.slot); emit() }
         do {
@@ -231,6 +257,8 @@ final class MeetingSession {
             return true
         } catch {
             guard handoff.meetingID == meetingID else { return false }
+            // 表示と送信先を同じ枠へ戻す。画面だけ移って送信は元の宛先、という状態を残さない。
+            selectAIProfile(slot: previous, forSchedule: forSchedule)
             aiWarning = "準備済みAIセッションを引き継げません"
             log("準備済みセッションの引き継ぎに失敗: \(error)")
             emit()
@@ -427,7 +455,9 @@ final class MeetingSession {
         for slot in aiPhases.keys { cancelAIPreparation(slot: slot) }
         let markdownURL = snapshot.markdownURL
         let meetingID = handoff.meetingID
-        let outputDir = config.outputDir
+        // 片付け先は会議に固定したMarkdownの親から組み立てる。録音中に保存先を再読込しても、
+        // この会議が書いた場所は変わらない。
+        let outputDir = markdownURL?.deletingLastPathComponent() ?? config.outputDir
         snapshot.state = .finishing
         snapshot.message = "録音を取り止め中..."
         emit()
@@ -442,7 +472,11 @@ final class MeetingSession {
                 do { try FileManager.default.removeItem(at: wav) } catch { log("録音の片付けに失敗: \(error)") }
             }
         }
-        // この会議のAIの置き場も残さない。まだ何も送っていないので、消しても回収対象は無い。
+        // 登録簿と監視も外す。実体だけ消すと、再起動時に無いmanifestを回収しようとして失敗する。
+        aiStore?.discard(meetingID: meetingID)
+        // 紐づけ済みの準備済みは未紐づけへ戻す。会議が無くなった以上、次の録音でまた選べるべき。
+        preparedStore?.unbindAll(meetingID: meetingID)
+        // この会議のAIの置き場も残さない。
         let context = outputDir.appendingPathComponent(".kikigaki-context").appendingPathComponent(meetingID.uuidString)
         if FileManager.default.fileExists(atPath: context.path) {
             do { try FileManager.default.removeItem(at: context) } catch { log("AIの置き場の片付けに失敗: \(error)") }

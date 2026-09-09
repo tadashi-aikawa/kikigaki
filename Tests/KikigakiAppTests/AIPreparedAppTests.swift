@@ -464,14 +464,179 @@ import KikigakiAIIO
         let session = session(root, profiles: list, fake: FakeHerdr())
         let markdown = root.appendingPathComponent("meeting.md")
         let wav = root.appendingPathComponent("meeting.wav")
-        // 録音開始が予約したMarkdownとWAVを模す。
+        // 録音開始が予約したMarkdownと、実際に書いたWAVを模す。
         try Data().write(to: markdown)
-        try Data([0]).write(to: wav)
+        let writer = try WavWriter(url: wav)
+        try writer.write(Array(repeating: 0.1, count: 16_000))
+        writer.close()
+        #expect((try Data(contentsOf: wav)).count > 44)
         await session.abandon()
         #expect(session.snapshot.state == .idle)
         #expect(!session.snapshot.saved)
         #expect(!FileManager.default.fileExists(atPath: markdown.path))
         #expect(!FileManager.default.fileExists(atPath: wav.path))
+    }
+
+    // MARK: - 3巡目の確認レビューの指摘
+
+    /// 【中】取り止めた会議の登録と監視が残り、紐づけ済みの準備済みも使えないままになる。
+    @Test func 取消はAIの登録と紐づけも戻す() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let id = try #require(prepared.unbound.first?.id)
+        #expect(await session.adoptPrepared(id, profile: list[0]))
+        let meetingID = session.aiMeetingID
+        let aiStore = try #require(session.aiStoreForTesting)
+        #expect(aiStore.records[meetingID] != nil)
+        try Data().write(to: root.appendingPathComponent("meeting.md"))
+
+        await session.abandon()
+        // 登録簿からも外す。残すと再起動時に無いmanifestを回収しようとして失敗する。
+        #expect(aiStore.records[meetingID] == nil)
+        let entries = try AIJSON.decode([AIRegistration].self, from: AIFileStore(root: root).read(["ai-roots.json"]))
+        #expect(!entries.contains { $0.meetingID == meetingID })
+        // 紐づけは未紐づけへ戻す。次の録音でまた選べる。
+        #expect(prepared.unbound.map(\.id) == [id])
+        #expect(!FileManager.default.fileExists(
+            atPath: root.appendingPathComponent(".kikigaki-context/\(meetingID.uuidString)").path))
+    }
+
+    /// 【中】録音中に保存先を再読込すると、取消が元の保存先を片付けなかった。
+    @Test func 取消は会議を始めた保存先を片付ける() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let list = try profiles(root)
+        let started = root.appendingPathComponent("started", isDirectory: true)
+        try FileManager.default.createDirectory(at: started, withIntermediateDirectories: true)
+        let fake = FakeHerdr()
+        let session = session(root, profiles: list, fake: fake,
+                              markdown: started.appendingPathComponent("meeting.md"))
+        try Data().write(to: started.appendingPathComponent("meeting.md"))
+        // AIの置き場も会議を始めた保存先の下にできる。
+        let prepared = store(root, fake: fake, session: session)
+        await prepared.prepare(profile: list[0], helper: URL(fileURLWithPath: "/bin/echo"), outputDirectory: started)
+        let id = try #require(prepared.unbound.first?.id)
+        #expect(await session.adoptPrepared(id, profile: list[0]))
+        let context = started.appendingPathComponent(".kikigaki-context")
+            .appendingPathComponent(session.aiMeetingID.uuidString)
+        #expect(FileManager.default.fileExists(atPath: context.path))
+
+        // 録音中に保存先を変えて再読込する。この会議が書いた場所は変わらない。
+        var moved = ResolvedConfig(config: KikigakiConfig(), home: root)
+        moved.aiProfiles = list
+        moved.outputDir = root.appendingPathComponent("moved", isDirectory: true)
+        session.update(config: moved)
+        await session.abandon()
+        #expect(!FileManager.default.fileExists(atPath: started.appendingPathComponent("meeting.md").path))
+        #expect(!FileManager.default.fileExists(atPath: context.path))
+    }
+
+    /// 【高】台帳の保存に失敗した後で「新規に起動する」を選ぶと、途中の接続へ送っていた。
+    @Test func 新規を選び直したら途中の引き継ぎを手放す() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try profiles(root, autoStart: true)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let id = try #require(prepared.unbound.first?.id)
+        session.deferAutomaticStart = true
+
+        // 会議側は保存できたが台帳の保存に失敗する。
+        let ledgerFile = root.appendingPathComponent("ai-prepared.json")
+        try FileManager.default.removeItem(at: ledgerFile)
+        try FileManager.default.createDirectory(at: ledgerFile, withIntermediateDirectories: false)
+        #expect(await session.applyPreparedSelection([1: id]) == [1])
+        let controller = try #require(session.aiRecord?.controller)
+        #expect(controller.connection(slot: 1) != nil)
+        try FileManager.default.removeItem(at: ledgerFile)
+
+        // 選び直しで「新規に起動する」。途中の接続を手放してから進む。
+        #expect(await session.applyPreparedSelection([1: nil]).isEmpty)
+        #expect(controller.connection(slot: 1) == nil)
+        #expect(!controller.hasAdopted(slot: 1))
+        // 準備済みは未紐づけのまま残る。
+        #expect(prepared.unbound.map(\.id) == [id])
+        #expect(session.snapshot.aiSchedule.active)
+        session.stopAISchedule()
+    }
+
+    /// 【高】紐づけに失敗すると、画面はB・送信先はAのままだった。
+    @Test func 紐づけに失敗したら表示を送信先へ戻す() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[1], root: root)
+        let gone = try #require(prepared.unbound.first)
+        await fake.removePane(try #require(gone.connection?.paneID))
+        #expect(session.aiConfiguration?.slot == 1)
+
+        // シートは「相談」の準備済みを選び、ポップアップだけ先に動いた状態。
+        let sheet = AIQuestionSheet(participant: "議事録", parentNumber: nil, draft: "依頼",
+            voice: "", range: "対象なし", tentative: false, canSubmit: true)
+        sheet.updateDestinations(session.aiDestinationItems, selected: 1, participant: "議事録")
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let popup = try #require(descendants(sheet.window.contentView!).compactMap { $0 as? NSPopUpButton }.first)
+        // 準備済みの行を選んだ直後の状態。ポップアップだけが先に動いている。
+        popup.selectItem(at: try #require(popup.itemArray.firstIndex { $0.title.hasPrefix("準備済み") }))
+
+        #expect(await session.adoptPrepared(gone.id, profile: list[1]) == false)
+        // 送信先は元の枠のまま。表示もそこへ戻す。
+        #expect(session.aiConfiguration?.slot == 1)
+        let restored = try #require(session.aiConfiguration?.slot)
+        sheet.restoreDestination(restored, items: session.aiDestinationItems, participant: "議事録")
+        #expect(sheet.owningSlot == 1)
+        #expect(popup.selectedItem?.title == "議事録")
+    }
+
+    /// 【高】紐づけの最中に状態が更新されても、宛先と送信は無効のまま保つ。
+    @Test func 紐づけ中はシートの更新でも宛先を戻さない() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let sheet = AIQuestionSheet(participant: "議事録", parentNumber: nil, draft: "依頼",
+            voice: "", range: "対象なし", tentative: false, canSubmit: true)
+        sheet.updateDestinations([.init(slot: 1, name: "議事録"), .init(slot: 2, name: "相談")],
+                                 selected: 1, participant: "議事録")
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let send = try #require(descendants(sheet.window.contentView!).compactMap { $0 as? NSButton }
+            .first { $0.title == "送信 ⏎" })
+        let popup = try #require(descendants(sheet.window.contentView!).compactMap { $0 as? NSPopUpButton }.first)
+
+        sheet.setBinding(true, canSubmit: false)
+        #expect(!send.isEnabled && !popup.isEnabled)
+        // 紐づけの開始で走る通常の更新。ここで戻すと二重に紐づけを始められる。
+        sheet.update(progress: nil, canSubmit: true)
+        #expect(!send.isEnabled && !popup.isEnabled)
+        sheet.setBinding(false, canSubmit: true)
+        #expect(send.isEnabled && popup.isEnabled)
+    }
+
+    /// 【高】候補が尽きても、新規起動へ黙って進めず利用者に選ばせる。
+    @Test func 候補が尽きた枠でも新規を選ばせる() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let profiles = [(slot: 1, name: "議事録"), (slot: 2, name: "相談")]
+        // 録音開始の初回は、候補が無い枠を出さない。
+        #expect(AIAttachSheet.choices(profiles: profiles) { _ in [] }.isEmpty)
+        // 選び直しは、候補が尽きた枠も残して「新規に起動する」を選ばせる。
+        let retry = AIAttachSheet.choices(profiles: profiles, slots: [2], includingEmpty: true) { _ in [] }
+        #expect(retry.map(\.slot) == [2] && retry[0].prepared.isEmpty)
+
+        let sheet = AIAttachSheet(choices: retry,
+                                  warning: "選んだ準備済みセッションを引き継げませんでした。選び直してください")
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let titles = descendants(sheet.window.contentView!).compactMap { ($0 as? NSButton)?.title }
+        #expect(titles.contains("新規に起動する"))
+        #expect(titles.contains("取消 (録音を始めない)") && titles.contains("開始"))
+        // 既定は新規。選んだ結果は「準備済みを使わない」。
+        #expect(sheet.selection[2] == UUID?.none)
     }
 }
 

@@ -126,6 +126,15 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     /// 固定した枠があればそれ、送信を始めていなければ現在の選択、始めていればそのときの枠
     var owningSlot: Int { fixedSlot ?? activeSlot ?? destination.selected }
 
+    /// 選択を送信先へ戻す。準備済みを選んで紐づけに失敗したときに使う。
+    /// ポップアップは選んだ瞬間に動くので、失敗したら送信先の側へ揃え直す。
+    func restoreDestination(_ slot: Int, items: [AIDestinationPicker.Item], participant: String) {
+        guard fixedSlot == nil else { return }
+        activeSlot = nil
+        destination.update(items: items, selected: slot)
+        title.stringValue = "\(participant)へ"
+    }
+
     /// 宛先の一覧と選択を差し替える。固定した枠と送信を始めた後は差し替えない。
     func updateDestinations(_ items: [AIDestinationPicker.Item], selected: Int, participant: String) {
         guard activeSlot == nil, fixedSlot == nil else { return }
@@ -141,8 +150,9 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         sendButton.isEnabled = canSubmit && !sent && !binding
         editor.isEditable = !sent || progress == nil
         work.isEnabled = !sent || progress == nil
-        if progress == nil {
-            sent = false; sendButton.isEnabled = canSubmit && !binding
+        // 紐づけの最中は、宛先も送信も無効のまま保つ。ここで戻すと二重に紐づけを始められる。
+        if progress == nil, !binding {
+            sent = false; sendButton.isEnabled = canSubmit
             // 送信が終わって次の下書きへ戻ったら、宛先をまた選べるようにする。
             activeSlot = nil; destination.setEnabled(true)
         }

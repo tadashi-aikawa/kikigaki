@@ -12,6 +12,18 @@ final class AIAttachSheet: NSObject {
         /// 古い順。先頭が既定の選択になる
         let prepared: [(id: UUID, label: String)]
     }
+    /// 出す枠を決める。**候補が尽きた枠も `includingEmpty` で残す。**
+    /// 選び直しでは、選ぶものが無くても「新規に起動する」を利用者に選ばせる。
+    static func choices(profiles: [(slot: Int, name: String)], slots: Set<Int>? = nil,
+                        includingEmpty: Bool = false,
+                        prepared: (Int) -> [(id: UUID, label: String)]) -> [Choice] {
+        profiles.filter { slots?.contains($0.slot) ?? true }.compactMap { profile in
+            let rows = prepared(profile.slot)
+            guard !rows.isEmpty || includingEmpty else { return nil }
+            return Choice(slot: profile.slot, name: profile.name, prepared: rows)
+        }
+    }
+
     let window: NSWindow
     /// 枠ごとの選択。値が nil なら「新規に起動する」
     var onStart: (([Int: UUID?]) -> Void)?

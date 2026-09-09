@@ -435,27 +435,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// 録音開始時に選ばせる候補。未紐づけが1件も無ければシートを出さない。
-    /// - Parameter slots: 指定するとその枠だけを出す。引き継ぎに失敗した枠の選び直しに使う
-    private func attachChoices(slots: Set<Int>? = nil) -> [AIAttachSheet.Choice] {
+    /// - Parameters:
+    ///   - slots: 指定するとその枠だけを出す。引き継ぎに失敗した枠の選び直しに使う
+    ///   - includingEmpty: 候補が無い枠も「新規に起動する」だけの選択として出す。
+    ///     選び直しでは、候補が尽きても利用者に選ばせる。黙って新規起動へ進めない
+    func attachChoices(slots: Set<Int>? = nil, includingEmpty: Bool = false) -> [AIAttachSheet.Choice] {
         guard replayURL == nil, let config, let preparedStore, preparedStore.isUsable else { return [] }
-        return config.aiProfiles.filter { slots?.contains($0.slot) ?? true }.compactMap { profile in
-            let prepared = preparedStore.available(for: profile, contextRoot: config.outputDir)
-            guard !prepared.isEmpty else { return nil }
-            return .init(slot: profile.slot, name: profile.name,
-                         prepared: prepared.map { ($0.id, preparedStore.label($0, includingName: false)) })
+        return AIAttachSheet.choices(profiles: config.aiProfiles.map { (slot: $0.slot, name: $0.name) },
+                                     slots: slots, includingEmpty: includingEmpty) { slot in
+            guard let profile = config.aiProfiles.first(where: { $0.slot == slot }) else { return [] }
+            return preparedStore.available(for: profile, contextRoot: config.outputDir)
+                .map { ($0.id, preparedStore.label($0, includingName: false)) }
         }
     }
 
     private func presentAttachSheet(_ choices: [AIAttachSheet.Choice], warning: String? = nil) {
         guard let parent = window?.window else { session?.deferAutomaticStart = false; return }
-        // 候補が尽きたら選ばせるものが無い。新規起動として続け、自動送信も始める。
-        guard !choices.isEmpty else {
-            session?.deferAutomaticStart = false
-            if session?.snapshot.state == .recording || session?.snapshot.state == .paused {
-                session?.startAutomaticSchedule()
-            }
-            return
-        }
+        // 出すものが無いときだけ、新規起動として続ける。呼び手は空の候補を渡さない。
+        guard !choices.isEmpty else { session?.deferAutomaticStart = false; return }
         let sheet = AIAttachSheet(choices: choices, warning: warning)
         sheet.onCancel = { [weak self] in
             // 取消は録音を始めない。開始してからシートを出しているので、収録した分ごと取り止め、
@@ -483,7 +480,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard session.aiMeetingID == meetingID else { return }
         // 失敗した枠は選び直させる。候補が尽きていれば新規起動として続ける。
         if !failed.isEmpty, session.snapshot.state == .recording || session.snapshot.state == .paused {
-            presentAttachSheet(attachChoices(slots: failed),
+            // 候補が尽きていても「新規に起動する」を選ばせる。黙って新規起動へ進めない。
+            presentAttachSheet(attachChoices(slots: failed, includingEmpty: true),
                                warning: "選んだ準備済みセッションを引き継げませんでした。選び直してください")
         }
     }
@@ -672,9 +670,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.adoptPrepared(slot: chosen, id: id, forSchedule: false) { bound in
                 if bound, !fixed { applyDestination(chosen) }
                 else if let session = self?.session, let sheet {
-                    let owning = sheet.owningSlot
-                    let name = session.meetingAIProfiles.first { $0.slot == owning }?.participantName ?? ""
-                    sheet.updateDestinations(session.aiDestinationItems, selected: owning, participant: name)
+                    // 失敗したら送信先(session側)へ表示を揃える。画面だけBに残さない。
+                    let restored = session.aiConfiguration?.slot ?? sheet.owningSlot
+                    let name = session.meetingAIProfiles.first { $0.slot == restored }?.participantName ?? ""
+                    sheet.restoreDestination(restored, items: session.aiDestinationItems, participant: name)
                 }
             }
         }

@@ -59,6 +59,9 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
         url.resolvingSymlinksInPath().standardizedFileURL.path
     }
 
+    /// 紐づけを取り消して未紐づけへ戻す。会議そのものが無かったことになったときに使う。
+    public mutating func unbind() { bound = nil }
+
     public mutating func bind(to meetingID: UUID, config: ResolvedAIConfig) throws {
         guard isUnbound else { throw AIError.conflict }
         guard connection != nil else { throw AIError.invalid("prepared session has no connection") }
@@ -165,6 +168,17 @@ public struct AIPreparedLedger: Codable, Equatable, Sendable {
     /// 会議側に接続が無い行が残る。
     public mutating func bind(_ id: UUID, to meetingID: UUID, config: ResolvedAIConfig) throws {
         try update(id) { try $0.bind(to: meetingID, config: config) }
+    }
+
+    /// その会議へ紐づけた行を未紐づけへ戻す。取り止めた会議の後始末に使う。
+    /// 会議が消えた以上、正本の `ai/sessions` も無いので、履歴として残す意味がない。
+    @discardableResult
+    public mutating func unbindAll(meetingID: UUID) -> [UUID] {
+        var restored: [UUID] = []
+        for index in sessions.indices where sessions[index].bound?.meetingID == meetingID {
+            sessions[index].unbind(); restored.append(sessions[index].id)
+        }
+        return restored
     }
 
     public mutating func discard(_ id: UUID) throws {

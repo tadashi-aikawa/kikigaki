@@ -133,6 +133,16 @@ final class AIRecordStore {
         bind(record); try controller.watch()
         return record
     }
+    /// 取り止めた会議を登録簿から外す。置き場を消す前に呼ぶ。
+    /// 残すと監視が続き、再起動時に無い manifest を回収しようとして失敗する。
+    func discard(meetingID: UUID) {
+        guard let record = records[meetingID] else { return }
+        record.controller.stopWatching()
+        records[meetingID] = nil
+        do { try persistRegistry() } catch { warnings.append("AI会議の登録簿を保存できません") }
+        onChange?()
+    }
+
     /// 稼働中のpane ID。準備済みセッションの生存確認に使う。
     func alivePaneIDs() async -> Set<String>? {
         guard let herdr = try? makeHerdr() else { return nil }
