@@ -53,7 +53,6 @@ import KikigakiAIIO
         var schedule = AIScheduleState(meetingID: history.meetingID)
         try schedule.start(options: .init(prompt: "議事録を更新"), now: Date(), runID: UUID())
         let window = TranscriptWindowController(shouldReduceMotion: { true })
-        window.aiRead.isActive = { false }
         window.window!.setFrameAutosaveName("")
         for width in [600, 900] {
             state.ai?.conversation = conversation

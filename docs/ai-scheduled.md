@@ -4,7 +4,7 @@
 
 ## 確定した仕様
 
-手動の「AIへ…」と同じ `AIConversationController`、herdrセッション、世代、`AIStreamHistory` を使う。定期送信の専用streamや接続は作らない。利用者が明示的に開始し、既定間隔は3分、録音停止時の最後の1回は既定ON。自動のansweredは未読強調しない。needs_inputとfailedは通常どおり扱う。
+手動の「AIへ…」と同じ `AIConversationController`、herdrセッション、世代、`AIStreamHistory` を使う。定期送信の専用streamや接続は作らない。利用者が明示的に開始し、既定間隔は3分、録音停止時の最後の1回は既定ON。自動のansweredも明示クリックまでは未読として強調する。needs_inputとfailedは通常どおり扱う。
 
 設定・稼働状態は会議単位。新会議では設定の初期値へ戻し、稼働状態をアプリ再起動で復元しない。停止後の返送回収と保存は既存の仕組みで続く。自動送信からウィンドウを前面に出さない。
 
@@ -98,7 +98,7 @@ tick時に差分を確認し、既存の3秒確定待ちを終えた `capture.li
 
 `AIRequest.trigger` は保存済みenvelopeから参照し、同じ値を別保存して不整合を作らない。確認への手動返答はtriggerを継承しない。送信印の表題を「#3 迅雷へ · 自動」、会議Markdownの送信時刻行・送信印へ「(自動)」を添える。詳細と原文の保存は維持する。
 
-`AIQuestion` の結果取り込み時に、scheduledかつansweredの場合だけ `isUnread = false` とする。UIだけで隠さず保存することで、現会議・過去会議・フッターの集計を一致させる。印は到着時刻に追加し、畳んだ薄墨の状態で置く。needs_inputとfailedは通常どおり未読・状態ピル・返答操作を保つ。既存の通知音は未読対象の返送に限定し、自動answeredを毎回鳴らさない。
+`AIQuestion` の結果取り込み時は、自動answeredを含む全返事を未読にする。本文・未読ピルの明示クリックで既読を保存し、フッターの未読アイコンは移動だけを行う。可視化では既読にしない。needs_inputの確認待ちは返答まで残す。通知音の対象は従来どおりで、自動answeredは鳴らさない。
 
 ## 配布用Skillとreplay
 

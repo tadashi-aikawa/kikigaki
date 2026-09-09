@@ -39,7 +39,6 @@ import KikigakiAIIO
             elapsed: 350, markdownURL: root.appendingPathComponent("meeting.md"), detectedSpeakerSlots: [0, 1, 2])
         state.aiSchedule = AIScheduleViewState(schedule: schedule)
         let window = TranscriptWindowController(shouldReduceMotion: { false })
-        window.aiRead.isActive = { false }
         window.window!.setFrameAutosaveName("")
         for width in [600, 900] {
             window.window!.setContentSize(NSSize(width: width, height: 650))
@@ -134,7 +133,6 @@ import KikigakiAIIO
                                    postedAt: started.addingTimeInterval(315))],
             timeline: MeetingTimeline(startedAt: started), elapsed: 350, markdownURL: root.appendingPathComponent("meeting.md"))
         let window = TranscriptWindowController(shouldReduceMotion: { true })
-        window.aiRead.isActive = { false }
         window.window!.setFrameAutosaveName("")
         window.window!.setContentSize(NSSize(width: 900, height: 750))
         let content = window.window!.contentView!
@@ -218,7 +216,7 @@ import KikigakiAIIO
         #expect(descendants(sheet.window.contentView!).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "迅雷へ" })
     }
 
-    @Test func 展開既定のまま可視化で既読にし件数と行の同一性を保つ() throws {
+    @Test func 展開既定のまま明示操作で既読にし件数と行の同一性を保つ() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID()
@@ -241,7 +239,6 @@ import KikigakiAIIO
             names: SpeakerNames([0: "田中", 1: "松村"]), elapsed: 375, markdownURL: root.appendingPathComponent("meeting.md"))
         state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
         let window = TranscriptWindowController(shouldReduceMotion: { true })
-        window.aiRead.isActive = { true }
         window.window!.setFrameAutosaveName("")
         window.window!.setFrame(NSRect(x: 20000, y: 20000, width: 680, height: 900), display: false)
         let content = window.window!.contentView!
@@ -290,23 +287,12 @@ import KikigakiAIIO
             try! conversation.update(id) { $0.markRead() }
             apply()
         }
-        // 可視域へ入っただけでは既読にしない。1秒留まってから既読にする。
+        // 可視域へ移動しても既読にせず、各行の印を明示的に押す。
         window.scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, answer.frame.minY - 20)))
         content.layoutSubtreeIfNeeded()
-        let now = AIReadWatcher.now
-        window.aiRead.evaluate(now: now)
         #expect(readIDs.isEmpty)
-        window.aiRead.evaluate(now: now + 0.5)
-        #expect(readIDs.isEmpty)
-        // 途中でウィンドウを見ていない状態を挟んだら、続きではなく0から数え直す。
-        window.aiRead.isActive = { false }
-        window.aiRead.evaluate(now: now + 0.6)
-        window.aiRead.isActive = { true }
-        window.aiRead.evaluate(now: now + 0.7)
-        window.aiRead.evaluate(now: now + 1.2)
-        #expect(readIDs.isEmpty)
-        window.aiRead.evaluate(now: now + 1.75)
-        // 画面の上から順に既読にする。返事待ちと失敗は既読の対象にしない。
+        answer.statusPill.performClick(nil)
+        #expect(try #require(descendants(confirmation).compactMap { $0 as? MarkdownBodyView }.first).accessibilityPerformPress())
         #expect(readIDs.first == requests[0].id)
         #expect(!readIDs.contains(requests[2].id) && !readIDs.contains(requests[3].id))
         #expect(answer.accent == nil && answer.pillStyle == nil)
@@ -353,7 +339,6 @@ import KikigakiAIIO
             timeline: .init(startedAt: started), elapsed: 380, markdownURL: root.appendingPathComponent("meeting.md"))
         state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
         let window = TranscriptWindowController(shouldReduceMotion: { true })
-        window.aiRead.isActive = { true }
         window.window!.setFrameAutosaveName("")
         window.window!.setFrame(NSRect(x: 20000, y: 20000, width: 680, height: 620), display: false)
         let content = window.window!.contentView!
@@ -441,7 +426,6 @@ import KikigakiAIIO
             utterances: (0..<40).map { Utterance(speaker: 0, start: Double($0 * 10), end: Double($0 * 10 + 5), text: "会議の発言 \($0)") },
             timeline: MeetingTimeline(startedAt: started), elapsed: 400, markdownURL: root.appendingPathComponent("meeting.md"))
         let window = TranscriptWindowController(shouldReduceMotion: { true })
-        window.aiRead.isActive = { true }
         window.window!.setFrameAutosaveName("")
         let content = window.window!.contentView!
         window.apply(state); content.layoutSubtreeIfNeeded()
@@ -456,14 +440,13 @@ import KikigakiAIIO
         var read: [UUID] = []
         window.onReadAI = { read.append($0) }
         window.scrollView.contentView.scroll(to: .zero); content.layoutSubtreeIfNeeded()
-        let now = AIReadWatcher.now
-        window.aiRead.evaluate(now: now); window.aiRead.evaluate(now: now + 2)
         #expect(read.isEmpty)
-        // 判定は行と可視域の重なり。上端が上へ抜けた長い返事も「読んでいる」と見なす。
+        // 長い返事の一部が見えても、クリックするまでは未読を保つ。
         window.scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, row.frame.midY)))
         content.layoutSubtreeIfNeeded()
         #expect(window.scrollView.contentView.bounds.intersects(row.frame))
-        window.aiRead.evaluate(now: now + 3); window.aiRead.evaluate(now: now + 5)
+        #expect(read.isEmpty)
+        #expect(try #require(descendants(row).compactMap { $0 as? MarkdownBodyView }.first).accessibilityPerformPress())
         #expect(read == [first.id])
         let snapshot = try history.prepare(lines: [], outputDirectory: root)
         let participant = AIParticipantContext(streamID: history.streamID, requestID: UUID(), sessionGeneration: 1, participantName: "迅雷",
@@ -480,7 +463,7 @@ import KikigakiAIIO
         #expect(descendants(row).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "?" && !$0.isHidden })
     }
 
-    @Test func 返送された失敗は未読になり印と可視化で既読にできる() throws {
+    @Test func 返送された失敗は未読になり印で既読にできる() throws {
         _ = NSApplication.shared
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
@@ -495,13 +478,12 @@ import KikigakiAIIO
             utterances: [.init(speaker: 0, start: 320, end: 322, text: "議事録の担当を決めましょう。")],
             timeline: .init(startedAt: started), elapsed: 350, markdownURL: root.appendingPathComponent("meeting.md"))
         let window = TranscriptWindowController(shouldReduceMotion: { true })
-        window.aiRead.isActive = { true }
         window.window!.setFrameAutosaveName("")
         window.window!.setFrame(NSRect(x: 20000, y: 20000, width: 680, height: 700), display: false)
         let content = window.window!.contentView!
         window.apply(state); content.layoutSubtreeIfNeeded()
         let failed = try #require(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.first)
-        // 返送された失敗はCoreが未読にする。印から既読にでき、可視化の対象にもなる。
+        // 返送された失敗はCoreが未読にする。印から既読にできる。
         #expect(failed.isFailure && failed.item.isUnread && failed.pillStyle == .unread)
         // 送信できなかった失敗とは言い方を分け、本文は画面から全部読める。
         #expect(failed.isReturnedFailure && failed.failureText.hasPrefix("迅雷から失敗の報告"))
@@ -522,8 +504,7 @@ import KikigakiAIIO
             try! conversation.update(id) { $0.markRead() }
             state.ai?.conversation = conversation; window.apply(state); content.layoutSubtreeIfNeeded()
         }
-        let now = AIReadWatcher.now
-        window.aiRead.evaluate(now: now); window.aiRead.evaluate(now: now + 1.2)
+        failed.statusPill.performClick(nil)
         #expect(read == [request.id])
         #expect(failed.statusPill.isHidden && state.ai?.badges.contains("未読") != true)
     }
@@ -690,7 +671,6 @@ import KikigakiAIIO
             markdownURL: root.appendingPathComponent("meeting.md"))
         state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
         let window = TranscriptWindowController(shouldReduceMotion: { true })
-        window.aiRead.isActive = { false }
         window.window!.setFrameAutosaveName("")
         let content = window.window!.contentView!
         func shoot(_ name: String, width: CGFloat) throws {
@@ -706,7 +686,7 @@ import KikigakiAIIO
         }
         try shoot("timeline-normal-600", width: 600)
         // ピル5種が同時に立つ600幅で、右の時間範囲と接していないかを見る。
-        #expect(state.ai?.badges == "未読 1 · 確認待ち 1 · 返事待ち 1 · 送達不明 1 · 失敗 1")
+        #expect(state.ai?.badges == "未読 2 · 確認待ち 1 · 返事待ち 1 · 送達不明 1 · 失敗 1")
         let footer = window.compactFooter
         try capture("timeline-badges-600", view: footer)
         try shoot("timeline-normal-900", width: 900)
@@ -749,18 +729,15 @@ import KikigakiAIIO
         let window = AIPastMeetingsWindow(store: store, current: { UUID() })
         window.window!.setFrameAutosaveName("")
         window.window!.setFrame(NSRect(x: 20000, y: 20000, width: 620, height: 700), display: false)
-        window.aiRead.isActive = { true }
         window.update()
         let content = window.window!.contentView!; content.layoutSubtreeIfNeeded()
         let answer = try #require(descendants(content).compactMap { $0 as? AIReplyRow }.first)
         #expect(answer.accent == Washi.red && answer.pillStyle == .unread)
         // 発話を持たないので、声でない送信も日時順の人側の行として並ぶ。
         #expect(descendants(content).compactMap { $0 as? AITypedSendRow }.count == 1)
-        // 旧会議も可視化で既読になる。印の直呼びではなく本番の配線を通す。
-        let now = AIReadWatcher.now
-        window.aiRead.evaluate(now: now)
+        // 旧会議も明示クリックだけで既読にする。本番の配線を通す。
         #expect(record.controller.conversation.questions[0].isUnread)
-        window.aiRead.evaluate(now: now + 1.2)
+        answer.statusPill.performClick(nil)
         content.layoutSubtreeIfNeeded()
         #expect(!record.controller.conversation.questions[0].isUnread)
         let after = try #require(descendants(content).compactMap { $0 as? AIReplyRow }.first)

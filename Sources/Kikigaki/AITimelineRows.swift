@@ -301,6 +301,11 @@ final class AIReplyRow: NSView, AITimelineRowView {
     }
     var statusPill: AIStatusPill { pill }
 
+    private func markReadIfNeeded() {
+        guard item.isUnread else { return }
+        onRead?()
+    }
+
     var isFailure: Bool { if case .failure = item.kind { return true }; return false }
     /// モデルが返した失敗報告。送信そのものができなかった失敗と区別し、本文を全部見せる。
     var isReturnedFailure: Bool { if case let .failure(_, returned) = item.kind { return returned }; return false }
@@ -327,7 +332,8 @@ final class AIReplyRow: NSView, AITimelineRowView {
         notes.isSelectable = true; notes.maximumNumberOfLines = 0; notes.lineBreakMode = .byWordWrapping
         failureLabel.lineBreakMode = .byTruncatingTail
         Washi.surface(quoteRule, color: Washi.rule)
-        pill.callback = { [weak self] in self?.onRead?() }
+        pill.callback = { [weak self] in self?.markReadIfNeeded() }
+        markdownBody.onClick = { [weak self] in self?.markReadIfNeeded() }
         quote.onToggle = { [weak self] in self?.onResize?() }
         for view in [avatar, nameLabel, chip, timeLabel, pill, quoteRule, quote, markdownBody, waitingBody,
                      confirmationMark, notes, failureLabel, replyAction, cancelAction, retryAction] { addSubview(view) }

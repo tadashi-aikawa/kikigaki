@@ -139,7 +139,7 @@ import KikigakiAIIO
         #expect(session.aiRecord?.manifest.automaticSlot == session.aiScheduleConfiguration?.slot)
         #expect(session.snapshot.ai?.rangeBoundaries.answered == first.request.envelope.totalLineCount - 1)
         #expect(session.aiRecord?.controller.conversation.questions.count == 1)
-        #expect(session.aiRecord?.controller.conversation.questions.first?.isUnread == false)
+        #expect(session.aiRecord?.controller.conversation.questions.first?.isUnread == true)
         let conversation = try #require(session.aiRecord?.controller.conversation)
         let items = AITimeline.items(conversation: conversation, utterances: [], timeline: MeetingTimeline(startedAt: now))
         // 自動の往復も人の発話と同格の行で、送信だけ細い1行にする。

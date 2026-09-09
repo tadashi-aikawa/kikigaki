@@ -52,7 +52,7 @@ import KikigakiCore
     }
 
     @Test(arguments: [AIReceiveEvent.Kind.answered, .needsInput, .failed])
-    func 自動answeredだけ未読にせず保存の往復でも保持する(kind: AIReceiveEvent.Kind) throws {
+    func 自動を含む全返事の未読を保存の往復でも保持する(kind: AIReceiveEvent.Kind) throws {
         for trigger: AIParticipantContext.Trigger? in [nil, .scheduled] {
             let request = try request(trigger: trigger)
             var conversation = AIConversation(meetingID: request.envelope.meetingID)
@@ -62,7 +62,7 @@ import KikigakiCore
                                        reason: kind == .needsInput ? "clarification" : kind == .failed ? "work_failed" : nil)
             _ = try conversation.receive(event, at: Date())
             let restored = try AIJSON.decode(AIConversation.self, from: AIJSON.encode(conversation))
-            #expect(restored.questions[0].isUnread == !(trigger == .scheduled && kind == .answered))
+            #expect(restored.questions[0].isUnread)
             #expect(AIMarkdown.section(restored).contains(" (自動)") == (trigger == .scheduled))
         }
     }

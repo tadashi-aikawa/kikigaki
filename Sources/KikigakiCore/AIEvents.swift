@@ -174,7 +174,7 @@ public struct AIQuestion: Codable, Equatable, Sendable {
         } else {
             guard order > 0 else { throw AIError.invalid("event order") }
             result = event; resultReceivedAt = date; resultOrder = order
-            isUnread = !(request.trigger == .scheduled && event.kind == .answered)
+            isUnread = true
             if cancelledAt == nil {
                 switch event.kind {
                 case .answered: state = .answered
