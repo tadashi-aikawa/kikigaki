@@ -15,10 +15,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onAskAI: ((UUID?) -> Void)?
     var onScheduleAI: (() -> Void)?
     var onStopScheduleAI: (() -> Void)?
+    private lazy var prepareAI = AIActionButton("AIセッションを準備…") { [weak self] in self?.onPrepareAI?() }
     private lazy var scheduleAI = AIActionButton("自動送信…") { [weak self] in self?.onScheduleAI?() }
     private lazy var stopScheduleAI = AIActionButton("自動送信を停止") { [weak self] in self?.onStopScheduleAI?() }
     private let scheduleNotice = Washi.label(size: 11, color: Washi.muted)
     private let scheduleRow = NSStackView()
+    private let prepareRow = NSStackView()
+    private let prepareNotice = Washi.label(size: 11, color: Washi.muted)
+    var onPrepareAI: (() -> Void)?
     var onReadAI: ((UUID) -> Void)?
     var onOpenAIPane: (() -> Void)?
     var onCancelAI: ((UUID) -> Void)?
@@ -128,6 +132,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         aiStatusRow.isHidden = aiNotice.isHidden && reconnectAI.isHidden && retryAISave.isHidden && openPaneAI.isHidden
         askButton.isHidden = value.ai == nil
         scheduleRow.isHidden = value.ai == nil
+        // 準備はいつでもできる。待機中に辿り着けるよう、録音していなくても出す。
+        prepareRow.isHidden = value.ai == nil
+        prepareAI.isEnabled = value.ai?.canPrepare ?? false
+        prepareAI.toolTip = prepareAI.isEnabled
+            ? "録音と結びつけずにAIセッションを起こします" : "設定を読み直すまで準備できません"
+        prepareNotice.stringValue = value.ai?.preparedSummary ?? ""
+        prepareNotice.isHidden = prepareNotice.stringValue.isEmpty
+        prepareNotice.toolTip = value.ai?.preparedToolTip ?? ""
         scheduleAI.isHidden = value.aiSchedule.active
         scheduleAI.isEnabled = value.state == .recording || value.state == .paused
         scheduleAI.toolTip = scheduleAI.isEnabled ? "繰り返し送る依頼と間隔を設定します" : "録音中・一時停止中に開始できます"
@@ -363,7 +375,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         scheduleNotice.lineBreakMode = .byTruncatingTail
         scheduleNotice.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         for view in [scheduleAI, scheduleNotice, stopScheduleAI] { scheduleRow.addArrangedSubview(view) }
-        let footer = column([footerTitle, aiStatusRow, scheduleRow, footerButtons], spacing: 8, inset: 16)
+        prepareRow.orientation = .horizontal; prepareRow.spacing = 12
+        prepareNotice.lineBreakMode = .byTruncatingTail
+        prepareNotice.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for view in [prepareAI, prepareNotice] { prepareRow.addArrangedSubview(view) }
+        let footer = column([footerTitle, aiStatusRow, prepareRow, scheduleRow, footerButtons], spacing: 8, inset: 16)
         Washi.surface(footer)
         searchField.placeholderString = "会話を検索"
         searchField.setAccessibilityLabel("会話を検索")

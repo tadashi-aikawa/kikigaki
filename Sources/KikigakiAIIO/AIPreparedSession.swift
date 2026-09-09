@@ -19,14 +19,26 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
     /// 起動に使った設定の固定値。紐づけの等価性検証にこれを使う
     public let config: ResolvedAIConfig
     public let token: String
+    /// フックの置き場。会議のものではないので、仮の会議IDで作った `.kikigaki-context` の枝を使う。
+    /// 起動引数に焼き付くので、紐づけてもここは動かない。紐づけた会議はこの置き場を読みにいく
+    public let contextRoot: URL
+    public let contextMeetingID: UUID
     public var connection: AIHerdrConnection?
     public private(set) var bound: Binding?
 
     public init(id: UUID = UUID(), profileSlot: Int, profileName: String, startedAt: Date,
-                config: ResolvedAIConfig, token: String, connection: AIHerdrConnection? = nil, bound: Binding? = nil) {
+                config: ResolvedAIConfig, token: String, contextRoot: URL, contextMeetingID: UUID,
+                connection: AIHerdrConnection? = nil, bound: Binding? = nil) {
         self.id = id; self.profileSlot = profileSlot; self.profileName = profileName
         self.startedAt = startedAt; self.config = config; self.token = token
+        self.contextRoot = contextRoot; self.contextMeetingID = contextMeetingID
         self.connection = connection; self.bound = bound
+    }
+    /// この準備済みセッションのsession record。起動時のnotifyが指す先
+    public var sessionURL: URL {
+        contextRoot.appendingPathComponent(".kikigaki-context")
+            .appendingPathComponent(contextMeetingID.uuidString)
+            .appendingPathComponent("ai/sessions/1.json")
     }
 
     public var isUnbound: Bool { bound == nil }
@@ -58,6 +70,7 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, profileSlot = "profile_slot", profileName = "profile_name"
         case startedAt = "started_at", config, token, connection, bound
+        case contextRoot = "context_root", contextMeetingID = "context_meeting_id"
     }
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -67,6 +80,8 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
         startedAt = try values.decode(Date.self, forKey: .startedAt)
         config = try values.decode(ResolvedAIConfig.self, forKey: .config)
         token = try values.decode(String.self, forKey: .token)
+        contextRoot = try values.decode(URL.self, forKey: .contextRoot)
+        contextMeetingID = try values.decode(UUID.self, forKey: .contextMeetingID)
         connection = try values.decodeIfPresent(AIHerdrConnection.self, forKey: .connection)
         bound = try values.decodeIfPresent(Binding.self, forKey: .bound)
         try validate()

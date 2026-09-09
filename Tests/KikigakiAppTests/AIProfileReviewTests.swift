@@ -115,8 +115,9 @@ import KikigakiCore
 
         // 「議事録」には準備済みセッションがある想定。
         let items: [AIDestinationPicker.Item] = [
-            .init(slot: 1, name: "議事録", prepared: "Kikigaki 議事録抽出 · 13:05起動"),
-            .init(slot: 2, name: "相談", prepared: nil)]
+            .init(slot: 1, name: "議事録",
+                  prepared: [.init(id: UUID(), label: "Kikigaki 議事録抽出 · 13:05起動")]),
+            .init(slot: 2, name: "相談")]
         let ask = AIQuestionSheet(participant: "迅雷", parentNumber: nil, draft: "この段取りで抜けはありますか",
             voice: "", range: "対象: 3〜7行(14:05:20〜14:06:16) · 送信時に確定", tentative: false, canSubmit: true)
         ask.updateDestinations(items, selected: 1, participant: "迅雷")
@@ -158,7 +159,7 @@ import KikigakiCore
         // プロファイルが1つで準備済みも無い会議では、宛先の行そのものを出さない。
         let single = AIQuestionSheet(participant: "迅雷", parentNumber: nil, draft: "", voice: "",
             range: "追加の確定行なし", tentative: false, canSubmit: true)
-        single.updateDestinations([.init(slot: 1, name: "迅雷", prepared: nil)], selected: 1, participant: "迅雷")
+        single.updateDestinations([.init(slot: 1, name: "迅雷")], selected: 1, participant: "迅雷")
         if let output { try capture("profiles-sheet-single", single.window.contentView!, to: output) }
     }
 }

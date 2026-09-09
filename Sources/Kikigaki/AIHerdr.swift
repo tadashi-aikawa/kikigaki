@@ -43,7 +43,8 @@ struct AIHerdr: Sendable {
         let pane_id: String; let workspace_id: String
         let agent: String?; let agent_status: String?; let interactive_ready: Bool?
         let agent_session: Session?; let terminal_id: String?
-        let display_agent: String?; let cwd: String?; let terminal_title_stripped: String?
+        let display_agent: String?; let cwd: String?
+        let terminal_title: String?; let terminal_title_stripped: String?
     }
     private struct AgentReply: Decodable { let agent: Agent }
     private struct AgentList: Decodable { let agents: [Agent] }
@@ -87,9 +88,14 @@ struct AIHerdr: Sendable {
     }
     /// 稼働中のpane IDを列挙する。準備済みセッションの生存確認にだけ使い、
     /// 宛先の候補には使わない(利用者が手で起こしたペインへ繋ぐ案は取り下げた)。
-    func alivePaneIDs() async throws -> Set<String> {
-        Set(try await call(["agent", "list"], as: AgentList.self).agents
-            .map(\.pane_id).filter(Self.identifier))
+    func alivePaneIDs() async throws -> Set<String> { Set(try await panes().map(\.paneID)) }
+
+    /// 稼働中のペインと表題。表題はCLIがOSCで設定する値なので、表示のたびに引き直す。
+    /// `terminal_title` には状態記号が付くため、素の `terminal_title_stripped` を先に使う。
+    func panes() async throws -> [(paneID: String, title: String?)] {
+        try await call(["agent", "list"], as: AgentList.self).agents
+            .filter { Self.identifier($0.pane_id) }
+            .map { ($0.pane_id, $0.terminal_title_stripped ?? $0.terminal_title) }
     }
     func label(_ target: AIHerdrConnection, participant: String) async throws {
         _ = try await call(["pane", "report-metadata", target.paneID, "--source", "owlery", "--display-agent", participant], as: Empty.self)

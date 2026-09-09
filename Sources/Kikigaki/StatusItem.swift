@@ -8,6 +8,7 @@ final class StatusItem {
     private let statusMenuItem: NSMenuItem
     private let startStopItem: NSMenuItem
     private let pauseResumeItem: NSMenuItem
+    private let prepareAIItem: NSMenuItem
 
     // バンドル済みのアイコンを共有する。毎秒の経過更新でディスクから読み直さない。
     private static let owlIcon: NSImage? = {
@@ -24,6 +25,8 @@ final class StatusItem {
     var onShowWindow: (() -> Void)?
     var onOpenOutputDir: (() -> Void)?
     var onReloadConfig: (() -> Void)?
+    /// AIセッションの準備。待機中・録音中・一時停止中のいつでも押せる
+    var onPrepareAI: (() -> Void)?
 
     init() {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -36,10 +39,15 @@ final class StatusItem {
         statusMenuItem.isEnabled = false
         startStopItem = NSMenuItem(title: "", action: #selector(startStop), keyEquivalent: "")
         pauseResumeItem = NSMenuItem(title: "", action: #selector(pauseResume), keyEquivalent: "")
+        prepareAIItem = NSMenuItem(title: "AIセッションを準備…", action: #selector(prepareAI), keyEquivalent: "")
         startStopItem.target = self
         pauseResumeItem.target = self
+        prepareAIItem.target = self
+        prepareAIItem.isEnabled = false
 
         let menu = NSMenu()
+        // 有効・無効は自分で決める。自動判定だと target のある項目が常に押せてしまう。
+        menu.autoenablesItems = false
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
         let versionItem = NSMenuItem(title: "KIKIGAKI \(version ?? "0.0.0-development")", action: nil, keyEquivalent: "")
         versionItem.isEnabled = false
@@ -48,6 +56,8 @@ final class StatusItem {
         menu.addItem(.separator())
         menu.addItem(startStopItem)
         menu.addItem(pauseResumeItem)
+        menu.addItem(.separator())
+        menu.addItem(prepareAIItem)
         menu.addItem(.separator())
 
         let showItem = NSMenuItem(title: "書き起こしを表示", action: #selector(showWindow), keyEquivalent: "")
@@ -81,6 +91,10 @@ final class StatusItem {
     @objc private func showWindow() { onShowWindow?() }
     @objc private func openOutputDir() { onOpenOutputDir?() }
     @objc private func reloadConfig() { onReloadConfig?() }
+    @objc private func prepareAI() { onPrepareAI?() }
+
+    /// AI設定が無い・台帳が読めないときは押させない。
+    func setPrepareEnabled(_ enabled: Bool) { prepareAIItem.isEnabled = enabled }
 
     private static func icon(for state: RecordingState) -> NSImage? {
         // 待機中は採用ロゴ。動作中は録音・一時停止などの状態を優先する。

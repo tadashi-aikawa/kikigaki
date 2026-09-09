@@ -27,6 +27,9 @@ final class AIConversationController {
         var idleSince: Date?
         var hookBackgroundRunning = false
         var warning: String?
+        /// フック観測の置き場。準備済みセッションを引き継いだ枠は、起動時に焼き付いた
+        /// 仮の会議の置き場へ落ちるので、そちらを読む
+        var hookContext: (root: URL, meetingID: UUID)?
         var generation: Int { history.sessionGeneration }
         init(slot: Int, meetingID: UUID) throws {
             self.slot = slot
@@ -183,6 +186,29 @@ final class AIConversationController {
         try commit(next)
         onChange?()
         return request
+    }
+
+    /// 準備済みセッションをこの枠のチャネルへ引き継ぐ。**会議側の保存が成功してから**
+    /// 台帳へ `bound` を書くこと。逆順にすると、台帳では使用済みなのに会議側に接続が無い行が残る。
+    func adopt(_ prepared: AIPreparedSession, config: ResolvedAIConfig) async throws {
+        try register([config])
+        let channel = try channel(config.slot)
+        guard allowsSending, channel.session == nil, channel.connection == nil,
+              !channel.launchingAttempted else { throw AIHerdrError.notReady }
+        guard prepared.matches(config), let connection = prepared.connection else { throw AIError.mismatch }
+        // フック用トークンは準備時のものを引き継ぐ。起動引数へ焼き付いていて変えられない。
+        var record = AISessionRecord(schemaVersion: 1, meetingID: meetingID, generation: channel.generation,
+                                     provider: config.cli, token: prepared.token)
+        record.connection = connection
+        channel.session = record
+        channel.configuration = config
+        try files.write(AIJSON.encode(record), to: sessionParts(channel), replacing: false)
+        channel.connection = connection
+        channel.launchingAttempted = true; channel.inputAttempted = true
+        channel.hookContext = (prepared.contextRoot, prepared.contextMeetingID)
+        // 引き継いだ直後に生存を確かめる。失敗しても記録は残し、状態は切断として見せる。
+        try? await refreshConnection(slot: config.slot)
+        onChange?()
     }
 
     func connect(config: ResolvedAIConfig, label: String, executable: URL, arguments: [String], readinessTimeout: TimeInterval = 30) async throws {
@@ -365,33 +391,50 @@ final class AIConversationController {
         for channel in channels.values { channel.hookBackgroundRunning = false }
         let owners = channels.values.compactMap { channel in channel.session.map { (channel, $0) } }
         guard !owners.isEmpty else { return }
-        do {
-            let inbox = try files.directory(base + ["inbox"], create: false)
-            let names = try FileManager.default.contentsOfDirectory(atPath: inbox.path)
-            var identities: [Int: String] = [:]
-            for (channel, _) in owners {
-                if let identity = channel.connection?.sessionID ?? (try? AIJSON.decode(String.self,
-                    from: files.read(identityPath(channel), limit: 2048))) { identities[channel.slot] = identity }
-            }
-            var latest: [Int: AIHookObservation] = [:]
-            for name in names where name.hasPrefix("notify-") && name.hasSuffix(".json") {
-                do {
-                    let event = try AIJSON.decode(AIHookObservation.self, from: files.read(base + ["inbox", name], limit: AILimits.eventBytes))
-                    guard event.filename == name, event.meetingID == meetingID else { throw AIError.mismatch }
-                    // 持ち主は identity まで見て決める。`validate` は会議・世代・CLI種別しか比べないので、
-                    // 同じCLIで世代が並ぶ2枠があると、Bのイベントで先にAを選び、その後の
-                    // identity不一致で捨ててしまう(Claudeの背景処理中フラグが落ちる)。
-                    // 現世代のどのチャネルにも属さないものは、旧世代の診断か未接続チャネル宛て。
-                    // 壊れているとは限らないので不正には数えない。
-                    guard let owner = owners.first(where: { channel, session in
-                        (try? event.validate(session: session)) != nil
-                            && identities[channel.slot] == event.sessionID
-                    })?.0 else { continue }
-                    if latest[owner.slot] == nil || event.recordedAt > latest[owner.slot]!.recordedAt { latest[owner.slot] = event }
-                } catch { invalidInboxFiles.append(name) }
-            }
-            for (slot, event) in latest { channels[slot]?.hookBackgroundRunning = event.runningBackgroundTasks }
-        } catch { for channel in channels.values { channel.warning = "フック観測を確認できません" } }
+        // 受信箱は基本ひとつだが、準備済みセッションを引き継いだ枠だけは起動時の置き場に落ちる。
+        // 置き場ごとに束ねて、その中で持ち主を決める。
+        var groups: [String: (store: AIFileStore, meetingID: UUID, owners: [(Channel, AISessionRecord)])] = [:]
+        for owner in owners {
+            let context = owner.0.hookContext ?? (outputDirectory, meetingID)
+            let key = context.root.path + "\n" + context.meetingID.uuidString
+            groups[key, default: (AIFileStore(root: context.root), context.meetingID, [])].owners.append(owner)
+        }
+        for group in groups.values {
+            let base = [".kikigaki-context", group.meetingID.uuidString, "ai"]
+            do {
+                let inbox = try group.store.directory(base + ["inbox"], create: false)
+                let names = try FileManager.default.contentsOfDirectory(atPath: inbox.path)
+                var identities: [Int: String] = [:]
+                for (channel, _) in group.owners {
+                    if let identity = channel.connection?.sessionID ?? (try? AIJSON.decode(String.self,
+                        from: group.store.read(base + ["sessions", "\(channel.generation).identity.json"], limit: 2048))) {
+                        identities[channel.slot] = identity
+                    }
+                }
+                var latest: [Int: AIHookObservation] = [:]
+                for name in names where name.hasPrefix("notify-") && name.hasSuffix(".json") {
+                    do {
+                        let event = try AIJSON.decode(AIHookObservation.self,
+                            from: group.store.read(base + ["inbox", name], limit: AILimits.eventBytes))
+                        guard event.filename == name, event.meetingID == group.meetingID else { throw AIError.mismatch }
+                        // 持ち主は identity まで見て決める。`validate` は会議・世代・CLI種別しか比べないので、
+                        // 同じCLIで世代が並ぶ2枠があると、Bのイベントで先にAを選び、その後の
+                        // identity不一致で捨ててしまう(Claudeの背景処理中フラグが落ちる)。
+                        // 現世代のどのチャネルにも属さないものは、旧世代の診断か未接続チャネル宛て。
+                        // 壊れているとは限らないので不正には数えない。
+                        guard let owner = group.owners.first(where: { channel, session in
+                            let expected = channel.hookContext == nil ? session
+                                : AISessionRecord(schemaVersion: 1, meetingID: group.meetingID, generation: channel.generation,
+                                                  provider: session.provider, token: session.token)
+                            return (try? event.validate(session: expected)) != nil
+                                && identities[channel.slot] == event.sessionID
+                        })?.0 else { continue }
+                        if latest[owner.slot] == nil || event.recordedAt > latest[owner.slot]!.recordedAt { latest[owner.slot] = event }
+                    } catch { invalidInboxFiles.append(name) }
+                }
+                for (slot, event) in latest { channels[slot]?.hookBackgroundRunning = event.runningBackgroundTasks }
+            } catch { for (channel, _) in group.owners { channel.warning = "フック観測を確認できません" } }
+        }
     }
 
     private func pollAll() { for slot in channels.keys { poll(slot) } }
@@ -434,11 +477,6 @@ final class AIConversationController {
     private func launchPath(_ channel: Channel) -> [String] {
         var parts = sessionParts(channel)
         parts[parts.count - 1] = "\(channel.generation).launch.json"
-        return parts
-    }
-    private func identityPath(_ channel: Channel) -> [String] {
-        var parts = sessionParts(channel)
-        parts[parts.count - 1] = "\(channel.generation).identity.json"
         return parts
     }
     private func path(_ parts: [String]) -> URL { (base + parts).reduce(outputDirectory) { $0.appendingPathComponent($1) } }

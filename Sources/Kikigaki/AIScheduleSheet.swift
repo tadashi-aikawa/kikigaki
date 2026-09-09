@@ -8,6 +8,8 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
     var onCancel: (() -> Void)?
     var onDraft: ((String) -> Void)?
     var onDestination: ((Int) -> Void)?
+    /// 準備済みセッションを選んだ。呼び手が紐づけてから一覧を差し替える
+    var onPrepared: ((Int, UUID) -> Void)?
     private let destination = AIDestinationPicker()
     private let title = Washi.label("", size: 17, weight: .semibold)
     private let editor = AIQuestionEditor()
@@ -25,6 +27,7 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         title.stringValue = "\(participant)へ 自動送信"
         destination.onChange = { [weak self] in self?.onDestination?($0) }
+        destination.onPrepared = { [weak self] slot, id in self?.onPrepared?(slot, id) }
         editor.placeholder = "毎回送る依頼を書いてください"
         editor.onSubmit = { [weak self] in self?.start() }
         editor.onCancel = { [weak self] in self?.cancel() }

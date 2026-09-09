@@ -18,6 +18,7 @@ import KikigakiAIIO
                          id: UUID = UUID()) -> AIPreparedSession {
         AIPreparedSession(id: id, profileSlot: config.slot, profileName: config.name,
             startedAt: base.addingTimeInterval(offset), config: config, token: "hook-secret",
+            contextRoot: URL(fileURLWithPath: "/out"), contextMeetingID: UUID(),
             connection: .init(workspaceID: String(pane.prefix(2)), paneID: pane, provider: config.cli))
     }
 
@@ -148,14 +149,17 @@ import KikigakiAIIO
     @Test func 枠と紐づけ先の食い違いを拒否する() throws {
         let config = try minutes()
         let mismatched = AIPreparedSession(profileSlot: 2, profileName: "議事録", startedAt: base,
-            config: config, token: "t", connection: nil)
+            config: config, token: "t", contextRoot: URL(fileURLWithPath: "/out"), contextMeetingID: UUID(),
+            connection: nil)
         // config.slot は1なのに枠が2。
         #expect(throws: AIError.self) { try mismatched.validate() }
         let wrongBinding = AIPreparedSession(profileSlot: 1, profileName: "議事録", startedAt: base,
-            config: config, token: "t", connection: nil, bound: .init(meetingID: UUID(), profileSlot: 3))
+            config: config, token: "t", contextRoot: URL(fileURLWithPath: "/out"), contextMeetingID: UUID(),
+            connection: nil, bound: .init(meetingID: UUID(), profileSlot: 3))
         #expect(throws: AIError.self) { try wrongBinding.validate() }
         let wrongProvider = AIPreparedSession(profileSlot: 1, profileName: "議事録", startedAt: base,
-            config: config, token: "t", connection: .init(workspaceID: "w", paneID: "w:p", provider: .codex))
+            config: config, token: "t", contextRoot: URL(fileURLWithPath: "/out"), contextMeetingID: UUID(),
+            connection: .init(workspaceID: "w", paneID: "w:p", provider: .codex))
         #expect(throws: AIError.mismatch) { try wrongProvider.validate() }
     }
 }

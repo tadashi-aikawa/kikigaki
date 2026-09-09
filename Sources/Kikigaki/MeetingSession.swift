@@ -83,6 +83,9 @@ final class MeetingSession {
     var automaticHelper: URL? = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
     /// replayだけで使う間隔の上書き。分単位の設定値では実行時間に収まらない
     var automaticIntervalOverride: Double?
+    /// 録音開始時の紐づけシートを出す間、`autoStart` の開始を保留する。
+    /// 先に始めると、紐づける前の新しいセッションへ1回目が飛んでしまう
+    var deferAutomaticStart = false
     private var aiScheduleWarning: String?
     /// 開いている手動シートが持つ枠。抑制も譲りもこの枠だけに効かせる
     private var manualAISheetSlot: Int?
@@ -119,9 +122,67 @@ final class MeetingSession {
         return meetingAIProfiles.first { $0.slot == slot }
     }
 
-    /// 宛先ポップアップへ並べる項目。準備済みセッションの表示は段7で足す。
+    /// 準備済みセッションの表示と紐づけを担う台帳。アプリが差し込む
+    weak var preparedStore: AIPreparedStore?
+
+    /// 宛先ポップアップへ並べる項目。未紐づけの準備済みはプロファイルの下へ字下げして並べる。
     var aiDestinationItems: [AIDestinationPicker.Item] {
-        meetingAIProfiles.map { .init(slot: $0.slot, name: $0.name, prepared: nil) }
+        meetingAIProfiles.map { profile in
+            let prepared = (preparedStore?.available(for: profile) ?? []).map {
+                AIDestinationPicker.Prepared(id: $0.id, label: preparedStore?.label($0, includingName: false) ?? "")
+            }
+            return .init(slot: profile.slot, name: profile.name, prepared: prepared,
+                         bound: boundPrepared[profile.slot])
+        }
+    }
+
+    /// 会議へ紐づけた準備済みセッション。宛先ポップアップの閉じた表題に出す
+    private(set) var boundPrepared: [Int: String] = [:]
+
+    /// 台帳が変わったので表示を作り直す。表題は台帳へ持たないので、出すたびに引き直す
+    func refreshPrepared() { emit() }
+
+    /// フッターの一行。「準備済み: 議事録 13:05 · 相談 13:10」。3件を超えたら畳む。
+    /// 台帳が読めないときは、1件も無い状態と区別して理由を出す。
+    private var preparedSummary: String {
+        guard let store = preparedStore else { return "" }
+        guard store.isUsable else { return store.warningText }
+        let rows = store.unbound
+        guard !rows.isEmpty else { return "" }
+        var shown: [String] = []
+        for row in rows.prefix(3) {
+            let time: String = AIPreparedStore.clock.string(from: row.startedAt)
+            shown.append(row.profileName + " " + time)
+        }
+        let rest: Int = rows.count - shown.count
+        let tail: String = rest > 0 ? " ほか\(rest)件" : ""
+        return "準備済み: " + shown.joined(separator: " · ") + tail
+    }
+    private var preparedDetail: String {
+        guard let store = preparedStore, store.isUsable else { return "" }
+        return store.unbound.map { store.label($0) }.joined(separator: "\n")
+    }
+
+    /// 準備済みセッションをこの会議のチャネルへ引き継ぐ。
+    /// **会議側の保存が成功してから**台帳へ `bound` を書く。逆順にすると、台帳では使用済みなのに
+    /// 会議側に接続が無い行が残る。
+    @discardableResult
+    func adoptPrepared(_ id: UUID, profile: ResolvedAIConfig) async -> Bool {
+        guard let store = preparedStore, let aiStore, let url = snapshot.markdownURL,
+              let prepared = store.unbound.first(where: { $0.id == id }) else { return false }
+        do {
+            let record = try aiStore.begin(meetingID: handoff.meetingID, markdownURL: url, profiles: meetingAIProfiles)
+            try await record.controller.adopt(prepared, config: profile)
+            try store.bind(id, to: handoff.meetingID, config: profile)
+            boundPrepared[profile.slot] = store.label(prepared, includingName: false)
+            emit()
+            return true
+        } catch {
+            aiWarning = "準備済みAIセッションを引き継げません"
+            log("準備済みセッションの引き継ぎに失敗: \(error)")
+            emit()
+            return false
+        }
     }
 
     init(config: ResolvedConfig, models: @escaping () async throws -> SortformerModelStore.Loaded, log: @escaping (String) -> Void, aiStore: AIRecordStore? = nil) {
@@ -425,22 +486,38 @@ final class MeetingSession {
                 participants[profile.slot] = profile.participantName
                 if controller?.connection(slot: profile.slot) != nil { openablePanes.insert(profile.slot) }
             }
-            snapshot.ai = AIViewState(conversation: controller?.conversation,
-                // ホットキーは1つ目のプロファイルのものだけを使う。宛先を選び直しても変わらない。
-                hotkey: meetingAIProfiles.first?.hotkey ?? config.hotkey,
-                participant: config.participantName, connection: connections[slot] ?? .unknown,
-                warning: aiWarning ?? aiRecord?.saveWarning ?? controller?.warning, progress: aiProgresses[slot],
-                unconfirmed: Set(controller?.conversation.questions.filter { controller!.isReturnUnconfirmed($0) }.map { $0.request.id } ?? []),
-                canSubmit: snapshot.canShare && aiTasks[slot] == nil && (controller?.canSend(slot: slot) ?? true),
-                submissionID: aiCompleted, draft: aiDraft,
-                canOpenPane: controller?.connection(slot: slot) != nil,
-                canRecreate: controller != nil && aiTasks[slot] == nil
-                    && (aiWarning != nil || connections[slot] == .disconnected),
-                saveFailed: aiRecord?.saveWarning != nil, generation: generations[slot] ?? 1,
-                profiles: meetingAIProfiles.map { ($0.slot, $0.name) }, selectedSlot: slot,
-                defaultSlot: controller?.defaultSlot ?? 1, connections: connections, generations: generations,
-                canSubmits: canSubmits, progresses: progresses,
-                participants: participants, openablePanes: openablePanes)
+            // 引数が多すぎると型検査が通らなくなるので、組み立ててから渡す。
+            var state = AIViewState()
+            state.conversation = controller?.conversation
+            // ホットキーは1つ目のプロファイルのものだけを使う。宛先を選び直しても変わらない。
+            state.hotkey = meetingAIProfiles.first?.hotkey ?? config.hotkey
+            state.participant = config.participantName
+            state.connection = connections[slot] ?? .unknown
+            state.warning = aiWarning ?? aiRecord?.saveWarning ?? controller?.warning
+            state.progress = aiProgresses[slot]
+            let unconfirmed = controller?.conversation.questions.filter { controller!.isReturnUnconfirmed($0) } ?? []
+            state.unconfirmed = Set(unconfirmed.map { $0.request.id })
+            state.canSubmit = canSubmits[slot] ?? true
+            state.submissionID = aiCompleted
+            state.draft = aiDraft
+            state.canOpenPane = openablePanes.contains(slot)
+            state.canRecreate = controller != nil && aiTasks[slot] == nil
+                && (aiWarning != nil || connections[slot] == .disconnected)
+            state.saveFailed = aiRecord?.saveWarning != nil
+            state.generation = generations[slot] ?? 1
+            state.canPrepare = preparedStore?.isUsable ?? false
+            state.preparedSummary = preparedSummary
+            state.preparedToolTip = preparedDetail
+            state.profiles = meetingAIProfiles.map { ($0.slot, $0.name) }
+            state.selectedSlot = slot
+            state.defaultSlot = controller?.defaultSlot ?? 1
+            state.connections = connections
+            state.generations = generations
+            state.canSubmits = canSubmits
+            state.progresses = progresses
+            state.participants = participants
+            state.openablePanes = openablePanes
+            snapshot.ai = state
         } else { snapshot.ai = nil }
         onChange?(snapshot)
     }
@@ -741,6 +818,7 @@ extension MeetingSession {
     /// `autoStart` のプロファイルがあれば、録音開始と同時に自動送信を始める。
     /// 設定だけで決まる非対話の開始なので、接続先を解決できなければ理由を出して開始しない。
     func startAutomaticSchedule(now: Date = Date()) {
+        guard !deferAutomaticStart else { return }
         guard let profile = meetingAIProfiles.first(where: \.autoStart), let helper = automaticHelper else { return }
         do {
             let options = try AIScheduleOptions(prompt: profile.autoPrompt,

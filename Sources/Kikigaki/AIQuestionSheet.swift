@@ -41,6 +41,8 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     var onDraft: ((String) -> Void)?
     var onWorkAllowedChange: ((Bool) -> Void)?
     var onDestination: ((Int) -> Void)?
+    /// 準備済みセッションを選んだ。呼び手が紐づけてから一覧を差し替える
+    var onPrepared: ((Int, UUID) -> Void)?
     private let destination = AIDestinationPicker()
     private let title = Washi.label("", size: 17, weight: .semibold)
     private let editor = AIQuestionEditor()
@@ -67,6 +69,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         title.stringValue = parentNumber.map { "#\($0)への返答" } ?? "\(participant)へ"
         destination.onChange = { [weak self] in self?.onDestination?($0) }
+        destination.onPrepared = { [weak self] slot, id in self?.onPrepared?(slot, id) }
         self.range.stringValue = range
         full.target = self; full.action = #selector(updateRange)
         work.state = workAllowed ? .on : .off

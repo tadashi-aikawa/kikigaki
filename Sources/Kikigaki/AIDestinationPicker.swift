@@ -5,14 +5,22 @@ import KikigakiCore
 /// そのプロファイルに未紐づけの準備済みセッションがあれば行に添えて示す。
 @MainActor
 final class AIDestinationPicker: NSStackView {
-    /// 1行ぶんの表示。`prepared` は名前に続けて出す「Kikigaki 議事録抽出 · 13:05起動」の部分で、
-    /// ペインの表題が取れないときは「13:05起動」だけになる。組み立ては呼び手が行う
+    /// 未紐づけの準備済みセッション。プロファイルの下へ字下げして並べる
+    struct Prepared: Equatable {
+        let id: UUID
+        /// 「Kikigaki 議事録抽出 · 13:05起動」。表題が取れないときは「13:05起動」だけ
+        let label: String
+    }
+    /// 1行ぶんの表示。`bound` は紐づけ済みのときに閉じた表題へ添える文字列
     struct Item: Equatable {
         let slot: Int
         let name: String
-        var prepared: String?
+        var prepared: [Prepared] = []
+        var bound: String?
     }
     var onChange: ((Int) -> Void)?
+    /// 準備済みを選んだ。呼び手が紐づけてから一覧を差し替える
+    var onPrepared: ((Int, UUID) -> Void)?
     private let popup = NSPopUpButton()
     private let label = Washi.label("宛先", size: 13)
     private(set) var items: [Item] = []
@@ -32,12 +40,24 @@ final class AIDestinationPicker: NSStackView {
         self.items = items; self.selected = selected
         popup.removeAllItems()
         for item in items {
-            popup.addItem(withTitle: item.prepared.map { "\(item.name) · \($0)" } ?? item.name)
-            popup.lastItem?.representedObject = item.slot
+            // 閉じた表題は「議事録 · 表題 · 13:05起動」。紐づけたときだけ添える。
+            popup.addItem(withTitle: item.bound.map { "\(item.name) · \($0)" } ?? item.name)
+            popup.lastItem?.representedObject = Choice.profile(item.slot)
+            for prepared in item.prepared {
+                popup.addItem(withTitle: "準備済み " + prepared.label)
+                popup.lastItem?.representedObject = Choice.prepared(item.slot, prepared.id)
+                popup.lastItem?.indentationLevel = 1
+            }
         }
-        let index = popup.itemArray.firstIndex { ($0.representedObject as? Int) == selected }
+        let index = popup.itemArray.firstIndex { ($0.representedObject as? Choice) == .profile(selected) }
         popup.selectItem(at: index ?? 0)
-        isHidden = items.count <= 1 && items.allSatisfy { $0.prepared == nil }
+        isHidden = items.count <= 1 && items.allSatisfy { $0.prepared.isEmpty }
+    }
+
+    /// ポップアップの行が指すもの。準備済みは選んだ時点で紐づける
+    private enum Choice: Equatable {
+        case profile(Int)
+        case prepared(Int, UUID)
     }
 
     /// 送信を始めたら操作させない。無効時は面を足さず、既にある枠のまま色を抜く。
@@ -47,8 +67,10 @@ final class AIDestinationPicker: NSStackView {
     }
 
     @objc private func changed() {
-        guard let slot = popup.selectedItem?.representedObject as? Int else { return }
-        selected = slot
-        onChange?(slot)
+        guard let choice = popup.selectedItem?.representedObject as? Choice else { return }
+        switch choice {
+        case .profile(let slot): selected = slot; onChange?(slot)
+        case .prepared(let slot, let id): selected = slot; onPrepared?(slot, id)
+        }
     }
 }

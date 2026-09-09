@@ -432,16 +432,16 @@ import KikigakiAIIO
         NSApplication.shared.setActivationPolicy(.prohibited)
         let sheet = AIQuestionSheet(participant: "議事録", parentNumber: nil, draft: "依頼",
             voice: "", range: "対象なし", tentative: false, canSubmit: true)
-        sheet.updateDestinations([.init(slot: 1, name: "議事録", prepared: nil),
-                                  .init(slot: 2, name: "相談", prepared: nil)], selected: 1, participant: "議事録")
+        sheet.updateDestinations([.init(slot: 1, name: "議事録"),
+                                  .init(slot: 2, name: "相談")], selected: 1, participant: "議事録")
         #expect(sheet.activeSlot == nil && sheet.owningSlot == 1)
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let send = try #require(descendants(sheet.window.contentView!).compactMap { $0 as? NSButton }.first { $0.title == "送信 ⏎" })
         send.performClick(nil)
         #expect(sheet.activeSlot == 1 && sheet.owningSlot == 1)
         // 送信を始めた後の差し替えは無視する。宛先のポップアップも操作させない。
-        sheet.updateDestinations([.init(slot: 1, name: "議事録", prepared: nil),
-                                  .init(slot: 2, name: "相談", prepared: nil)], selected: 2, participant: "相談")
+        sheet.updateDestinations([.init(slot: 1, name: "議事録"),
+                                  .init(slot: 2, name: "相談")], selected: 2, participant: "相談")
         #expect(sheet.owningSlot == 1)
         let popup = try #require(descendants(sheet.window.contentView!).compactMap { $0 as? NSPopUpButton }.first)
         #expect(!popup.isEnabled)

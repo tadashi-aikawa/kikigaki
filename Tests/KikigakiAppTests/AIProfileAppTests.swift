@@ -117,13 +117,14 @@ import KikigakiCore
     @Test func 宛先ポップアップは候補が2つ以上のときだけ出す() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let picker = AIDestinationPicker()
-        picker.update(items: [.init(slot: 1, name: "迅雷", prepared: nil)], selected: 1)
+        picker.update(items: [.init(slot: 1, name: "迅雷")], selected: 1)
         #expect(picker.isHidden)
-        picker.update(items: [.init(slot: 1, name: "議事録", prepared: nil),
-                              .init(slot: 2, name: "相談", prepared: nil)], selected: 2)
+        picker.update(items: [.init(slot: 1, name: "議事録"),
+                              .init(slot: 2, name: "相談")], selected: 2)
         #expect(!picker.isHidden && picker.selected == 2)
         // 1つしか無くても、準備済みがあるなら選ぶ意味がある。
-        picker.update(items: [.init(slot: 1, name: "議事録", prepared: "Kikigaki 議事録抽出 · 13:05起動")], selected: 1)
+        picker.update(items: [.init(slot: 1, name: "議事録",
+                                    prepared: [.init(id: UUID(), label: "Kikigaki 議事録抽出 · 13:05起動")])], selected: 1)
         #expect(!picker.isHidden)
     }
 }
