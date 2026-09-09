@@ -37,7 +37,33 @@ final class AIPreparedStore {
         onChange?()
     }
 
-    private func save() throws { try files.write(AIJSON.encode(ledger), to: [Self.fileName]) }
+    /// 台帳を保存してから実体を消す。削除失敗は次の一覧更新でも再試行する。
+    private var pendingCleanup: [UUID: AIPreparedSession] = [:]
+    private func remove(_ ids: [UUID]) throws {
+        let removed = ledger.sessions.filter { ids.contains($0.id) }
+        guard removed.allSatisfy(\.isUnbound) else { throw AIError.conflict }
+        var next = ledger
+        for id in ids { try next.discard(id) }
+        try files.write(AIJSON.encode(next), to: [Self.fileName])
+        ledger = next
+        for entry in removed { pendingCleanup[entry.id] = entry }
+        cleanup()
+    }
+
+    private func cleanup() {
+        for (id, entry) in pendingCleanup {
+            do {
+                let parts = [".kikigaki-context", entry.contextMeetingID.uuidString]
+                let target = parts.reduce(entry.contextRoot) { $0.appendingPathComponent($1) }
+                if FileManager.default.fileExists(atPath: target.path) {
+                    let directory = try AIFileStore(root: entry.contextRoot).directory(parts, create: false)
+                    try FileManager.default.removeItem(at: directory)
+                }
+                pendingCleanup[id] = nil
+            } catch { warning = "準備済みAIセッションの置き場を削除できません" }
+        }
+        if pendingCleanup.isEmpty, warning == "準備済みAIセッションの置き場を削除できません" { warning = nil }
+    }
 
     // MARK: - 一覧
 
@@ -67,6 +93,7 @@ final class AIPreparedStore {
 
     /// 表題と生存を引き直す。消えていた未紐づけは落とす。herdrへ繋がらないときは落とさない。
     func refresh() async {
+        cleanup()
         guard let herdr = try? makeHerdr() else { return }
         // 引けなければ何も落とさない。消えたことと、herdrへ繋がらないことを混同しない。
         guard let panes = try? await herdr.panes() else {
@@ -74,8 +101,12 @@ final class AIPreparedStore {
         }
         if warning == "herdrへ繋がらないため、準備済みの状態を確認できません" { warning = nil }
         titles = panes.reduce(into: [:]) { $0[$1.paneID] = $1.title }
-        let removed = ledger.removeMissing(alivePaneIDs: Set(panes.map(\.paneID)))
-        if !removed.isEmpty { try? save() }
+        var next = ledger
+        let removed = next.removeMissing(alivePaneIDs: Set(panes.map(\.paneID)))
+        if !removed.isEmpty {
+            do { try remove(removed) }
+            catch { warning = "準備済みAIセッションを破棄できません" }
+        }
         onChange?()
     }
 
@@ -99,6 +130,7 @@ final class AIPreparedStore {
             let record = AISessionRecord(meetingID: context, generation: 1, provider: profile.cli, token: session.token)
             let store = AIFileStore(root: outputDirectory)
             let base = [".kikigaki-context", context.uuidString, "ai"]
+            _ = try store.directory(base + ["inbox"])
             try store.write(AIJSON.encode(record), to: base + ["sessions", "1.json"], replacing: false)
             let launch = try AILaunchConfiguration(config: profile, helper: helper, outputDirectory: outputDirectory,
                 meetingID: context, sessionURL: session.sessionURL, generation: 1, token: session.token,
@@ -161,10 +193,8 @@ final class AIPreparedStore {
 
     func discard(_ id: UUID) {
         do {
-            var next = ledger
-            try next.discard(id)
-            try files.write(AIJSON.encode(next), to: [Self.fileName])
-            ledger = next; warning = nil
+            warning = nil
+            try remove([id])
         } catch { warning = "準備済みAIセッションを破棄できません" }
         onChange?()
     }

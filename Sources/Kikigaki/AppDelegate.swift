@@ -174,6 +174,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var replayDestinationPending = false
     init(replayDebug: ReplayDebugOptions = .init()) { self.replayDebug = replayDebug; super.init() }
 
+    convenience init(testingSession: MeetingSession, config: ResolvedConfig, preparedStore: AIPreparedStore) {
+        self.init()
+        self.session = testingSession; self.config = config; self.preparedStore = preparedStore
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = ApplicationMenu.make()
         let config: ResolvedConfig
@@ -555,10 +560,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ///     選び直しでは、候補が尽きても利用者に選ばせる。黙って新規起動へ進めない
     func attachChoices(slots: Set<Int>? = nil, includingEmpty: Bool = false) -> [AIAttachSheet.Choice] {
         guard replayURL == nil, let config, let preparedStore, preparedStore.isUsable else { return [] }
-        return AIAttachSheet.choices(profiles: config.aiProfiles.map { (slot: $0.slot, name: $0.name) },
+        // 開始前は次の録音の設定。開始後の選び直しはadoptと同じ会議固定値で判定する。
+        let active = session.flatMap { $0.snapshot.state == .recording || $0.snapshot.state == .paused ? $0 : nil }
+        let profiles = active?.meetingAIProfiles ?? config.aiProfiles
+        let outputDirectory = active?.aiContextRoot ?? config.outputDir
+        return AIAttachSheet.choices(profiles: profiles.map { (slot: $0.slot, name: $0.name) },
                                      slots: slots, includingEmpty: includingEmpty) { slot in
-            guard let profile = config.aiProfiles.first(where: { $0.slot == slot }) else { return [] }
-            return preparedStore.available(for: profile, contextRoot: config.outputDir)
+            guard let profile = profiles.first(where: { $0.slot == slot }) else { return [] }
+            return preparedStore.available(for: profile, contextRoot: outputDirectory)
                 .map { ($0.id, preparedStore.label($0, includingName: false)) }
         }
     }

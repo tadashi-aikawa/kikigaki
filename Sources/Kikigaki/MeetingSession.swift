@@ -85,7 +85,9 @@ final class MeetingSession {
     var automaticIntervalOverride: Double?
     /// 録音開始時の紐づけシートを出す間、`autoStart` の開始を保留する。
     /// 先に始めると、紐づける前の新しいセッションへ1回目が飛んでしまう
-    var deferAutomaticStart = false
+    var deferAutomaticStart = false {
+        didSet { if oldValue != deferAutomaticStart { emit() } }
+    }
     private var aiScheduleWarning: String?
     /// 開いている手動シートが持つ枠。抑制も譲りもこの枠だけに効かせる
     private var manualAISheetSlot: Int?
@@ -657,6 +659,7 @@ final class MeetingSession {
                 generations[profile.slot] = controller?.generation(slot: profile.slot) ?? 1
                 // 同じ枠で準備を起こしている間は送らせない。別の枠は止めない。
                 canSubmits[profile.slot] = snapshot.canShare && aiTasks[profile.slot] == nil
+                    && !deferAutomaticStart
                     && !bindingSlots.contains(profile.slot)
                     && preparedStore?.launching.contains(profile.slot) != true
                     && (controller?.canSend(slot: profile.slot) ?? true)
@@ -792,7 +795,7 @@ final class MeetingSession {
         }
         let selected = parentSlot.flatMap { slot in meetingAIProfiles.first { $0.slot == slot } }
             ?? profile ?? (trigger == .scheduled ? aiScheduleConfiguration : meetingAI)
-        guard snapshot.canShare, let config = selected, aiTasks[config.slot] == nil,
+        guard snapshot.canShare, !deferAutomaticStart, let config = selected, aiTasks[config.slot] == nil,
               // 同じ枠の準備を起こしている最中は送らない。起動と送信が同じ枠で重なると、
               // どちらの接続が正本か決まらなくなる。
               preparedStore?.launching.contains(config.slot) != true, !bindingSlots.contains(config.slot),

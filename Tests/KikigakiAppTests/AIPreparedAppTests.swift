@@ -64,6 +64,118 @@ import KikigakiAIIO
         if let task = session.submissionTaskForTesting(slot: profile.slot) { await task.value }
     }
 
+    @Test func 準備側の通知がまだ無くても紐づけ直後の走査は警告しない() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let entry = try #require(prepared.unbound.first)
+        #expect(await session.adoptPrepared(entry.id, profile: list[0]))
+        let controller = try #require(session.aiRecord?.controller)
+        controller.scan()
+        #expect(controller.warning == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func 台帳から外した未紐づけの置き場も消す(ペイン消失: Bool) async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let entry = try #require(prepared.unbound.first)
+        let context = root.appendingPathComponent(".kikigaki-context").appendingPathComponent(entry.contextMeetingID.uuidString)
+        #expect(FileManager.default.fileExists(atPath: entry.sessionURL.path))
+        if ペイン消失 {
+            await fake.removePane(try #require(entry.connection?.paneID))
+            await prepared.refresh()
+        } else { prepared.discard(entry.id) }
+        #expect(prepared.ledger.sessions.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: context.path))
+        let reloaded = AIPreparedStore(directory: root)
+        reloaded.load()
+        #expect(reloaded.ledger.sessions.isEmpty)
+    }
+
+    @Test func 紐づけシートで選択中は全枠の手動送信を止める() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        session.deferAutomaticStart = true
+        session.refreshPrepared()
+        for profile in list {
+            #expect(session.snapshot.ai?.canSubmit(slot: profile.slot) == false)
+            session.submitAI(question: "質問", full: false, parent: nil,
+                             helper: URL(fileURLWithPath: "/bin/echo"), profile: profile)
+            #expect(session.submissionTaskForTesting(slot: profile.slot) == nil)
+        }
+        // 旧実装で始まったタスクも残さず回収する。
+        await session.abandon()
+        let resumed = self.session(root, profiles: list, fake: fake)
+        resumed.deferAutomaticStart = true
+        resumed.deferAutomaticStart = false
+        resumed.refreshPrepared()
+        #expect(list.allSatisfy { resumed.snapshot.ai?.canSubmit(slot: $0.slot) == true })
+    }
+
+    @Test(arguments: [false, true])
+    func 台帳保存に失敗したら未紐づけも置き場も残す(ペイン消失: Bool) async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let entry = try #require(prepared.unbound.first)
+        // 台帳だけを安全なファイルではなくして、保存を拒否させる。
+        try FileManager.default.setAttributes([.posixPermissions: 0o644],
+                                             ofItemAtPath: root.appendingPathComponent("ai-prepared.json").path)
+        if ペイン消失 {
+            await fake.removePane(try #require(entry.connection?.paneID))
+            await prepared.refresh()
+        } else { prepared.discard(entry.id) }
+        #expect(prepared.warning != nil)
+        #expect(prepared.unbound.map(\.id) == [entry.id])
+        #expect(FileManager.default.fileExists(atPath: entry.sessionURL.path))
+    }
+
+    @Test func 紐づけ済みはペイン消失や直接の破棄でも置き場を消さない() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let entry = try #require(prepared.unbound.first)
+        #expect(await session.adoptPrepared(entry.id, profile: list[0]))
+        await fake.removePane(try #require(entry.connection?.paneID))
+        await prepared.refresh()
+        prepared.discard(entry.id)
+        #expect(prepared.ledger.sessions.map(\.id) == [entry.id])
+        #expect(FileManager.default.fileExists(atPath: entry.sessionURL.path))
+    }
+
+    @Test func 選び直す候補も会議に固定した保存先を使う() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let entry = try #require(prepared.unbound.first)
+        var changed = ResolvedConfig(config: KikigakiConfig(), home: root)
+        changed.aiProfiles = list
+        changed.outputDir = root.appendingPathComponent("next-meeting")
+        session.update(config: changed)
+        let app = AppDelegate(testingSession: session, config: changed, preparedStore: prepared)
+        let choices = app.attachChoices(slots: [1], includingEmpty: true)
+        #expect(choices.first?.prepared.map(\.id) == [entry.id])
+        #expect(await session.adoptPrepared(entry.id, profile: list[0]))
+        // 次の録音の候補は、終了した会議の保存先へ固定しない。
+        await session.abandon()
+        await prepare(prepared, list[0], root: changed.outputDir)
+        let next = try #require(prepared.available(for: list[0], contextRoot: changed.outputDir).first)
+        #expect(app.attachChoices().first?.prepared.map(\.id) == [next.id])
+    }
+
     @Test func 未作成の保存先でも録音前に準備して許可先を作る() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let output = root.appendingPathComponent("new/meetings")
