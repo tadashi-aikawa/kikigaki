@@ -869,6 +869,7 @@ final class MeetingSession {
                 if let request, aiStore.records[meetingID]?.controller.conversation.questions.first(where: { $0.request.id == request.id })?.state == .prepared {
                     try? aiStore.records[meetingID]?.controller.fail(request.id, reason: "入力前に停止しました。接続先と設定を確認してください")
                 }
+                log("AI送信に失敗(slot \(slot)): \(error)")
                 if meetingID == handoff.meetingID { aiWarning = "送信を完了できません。herdrのペインと設定を確認してください" }
             }
         }

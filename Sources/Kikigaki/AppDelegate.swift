@@ -700,6 +700,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Self.log("replay AI質問\(nextDebugQuestion): 指定\(question.seconds)秒、音声\(snapshot.elapsed)秒、宛先\(target?.name ?? "-")で送信開始")
         let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
         session.submitAI(question: question.text, full: false, parent: nil, helper: helper, profile: target)
+        // 入口で弾かれると何も起きない。始まったかどうかを残す。
+        Self.log("replay AI質問\(nextDebugQuestion): 送信タスク開始 \(session.isAIBusy(slot: target?.slot ?? 1))")
     }
     private func performReplayRename() {
         guard replayHolding, !debugRenamed, let rename = replayDebug.rename, let session else { return }
