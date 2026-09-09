@@ -96,8 +96,12 @@ public struct ResolvedConfig: Equatable, Sendable {
             }
             return speaker
         }
-        aiProfiles = (config.ai?.profiles ?? []).enumerated().map {
-            ResolvedAIConfig(config: $1, home: home, slot: $0 + 1)
+        // herdrCommandは共通設定。省略したプロファイルは先頭の値を引き継ぐ。
+        let sharedHerdr = config.ai?.profiles.first?.herdrCommand
+        aiProfiles = (config.ai?.profiles ?? []).enumerated().map { index, profile in
+            var inherited = profile
+            if inherited.herdrCommand == nil { inherited.herdrCommand = sharedHerdr }
+            return ResolvedAIConfig(config: inherited, home: home, slot: index + 1)
         }
     }
 

@@ -99,6 +99,15 @@ struct AIViewState {
     /// 枠ごとの接続状態と現世代。印は自分を送った枠のものを見る
     var connections: [Int: AIConnectionStatus] = [:]
     var generations: [Int: Int] = [:]
+    /// 枠ごとの送信可否と進捗。確認への返答シートは親の枠のものを見る
+    var canSubmits: [Int: Bool] = [:]
+    var progresses: [Int: String] = [:]
+    var participants: [Int: String] = [:]
+    var openablePanes: Set<Int> = []
+    func canSubmit(slot: Int) -> Bool { canSubmits[slot] ?? canSubmit }
+    func progress(slot: Int) -> String? { progresses[slot] ?? (slot == selectedSlot ? progress : nil) }
+    func participant(slot: Int) -> String { participants[slot] ?? participant }
+    func canOpenPane(slot: Int) -> Bool { participants[slot] == nil ? canOpenPane : openablePanes.contains(slot) }
     func slot(of request: AIRequest) -> Int { request.envelope.participant.profileSlot ?? defaultSlot }
     func connection(for request: AIRequest) -> AIConnectionStatus { connections[slot(of: request)] ?? connection }
     func generation(for request: AIRequest) -> Int { generations[slot(of: request)] ?? generation }

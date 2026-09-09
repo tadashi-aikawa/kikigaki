@@ -111,6 +111,13 @@ final class MeetingSession {
         emit()
     }
 
+    /// そのrequestを送ったプロファイル。確認への返答は元質問の宛先へ固定する
+    func aiProfile(forRequest id: UUID) -> ResolvedAIConfig? {
+        guard let slot = aiRecord?.controller.conversation.questions.first(where: { $0.request.id == id })?
+            .request.envelope.participant.profileSlot else { return nil }
+        return meetingAIProfiles.first { $0.slot == slot }
+    }
+
     /// 宛先ポップアップへ並べる項目。準備済みセッションの表示は段7で足す。
     var aiDestinationItems: [AIDestinationPicker.Item] {
         meetingAIProfiles.map { .init(slot: $0.slot, name: $0.name, prepared: nil) }
@@ -406,9 +413,16 @@ final class MeetingSession {
             // 各印の接続状態と現世代は、その質問を送った枠のものを渡す。選択中の宛先で全行を
             // 塗ると、Aを作り直しただけでBの正常な返事まで「旧接続から」になる。
             var connections: [Int: AIConnectionStatus] = [:], generations: [Int: Int] = [:]
+            var canSubmits: [Int: Bool] = [:], progresses: [Int: String] = [:]
+            var participants: [Int: String] = [:], openablePanes: Set<Int> = []
             for profile in meetingAIProfiles {
                 connections[profile.slot] = controller?.connectionStatus(slot: profile.slot) ?? .unknown
                 generations[profile.slot] = controller?.generation(slot: profile.slot) ?? 1
+                canSubmits[profile.slot] = snapshot.canShare && aiTasks[profile.slot] == nil
+                    && (controller?.canSend(slot: profile.slot) ?? true)
+                progresses[profile.slot] = aiProgresses[profile.slot]
+                participants[profile.slot] = profile.participantName
+                if controller?.connection(slot: profile.slot) != nil { openablePanes.insert(profile.slot) }
             }
             snapshot.ai = AIViewState(conversation: controller?.conversation,
                 // ホットキーは1つ目のプロファイルのものだけを使う。宛先を選び直しても変わらない。
@@ -423,7 +437,9 @@ final class MeetingSession {
                     && (aiWarning != nil || connections[slot] == .disconnected),
                 saveFailed: aiRecord?.saveWarning != nil, generation: generations[slot] ?? 1,
                 profiles: meetingAIProfiles.map { ($0.slot, $0.name) }, selectedSlot: slot,
-                defaultSlot: controller?.defaultSlot ?? 1, connections: connections, generations: generations)
+                defaultSlot: controller?.defaultSlot ?? 1, connections: connections, generations: generations,
+                canSubmits: canSubmits, progresses: progresses,
+                participants: participants, openablePanes: openablePanes)
         } else { snapshot.ai = nil }
         onChange?(snapshot)
     }
@@ -452,8 +468,13 @@ final class MeetingSession {
 
     /// 進行中の自動送信を手動へ譲る。送信試行済みのrequestは取り消さず、既存の返事待ちに従う。
     private func yieldAutomatic(slot: Int) {
-        guard aiSubmissionTriggers[slot] == .scheduled, aiTasks[slot] != nil,
-              aiRecord?.controller.conversation.questions.contains(where: { $0.isAwaitingResult }) != true else { return }
+        // 返事待ちの判定はこの枠だけで行う。会議全体で見ると、別プロファイルが返事待ちの間
+        // 自動送信を止められず、停止したはずの依頼が接続完了後に飛ぶ。
+        let awaiting = aiRecord?.controller.conversation.questions.contains {
+            ($0.request.envelope.participant.profileSlot ?? aiRecord?.controller.defaultSlot ?? 1) == slot
+                && $0.isAwaitingResult
+        } ?? false
+        guard aiSubmissionTriggers[slot] == .scheduled, aiTasks[slot] != nil, !awaiting else { return }
         if aiPhases[slot] == .confirmationWait || aiRecord?.controller.isSending == true { cancelAIPreparation(slot: slot) }
         else { cancelledAutomaticOwners[slot] = aiSubmissionOwners[slot] }
     }
@@ -480,16 +501,16 @@ final class MeetingSession {
         catch { aiWarning = "接続を作り直せません" }
         emit()
     }
-    func showAIPane() {
-        let slot = meetingAI?.slot
+    func showAIPane(slot requested: Int? = nil) {
+        let slot = requested ?? meetingAI?.slot
         Task { do { try await aiRecord?.controller.showPane(slot: slot) } catch { aiWarning = "herdrのペインを開けません"; emit() } }
     }
 
-    func aiRangePreview(full: Bool) -> String {
+    func aiRangePreview(full: Bool, slot: Int? = nil) -> String {
         let lines = TranscriptRenderer.lines(snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
         guard let url = snapshot.markdownURL else { return "確定した会話はまだありません" }
         let context: AIContextSnapshot?
-        if let controller = aiRecord?.controller { context = try? controller.preview(lines: lines, full: full, slot: meetingAI?.slot) }
+        if let controller = aiRecord?.controller { context = try? controller.preview(lines: lines, full: full, slot: slot ?? meetingAI?.slot) }
         else {
             var history = try? AIStreamHistory(meetingID: aiMeetingID)
             context = try? history?.prepare(lines: lines, outputDirectory: url.deletingLastPathComponent(), full: full)

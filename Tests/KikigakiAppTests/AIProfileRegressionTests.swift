@@ -25,11 +25,12 @@ import KikigakiAIIO
         address = "ネオへ"
         """)
     }
-    private func session(_ root: URL, profiles: [ResolvedAIConfig], fake: FakeHerdr) -> MeetingSession {
+    private func session(_ root: URL, profiles: [ResolvedAIConfig], fake: FakeHerdr, recordedSamples: Int = 0) -> MeetingSession {
         let store = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
         var config = ResolvedConfig(config: KikigakiConfig(), home: root)
         config.aiProfiles = profiles
-        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config, aiStore: store)
+        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config,
+                                     aiStore: store, recordedSamples: recordedSamples)
         session.automaticHelper = URL(fileURLWithPath: "/bin/echo")
         return session
     }
@@ -299,7 +300,7 @@ import KikigakiAIIO
         """)
         await fake.setProviders(["p": "codex", "w2:p1": "claude"])
         // Claudeは agent_session が立つまで入力可能とみなさない(実測)。
-        await fake.setSessions(["w2:p1": "claude-session"])
+        await fake.setSessions(["p": "codex-thread", "w2:p1": "claude-session"])
         let session = session(root, profiles: list, fake: fake)
         try await submit(session, profile: list[0])
         try await submit(session, profile: list[1])
@@ -310,9 +311,11 @@ import KikigakiAIIO
         for slot in [1, 2] {
             let path = base + AIEnvelope.sessionPath(slot: slot, generation: 1).split(separator: "/").dropFirst().map(String.init)
             let record = try AIJSON.decode(AISessionRecord.self, from: files.read(path, limit: 8192))
+            // identityは実際の接続と揃える。ずれていると観測が捨てられても「不正なし」で緑になる。
+            let identity = try #require(record.connection?.sessionID)
             let payload = record.provider == .codex
-                ? Data("{\"type\":\"agent-turn-complete\",\"thread-id\":\"t\(slot)\",\"turn-id\":\"u\"}".utf8)
-                : Data("{\"hook_event_name\":\"Stop\",\"session_id\":\"t\(slot)\"}".utf8)
+                ? Data("{\"type\":\"agent-turn-complete\",\"thread-id\":\"\(identity)\",\"turn-id\":\"u\"}".utf8)
+                : Data("{\"hook_event_name\":\"Stop\",\"session_id\":\"\(identity)\"}".utf8)
             let event = try AIHookObservation(payload: payload, session: record, now: Date())
             try files.write(AIJSON.encode(event), to: base + ["inbox", event.filename], replacing: false)
         }
@@ -321,8 +324,57 @@ import KikigakiAIIO
         #expect(controller.invalidInboxFiles.isEmpty)
     }
 
-    /// テストの穴として指摘された結合。アプリが書いた複数枠の保存物を実CLIが読めること。
-    @Test func 複数枠の保存物を実CLIで返送しcontrollerが回収する() async throws {
+    /// 同じCLI・同じ世代の2枠でも、持ち主をidentityまで見て決めるので観測が落ちない。
+    @Test func 同じCLIの2枠でも背景処理の状態が枠ごとに反映される() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        await fake.setProvider("claude")
+        await fake.setSessions(["p": "session-a", "w2:p1": "session-b"])
+        let list = try profiles(root, toml: """
+        [[ai]]
+        name = "議事録"
+        cli = "claude"
+        command = "/bin/echo"
+        cwd = "\(root.path)"
+
+        [[ai]]
+        name = "相談"
+        cli = "claude"
+        command = "/bin/echo"
+        cwd = "\(root.path)"
+        address = "ネオへ"
+        """)
+        let session = session(root, profiles: list, fake: fake)
+        try await submit(session, profile: list[0])
+        try await submit(session, profile: list[1])
+        let controller = try #require(session.aiRecord?.controller)
+        #expect(controller.connection(slot: 1)?.sessionID == "session-a")
+        #expect(controller.connection(slot: 2)?.sessionID == "session-b")
+        let files = AIFileStore(root: controller.outputDirectory)
+        let base = [".kikigaki-context", session.aiMeetingID.uuidString, "ai"]
+        // 2枠目だけ背景処理が走っている観測を置く。世代もCLIも同じなので、
+        // 持ち主をproviderと世代だけで選ぶと1枠目が拾って捨ててしまう。
+        for slot in [1, 2] {
+            let path = base + AIEnvelope.sessionPath(slot: slot, generation: 1).split(separator: "/").dropFirst().map(String.init)
+            let record = try AIJSON.decode(AISessionRecord.self, from: files.read(path, limit: 8192))
+            let identity = try #require(record.connection?.sessionID)
+            let running = slot == 2 ? "[{\"status\":\"running\"}]" : "[]"
+            let payload = Data("{\"hook_event_name\":\"Stop\",\"session_id\":\"\(identity)\",\"background_tasks\":\(running)}".utf8)
+            let event = try AIHookObservation(payload: payload, session: record, now: Date())
+            try files.write(AIJSON.encode(event), to: base + ["inbox", event.filename], replacing: false)
+        }
+        controller.scan()
+        #expect(controller.invalidInboxFiles.isEmpty)
+        // 背景処理中の枠は「返送未確認」を出さない。もう片方は出せる状態のまま。
+        let questions = controller.conversation.questions
+        let later = Date().addingTimeInterval(600)
+        #expect(!controller.isReturnUnconfirmed(questions[1], now: later))
+        #expect(controller.isReturnUnconfirmed(questions[0], now: later))
+    }
+
+    /// 【中】手動シートの取消が別枠の自動送信まで取り消していた。
+    @Test func 取消は指定した枠だけを対象にする() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr()
@@ -331,8 +383,59 @@ import KikigakiAIIO
         try await submit(session, profile: list[0])
         try await submit(session, profile: list[1])
         let controller = try #require(session.aiRecord?.controller)
+        // 送信済みは取消の対象外。preparedだけが取り消される契約を、枠を指定して確かめる。
+        #expect(controller.conversation.questions.allSatisfy { $0.state == .submitted })
+        session.cancelAIPreparation(slot: 2)
+        #expect(controller.conversation.questions.allSatisfy { $0.state == .submitted })
+    }
+
+    /// 【中】別枠が返事待ちだと自動送信を止められていなかった。
+    @Test func 別枠の返事待ちは自動送信の停止を妨げない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try two(root)
+        let session = session(root, profiles: list, fake: fake)
+        // 1枠目を返事待ちにしておく。
+        try await submit(session, profile: list[0])
+        let controller = try #require(session.aiRecord?.controller)
+        #expect(controller.conversation.questions.first?.isAwaitingResult == true)
+        // 2枠目の自動送信を始めて止める。1枠目の返事待ちで早期returnしてはいけない。
+        try session.startAISchedule(options: try AIScheduleOptions(prompt: "議事録を更新して", interval: 60),
+                                    helper: URL(fileURLWithPath: "/bin/echo"), profile: list[1])
+        #expect(session.snapshot.aiSchedule.active)
+        session.stopAISchedule()
+        #expect(!session.snapshot.aiSchedule.active)
+    }
+
+    /// 【中】共通のherdrCommandを後続で省略できる。
+    @Test func herdrCommandの省略は先頭を引き継ぐ() throws {
+        let resolved = ResolvedConfig(config: try ConfigLoader.parse(toml: """
+        [[ai]]
+        name = "議事録"
+        herdrCommand = "/opt/homebrew/bin/herdr"
+
+        [[ai]]
+        name = "相談"
+        """), home: URL(fileURLWithPath: "/home/person")).aiProfiles
+        #expect(resolved.map(\.herdrCommand) == ["/opt/homebrew/bin/herdr", "/opt/homebrew/bin/herdr"])
+    }
+
+    /// テストの穴として指摘された結合。アプリが書いた複数枠の保存物を実CLIが読めること。
+    @Test func 複数枠の保存物を実CLIで返送しcontrollerが回収する() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try two(root)
+        // 収録済みの位置が無いと確定範囲が0行になり、受領基準の前進を見られない。
+        let session = session(root, profiles: list, fake: fake, recordedSamples: 16_000)
+        session.setScheduleTranscriptForTesting("架空の会議を始めます")
+        try await submit(session, profile: list[0])
+        try await submit(session, profile: list[1])
+        let controller = try #require(session.aiRecord?.controller)
         let requests = controller.conversation.questions.map(\.request)
         #expect(requests.count == 2)
+        #expect(requests.allSatisfy { $0.envelope.totalLineCount > 0 })
 
         for request in requests {
             let participant = request.envelope.participant
@@ -344,12 +447,23 @@ import KikigakiAIIO
             _ = try ReturnCommand(["reply"] + args + ["--kind", "answered"])
                 .execute(input: { Data("\(participant.participantName)からの回答".utf8) }, environment: [:])
         }
+        // 返送の前は、どちらのstreamもまだ受領していないので差分ありのまま。
+        let snapshot = session.snapshot
+        let lines = TranscriptRenderer.lines(snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
+        #expect(!lines.isEmpty)
+        #expect(controller.hasChanges(lines: lines, slot: 1) && controller.hasChanges(lines: lines, slot: 2))
+
         controller.scan()
         #expect(controller.invalidInboxFiles.isEmpty)
         let answered = controller.conversation.questions
         #expect(answered.allSatisfy { $0.state == .answered })
         #expect(answered.map { $0.result?.body } == ["迅雷からの回答", "ネオからの回答"])
-        // 受領基準はそれぞれのstreamで進む。
+        // 受領基準はそれぞれのstreamで進む。同じ本文なら次回は差分なしになる。
         #expect(answered[0].contextReceived && answered[1].contextReceived)
+        #expect(!controller.hasChanges(lines: lines, slot: 1))
+        #expect(!controller.hasChanges(lines: lines, slot: 2))
+        // 本文が増えれば両方とも差分ありへ戻る。
+        #expect(controller.hasChanges(lines: lines + ["[12:00:10] B: 追記"], slot: 1))
+        #expect(controller.hasChanges(lines: lines + ["[12:00:10] B: 追記"], slot: 2))
     }
 }

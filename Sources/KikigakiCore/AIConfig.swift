@@ -145,9 +145,10 @@ public struct AIProfileList: Codable, Equatable, Sendable {
             // ホットキーはプロファイルごとに持たない。録音・一時停止との衝突検証が組み合わせで増えるため。
             guard index == 0 || profile.hotkey == nil else { throw invalid("hotkey is only allowed on the first profile") }
             // herdr自体はプロファイルごとに分けない。1つのadapterで全チャネルを扱うので、
-            // 2つ目以降に別の値を書いても効かない。黙って無視せず不一致を拒否する。
-            guard index == 0 || profile.herdrCommand == profiles[0].herdrCommand else {
-                throw invalid("herdrCommand is shared. it must match the first profile")
+            // 2つ目以降に別の値を書いても効かない。**省略は先頭を引き継ぎ**、明示した値だけ突き合わせる。
+            // 省略まで拒否すると、共通の絶対パスを全プロファイルへ書き写させることになる。
+            guard index == 0 || profile.herdrCommand == nil || profile.herdrCommand == profiles[0].herdrCommand else {
+                throw invalid("herdrCommand is shared. it must match the first profile or be omitted")
             }
         }
         guard profiles.filter({ $0.autoStart == true }).count <= 1 else {

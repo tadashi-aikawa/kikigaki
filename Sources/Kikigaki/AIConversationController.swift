@@ -378,10 +378,15 @@ final class AIConversationController {
                 do {
                     let event = try AIJSON.decode(AIHookObservation.self, from: files.read(base + ["inbox", name], limit: AILimits.eventBytes))
                     guard event.filename == name, event.meetingID == meetingID else { throw AIError.mismatch }
+                    // 持ち主は identity まで見て決める。`validate` は会議・世代・CLI種別しか比べないので、
+                    // 同じCLIで世代が並ぶ2枠があると、Bのイベントで先にAを選び、その後の
+                    // identity不一致で捨ててしまう(Claudeの背景処理中フラグが落ちる)。
                     // 現世代のどのチャネルにも属さないものは、旧世代の診断か未接続チャネル宛て。
                     // 壊れているとは限らないので不正には数えない。
-                    guard let owner = owners.first(where: { (try? event.validate(session: $0.1)) != nil })?.0 else { continue }
-                    guard let identity = identities[owner.slot], event.sessionID == identity else { continue }
+                    guard let owner = owners.first(where: { channel, session in
+                        (try? event.validate(session: session)) != nil
+                            && identities[channel.slot] == event.sessionID
+                    })?.0 else { continue }
                     if latest[owner.slot] == nil || event.recordedAt > latest[owner.slot]!.recordedAt { latest[owner.slot] = event }
                 } catch { invalidInboxFiles.append(name) }
             }

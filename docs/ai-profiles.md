@@ -50,7 +50,7 @@ address = "ネオへ"                # cwd を省いたので既定のディレ�
 | cwd | 省略時は従来どおり固定の `~/Library/Application Support/KIKIGAKI/ai-work/`。起動時の作業ディレクトリで、プロファイルごとに変えられる。 |
 | autoStart | false。trueは配列全体で1つまで。`autoPrompt` が空なら設定エラー。 |
 | hotkey | **共通**。1つ目のプロファイルにだけ書ける。2つ目以降にあれば設定エラー。宛先を選び直しても変わらない。 |
-| herdrCommand | **共通**。adapterを全チャネルで共有するので、2つ目以降に先頭と違う値を書けば設定エラー。 |
+| herdrCommand | **共通**。2つ目以降は省略でき、先頭の値を引き継ぐ。先頭と違う値を明示したときだけ設定エラー。 |
 | notifySound | プロファイルごとに効く。返事が届いた枠の設定で鳴らす。 |
 | その他 | 既存の `[ai]` と同じ。`cli` `command` `herdrCommand` `model` `address` `extraArgs` `prompt` `notifySound` `allowWork` `autoPrompt` `autoIntervalMinutes` を要素ごとに持つ。 |
 

@@ -108,6 +108,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var scheduleSheet: AIScheduleSheet?
     private var scheduleSheetMeetingID: UUID?
     private var aiSheetMeetingID: UUID?
+    /// 確認への返答シートが固定している枠。通常のシートはnilで選択中の宛先へ追随する
+    private var aiSheetSlot: Int?
     private var previousAI: AIPastMeetingsWindow?
     private var registeredAIHotkey: KikigakiConfig.Hotkey?
     private let replayDebug: ReplayDebugOptions
@@ -117,6 +119,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var replayHolding = false
     private var debugRenamed = false
     private var performingReplayDebug = false
+    /// 宛先の指定を当て終えるまでデバッグ送信を保留する。0秒指定の質問は start 内の
+    /// 通知から呼ばれるため、保留しないと先頭宛で飛んでしまう
+    private var replayDestinationPending = false
     init(replayDebug: ReplayDebugOptions = .init()) { self.replayDebug = replayDebug; super.init() }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -198,8 +203,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if self.registeredAIHotkey != session.aiPrimaryConfiguration?.hotkey, let config = self.config { _ = self.registerHotkeys(config) }
             if let sheet = self.aiSheet {
                 if self.aiSheetMeetingID != session.aiMeetingID || !snapshot.canShare || snapshot.ai?.submissionID != nil {
-                    sheet.close(); self.aiSheet = nil; session.endAIDraft()
-                } else { sheet.update(progress: snapshot.ai?.progress, canSubmit: snapshot.ai?.canSubmit == true, warning: snapshot.ai?.warning) }
+                    sheet.close(); self.aiSheet = nil; self.aiSheetSlot = nil; session.endAIDraft()
+                } else {
+                    // 返答シートは固定した枠の状態を見る。選択中の宛先が返事待ちでも無効にしない。
+                    let slot = self.aiSheetSlot ?? snapshot.ai?.selectedSlot ?? 1
+                    sheet.update(progress: snapshot.ai?.progress(slot: slot),
+                                 canSubmit: snapshot.ai?.canSubmit(slot: slot) == true, warning: snapshot.ai?.warning)
+                }
             }
             if let sheet = self.scheduleSheet,
                self.scheduleSheetMeetingID != session.aiMeetingID || (snapshot.state != .recording && snapshot.state != .paused) {
@@ -293,7 +303,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             source = MicSource()
         }
         window?.show()
-        if replayURL != nil { session.automaticIntervalOverride = replayDebug.automaticSeconds }
+        if replayURL != nil {
+            session.automaticIntervalOverride = replayDebug.automaticSeconds
+            replayDestinationPending = replayDebug.askProfile != nil
+        }
         let started = await session.start(source: source)
         // 宛先の指定は録音開始のリセットより後に当てる。start()が先頭へ戻すので、
         // 前に当てると2つ目を指定しても先頭へ送ってしまう。
@@ -302,6 +315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Self.log("replay 手動の宛先が設定にない: \(name)"); exit(1)
             }
             session.selectAIProfile(slot: profile.slot)
+            replayDestinationPending = false
             Self.log("replay 手動の宛先: \(profile.name)(slot \(profile.slot))")
         }
         if started, replayURL != nil, let schedule = session.aiScheduleConfiguration, schedule.autoStart {
@@ -373,7 +387,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // 手入力の保存検証では最終会話を送る。停止による確定待ち取消を避ける。
         if replayDebug.verifyTyped && !replayHolding { return }
-        guard nextDebugQuestion < replayDebug.questions.count, let session else { return }
+        guard !replayDestinationPending, nextDebugQuestion < replayDebug.questions.count, let session else { return }
         let question = replayDebug.questions[nextDebugQuestion]
         guard snapshot.elapsed >= question.seconds else { return }
         do { try ReplayDebugOptions.recoverForNextQuestion(session.aiRecord?.controller, preparing: snapshot.ai?.progress != nil) }
@@ -446,34 +460,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showAISheet(parent: UUID?) {
-        guard let session, session.snapshot.canShare, let config = session.aiConfiguration, let window = window?.window else { return }
+        guard let session, session.snapshot.canShare, let window = window?.window else { return }
+        // 確認への返答はシート全体を元質問の宛先へ固定する。送信先だけ直しても、
+        // 送信可否・進捗・範囲・ペイン操作・表題が現在の選択を見ていては噛み合わない。
+        guard let config = parent.flatMap({ session.aiProfile(forRequest: $0) }) ?? session.aiConfiguration else { return }
+        let fixed = parent != nil
         if let aiSheet { aiSheet.window.makeFirstResponder(aiSheet.window.firstResponder); return }
         if let scheduleSheet { self.window?.show(); scheduleSheet.focus(); return }
         session.beginAIDraft()
         let snapshot = session.snapshot
         let question = parent.flatMap { id in session.aiRecord?.controller.conversation.questions.first { $0.request.id == id } }
-        let range = session.aiRangePreview(full: false)
+        let slot = config.slot
+        let range = session.aiRangePreview(full: false, slot: slot)
         let sheet = AIQuestionSheet(participant: config.participantName, parentNumber: question?.request.number,
             draft: session.aiDraft, voice: snapshot.voiceQuestionPlaceholder,
-            range: range, tentative: snapshot.tentativeText != nil, canSubmit: snapshot.ai?.canSubmit == true, confirmation: question?.result?.body,
+            range: range, tentative: snapshot.tentativeText != nil,
+            canSubmit: snapshot.ai?.canSubmit(slot: slot) == true, confirmation: question?.result?.body,
             workAllowed: session.aiWorkAllowed)
-        sheet.updateDestinations(session.aiDestinationItems, selected: config.slot, participant: config.participantName)
-        sheet.onDestination = { [weak sheet] slot in
-            session.selectAIProfile(slot: slot)
-            guard let profile = session.aiConfiguration else { return }
-            sheet?.updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
+        sheet.updateDestinations(session.aiDestinationItems, selected: slot, participant: config.participantName)
+        if !fixed {
+            sheet.onDestination = { [weak sheet] chosen in
+                session.selectAIProfile(slot: chosen)
+                guard let profile = session.aiConfiguration else { return }
+                sheet?.updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
+            }
         }
         sheet.onDraft = { session.updateAIDraft($0) }
         sheet.onWorkAllowedChange = { session.updateAIWorkAllowed($0) }
-        sheet.rangePreview = { session.aiRangePreview(full: $0) }
-        sheet.onCancel = { [weak self] in session.cancelAIPreparation(); session.endAIDraft(); self?.aiSheet = nil }
-        sheet.onPane = { session.showAIPane() }
+        // 返答シートは親の枠に固定。それ以外は開いている間の選び直しへ追随する。
+        sheet.rangePreview = { session.aiRangePreview(full: $0, slot: fixed ? slot : session.aiConfiguration?.slot) }
+        sheet.onCancel = { [weak self] in
+            // 取り消すのはこのシートが持つ枠だけ。別プロファイルの自動送信まで巻き込まない。
+            session.cancelAIPreparation(slot: fixed ? slot : session.aiConfiguration?.slot ?? slot)
+            session.endAIDraft(); self?.aiSheet = nil
+        }
+        sheet.onPane = { session.showAIPane(slot: fixed ? slot : session.aiConfiguration?.slot) }
         sheet.onSubmit = { text, full in
             let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
             session.submitAI(question: text, full: full, parent: parent, helper: helper,
-                             profile: session.aiConfiguration)
+                             profile: fixed ? config : session.aiConfiguration)
         }
         aiSheet = sheet; aiSheetMeetingID = session.aiMeetingID
+        aiSheetSlot = fixed ? slot : nil
         self.window?.show(); sheet.present(on: window)
     }
     private func showScheduleSheet() {

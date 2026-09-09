@@ -232,6 +232,9 @@ actor FakeHerdr {
     var provider = "codex"
     /// workspace createのたびに別のIDを返す。チャネルごとの接続先を見分けるため
     var createdWorkspaces = 0
+    /// 作成済みpaneの台帳。ここに無いpaneへは整合する応答を返さない。
+    /// 既定の `p` は、workspaceを作らず直接観測する既存テストのために最初から入れておく
+    var createdPanes: [String: String] = ["p": "w"]
     /// paneごとのCLI種別。指定が無ければ `provider` を使う
     var providersByPane: [String: String] = [:]
     /// paneごとのagent session。世代や置き換えの検証で使う
@@ -261,6 +264,7 @@ actor FakeHerdr {
             // 1つ目は既存テストと同じ固定値。2つ目からチャネルを見分けられる別IDを返す。
             let workspace = createdWorkspaces == 1 ? "w" : "w\(createdWorkspaces)"
             let pane = createdWorkspaces == 1 ? "p" : "w\(createdWorkspaces):p1"
+            createdPanes[pane] = workspace
             response = ["workspace": ["workspace_id": workspace], "root_pane": ["pane_id": pane]]
         case ["agent", "list"]:
             response = ["agents": listed.map { entry -> [String: Any] in
@@ -277,8 +281,11 @@ actor FakeHerdr {
                 return AIProcessOutput(status: 1, stdout: Data(), stderr: Data("{\"error\":{\"code\":\"agent_not_found\"}}".utf8))
             }
             let pane = args.count > 2 ? args[2] : "p"
-            let workspace = listed.first { $0.pane == pane }?.workspace
-                ?? (pane.contains(":") ? String(pane.prefix(while: { $0 != ":" })) : "w")
+            // 作成も列挙もされていないpaneには整合する応答を返さない。
+            // 何にでも答えると、接続先IDを取り違えたまま緑になる。
+            guard let workspace = createdPanes[pane] ?? listed.first(where: { $0.pane == pane })?.workspace else {
+                return AIProcessOutput(status: 1, stdout: Data(), stderr: Data("{\"error\":{\"code\":\"agent_not_found\"}}".utf8))
+            }
             var agent: [String: Any] = ["workspace_id": workspace, "pane_id": pane,
                                         "agent": providersByPane[pane] ?? provider,
                                         "agent_status": status, "interactive_ready": true]
