@@ -28,6 +28,30 @@ import KikigakiAIIO
     }
     private func settle(_ session: MeetingSession) async { await session.submissionTaskForTesting?.value }
 
+    @Test func 範囲表示用の宛先保存失敗でも自動開始と送信を続ける() async throws {
+        for failAtStart in [true, false] {
+            let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+            let session = try session(root, fake: FakeHerdr()), now = Date()
+            defer { session.stopAISchedule() }
+            let store = try #require(session.aiStoreForTesting)
+            if !failAtStart {
+                try session.startAISchedule(options: .init(prompt: "更新"), helper: URL(fileURLWithPath: "/bin/echo"), now: now)
+            }
+            let record = try store.begin(meetingID: session.aiMeetingID, markdownURL: root.appendingPathComponent("meeting.md"),
+                config: try #require(session.aiConfiguration))
+            let manifest = root.appendingPathComponent(".kikigaki-context/\(session.aiMeetingID)/ai/manifest.json")
+            try FileManager.default.removeItem(at: manifest)
+            try FileManager.default.createDirectory(at: manifest, withIntermediateDirectories: false)
+            if failAtStart {
+                do { try session.startAISchedule(options: .init(prompt: "更新"), helper: URL(fileURLWithPath: "/bin/echo"), now: now) }
+                catch { Issue.record("表示用の保存失敗が自動開始を止めた: \(error)") }
+            }
+            session.evaluateAISchedule(now: now.addingTimeInterval(180)); await settle(session)
+            #expect(record.controller.conversation.questions.last?.state == .submitted)
+            #expect(!store.warnings.isEmpty)
+        }
+    }
+
     @Test func 非稼働時の表示更新は自動送信用の全行を組まない() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let session = try session(root, fake: FakeHerdr())
@@ -112,6 +136,8 @@ import KikigakiAIIO
         #expect(session.aiRecord?.controller.conversation.questions.count == 1)
         try reply(session, root: root)
         session.evaluateAISchedule(now: now.addingTimeInterval(720)); await settle(session)
+        #expect(session.aiRecord?.manifest.automaticSlot == session.aiScheduleConfiguration?.slot)
+        #expect(session.snapshot.ai?.rangeBoundaries.answered == first.request.envelope.totalLineCount - 1)
         #expect(session.aiRecord?.controller.conversation.questions.count == 1)
         #expect(session.aiRecord?.controller.conversation.questions.first?.isUnread == false)
         let conversation = try #require(session.aiRecord?.controller.conversation)
@@ -119,6 +145,8 @@ import KikigakiAIIO
         // 自動の往復も人の発話と同格の行で、送信だけ細い1行にする。
         #expect(items.map(\.kind) == [.sendLine(automatic: true), .reply(.answered)])
         #expect(items.allSatisfy { $0.automatic })
+        session.stopAISchedule()
+        #expect(session.snapshot.ai?.rangeBoundaries.answered == first.request.envelope.totalLineCount - 1)
         let sendItem = try #require(items.first), replyItem = try #require(items.last)
         #expect(sendItem.notes.first?.hasSuffix("発言") == true)
         #expect(replyItem.body.hasPrefix("議事録を更新しました"))

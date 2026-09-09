@@ -81,6 +81,7 @@ final class AIBadgeBar: NSStackView {
 }
 
 struct AIViewState {
+    var rangeBoundaries = AIRangeBoundaries()
     var conversation: AIConversation?
     var hotkey = ResolvedAIConfig.defaultHotkey
     var participant = "迅雷"

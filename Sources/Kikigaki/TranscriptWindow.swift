@@ -193,6 +193,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         let animated = sameMeeting && !shouldReduceMotion()
         var next: [RowID: TranscriptRow] = [:]
         var ordered: [any DocumentRow] = []
+        var rangeRows: [NSView] = []
         var occurrences: [RowKey: Int] = [:]
         var inserted: [TranscriptRow] = []
         var changed: [TranscriptRow] = []
@@ -212,6 +213,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             next[id] = row
             ordered.append(row)
             for item in attached[index, default: []] { ordered.append(aiRowView(item)) }
+            rangeRows.append(ordered.last!)
         }
         if let tentative = snapshot.tentativeText {
             tentativeRow.updateTentative(tentative)
@@ -221,6 +223,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         let rowIDs = Set(items.map(\.rowID))
         aiRows = aiRows.filter { rowIDs.contains($0.key) }
         transcriptDocument.setRows(ordered, anchor: anchor)
+        transcriptDocument.setRangeBoundaries(ai?.rangeBoundaries ?? AIRangeBoundaries(),
+            utteranceRows: rangeRows)
         aiRead.noteVisibilityChanged()
         aiRead.refresh()
         for row in inserted {

@@ -77,6 +77,7 @@ final class MeetingSession {
     private var aiSubmissionTriggers: [Int: AIParticipantContext.Trigger] = [:]
     private var cancelledAutomaticOwners: [Int: UUID] = [:]
     private var aiSchedule: AIScheduleState?
+    private var rangeAutomaticSlot: Int?
 #if DEBUG
     private(set) var scheduleLinesBuildCount = 0
 #endif
@@ -248,6 +249,7 @@ final class MeetingSession {
         defer { bindingSlots.remove(profile.slot); emit() }
         do {
             let record = try aiStore.begin(meetingID: meetingID, markdownURL: url, profiles: meetingAIProfiles)
+            if let slot = rangeAutomaticSlot { aiStore.setAutomaticSlot(slot, for: record) }
             // 紐づけの前に会議の全プロファイルを登録する。1つだけ登録すると保存パスが平置きになり、
             // あとで他の枠が登録された時点で参照先が枝つきへ変わって、CLIがsessionを読めなくなる。
             try record.controller.register(meetingAIProfiles)
@@ -310,6 +312,7 @@ final class MeetingSession {
         cancelAIPreparation()
         stopAISchedule()
         aiSchedule = nil; lastScheduleOptions = nil; scheduleDraft = nil; aiScheduleWarning = nil
+        rangeAutomaticSlot = nil
         let preparation = UUID()
         preparationID = preparation
         // 準備中や録音中の再読込で、同じ会議の保存方針を途中から切り替えない。
@@ -673,6 +676,7 @@ final class MeetingSession {
             }
             // 引数が多すぎると型検査が通らなくなるので、組み立ててから渡す。
             var state = AIViewState()
+            state.rangeBoundaries = controller?.rangeBoundaries(slot: rangeAutomaticSlot, utterances: snapshot.utterances) ?? AIRangeBoundaries()
             state.conversation = controller?.conversation
             // ホットキーは1つ目のプロファイルのものだけを使う。宛先を選び直しても変わらない。
             state.hotkey = meetingAIProfiles.first?.hotkey ?? config.hotkey
@@ -827,6 +831,7 @@ final class MeetingSession {
             }
             do {
                 let record = try aiStore.begin(meetingID: meetingID, markdownURL: url, profiles: meetingAIProfiles)
+                if let slot = rangeAutomaticSlot { aiStore.setAutomaticSlot(slot, for: record) }
                 try record.controller.register(meetingAIProfiles)
                 guard record.controller.canSend(slot: config.slot) else { throw AIHerdrError.notReady }
                 if snapshot.state == .idle, var archive, record.archive == nil {
@@ -1037,8 +1042,11 @@ extension MeetingSession {
             throw AIError.invalid("schedule recording state")
         }
         if let profile { scheduleAI = profile }
-        if aiSchedule == nil { aiSchedule = AIScheduleState(meetingID: aiMeetingID) }
-        try aiSchedule?.start(options: options, now: now, runID: UUID())
+        var next = aiSchedule ?? AIScheduleState(meetingID: aiMeetingID)
+        try next.start(options: options, now: now, runID: UUID())
+        if let record = aiRecord, let slot = aiScheduleConfiguration?.slot { aiStore?.setAutomaticSlot(slot, for: record) }
+        aiSchedule = next
+        rangeAutomaticSlot = aiScheduleConfiguration?.slot
         lastScheduleOptions = options; aiScheduleHelper = helper; aiScheduleWarning = nil
         aiScheduleTimer?.invalidate()
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] timer in

@@ -1,4 +1,27 @@
 import AppKit
+import KikigakiCore
+
+final class AIRangeBoundaryView: NSView {
+    let answered: Bool
+    init(answered: Bool) {
+        self.answered = answered
+        super.init(frame: .zero)
+        setAccessibilityElement(true)
+        setAccessibilityLabel(answered ? "ここまで返事済み" : "ここまで受領")
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func draw(_ dirtyRect: NSRect) {
+        let text = (answered ? "ここまで返事済み" : "ここまで受領") as NSString
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 9), .foregroundColor: Washi.muted]
+        let size = text.size(withAttributes: attrs)
+        let x = bounds.width - 20 - size.width
+        (answered ? Washi.muted : Washi.gold).withAlphaComponent(0.35).setFill()
+        NSRect(x: 54, y: 6, width: max(0, x - 64), height: 0.5).fill()
+        text.draw(at: NSPoint(x: x, y: 0), withAttributes: attrs)
+    }
+}
 
 protocol DocumentRow: NSView { func height(for width: CGFloat) -> CGFloat }
 
@@ -22,6 +45,29 @@ final class TranscriptDocument: NSView {
     override var isFlipped: Bool { true }
     var followsBottom = true
     var rows: [any DocumentRow] = []
+    private(set) var rangeMarkers: [(row: NSView, view: AIRangeBoundaryView)] = []
+    func setRangeBoundaries(_ boundaries: AIRangeBoundaries, utteranceRows: [NSView]) {
+        let targets: [(NSView, Bool)] = [(boundaries.answered, true), (boundaries.accepted, false)].compactMap { index, answered in
+            guard let index, utteranceRows.indices.contains(index) else { return nil }
+            return (utteranceRows[index], answered)
+        }
+        if targets.count == rangeMarkers.count,
+           zip(targets, rangeMarkers).allSatisfy({ $0.0.0 === $0.1.row && $0.0.1 == $0.1.view.answered }) { return }
+        for marker in rangeMarkers { marker.view.removeFromSuperview() }
+        rangeMarkers = targets.map { row, answered in
+            let view = AIRangeBoundaryView(answered: answered)
+            addSubview(view)
+            return (row, view)
+        }
+        positionRangeMarkers()
+    }
+    private func positionRangeMarkers() {
+        for marker in rangeMarkers {
+            addSubview(marker.view, positioned: .above, relativeTo: nil)
+            marker.view.frame = NSRect(x: 0, y: marker.row.frame.maxY - 5, width: bounds.width, height: 12)
+            marker.view.needsDisplay = true
+        }
+    }
     private var layingOut = false
     struct Anchor {
         let candidates: [(NSView, CGFloat)]
@@ -35,7 +81,7 @@ final class TranscriptDocument: NSView {
     }
     func setRows(_ rows: [any DocumentRow], anchor: Anchor) {
         let keep = Set(rows.map { ObjectIdentifier($0) })
-        for view in subviews where !keep.contains(ObjectIdentifier(view)) { view.removeFromSuperview() }
+        for view in subviews where !(view is AIRangeBoundaryView) && !keep.contains(ObjectIdentifier(view)) { view.removeFromSuperview() }
         for row in rows where row.superview !== self { addSubview(row) }
         self.rows = rows
         reflow(anchor: anchor)
@@ -60,6 +106,7 @@ final class TranscriptDocument: NSView {
             y += height
         }
         setFrameSize(NSSize(width: width, height: max(scroll.contentSize.height, y + 8)))
+        positionRangeMarkers()
         let surviving = anchor.candidates.first { $0.0.superview === self }
         let target = anchor.atBottom && followsBottom ? frame.height - scroll.contentSize.height
             : surviving.map { $0.0.frame.minY - $0.1 } ?? anchor.y

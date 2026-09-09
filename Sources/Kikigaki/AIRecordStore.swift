@@ -9,6 +9,7 @@ struct AIMeetingManifest: Codable {
     let meetingID: UUID
     let markdownURL: URL
     let profiles: [ResolvedAIConfig]
+    var automaticSlot: Int?
     /// 既定のプロファイル。版1のmanifestは1つ目の新規起動プロファイルとして読む。
     /// 復号も生成も空の配列を作らないので、添字で参照してよい
     var config: ResolvedAIConfig { profiles[0] }
@@ -18,13 +19,14 @@ struct AIMeetingManifest: Codable {
         self.markdownURL = markdownURL; self.profiles = profiles
     }
 
-    private enum CodingKeys: String, CodingKey { case schemaVersion, meetingID, markdownURL, profiles, config }
+    private enum CodingKeys: String, CodingKey { case schemaVersion, meetingID, markdownURL, profiles, config, automaticSlot }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
         meetingID = try values.decode(UUID.self, forKey: .meetingID)
         markdownURL = try values.decode(URL.self, forKey: .markdownURL)
+        automaticSlot = try values.decodeIfPresent(Int.self, forKey: .automaticSlot)
         switch schemaVersion {
         case 1: profiles = [try values.decode(ResolvedAIConfig.self, forKey: .config)]
         case 2: profiles = try values.decode([ResolvedAIConfig].self, forKey: .profiles)
@@ -39,6 +41,7 @@ struct AIMeetingManifest: Codable {
         try values.encode(meetingID, forKey: .meetingID)
         try values.encode(markdownURL, forKey: .markdownURL)
         try values.encode(profiles, forKey: .profiles)
+        try values.encodeIfPresent(automaticSlot, forKey: .automaticSlot)
     }
 }
 struct AIRegistration: Codable, Equatable {
@@ -57,6 +60,7 @@ final class AIRecordStore {
         var savedConversation: AIConversation?
         var saveResult: MeetingArchive.SaveResult?
         var saveWarning: String?
+        var automaticSlotNeedsSave = false
         var hasUnpersistedChanges = true
         init(manifest: AIMeetingManifest, controller: AIConversationController, recovered: Bool) {
             self.manifest = manifest; self.controller = controller; self.recovered = recovered
@@ -163,8 +167,9 @@ final class AIRecordStore {
     /// 既存のプロファイルは書き換えず、新しいslotの追加だけを許す。
     func register(_ profile: ResolvedAIConfig, for record: Record) throws {
         guard !record.recovered, !record.manifest.profiles.contains(where: { $0.slot == profile.slot }) else { return }
-        let updated = AIMeetingManifest(meetingID: record.manifest.meetingID, markdownURL: record.manifest.markdownURL,
+        var updated = AIMeetingManifest(meetingID: record.manifest.meetingID, markdownURL: record.manifest.markdownURL,
             profiles: record.manifest.profiles + [profile])
+        updated.automaticSlot = record.manifest.automaticSlot
         try AIFileStore(root: record.manifest.markdownURL.deletingLastPathComponent())
             .write(AIJSON.encode(updated), to: Self.base(record.manifest.meetingID) + ["manifest.json"])
         record.manifest = updated
@@ -177,6 +182,23 @@ final class AIRecordStore {
         if let updated = record.archive { archive = updated }
         do { try persistRegistry() } catch { warnings.append("AI会議の登録簿を保存できません") }
         return record.saveResult ?? .init(utterances: archive.original.utterances, message: record.saveWarning ?? "保存できません", succeeded: false)
+    }
+
+    /// 範囲表示の付随情報。保存失敗は本来の送信・紐づけを妨げない。
+    func setAutomaticSlot(_ slot: Int, for record: Record) {
+        guard !record.recovered, record.manifest.automaticSlot != slot || record.automaticSlotNeedsSave else { return }
+        var manifest = record.manifest
+        manifest.automaticSlot = slot
+        record.manifest = manifest
+        do {
+            try AIFileStore(root: record.controller.outputDirectory)
+                .write(AIJSON.encode(manifest), to: Self.base(manifest.meetingID) + ["manifest.json"])
+            record.automaticSlotNeedsSave = false
+        } catch {
+            record.automaticSlotNeedsSave = true
+            let warning = "自動送信の宛先を保存できません。再起動後の範囲表示に反映されないことがあります"
+            if !warnings.contains(warning) { warnings.append(warning) }
+        }
     }
     func retrySaves() {
         for record in records.values where record.hasUnpersistedChanges {

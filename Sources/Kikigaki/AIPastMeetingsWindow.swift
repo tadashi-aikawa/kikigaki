@@ -15,6 +15,7 @@ import KikigakiCore
         Task { try? await record.controller.showPane() }
     }
     private var marks: [String: any AITimelineRowView] = [:]
+    private var speechRows: [Int: TranscriptRow] = [:]
     private let avatars = AvatarStore()
     /// 書き起こしウィンドウと同じ可視化の既読判定を使う。
     private(set) lazy var aiRead = AIReadWatcher(window: { [weak self] in self?.window })
@@ -81,7 +82,7 @@ import KikigakiCore
         scroll.isHidden = false
         let changedMeeting = displayedMeeting != record.manifest.meetingID
         // 会議を切り替えたら滞在時間を捨てる。前の会議で見ていた時間を持ち越さない。
-        if changedMeeting { marks = [:]; aiRead.reset() }
+        if changedMeeting { marks = [:]; speechRows = [:]; aiRead.reset() }
         displayedMeeting = record.manifest.meetingID
         // 現在の会議と同じ形で枠ごとの状態を渡す。全体の値で塗ると、片方の宛先を
         // 作り直しただけで、もう片方の正常な返事まで「旧接続から」になる。
@@ -113,12 +114,15 @@ import KikigakiCore
         openPane.isHidden = !state.canOpenPane
         var next: [String: any AITimelineRowView] = [:]
         let anchor = transcript.anchor()
-        // 旧会議は発話を持たないので、声の送信もアンカーを解決できず日時順の細い1行になる。
-        let rows = AITimeline.items(conversation: state.conversation, utterances: [],
-                                    timeline: MeetingTimeline(startedAt: Date(timeIntervalSince1970: 0)),
+        let meeting = record.archive?.original
+        let utterances = record.saveResult?.utterances ?? meeting?.utterances ?? []
+        let timeline = meeting?.timeline ?? MeetingTimeline(startedAt: Date(timeIntervalSince1970: 0))
+        let items = AITimeline.items(conversation: state.conversation, utterances: utterances,
+                                    timeline: timeline,
                                     generation: { state.generation(for: $0) },
                                     connection: { state.connection(for: $0) },
-                                    unconfirmed: state.unconfirmed).map { item -> any DocumentRow in
+                                    unconfirmed: state.unconfirmed)
+        let aiRows = items.map { item -> any DocumentRow in
             let row: any AITimelineRowView
             if let existing = marks[item.rowID] { existing.update(item, state: state); row = existing }
             else {
@@ -145,7 +149,24 @@ import KikigakiCore
             next[item.rowID] = row; return row
         }
         marks = next
+        var rows: [any DocumentRow] = []
+        var utteranceRows: [NSView] = []
+        var attached: [Int: [any DocumentRow]] = [:]
+        for (item, row) in zip(items, aiRows) { attached[item.slot, default: []].append(row) }
+        rows.append(contentsOf: attached[-1, default: []])
+        for (index, utterance) in utterances.enumerated() {
+            let row = speechRows[index] ?? TranscriptRow()
+            speechRows[index] = row
+            row.update(utterance, names: meeting?.names ?? SpeakerNames(), timeline: timeline)
+            rows.append(row)
+            rows.append(contentsOf: attached[index, default: []])
+            utteranceRows.append(rows.last!)
+        }
         transcript.setRows(rows, anchor: changedMeeting ? .init(candidates: [], y: 0, atBottom: false) : anchor)
+        speechRows = speechRows.filter { utterances.indices.contains($0.key) }
+        let automaticSlot = record.manifest.automaticSlot ?? controller.conversation.questions.last(where: { $0.request.trigger == .scheduled })
+            .map { $0.request.envelope.participant.profileSlot ?? controller.defaultSlot }
+        transcript.setRangeBoundaries(controller.rangeBoundaries(slot: automaticSlot, utterances: utterances), utteranceRows: utteranceRows)
         aiRead.noteVisibilityChanged()
         aiRead.refresh()
     }

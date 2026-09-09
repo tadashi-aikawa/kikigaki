@@ -40,6 +40,7 @@ final class AIConversationController {
     let meetingID: UUID
     let outputDirectory: URL
     private(set) var conversation: AIConversation
+    private var recoveredRangeHistories: [Int: AIStreamHistory] = [:]
     private(set) var invalidInboxFiles: [String] = []
     var onChange: (() -> Void)?
     /// 返事が届いた枠。通知音は返答元のプロファイルの設定で決める
@@ -67,9 +68,32 @@ final class AIConversationController {
         _ = try AIJSON.decode(AIConversation.self, from: AIJSON.encode(conversation))
         for q in conversation.questions { try q.request.envelope.validatePaths(outputDirectory: outputDirectory) }
         channels[defaultSlot] = try Channel(slot: defaultSlot, meetingID: meetingID)
+        if recovered != nil {
+            let perSlot = Dictionary(grouping: conversation.questions) { $0.request.envelope.participant.profileSlot ?? defaultSlot }
+            for question in perSlot.values.compactMap({ $0.last }) {
+                let participant = question.request.envelope.participant
+                let slot = participant.profileSlot ?? defaultSlot
+                let savedGeneration = try? AIJSON.decode(Int.self, from: files.read(base + ["sessions", "\(slot)", "generation.json"]))
+                // 作り直したあと一度も送っていない場合、旧requestの範囲を復活させない。
+                guard (savedGeneration ?? participant.sessionGeneration) <= participant.sessionGeneration else { continue }
+                recoveredRangeHistories[slot] = try AIStreamHistory(meetingID: meetingID,
+                    streamID: participant.streamID, sessionGeneration: participant.sessionGeneration)
+            }
+        }
     }
 
     // MARK: - チャネル
+
+    func rangeBoundaries(slot: Int?, utterances: [Utterance]) -> AIRangeBoundaries {
+        guard let slot else { return AIRangeBoundaries() }
+        let questions = conversation.questions.filter { self.slot(of: $0.request) == slot }
+        // 回収時は送信用historyを復元しない。保存済みrequestの現stream識別子だけを使う。
+        let history: AIStreamHistory?
+        if allowsSending { history = channels[slot]?.history }
+        else { history = recoveredRangeHistories[slot] }
+        guard let history else { return AIRangeBoundaries() }
+        return AIRangeBoundaries.resolve(history: history, questions: questions, utterances: utterances)
+    }
 
     private func channel(_ slot: Int) throws -> Channel {
         if let existing = channels[slot] { return existing }
