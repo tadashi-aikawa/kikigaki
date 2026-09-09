@@ -12,12 +12,15 @@ enum AIRowMetrics {
     static let bodyX: CGFloat = 54
     static let avatar = NSRect(x: 20, y: 8, width: 25, height: 26)
     static func bodyWidth(_ width: CGFloat) -> CGFloat { max(44, width - 90) }
-    static let clock: DateFormatter = {
+    /// 人の発話と同じ粒度で出す。1本の時間軸に2つの桁数を混ぜない。秒はtooltipへ。
+    static let clock = formatter("HH:mm")
+    static let clockWithSeconds = formatter("HH:mm:ss")
+    private static func formatter(_ format: String) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "HH:mm:ss"
+        formatter.dateFormat = format
         return formatter
-    }()
+    }
     static func measure(_ field: NSTextField, width: CGFloat) -> CGFloat {
         ceil(field.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: max(44, width), height: .greatestFiniteMagnitude)).height ?? 0)
     }
@@ -57,7 +60,9 @@ final class AIStatusPill: NSButton {
         let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10)
         if filled { color.setFill(); pill.fill() }
         else { color.setStroke(); pill.lineWidth = 1; pill.stroke() }
-        let attributes: [NSAttributedString.Key: Any] = [.font: font!, .foregroundColor: filled ? NSColor.white : color]
+        // 金地に白は3.25:1しかない。塗りの色に応じて読める方の文字色を選ぶ。
+        let attributes: [NSAttributedString.Key: Any] = [.font: font!,
+            .foregroundColor: filled ? (style == .confirmation ? Washi.ink : NSColor.white) : color]
         let size = (title as NSString).size(withAttributes: attributes)
         (title as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2),
                                  withAttributes: attributes)
@@ -65,40 +70,15 @@ final class AIStatusPill: NSButton {
     @objc private func pressed() { callback?() }
 }
 
-/// 行の中の操作。押せることが分かるよう枠のピルで描く。
-/// 無効な場面ではボタン自体を出さないので、無効時に面を足す状態は作らない。
-final class AIRowActionButton: NSButton {
-    var callback: (() -> Void)?
-    init(_ title: String, action: @escaping () -> Void) {
-        callback = action
-        super.init(frame: .zero)
-        self.title = title
-        isBordered = false
-        font = .systemFont(ofSize: 12)
-        target = self; self.action = #selector(pressed)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-    var measuredWidth: CGFloat { ceil((title as NSString).size(withAttributes: [.font: font!]).width) + 24 }
-    override func draw(_ dirtyRect: NSRect) {
-        let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 12, yRadius: 12)
-        Washi.muted.setStroke(); pill.lineWidth = 1; pill.stroke()
-        let attributes: [NSAttributedString.Key: Any] = [.font: font!, .foregroundColor: Washi.ink]
-        let size = (title as NSString).size(withAttributes: attributes)
-        (title as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2),
-                                 withAttributes: attributes)
-    }
-    @objc private func pressed() { callback?() }
-}
-
-/// 宛名の枠ピル。人側の送信行の右端に置く。
-final class AIAddressPill: NSView {
+/// 「AI」「自動」の印。塗りは足さず枠だけで、状態のピルとは別の大きさにする。
+final class AITagPill: NSView {
     override var isFlipped: Bool { true }
     var text = "" { didSet { if text != oldValue { needsDisplay = true } } }
-    private var font: NSFont { .systemFont(ofSize: 11, weight: .bold) }
-    var measuredWidth: CGFloat { ceil((text as NSString).size(withAttributes: [.font: font]).width) + 16 }
+    private var font: NSFont { .systemFont(ofSize: 10) }
+    var measuredWidth: CGFloat { ceil((text as NSString).size(withAttributes: [.font: font]).width) + 12 }
     override func draw(_ dirtyRect: NSRect) {
-        let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10)
-        Washi.muted.setStroke(); pill.lineWidth = 1; pill.stroke()
+        let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
+        Washi.rule.setStroke(); pill.lineWidth = 1; pill.stroke()
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: Washi.muted]
         let size = (text as NSString).size(withAttributes: attributes)
         (text as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2),
@@ -136,17 +116,12 @@ final class AIQuoteButton: NSButton {
         setAccessibilityLabel("送信文 " + text + (expanded ? "、畳む" : "、全文を表示する"))
         needsDisplay = true
     }
+    /// 幅は字下げ後の実幅で渡す。罫は行側が本文の左端へ別に描く。
     func height(for width: CGFloat) -> CGFloat {
         guard expanded else { return 18 }
-        let bounds = NSRect(x: 0, y: 0, width: max(44, width - 12), height: .greatestFiniteMagnitude)
+        let bounds = NSRect(x: 0, y: 0, width: max(44, width), height: .greatestFiniteMagnitude)
         return max(18, ceil(cell?.cellSize(forBounds: bounds).height ?? 18))
     }
-    override func draw(_ dirtyRect: NSRect) {
-        Washi.rule.setFill()
-        NSRect(x: 0, y: 1, width: 2, height: max(0, bounds.height - 2)).fill()
-        super.draw(dirtyRect)
-    }
-    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 0) }
     @objc private func pressed() {
         expanded.toggle()
         refresh()
@@ -174,10 +149,11 @@ final class AISendLineRow: NSView, AITimelineRowView {
         var parts = ["└ " + item.participantName + verb] + item.notes
         if let date = item.date { parts.append(AIRowMetrics.clock.string(from: date)) }
         label.stringValue = parts.joined(separator: " · ")
-        // 自動送信は本数が増えるので、同じ形のまま薄くして目立たせない。
-        label.textColor = item.automatic ? Washi.muted.withAlphaComponent(0.65) : Washi.muted
+        // この地色では薄めた11ptが2.6:1まで落ちる。自動の区別は語に任せて色は薄めない。
+        label.textColor = Washi.muted
         let range = item.timeRange.map { "\($0.start)〜\($0.end)" }
-        label.toolTip = ([label.stringValue, range, item.question.isEmpty ? nil : item.question]
+        let seconds = item.date.map { AIRowMetrics.clockWithSeconds.string(from: $0) }
+        label.toolTip = ([label.stringValue, seconds, range, item.question.isEmpty ? nil : item.question]
             .compactMap { $0 }).joined(separator: "\n")
         label.setAccessibilityLabel(label.stringValue)
         needsLayout = true
@@ -199,11 +175,13 @@ final class AITypedSendRow: NSView, AITimelineRowView {
     private let nameLabel = Washi.label("AIへ送信", size: 12, weight: .semibold)
     private let timeLabel = Washi.label(color: Washi.muted)
     private let noteLabel = Washi.label(size: 11, color: Washi.muted)
-    private let address = AIAddressPill()
+    /// 宛名はラベルであって状態ではないので、枠つきピルにしない。
+    /// 枠つきピルは状態専用に残し、枠の有無をそのまま「注意が要るか」にする。
+    private let address = Washi.label(size: 11, color: Washi.muted)
     private let body = NSTextField(wrappingLabelWithString: "")
     private var measured: CGFloat = 0
     var displayName: String { nameLabel.stringValue }
-    var addressText: String { address.text }
+    var addressText: String { address.stringValue }
     var noteText: String { noteLabel.stringValue }
     init(item: AITimeline.Item, state: AIViewState) {
         self.item = item
@@ -221,21 +199,27 @@ final class AITypedSendRow: NSView, AITimelineRowView {
     }
     required init?(coder: NSCoder) { fatalError() }
     func update(_ item: AITimeline.Item, state: AIViewState) {
+        let previous = self.item
         self.item = item
         timeLabel.stringValue = item.date.map(AIRowMetrics.clock.string(from:)) ?? ""
+        timeLabel.toolTip = item.date.map(AIRowMetrics.clockWithSeconds.string(from:))
         let parent = item.parentNumber.map { "#\($0)への返答" }
         noteLabel.stringValue = ([parent].compactMap { $0 } + item.notes).joined(separator: " · ")
         noteLabel.toolTip = ([noteLabel.stringValue, item.timeRange.map { "\($0.start)〜\($0.end)" }]
             .compactMap { $0 }).joined(separator: "\n")
-        address.text = item.participantName + "へ"
+        address.stringValue = item.participantName + "へ"
         avatar.setAccessibilityLabel("AIへ送信")
-        if body.stringValue != item.question {
+        // 送っていない文と取り消した文を、送った文と同じ重さで会話に残さない。面は足さず色を抜く。
+        let pending = item.notes.contains { $0 == "取消" || $0 == "送信準備中" }
+        if body.stringValue != item.question || previous.notes != item.notes {
             let paragraph = NSMutableParagraphStyle(); paragraph.lineSpacing = 4
             body.attributedStringValue = NSAttributedString(string: item.question, attributes: [
-                .font: NSFont.systemFont(ofSize: 15), .foregroundColor: Washi.ink, .paragraphStyle: paragraph
+                .font: NSFont.systemFont(ofSize: 15), .foregroundColor: pending ? Washi.muted : Washi.ink,
+                .paragraphStyle: paragraph
             ])
             measured = 0
         }
+        avatar.alphaValue = pending ? 0.5 : 1
         avatar.needsDisplay = true
         needsLayout = true
     }
@@ -248,9 +232,9 @@ final class AITypedSendRow: NSView, AITimelineRowView {
         avatar.frame = AIRowMetrics.avatar
         let nameWidth = ceil(nameLabel.intrinsicContentSize.width) + 4
         nameLabel.frame = NSRect(x: AIRowMetrics.bodyX, y: 8, width: nameWidth, height: 18)
-        timeLabel.frame = NSRect(x: AIRowMetrics.bodyX + nameWidth + 12, y: 8, width: 62, height: 18)
-        let pillWidth = address.measuredWidth
-        address.frame = NSRect(x: bounds.width - 20 - pillWidth, y: 8, width: pillWidth, height: 20)
+        timeLabel.frame = NSRect(x: AIRowMetrics.bodyX + nameWidth + 12, y: 8, width: 48, height: 18)
+        let addressWidth = ceil(address.intrinsicContentSize.width) + 2
+        address.frame = NSRect(x: bounds.width - 20 - addressWidth, y: 9, width: addressWidth, height: 16)
         let noteX = timeLabel.frame.maxX + 8
         noteLabel.frame = NSRect(x: noteX, y: 9, width: max(0, address.frame.minX - noteX - 8), height: 16)
         body.frame = NSRect(x: AIRowMetrics.bodyX, y: 31, width: AIRowMetrics.bodyWidth(bounds.width), height: max(20, bounds.height - 36))
@@ -269,22 +253,25 @@ final class AIReplyRow: NSView, AITimelineRowView {
     var onResize: (() -> Void)?
     private let avatar = AvatarView()
     private let nameLabel = Washi.label(size: 12, weight: .semibold)
-    private let chip = Washi.label(size: 10, color: Washi.muted)
+    private let chip = AITagPill()
     private let timeLabel = Washi.label(color: Washi.muted)
     private let pill = AIStatusPill()
     private let quote = AIQuoteButton()
+    /// 引用の左罫。ボタンの内側へ描くと文字に隠れるので、本文の左端へ別のビューで置く。
+    private let quoteRule = NSView()
     private let markdownBody = MarkdownBodyView()
     private let waitingBody = Washi.label("考え中…", size: 15, color: Washi.muted)
     private let confirmationMark = Washi.label("?", size: 15, color: Washi.muted)
     private let notes = NSTextField(wrappingLabelWithString: "")
-    private let failureLabel = Washi.label(size: 13, weight: .semibold)
-    private lazy var replyAction = AIRowActionButton("返答する") { [weak self] in self?.onReply?() }
-    private lazy var cancelAction = AIRowActionButton("取消") { [weak self] in self?.onCancel?() }
-    private lazy var retryAction = AIRowActionButton("再送") { [weak self] in self?.onRetry?() }
+    /// 本文15・名前12の間に段を増やさないよう12ptに揃える。
+    private let failureLabel = Washi.label(size: 12, weight: .semibold)
+    private lazy var replyAction = AIActionButton("返答する", size: 12) { [weak self] in self?.onReply?() }
+    private lazy var cancelAction = AIActionButton("取消", size: 12) { [weak self] in self?.onCancel?() }
+    private lazy var retryAction = AIActionButton("再送", size: 12) { [weak self] in self?.onRetry?() }
     private var measuredQuote: CGFloat = 0
     private var measuredBody: CGFloat = 0
     private var measuredNotes: CGFloat = 0
-    var chipText: String { chip.stringValue }
+    var chipText: String { chip.text }
     var chipVisible: Bool { !chip.isHidden }
     var timeText: String { timeLabel.isHidden ? "" : timeLabel.stringValue }
     var noteText: String { notes.isHidden ? "" : notes.stringValue }
@@ -313,12 +300,12 @@ final class AIReplyRow: NSView, AITimelineRowView {
         super.init(frame: .zero)
         avatar.accent = Washi.ai
         timeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        chip.alignment = .center
         notes.isSelectable = true; notes.maximumNumberOfLines = 0; notes.lineBreakMode = .byWordWrapping
         failureLabel.lineBreakMode = .byTruncatingTail
+        Washi.surface(quoteRule, color: Washi.rule)
         pill.callback = { [weak self] in self?.onRead?() }
         quote.onToggle = { [weak self] in self?.onResize?() }
-        for view in [avatar, nameLabel, chip, timeLabel, pill, quote, markdownBody, waitingBody,
+        for view in [avatar, nameLabel, chip, timeLabel, pill, quoteRule, quote, markdownBody, waitingBody,
                      confirmationMark, notes, failureLabel, replyAction, cancelAction, retryAction] { addSubview(view) }
         update(item, state: state)
     }
@@ -333,8 +320,11 @@ final class AIReplyRow: NSView, AITimelineRowView {
         avatar.initial = String(item.participantName.prefix(1))
         avatar.setAccessibilityLabel(item.participantName)
         avatar.needsDisplay = true
-        chip.stringValue = item.automatic ? "自動" : "AI"
+        chip.text = item.automatic ? "自動" : "AI"
         timeLabel.stringValue = item.date.map(AIRowMetrics.clock.string(from:)) ?? ""
+        timeLabel.toolTip = item.date.map(AIRowMetrics.clockWithSeconds.string(from:))
+        // 返答したあとも本文が問いであることの印は残す。状態ではないので色だけ落とす。
+        confirmationMark.textColor = item.needsAnswer ? Washi.muted : Washi.rule
         if let style = pillStyle { pill.update(style) }
         markdownBody.update(item.body)
         quote.update(item.question)
@@ -366,20 +356,21 @@ final class AIReplyRow: NSView, AITimelineRowView {
         chip.isHidden = failure || isWaiting
         pill.isHidden = pillStyle == nil
         quote.isHidden = failure || item.question.isEmpty
+        quoteRule.isHidden = quote.isHidden
         markdownBody.isHidden = failure || isWaiting
         waitingBody.isHidden = failure || !isWaiting
-        confirmationMark.isHidden = failure || !item.needsAnswer
+        confirmationMark.isHidden = failure || item.kind != .reply(.needsInput)
         notes.isHidden = failure || notes.stringValue.isEmpty
         replyAction.isHidden = failure || !item.needsAnswer || state.readOnly
         cancelAction.isHidden = failure || !isWaiting || state.readOnly
         setAccessibilityLabel(failure ? failureLabel.stringValue
-            : item.participantName + "、" + (isWaiting ? "返事待ち" : chip.stringValue) + (pillStyle == .unread ? "、未読" : ""))
+            : item.participantName + "、" + (isWaiting ? "返事待ち" : chip.text) + (pillStyle == .unread ? "、未読" : ""))
     }
 
     func height(for width: CGFloat) -> CGFloat {
         if isFailure { return 34 }
         let bodyWidth = AIRowMetrics.bodyWidth(width)
-        measuredQuote = item.question.isEmpty ? 0 : quote.height(for: bodyWidth) + 8
+        measuredQuote = item.question.isEmpty ? 0 : quote.height(for: bodyWidth - 12) + 8
         // 測る前に表示と同じ幅の枠を与える。幅0のまま測るとTextKitが器の寸法を誤り、
         // 表やコードを含む返事の高さが一度だけ跳ね上がったまま計測値に残る。
         if markdownBody.frame.width != bodyWidth {
@@ -387,16 +378,19 @@ final class AIReplyRow: NSView, AITimelineRowView {
         }
         measuredBody = isWaiting ? 20 : markdownBody.height(for: bodyWidth)
         measuredNotes = notes.isHidden ? 0 : AIRowMetrics.measure(notes, width: bodyWidth) + 6
-        let actions = [replyAction, cancelAction].contains { !$0.isHidden } ? 30.0 : 0
+        // 返事待ちの「取消」は「考え中…」と同じ行の右端へ寄せる。まだ何も無い行を4段にしない。
+        let actions = replyAction.isHidden ? 0.0 : 30
         return 31 + measuredQuote + max(20, measuredBody) + measuredNotes + actions + 9
     }
 
     override func layout() {
         super.layout()
         if isFailure {
-            let retryWidth = retryAction.measuredWidth
+            // 読み取り専用では「再送」を出さないので、その幅を空けたままにしない。
+            let retryWidth = retryAction.isHidden ? 0 : retryAction.measuredWidth
             retryAction.frame = NSRect(x: bounds.width - 20 - retryWidth, y: 5, width: retryWidth, height: 24)
-            timeLabel.frame = NSRect(x: retryAction.frame.minX - 70, y: 6, width: 62, height: 18)
+            let right = retryAction.isHidden ? bounds.width - 20 : retryAction.frame.minX - 8
+            timeLabel.frame = NSRect(x: right - 48, y: 6, width: 48, height: 18)
             // 返送された失敗は未読になるので、押して既読にできる印を帯の中へ置く。
             let pillWidth = pill.isHidden ? 0 : ceil(pill.intrinsicContentSize.width)
             pill.frame = NSRect(x: timeLabel.frame.minX - 8 - pillWidth, y: 5, width: pillWidth, height: 20)
@@ -407,23 +401,27 @@ final class AIReplyRow: NSView, AITimelineRowView {
         avatar.frame = AIRowMetrics.avatar
         let nameWidth = ceil(nameLabel.intrinsicContentSize.width) + 4
         nameLabel.frame = NSRect(x: AIRowMetrics.bodyX, y: 8, width: nameWidth, height: 18)
-        let chipWidth = chip.isHidden ? 0 : ceil(chip.intrinsicContentSize.width) + 12
+        let chipWidth = chip.isHidden ? 0 : chip.measuredWidth
         chip.frame = NSRect(x: nameLabel.frame.maxX + 8, y: 9, width: chipWidth, height: 16)
-        timeLabel.frame = NSRect(x: nameLabel.frame.maxX + (chip.isHidden ? 12 : chipWidth + 16), y: 8, width: 62, height: 18)
+        timeLabel.frame = NSRect(x: nameLabel.frame.maxX + (chip.isHidden ? 12 : chipWidth + 16), y: 8, width: 48, height: 18)
         let pillWidth = ceil(pill.intrinsicContentSize.width)
         pill.frame = NSRect(x: bounds.width - 20 - pillWidth, y: 8, width: pillWidth, height: 20)
         let bodyWidth = AIRowMetrics.bodyWidth(bounds.width)
-        quote.frame = NSRect(x: AIRowMetrics.bodyX, y: 31, width: bodyWidth, height: max(0, measuredQuote - 8))
+        // 引用は本文より12pt字下げし、空いた左へ罫を置く。従属関係を字下げと罫の両方で示す。
+        quote.frame = NSRect(x: AIRowMetrics.bodyX + 12, y: 31, width: bodyWidth - 12, height: max(0, measuredQuote - 8))
+        quoteRule.frame = NSRect(x: AIRowMetrics.bodyX, y: 32, width: 2, height: max(0, measuredQuote - 10))
         let bodyY = 31 + measuredQuote
         markdownBody.frame = NSRect(x: AIRowMetrics.bodyX, y: bodyY, width: bodyWidth, height: max(20, measuredBody))
         waitingBody.frame = NSRect(x: AIRowMetrics.bodyX, y: bodyY, width: bodyWidth, height: 20)
         confirmationMark.frame = NSRect(x: AIRowMetrics.bodyX - 14, y: bodyY + 2, width: 12, height: 20)
         notes.frame = NSRect(x: AIRowMetrics.bodyX, y: markdownBody.frame.maxY + 6, width: bodyWidth, height: max(0, measuredNotes - 6))
-        var x = AIRowMetrics.bodyX
-        for button in [replyAction, cancelAction] where !button.isHidden {
-            let width = button.measuredWidth
-            button.frame = NSRect(x: x, y: markdownBody.frame.maxY + measuredNotes + 4, width: width, height: 24)
-            x += width + 10
+        if !cancelAction.isHidden {
+            let width = cancelAction.measuredWidth
+            cancelAction.frame = NSRect(x: bounds.width - 20 - width, y: bodyY - 2, width: width, height: 24)
+        }
+        if !replyAction.isHidden {
+            replyAction.frame = NSRect(x: AIRowMetrics.bodyX, y: markdownBody.frame.maxY + measuredNotes + 4,
+                                       width: replyAction.measuredWidth, height: 24)
         }
     }
 

@@ -36,7 +36,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let aiStatusRow = NSStackView()
     private let askButton = WashiActionButton(title: "AIへ…", target: nil, action: nil)
     private var aiRows: [String: any AITimelineRowView] = [:]
-    let aiRead = AIReadWatcher()
+    private(set) lazy var aiRead = AIReadWatcher(window: { [weak self] in self?.window })
     private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
     private var speakerSettingsPopover: SpeakerSettingsPopover?
     private let startStopButton = WashiActionButton()

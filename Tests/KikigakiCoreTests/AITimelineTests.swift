@@ -61,9 +61,9 @@ import KikigakiCore
         #expect(sends[2].anchor == .at(Date(timeIntervalSince1970: 50)))
         #expect(sends.map(\.automatic) == [false, false, true])
         #expect(sends[1].question == "入力した問い")
-        // 引用は手動入力の返事だけへ添える。声は発話そのもの、自動は毎回同じ定型文になる。
-        #expect(items.filter { !$0.isSend }.map(\.question) == ["", "入力した問い", ""])
-        #expect(items.allSatisfy { $0.notes.contains("対象: 1発言") || !$0.isSend })
+        // 送信の行のすぐ下に返事が来る場合は、同じ文が2回続くので引用を落とす。
+        #expect(items.filter { !$0.isSend }.allSatisfy { $0.question.isEmpty })
+        #expect(items.allSatisfy { $0.notes.contains("1発言") || !$0.isSend })
     }
 
     @Test func 確認への返答は人側の行にし親番号を持つ() throws {
@@ -80,7 +80,8 @@ import KikigakiCore
         let confirmation = try #require(items.first { $0.number == 1 && !$0.isSend })
         #expect(confirmation.kind == .reply(.needsInput))
         #expect(confirmation.needsAnswer == false)      // 返答済みなので確認待ちの導線は畳む
-        #expect(confirmation.notes.contains("返答済み"))
+        // どの依頼で返したかを番号で結ぶ。「返答済み」だけでは往復を追えない。
+        #expect(confirmation.notes.contains("#2で返答"))
         let answerSend = try #require(items.first { $0.number == 2 && $0.isSend })
         #expect(answerSend.kind == .sendRow)
         #expect(answerSend.parentNumber == 1)
@@ -204,7 +205,7 @@ import KikigakiCore
         // 成否が分からないので「考え中…」は出さず、送信の行の注記だけにする。
         #expect(!items.contains { $0.number == 2 && !$0.isSend })
         #expect(try #require(items.first { $0.number == 2 }).notes.contains("送達不明"))
-        #expect(try #require(items.first { $0.number == 1 }).notes.contains("対象: 1発言"))
+        #expect(try #require(items.first { $0.number == 1 }).notes.contains("1発言"))
         #expect(items.filter { !$0.isSend }.allSatisfy { $0.rowID.hasSuffix("/reply") })
         #expect(items.filter(\.isSend).allSatisfy { $0.rowID.hasSuffix("/send") })
     }
@@ -217,8 +218,45 @@ import KikigakiCore
                                 lines: ["[00:00:10] 話者A: 一行目", "[00:00:20] 話者A: 二行目"])
         try conversation.append(value)
         let prepared = try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline).first)
-        #expect(prepared.notes == ["対象: 2発言", "作業許可なし", "暫定末尾を含む", "送信準備中"])
+        #expect(prepared.notes == ["2発言", "作業許可なし", "暫定末尾を含む", "送信準備中"])
         #expect(prepared.date == Date(timeIntervalSince1970: 30))   // 未送信は固定した確定時刻で置く
+    }
+
+    @Test func 送信と返事の間に発話が入るときだけ引用を残す() throws {
+        let meeting = UUID()
+        var conversation = AIConversation(meetingID: meeting)
+        let value = try request(in: meeting, number: 1, question: "入力した問い")
+        try send(&conversation, value, at: 20)
+        try answer(&conversation, value, at: 60)
+        // 送信は10秒の発話の後、返事は50秒の発話の後になり、間に発話が挟まる。
+        let apart = AITimeline.items(conversation: conversation, utterances: [voice("先", at: 10), voice("後", at: 50)],
+                                     timeline: timeline)
+        #expect(apart.map(\.slot) == [0, 1])
+        #expect(try #require(apart.last).question == "入力した問い")
+        // 発話が挟まらなければ何への返事かは直上で読めるので引用は要らない。
+        let adjacent = AITimeline.items(conversation: conversation, utterances: [voice("先", at: 10)], timeline: timeline)
+        #expect(adjacent.map(\.slot) == [0, 0])
+        #expect(try #require(adjacent.last).question.isEmpty)
+    }
+
+    @Test func 失敗した返答は同じ確認へ送り直せる() throws {
+        let meeting = UUID()
+        var conversation = AIConversation(meetingID: meeting)
+        let ask = try request(in: meeting, number: 1, anchor: 10)
+        try send(&conversation, ask, at: 30)
+        try answer(&conversation, ask, at: 31, kind: .needsInput, body: "社外の方も含みますか", reason: "clarification")
+        let parent = try #require(conversation.questions.first)
+        let failed = try request(in: meeting, number: 2, question: "社内だけです", parent: parent)
+        try send(&conversation, failed, at: 40)
+        try answer(&conversation, failed, at: 41, kind: .failed, body: "送信できませんでした", reason: "send_failed")
+        // 失敗した返答が親に登録されたままだと、同じ確認への再送が「返答済み」で拒否される。
+        let resent = try request(in: meeting, number: 3, question: "社内だけです", parent: conversation.questions[0])
+        try send(&conversation, resent, at: 50)
+        #expect(conversation.questions[0].answeredByRequestID == resent.id)
+        #expect(try AIJSON.decode(AIConversation.self, from: AIJSON.encode(conversation)) == conversation)
+        let items = AITimeline.items(conversation: conversation, utterances: [voice("対象", at: 10)], timeline: timeline)
+        #expect(try #require(items.first { $0.number == 1 && !$0.isSend }).notes == ["#3で返答"])
+        #expect(items.filter { $0.number == 3 }.map(\.kind) == [.sendRow, .reply(.waiting)])
     }
 
     @Test func 会話がなければ何も返さない() {

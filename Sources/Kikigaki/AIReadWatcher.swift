@@ -14,13 +14,21 @@ import AppKit
     private var timer: Timer?
     private var observers: [any NSObjectProtocol] = []
 
-    init() {
+    /// - window: 監視するウィンドウ。別のウィンドウの最小化で滞在時間を消さないため所有元へ限定する。
+    init(window: @escaping () -> NSWindow?) {
         // 見ていない間の時間を数えない。次に戻ってきたら0から数え直す。
+        let handler: @Sendable (Notification) -> Void = { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                // アプリ全体の非活性はどのウィンドウでも効く。ウィンドウ通知は所有元だけ見る。
+                if note.name == NSApplication.didResignActiveNotification || (note.object as AnyObject?) === window() {
+                    self.reset()
+                }
+            }
+        }
         for name in [NSWindow.didResignKeyNotification, NSWindow.didMiniaturizeNotification,
                      NSApplication.didResignActiveNotification] {
-            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.reset() }
-            })
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main, using: handler))
         }
     }
     deinit {
@@ -60,8 +68,9 @@ import AppKit
     private func visibleRows() -> [AIReplyRow] {
         guard isActive() else { return [] }
         let clip = self.clip()
-        // 上端が見えていることを条件にする。長い返事の途中だけが見えている状態は数えない。
-        return rows().filter { $0.frame.minY >= clip.minY && $0.frame.minY <= clip.maxY - 8 }
+        // 行と可視域の重なりで見る。上端だけを条件にすると、画面いっぱいの長い返事は
+        // スクロールしながら読んでいる間ずっと対象から外れ、いつまでも既読にならない。
+        return rows().filter { $0.frame.maxY > clip.minY && $0.frame.minY < clip.maxY - 8 }
     }
 
     func evaluate(now: TimeInterval = AIReadWatcher.now, dwell: TimeInterval = 1) {

@@ -189,9 +189,17 @@ public struct AIQuestion: Codable, Equatable, Sendable {
 
     public mutating func markRead() { isUnread = false }
 
-    mutating func linkFollowup(_ id: UUID) throws {
-        guard state == .needsInput, answeredByRequestID == nil else { throw AIError.invalidTransition }
+    /// 失敗・取消に終わった返答は、同じ確認へ送り直せるよう参照を付け替える。
+    /// 付け替えないと、失敗した返答の再送が「返答済み」として拒否される。
+    mutating func linkFollowup(_ id: UUID, replacing: Bool = false) throws {
+        guard state == .needsInput, answeredByRequestID == nil || replacing else { throw AIError.invalidTransition }
         answeredByRequestID = id
+    }
+    /// 返答済みかどうか。失敗・取消で終わった返答は返答済みとして数えない。
+    static func isAnswered(_ parent: AIQuestion, in questions: [AIQuestion]) -> Bool {
+        guard let id = parent.answeredByRequestID else { return false }
+        guard let child = questions.first(where: { $0.request.id == id }) else { return true }
+        return child.state != .failed && child.state != .cancelled
     }
 
     /// state.json回収用。破損した保存状態を受信済み・送信可能として扱わない。
@@ -259,7 +267,9 @@ public struct AIConversation: Codable, Equatable, Sendable {
                       // 確認への返答は元質問と同じ宛先へ返す。別のAIへ送ると、返答を見ていない
                       // 相手が答え、元質問まで返答済みになる。
                       parent.request.envelope.participant.profileSlot == question.request.envelope.participant.profileSlot,
-                      question.sendAttemptedAt == nil || parent.answeredByRequestID == question.request.id else { throw AIError.mismatch }
+                      // 付け替えられた古い返答は失敗・取消で終わっているものだけを認める。
+                      question.sendAttemptedAt == nil || parent.answeredByRequestID == question.request.id
+                        || question.state == .failed || question.state == .cancelled else { throw AIError.mismatch }
             }
             if let childID = question.answeredByRequestID {
                 guard questions.contains(where: { $0.request.id == childID && $0.sendAttemptedAt != nil
@@ -277,7 +287,8 @@ public struct AIConversation: Codable, Equatable, Sendable {
                   questions[index].result?.eventID == request.envelope.participant.inReplyToEventID,
                   // 確認への返答は元質問と同じ宛先へ返す。
                   questions[index].request.envelope.participant.profileSlot == request.envelope.participant.profileSlot,
-                  questions[index].state == .needsInput, questions[index].answeredByRequestID == nil else { throw AIError.mismatch }
+                  questions[index].state == .needsInput,
+                  !AIQuestion.isAnswered(questions[index], in: questions) else { throw AIError.mismatch }
         }
         questions.append(question)
     }
@@ -293,7 +304,7 @@ public struct AIConversation: Codable, Equatable, Sendable {
            let parentID = copy.request.envelope.participant.inReplyToRequestID {
             guard let parentIndex = questions.firstIndex(where: { $0.request.id == parentID }) else { throw AIError.mismatch }
             var parent = questions[parentIndex]
-            try parent.linkFollowup(requestID)
+            try parent.linkFollowup(requestID, replacing: !AIQuestion.isAnswered(parent, in: questions))
             questions[parentIndex] = parent
         }
         questions[index] = copy

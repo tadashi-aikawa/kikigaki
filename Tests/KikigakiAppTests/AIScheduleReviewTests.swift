@@ -101,7 +101,7 @@ import KikigakiAIIO
         window.apply(state); try capture("schedule-warning", view)
         let items = AITimeline.items(conversation: conversation, utterances: [], timeline: MeetingTimeline(startedAt: Date()))
         #expect(items.map(\.kind) == [.sendLine(automatic: true), .reply(.answered)])
-        #expect(try #require(items.first).notes == ["対象: 2発言"])
+        #expect(try #require(items.first).notes == ["2発言"])
         #expect(try #require(items.last).body == conversation.questions[0].result?.body)
         // 自動のansweredは取り込み時点で既読なので、印も帯も出さない。
         #expect(items.allSatisfy { !$0.isUnread })

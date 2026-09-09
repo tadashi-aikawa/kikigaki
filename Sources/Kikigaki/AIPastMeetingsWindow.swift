@@ -16,7 +16,9 @@ import KikigakiCore
     }
     private var marks: [String: any AITimelineRowView] = [:]
     /// 書き起こしウィンドウと同じ可視化の既読判定を使う。
-    let aiRead = AIReadWatcher()
+    private(set) lazy var aiRead = AIReadWatcher(window: { [weak self] in self?.window })
+    private var boundsObserver: (any NSObjectProtocol)?
+    deinit { if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) } }
     private var displayedMeeting: UUID?
     private let warning = NSTextField(wrappingLabelWithString: "")
     private var ids: [UUID] = []
@@ -47,8 +49,8 @@ import KikigakiCore
             self?.update()
         }
         scroll.contentView.postsBoundsChangedNotifications = true
-        NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView,
-                                               queue: .main) { [weak self] _ in
+        boundsObserver = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification,
+                                                               object: scroll.contentView, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.aiRead.noteVisibilityChanged() }
         }
     }
@@ -109,6 +111,8 @@ import KikigakiCore
                     guard let self, let reply else { return }
                     let y = scroll.contentView.bounds.minY
                     transcript.reflow(anchor: .init(candidates: [(reply, reply.frame.minY - y)], y: y, atBottom: false))
+                    // 引用の開閉で行が押し出されても可視域のboundsは変わらないので、ここで直接見る。
+                    aiRead.noteVisibilityChanged()
                 }
             }
             next[item.rowID] = row; return row

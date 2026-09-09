@@ -81,7 +81,7 @@ import KikigakiAIIO
         #expect(items.map(\.kind) == [.sendLine(automatic: true), .reply(.answered)])
         #expect(items.allSatisfy { $0.automatic })
         let sendItem = try #require(items.first), replyItem = try #require(items.last)
-        #expect(sendItem.notes.first?.hasPrefix("対象: ") == true)
+        #expect(sendItem.notes.first?.hasSuffix("発言") == true)
         #expect(replyItem.body.hasPrefix("議事録を更新しました"))
         session.submitAI(question: "手動の質問", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"))
         await settle(session)

@@ -35,7 +35,8 @@ public enum AITimeline {
         /// 送信は送信時刻、返事と失敗は到着時刻。到着が無ければ送信時刻。返事待ちだけnil。
         public let date: Date?
         /// 送信の行では送信文そのもの。返事の行では上へ添える1行引用で、手動typedのときだけ非空。
-        public let question: String
+        /// 送信の行と返事の行が隣り合うときは、同じ文が2回続くので引用を空にする。
+        public fileprivate(set) var question: String
         public let parentNumber: Int?
         public let body: String
         public let notes: [String]
@@ -80,7 +81,7 @@ public enum AITimeline {
                 : participant.questionSource == .voice ? .sendLine(automatic: false) : .sendRow
             let voiceIndex = request.voiceAnchorIndex(in: utterances)
             let sendAnchor: Anchor = voiceIndex.map { .afterUtterance($0) } ?? .at(sendDate)
-            var sendNotes = ["対象: \(request.envelope.readLineCount)発言"]
+            var sendNotes = ["\(request.envelope.readLineCount)発言"]
             if !participant.workAllowed { sendNotes.append("作業許可なし") }
             if participant.tentativeTail != nil { sendNotes.append("暫定末尾を含む") }
             switch question.state {
@@ -103,7 +104,11 @@ public enum AITimeline {
             var notes: [String] = []
             if question.cancelledAt != nil { notes.append("取消後の返事") }
             if participant.sessionGeneration < generation { notes.append("旧接続からの返事") }
-            if question.answeredByRequestID != nil { notes.append("返答済み") }
+            // どの依頼で返したかを番号で結ぶ。「返答済み」だけでは往復を追えない。
+            if let child = question.answeredByRequestID,
+               let number = conversation.questions.first(where: { $0.request.id == child })?.request.number {
+                notes.append("#\(number)で返答")
+            }
             if waiting {
                 switch connection {
                 case .blocked: notes.append("ペインで確認してください")
@@ -126,7 +131,7 @@ public enum AITimeline {
         }
         // 同じslotの中は afterUtterance → 日時順 → 末尾。同着は送信を先にし、
         // 送信はrequest番号、返事は記録順で決める。最後は生成順で必ず全順序にする。
-        return built.enumerated().sorted { left, right in
+        var ordered = built.enumerated().sorted { left, right in
             let (a, b) = (left.element, right.element)
             if a.item.slot != b.item.slot { return a.item.slot < b.item.slot }
             if a.rank != b.rank { return a.rank < b.rank }
@@ -136,6 +141,16 @@ public enum AITimeline {
             if a.item.number != b.item.number { return a.item.number < b.item.number }
             return left.offset < right.offset
         }.map(\.element.item)
+        // 引用は「間に発話が入っても何への返事か読める」ための添え物なので、
+        // 送信の行のすぐ下に返事が来るときは同じ文が2回続くだけになる。落とす。
+        for index in ordered.indices.dropFirst() where !ordered[index].question.isEmpty && !ordered[index].isSend {
+            let previous = ordered[index - 1]
+            // 同じslotで隣り合うときだけ。slotが違えば間に発話が入る。
+            if previous.isSend, previous.requestID == ordered[index].requestID, previous.slot == ordered[index].slot {
+                ordered[index].question = ""
+            }
+        }
+        return ordered
     }
 
     private static func replyKind(_ question: AIQuestion) -> Kind? {

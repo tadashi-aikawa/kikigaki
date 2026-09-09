@@ -54,14 +54,15 @@ import KikigakiAIIO
         let sends = window.transcriptDocument.rows.compactMap { $0 as? AITypedSendRow }
         #expect(sends.count == 2)
         #expect(sends.allSatisfy { $0.displayName == "AIへ送信" && $0.addressText == "迅雷へ" })
-        #expect(sends[1].noteText.hasPrefix("#1への返答 · 対象: "))
+        #expect(sends[1].noteText.hasPrefix("#1への返答 · "))
+        #expect(sends.allSatisfy { $0.noteText.contains("発言") })
         #expect(!descendants(content).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "手入力" })
         let replies = window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }
         #expect(replies.map(\.item.kind) == [.reply(.needsInput), .reply(.answered)])
         // 展開が既定なので、返事本文は開かずに見える。
         #expect(replies.allSatisfy { row in descendants(row).compactMap { $0 as? MarkdownBodyView }.contains { !$0.isHidden } })
-        // 引用はキーボード入力の送信にだけ添える。
-        #expect(replies.map { $0.quoteButton.text } == ["案内文をファイルへ追記して", "はい、社内向けでお願いします"])
+        // 送信の行の直下に返事が来るので、同じ文を2回出さないため引用は落とす。
+        #expect(replies.allSatisfy { $0.quoteButton.isHidden })
         try capture("timeline-wording", view: content.superview!)
         let sheet = AIQuestionSheet(participant: "迅雷", parentNumber: nil, draft: "次の案内も整えてください", voice: "", range: "直近1発言", tentative: false, canSubmit: true)
         #expect(descendants(sheet.window.contentView!).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "迅雷へ" })
@@ -182,7 +183,7 @@ import KikigakiAIIO
         let retry = try #require(descendants(failed).compactMap { $0 as? NSButton }.first { $0.title == "再送" })
         #expect(!retry.isHidden)
         let sends = window.transcriptDocument.rows.compactMap { $0 as? AITypedSendRow }
-        #expect(sends.count == 4 && sends.allSatisfy { $0.noteText.contains("対象: 2発言") })
+        #expect(sends.count == 4 && sends.allSatisfy { $0.noteText.contains("2発言") })
         state.state = .idle; apply()
         try capture("timeline-idle", view: content.superview!)
     }
@@ -213,8 +214,9 @@ import KikigakiAIIO
         let rows = window.transcriptDocument.rows
         let send = try #require(rows[1] as? AISendLineRow)
         #expect(rows[0] is TranscriptRow && rows[2] is TranscriptRow)
-        let clock = DateFormatter(); clock.locale = Locale(identifier: "en_US_POSIX"); clock.dateFormat = "HH:mm:ss"
-        #expect(send.displayText == "└ 迅雷へ送信 · 対象: 2発言 · " + clock.string(from: started.addingTimeInterval(343)))
+        // 時刻は人の発話と同じ粒度。秒はtooltipへ。
+        let clock = DateFormatter(); clock.locale = Locale(identifier: "en_US_POSIX"); clock.dateFormat = "HH:mm"
+        #expect(send.displayText == "└ 迅雷へ送信 · 2発言 · " + clock.string(from: started.addingTimeInterval(343)))
         #expect(send.height(for: 680) == 24)
         let answer = try #require(rows.compactMap { $0 as? AIReplyRow }.first)
         // 声の送信は発話そのものが送信文なので、返事へ引用を重ねない。
@@ -269,10 +271,16 @@ import KikigakiAIIO
         // 上を読んでいる間は画面に入らないので既読にならない。
         var read: [UUID] = []
         window.onReadAI = { read.append($0) }
+        window.scrollView.contentView.scroll(to: .zero); content.layoutSubtreeIfNeeded()
         let now = AIReadWatcher.now
         window.aiRead.evaluate(now: now); window.aiRead.evaluate(now: now + 2)
-        let visible = window.scrollView.contentView.bounds.contains(NSPoint(x: 0, y: row.frame.minY))
-        #expect(read.isEmpty == !visible)
+        #expect(read.isEmpty)
+        // 判定は行と可視域の重なり。上端が上へ抜けた長い返事も「読んでいる」と見なす。
+        window.scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, row.frame.midY)))
+        content.layoutSubtreeIfNeeded()
+        #expect(window.scrollView.contentView.bounds.intersects(row.frame))
+        window.aiRead.evaluate(now: now + 3); window.aiRead.evaluate(now: now + 5)
+        #expect(read == [first.id])
         let snapshot = try history.prepare(lines: [], outputDirectory: root)
         let participant = AIParticipantContext(streamID: history.streamID, requestID: UUID(), sessionGeneration: 1, participantName: "迅雷",
             cliPath: root.appendingPathComponent("helper").path,
@@ -283,7 +291,9 @@ import KikigakiAIIO
         try conversation.append(followup)
         try conversation.update(followup.id) { try $0.beginSending(at: started.addingTimeInterval(403)) }
         state.ai?.conversation = conversation; window.apply(state)
-        #expect(row.accent == nil && row.noteText.contains("返答済み"))
+        #expect(row.accent == nil && row.noteText.contains("#2で返答"))
+        // 返答したあとも本文が問いであることの印は残す。
+        #expect(descendants(row).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "?" && !$0.isHidden })
     }
 
     @Test func 返送された失敗は未読になり印と可視化で既読にできる() throws {
@@ -337,8 +347,10 @@ import KikigakiAIIO
         var conversation = AIConversation(meetingID: meeting)
         try conversation.append(request)
         try conversation.update(request.id) { try $0.beginSending(at: started.addingTimeInterval(330)); try $0.submitted() }
+        // 送信の行と返事の行の間に発話が入る並びにする。隣接していると引用は落ちる。
         var state = SessionSnapshot(ai: AIViewState(conversation: conversation), state: .recording,
-            utterances: [.init(speaker: 0, start: 320, end: 322, text: "確認したいことがあります。")],
+            utterances: [.init(speaker: 0, start: 320, end: 322, text: "確認したいことがあります。"),
+                         .init(speaker: 0, start: 340, end: 342, text: "その間に別の話をします。")],
             timeline: .init(startedAt: started), elapsed: 350, markdownURL: root.appendingPathComponent("meeting.md"))
         let window = TranscriptWindowController(shouldReduceMotion: { true })
         window.window!.setFrameAutosaveName("")
@@ -434,10 +446,15 @@ import KikigakiAIIO
         speak(0, "では金曜までに私が案内を用意します。", at: 500)
         let failed = try ask(question: "担当と期限を確定してください", voiceStart: 500, at: 506, lines: 3)
         try conversation.update(failed.id) { try $0.failBeforeSending("接続が切れています") }
+        // 4枡目を埋めて、人の色とAIの色が見分けられるかを1枚で確かめる。
+        speak(3, "会場の予約はこちらで進めておきます。", at: 512)
+        // 送達不明も出して、フッターのピル5種が同時に立つ状態にする。
+        let unknown = try ask(question: "会場の予約状況を確認してください", voiceStart: nil, at: 516, lines: 5)
+        try conversation.update(unknown.id) { try $0.beginSending(at: started.addingTimeInterval(516)) }
 
         var state = SessionSnapshot(ai: AIViewState(conversation: conversation, connection: .working), state: .recording,
             utterances: utterances, timeline: MeetingTimeline(startedAt: started),
-            names: SpeakerNames([0: "佐藤", 1: "鈴木", 2: "田中"]), elapsed: 520,
+            names: SpeakerNames([0: "佐藤", 1: "鈴木", 2: "田中", 3: "松村"]), elapsed: 520,
             markdownURL: root.appendingPathComponent("meeting.md"))
         state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
         let window = TranscriptWindowController(shouldReduceMotion: { true })
@@ -456,8 +473,15 @@ import KikigakiAIIO
             try capture(name, view: content.superview!)
         }
         try shoot("timeline-normal-600", width: 600)
+        // ピル5種が同時に立つ600幅で、右の時間範囲と接していないかを見る。
+        #expect(state.ai?.badges == "未読 1 · 確認待ち 1 · 返事待ち 1 · 送達不明 1 · 失敗 1")
+        let footer = try #require(descendants(content).compactMap { $0 as? NSTextField }
+            .first { $0.stringValue == "AIへ渡す会話" }?.superview?.superview)
+        try capture("timeline-badges-600", view: footer)
         try shoot("timeline-normal-900", width: 900)
         #expect(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.count == 5)
+        // 4枡が埋まった会議。AIの色が4人目の話者と同色に見えないことを実画面で確かめる。
+        #expect(Set(utterances.compactMap(\.speaker)) == [0, 1, 2, 3])
 
         // 混雑: 自動送信が積み重なり、印が何本も並ぶ長い会議。
         for index in 0..<4 {
