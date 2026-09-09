@@ -17,7 +17,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onStopScheduleAI: (() -> Void)?
     var onFireScheduleAI: (() -> Void)?
     let compactFooter = AICompactFooter()
-    private let recordingRange = Washi.label(size: 10, color: Washi.muted)
+    private let recordingRange = Washi.label(size: 11, color: Washi.muted)
     var onPrepareAI: (() -> Void)?
     var onReadAI: ((UUID) -> Void)?
     var onOpenAIPane: (() -> Void)?

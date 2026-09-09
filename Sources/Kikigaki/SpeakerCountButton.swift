@@ -6,6 +6,7 @@ import KikigakiCore
 final class SpeakerCountButton: HoverButton {
     override var isFlipped: Bool { false }
     private(set) var countText = "0/4"
+    let countFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
     override var intrinsicContentSize: NSSize { NSSize(width: 36, height: 38) }
     func update(snapshot: SessionSnapshot) {
         countText = "\(snapshot.detectedSpeakerSlots.count)/\(SpeakerNames.slotCount)"
@@ -18,7 +19,7 @@ final class SpeakerCountButton: HoverButton {
         NSImage(systemSymbolName: "person.2.fill", accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(paletteColors: [Washi.ink]))?
             .draw(in: NSRect(x: (bounds.width - 24) / 2, y: 15, width: 24, height: 20))
-        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium), .foregroundColor: Washi.muted]
+        let attributes: [NSAttributedString.Key: Any] = [.font: countFont, .foregroundColor: Washi.muted]
         let size = (countText as NSString).size(withAttributes: attributes)
         (countText as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: 1), withAttributes: attributes)
     }
