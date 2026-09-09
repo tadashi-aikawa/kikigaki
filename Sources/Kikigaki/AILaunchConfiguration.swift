@@ -17,6 +17,8 @@ struct AILaunchConfiguration {
         let notify = [helper.path, "notify", "--provider", config.cli.rawValue, "--session", controller.sessionURL.path, "--token", token]
         var args: [String] = []
         if let model = config.model { args += [config.cli == .codex ? "-m" : "--model", model] }
+        // 専用キーの effort をCLIごとの引数へ翻訳する。extraArgs との二重指定は設定検証で拒否済み。
+        args += config.effortArguments
         if config.cli == .codex {
             let encoder = JSONEncoder(); encoder.outputFormatting = [.withoutEscapingSlashes]
             args += ["-c", "notify=" + String(decoding: try encoder.encode(notify), as: UTF8.self)]

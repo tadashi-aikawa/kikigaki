@@ -61,7 +61,8 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         model = "test-model"
         address = "参加者へ"
         cwd = "~/project"
-        extraArgs = ["--effort", "high"]
+        effort = "high"
+        extraArgs = ["--permission-mode", "plan"]
         prompt = "短く答える"
         notifySound = true
         [ai.hotkey]
@@ -71,7 +72,8 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         let ai = try #require(ResolvedConfig(config: parsed, home: URL(fileURLWithPath: "/home/person")).ai)
         #expect(ai.cli == .claude && ai.command == "/test/Claude Code" && ai.model == "test-model")
         #expect(ai.cwd.path == "/home/person/project" && ai.participantName == "参加者")
-        #expect(ai.notifySound && ai.extraArgs == ["--effort", "high"])
+        #expect(ai.notifySound && ai.extraArgs == ["--permission-mode", "plan"])
+        #expect(ai.effort == "high" && ai.effortArguments == ["--effort", "high"])
     }
 
     @Test(arguments: ["cli = 'unknown'", "command = 'codex'", "cwd = './work'", "model = ''", "address = 'へ'",
@@ -104,11 +106,14 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
 
     @Test func 対応する追加引数の値も検証する() throws {
         try AIExtraArguments.validate(["--sandbox=workspace-write", "--search", "--add-dir", "/tmp/test"], provider: .codex)
-        try AIExtraArguments.validate(["--effort", "high", "--permission-mode=auto"], provider: .claude)
-        #expect(throws: ConfigError.self) { try AIExtraArguments.validate(["--effort"], provider: .claude) }
-        #expect(throws: ConfigError.self) { try AIExtraArguments.validate(["--effort=no"], provider: .claude) }
+        try AIExtraArguments.validate(["--verbose", "--permission-mode=auto"], provider: .claude)
+        #expect(throws: ConfigError.self) { try AIExtraArguments.validate(["--permission-mode"], provider: .claude) }
+        #expect(throws: ConfigError.self) { try AIExtraArguments.validate(["--permission-mode=no"], provider: .claude) }
         #expect(throws: ConfigError.self) { try AIExtraArguments.validate(["--add-dir", "relative"], provider: .codex) }
-        #expect(throws: ConfigError.self) { try AIExtraArguments.validate(["--effort", "--settings"], provider: .claude) }
+        #expect(throws: ConfigError.self) { try AIExtraArguments.validate(["--permission-mode", "--settings"], provider: .claude) }
+        // effortは専用キーへ一本化した。二重指定になるのでextraArgsからは受け付けない。
+        #expect(throws: ConfigError.self) { try AIExtraArguments.validate(["--effort", "high"], provider: .claude) }
+        #expect(throws: ConfigError.self) { try AIExtraArguments.validate(["-c", "model_reasoning_effort=high"], provider: .codex) }
     }
 }
 

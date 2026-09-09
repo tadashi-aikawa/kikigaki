@@ -22,30 +22,34 @@ cli = "codex"
 model = "gpt-5.4-codex"
 effort = "high"
 address = "迅雷へ"
-displayAgent = "迅雷"          # 稼働中のherdrペインへ接続する。省略時は従来どおり新規起動
+cwd = "~/work/minutes"         # 明示すると、このcwdの稼働中ペインへ接続する。省略時は従来どおり新規起動
+displayAgent = "迅雷"          # 同じcwdに複数のペインが並ぶときの追加の絞り込み。省略可
 autoStart = true
 autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
 autoIntervalMinutes = 3
+
+# 配列表記では、この位置の [ai.hotkey] は直前の [[ai]] 要素に属する。
+# ホットキーは1つ目のプロファイルにだけ書ける
+[ai.hotkey]
+modifiers = ["ctrl", "alt", "cmd"]
+key = "a"
 
 [[ai]]
 name = "相談"
 cli = "claude"
 effort = "max"
-address = "ネオへ"
-cwd = "~/work/project"
-
-[ai.hotkey]                    # 配列要素ごとには持たない。下記の判断依頼を参照
-modifiers = ["ctrl", "alt", "cmd"]
-key = "a"
+address = "ネオへ"                # cwd も displayAgent も無いので、初回送信時に新規起動する
 ```
 
 | キー | 既定と検証 |
 | --- | --- |
 | name | 省略時は `address` 末尾の「へ」を除いた参加者名。空・改行・NUL・前後空白のみを拒否し、64バイトまで。配列内の重複を拒否する。 |
 | effort | 省略時はCLIの既定。単一行でNULを拒否し、CLIごとの値域で検証する。 |
-| displayAgent | 省略時は従来どおり `workspace create` + 起動。指定時は稼働中ペインの `display_agent` と完全一致で解決する。 |
+| cwd | 省略時は従来どおり固定の `~/Library/Application Support/KIKIGAKI/ai-work/` を作って新規起動する。**明示すると接続先の絞り込み条件になる。** |
+| displayAgent | 稼働中ペインの `display_agent` との完全一致。`cwd` と併せて絞り込む追加条件で、単独でも使える。 |
 | autoStart | false。trueは配列全体で1つまで。`autoPrompt` が空なら設定エラー。 |
-| その他 | 既存の `[ai]` と同じ。`cli` `command` `herdrCommand` `model` `address` `cwd` `extraArgs` `prompt` `notifySound` `allowWork` `autoPrompt` `autoIntervalMinutes` を要素ごとに持つ。 |
+| hotkey | 1つ目のプロファイルにだけ書ける。2つ目以降にあれば設定エラー。 |
+| その他 | 既存の `[ai]` と同じ。`cli` `command` `herdrCommand` `model` `address` `extraArgs` `prompt` `notifySound` `allowWork` `autoPrompt` `autoIntervalMinutes` を要素ごとに持つ。 |
 
 単数 `[ai]` と配列 `[[ai]]` の併記は拒否する。TOMLの同名テーブルと配列は文法上も両立しないが、片方だけを黙って採らない。
 
@@ -76,17 +80,25 @@ codexの `-c` の値はTOMLとして解釈されるので、文字列はクォ�
 
 ### herdrから採れる情報(実測)
 
-`herdr agent list` と `agent get` が返すのは `pane_id` / `workspace_id` / `agent`(CLI種別)/ `agent_session.value` / `agent_status` / `cwd` / `foreground_cwd` / `display_agent` / `terminal_id` / `terminal_title` である。**`agent start <NAME>` で付けた名前はどちらにも返らない。** よって「herdrのagent名で指す」設計は成立せず、指せるのは `display_agent` か `pane_id` だけになる。設定キーを `agent` ではなく `displayAgent` にするのはこのため。
+`herdr agent list` と `agent get` が返すのは `pane_id` / `workspace_id` / `agent`(CLI種別)/ `agent_session.value` / `agent_status` / `cwd` / `foreground_cwd` / `display_agent` / `terminal_id` / `terminal_title` である。**`agent start <NAME>` で付けた名前はどちらにも返らない。** よって「herdrのagent名で指す」設計は成立せず、指せるのは `cwd` か `display_agent` か `pane_id` だけになる。設定キーを `agent` ではなく `cwd` + `displayAgent` にするのはこのため。
+
+### 絞り込みの純関数
+
+接続先の決定は `AIAgentResolver.resolve(candidates:criteria:provider:)` に閉じる。候補配列を受けて、一意の候補か失敗理由を返すだけの純関数で、herdr呼び出しも副作用も持たない。どのキーで絞るかは `AIAgentCriteria` に集めてあり、後から差し替えられる。
+
+絞り込みは `cwd` → `displayAgent` の順で、**CLI種別は絞り込みに使わず最後の拒否条件にする**。種別で絞ると、条件が甘いまま偶然1件になった候補へ送ってしまう。失敗理由は `noCriteria`(条件なし)・`notFound`(0件)・`ambiguous`(複数件)・`kindMismatch`(種別違い)の4つで、いずれも**新規起動へ倒さない**。
+
+`cwd` の比較は末尾の `/` と `.` の表記ゆれだけを吸収する。実体の同一性やシンボリックリンクは判定しない。herdrの `foreground_cwd` はworktreeへ入ると変わるので、ペインの `cwd` だけで比べる。
 
 ### 接続の契約
 
 - 接続型では `workspace create` も `agent start` も `pane run` も行わない。既存の `pane_id` へ `agent prompt` するだけにする。
-- 接続時に `pane_id` `workspace_id` `agent` `agent_session.value` `terminal_id` を `AIHerdrConnection` へ保存し、以後の同一性判定は既存の `observe` と同じ照合を使う。`display_agent` は選ぶときだけ使い、同一性判定に使わない。利用者がいつでも変えられるため。
+- 接続時に `pane_id` `workspace_id` `agent` `agent_session.value` `terminal_id` を `AIHerdrConnection` へ保存し、以後の同一性判定は既存の `observe` と同じ照合を使う。`display_agent` と `cwd` は選ぶときだけ使い、同一性判定に使わない。利用者がいつでも変えられるため。
 - 設定の `cli` と実物の `agent` が食い違ったら拒否する。実物を優先して黙ってCLIを切り替えない。対応外のkind(`pi` `gemini` など)も拒否する。
-- `displayAgent` に**2つ以上該当したら失敗**にする。`display_agent` はペイン単位で重複でき、同じメンバーの複数セッションが日常的に並ぶ。自動送信は非対話で決まるので、黙って別のペインへ送るほうが危険である。シートでは全候補を `cwd` と `terminal_title` 付きで並べ、利用者に選ばせる。
-- 同じ `pane_id` へ解決するプロファイルが2つ以上あれば設定エラーにする。streamと世代が別なのに同じCLI文脈へ2本の会話が混ざり、受領基準がずれる。
+- **絞った結果が0件か2件以上なら失敗**にする。`display_agent` はペイン単位で重複でき、同じメンバーの複数セッションが日常的に並ぶ。自動送信は非対話で決まるので、黙って別のペインへ送るほうが危険である。シートでは全候補を `cwd` と `terminal_title` 付きで並べ、利用者に選ばせる。
+- 同じ条件へ解決するプロファイルが2つ以上あれば設定エラーにする。streamと世代が別なのに同じCLI文脈へ2本の会話が混ざり、受領基準がずれる。
 - ペインが消えた後は既存の切断扱い(`agent_not_found` → `.disconnected`)。**新規起動へ倒さない。**
-- `cwd` キーは接続型では使わない。指定があれば警告に残し、接続先のcwdを書き換えない。
+- 接続先のcwdをKIKIGAKIが書き換えることはしない。`cwd` はあくまで探すための条件である。
 
 ### 接続型で失われるもの
 
@@ -102,7 +114,7 @@ Codexの読み取り側は `workspace-write` でも広いため、cwd外の会�
 
 `autoStart = true` のプロファイルがあれば、録音開始で既存の `startAISchedule` を呼ぶ。プロンプトは `autoPrompt`、間隔は `autoIntervalMinutes`、作業許可は `allowWork`、録音停止時の最後の1回はON。既存契約どおり即時送信はせず、開始から1間隔後を初回期限にする。
 
-接続先が解決できない場合(`displayAgent` が未稼働、または複数該当)は、その場で失敗を表示して自動送信を開始しない。新規起動へは倒さない。`displayAgent` を持たないプロファイルは従来どおり初回送信時に新規起動する。
+接続先が解決できない場合(条件に合うペインが無い、または複数該当)は、その場で失敗を表示して自動送信を開始しない。新規起動へは倒さない。`cwd` も `displayAgent` も持たないプロファイルは従来どおり初回送信時に新規起動する。
 
 開始後の操作は既存と同じ。「自動送信を停止」で録音を続けたまま止められ、設定を変えるにはいったん止めてシートを開き直す。状態行は「自動送信 3分 · 次 12:34 · 議事録へ」とし、宛先を含める。稼働状態は新会議・再起動で引き継がない。
 
@@ -153,7 +165,7 @@ manifestは `schemaVersion` を2へ上げ、`config` を `profiles: [ResolvedAIP
 
 | 段 | 内容 |
 | --- | --- |
-| 2・Core | `AIProfilesConfig` の解析(配列・単数互換・name重複・autoStart重複・effort値域・extraArgs二重指定)、effortの翻訳、`participant.profile` / `profile_slot` の往復と旧欠損、`sessionPath` の新旧検証、manifest schemaVersion 2と1の読み分け |
+| 2・Core | `AIProfileList` の解析(配列・単数互換・name重複・autoStart重複・hotkeyの位置・effort値域・extraArgs二重指定・同条件の重複)、`AIEffort` の翻訳、接続先解決の純関数 `AIAgentResolver`、`participant.profile` / `profile_slot` の往復と旧欠損、`sessionPath` の新旧検証、manifest schemaVersion 2と1の読み分け。**完了** |
 | 3・アプリ | チャネル化した `AIConversationController`、`herdr agent list` の解釈と接続型の `connect`、両シートのポップアップと会議内の記憶、`autoStart`、状態行・警告・ピルの宛先表示、接続型でのフック判定の無効化 |
 | 3・実画面 | 600・900幅でポップアップ、複数プロファイルの印が積んだ会議、接続型の警告、解決失敗の表示を撮影して目視 |
 | 4・replay | 手動と自動で別プロファイルへ同時送信、片方の返事待ちがもう片方を止めないこと、`autoStart` の初回期限、接続先解決失敗で自動送信が始まらないこと |
@@ -166,18 +178,23 @@ manifestは `schemaVersion` を2へ上げ、`config` を `profiles: [ResolvedAIP
 - 3つ以上のプロファイルを自動送信で同時に回すこと。自動送信の状態機械は会議に1つのままにする。
 - KIKIGAKIが会議前に準備セッションを起こすこと。連続する会議での取り違えを避けるため作らない。
 - 接続先のCLI設定・サンドボックス・信頼設定をKIKIGAKIが書き換えること。
-- プロファイルごとのホットキー。下記の判断依頼を参照。
+- プロファイルごとのホットキー。既存の1つで既定プロファイルのシートを開く。
 - 音声からの宛先自動判別。宛名で呼ばれたAIへ自動で振り分けることはしない。
+
+## 採用した判断
+
+段1のレビューで決めた。段2はこの形で実装してある。
+
+- **`autoStart` は配列全体で1つまで。** 自動送信の状態機械 `AIScheduleState` は会議に1つで、複数同時は期限・失敗回数・最後の1回の権利をすべて多重化する。必要なら段を分ける。
+- **その場限りの「稼働中herdr agent」宛先を許し、選んだ時点でad hocプロファイルとしてmanifestへ残す。** requestのenvelopeがプロファイルを参照するので、記録の側に定義が無いと過去会議を復元できない。
+- **接続型のチャネルが切断しても「作り直す」を出さない。** 準備済みの文脈が接続の目的なので、空のセッションを新規に起こしても目的を満たさない。「別のペインへ接続し直す」だけにする。
+- **`extraArgs` での effort 指定は設定エラーにする。** 受理すると翻訳した引数との順序依存になり、どちらが効くか読めない。移行は1行の書き換えで済む。
+- **`name` の既定は参加者名。** 重複したときだけ明示を必須にする。画面のポップアップは宛名で識別するのが自然で、設定の記述量も増えない。
+- **ホットキーはプロファイルごとに持たない。** 既存の1つで既定プロファイルのシートを開き、宛先はシート内で選ぶ。プロファイル数だけ予約すると録音・一時停止との衝突検証が組み合わせで増える。
 
 ## 判断依頼
 
-段2へ進む前にタダシへ確認する。それぞれ推奨と理由を付ける。
+タダシへ確認する。段3の前に決まればよい。
 
-1. **接続先の指定キー**。推奨は `displayAgent` で完全一致、複数該当は失敗。理由: `agent start` の名前はherdrのlist/getから取れないと実測した。`pane_id` 指定はペインを起こし直すたびに設定を書き換える必要があり、会議前の準備という用途に合わない。
-2. **Codex接続型の返送**。推奨は、接続先がcodexのとき利用者の `~/.codex/config.toml` の `writable_roots` に会議の保存先が含まれるかを起動前に読んで確認し、無ければシートに警告を出す。理由: KIKIGAKIが起動しない以上 `-c` を渡せず、設定ファイルの自動書き換えは既存契約で禁じている。代替はClaudeを接続型に使うこと(Bashに同じ制限が無いと実測済み)。
-3. **`autoStart` を複数プロファイルで許すか**。推奨は1つだけ許し、2つ以上は設定エラー。理由: 自動送信の状態機械 `AIScheduleState` は会議に1つで、複数同時は期限・失敗回数・最後の1回の権利をすべて多重化する。必要なら段を分ける。
-4. **その場限りの「稼働中herdr agent」宛先を許すか**。推奨は許し、選んだ時点でad hocプロファイルを作ってmanifestへ残す。理由: requestのenvelopeがプロファイルを参照するので、記録の側に定義が無いと過去会議を復元できない。
-5. **接続型のチャネルが切断したときに「作り直す」を出すか**。推奨は出さず、「別のペインへ接続し直す」だけにする。理由: 準備済みの文脈が接続の目的なので、空のセッションを新規に起こしても目的を満たさない。
-6. **`extraArgs` の `--effort` を廃止するか**。推奨は廃止して設定エラーにする。理由: 受理すると翻訳した引数との順序依存になり、どちらが効くか読めない。移行は1行の書き換えで済む。
-7. **`name` 省略時の既定を参加者名にしてよいか**。推奨はそうする。重複したときだけ明示を必須にする。理由: 画面のポップアップは宛名で識別するのが自然で、設定の記述量も増えない。
-8. **ホットキーをプロファイルごとに持つか**。推奨は持たず、既存の1つで既定プロファイルのシートを開き、宛先はシート内で選ぶ。理由: プロファイル数だけホットキーを予約すると録音・一時停止との衝突検証が組み合わせで増える。
+1. **接続先の指定キー**。採用案は `cwd` で候補を絞り、`displayAgent` を任意の追加条件にする(少なくとも一方が必要、0件と複数件は失敗)。理由: `display_agent` だけでは同じメンバーの複数セッションが日常的に並んで失敗し続ける。会議前に用意するペインはワークスペースごとに立つので、`cwd` のほうが安定した鍵になる。代替は `displayAgent` だけで絞る案と、ペインの表題で絞る案。表題は作業内容で刻々と変わるので推さない。
+2. **Codex接続型の返送**。推奨は、接続先がcodexのとき利用者の `~/.codex/config.toml` の `writable_roots` に会議の保存先が含まれるかを起動前に読んで確認し、無ければシートに警告を出す。既存の `CodexUserConfig.writableRoots` をそのまま使える。理由: KIKIGAKIが起動しない以上 `-c` を渡せず、設定ファイルの自動書き換えは既存契約で禁じている。代替はClaudeを接続型に使うこと(Bashに同じ制限が無いと実測済み)。

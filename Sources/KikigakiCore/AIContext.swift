@@ -4,6 +4,7 @@ public enum AILimits {
     public static let eventBytes = 1_048_576
     public static let bodyBytes = 262_144
     public static let questionBytes = 32_768
+    public static let profileNameBytes = 64
 }
 
 public enum AIError: Error, Equatable {
@@ -93,13 +94,17 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     public let tentativeTail: AITentativeTail?
     public let inReplyToRequestID: UUID?
     public let inReplyToEventID: String?
+    /// 送信先プロファイルの表示名。単一プロファイルの旧requestには無い
+    public let profile: String?
+    /// 送信先プロファイルの通し番号。session recordの枝名になる。旧requestには無い
+    public let profileSlot: Int?
 
     public init(streamID: UUID, requestID: UUID, sessionGeneration: Int, participantName: String,
                 cliPath: String, sessionPath: String, requestToken: String, question: String,
                 capturedAt: Date, audioCutoffSeconds: Double, tentativeTail: AITentativeTail? = nil,
                 inReplyToRequestID: UUID? = nil, inReplyToEventID: String? = nil, workAllowed: Bool = true,
-                trigger: Trigger? = nil) {
-        self.trigger = trigger
+                trigger: Trigger? = nil, profile: String? = nil, profileSlot: Int? = nil) {
+        self.trigger = trigger; self.profile = profile; self.profileSlot = profileSlot
         schemaVersion = 1; mode = "meeting"; self.streamID = streamID; self.requestID = requestID
         self.sessionGeneration = sessionGeneration; self.participantName = participantName
         self.cliPath = cliPath; self.sessionPath = sessionPath; self.requestToken = requestToken
@@ -117,7 +122,14 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
               requestToken.utf8.count <= 256, audioCutoffSeconds.isFinite, audioCutoffSeconds >= 0,
               capturedAt.timeIntervalSince1970.isFinite,
               questionSource == (question.isEmpty ? .voice : .typed),
-              (inReplyToRequestID == nil) == (inReplyToEventID == nil) else { throw AIError.invalid("participant") }
+              (inReplyToRequestID == nil) == (inReplyToEventID == nil),
+              // 片方だけのプロファイル指定は、パス検証も表示も決められないので拒否する。
+              (profile == nil) == (profileSlot == nil) else { throw AIError.invalid("participant") }
+        if let profile, let profileSlot {
+            guard profileSlot > 0, AIValidation.singleLine(profile),
+                  !profile.trimmingCharacters(in: .whitespaces).isEmpty,
+                  profile.utf8.count <= AILimits.profileNameBytes else { throw AIError.invalid("profile") }
+        }
         try AIValidation.text(question, limit: AILimits.questionBytes)
         if trigger == .scheduled {
             try AIValidation.text(question, limit: AILimits.questionBytes, nonempty: true)
@@ -135,7 +147,8 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case trigger
+        case trigger, profile
+        case profileSlot = "profile_slot"
         case schemaVersion = "schema_version", mode, streamID = "stream_id", requestID = "request_id"
         case sessionGeneration = "session_generation", participantName = "participant_name"
         case cliPath = "cli_path", sessionPath = "session_path", requestToken = "request_token"
@@ -147,6 +160,9 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         trigger = try values.contains(.trigger) ? values.decode(Trigger.self, forKey: .trigger) : nil
+        // 複数プロファイル以前のrequestはこのキーを持たない。欠損は既定プロファイルとして読む。
+        profile = try values.decodeIfPresent(String.self, forKey: .profile)
+        profileSlot = try values.decodeIfPresent(Int.self, forKey: .profileSlot)
         schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
         mode = try values.decode(String.self, forKey: .mode)
         streamID = try values.decode(UUID.self, forKey: .streamID)
@@ -217,9 +233,18 @@ public struct AIEnvelope: Codable, Equatable, Sendable {
               meetingURL.deletingLastPathComponent().lastPathComponent == ".kikigaki-context",
               transcriptPath.split(separator: "/", omittingEmptySubsequences: false).dropFirst()
                 .allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
-              participant.sessionPath == meetingURL.appendingPathComponent("ai/sessions/\(participant.sessionGeneration).json").path else {
+              participant.sessionPath == meetingURL.appendingPathComponent(Self.sessionPath(for: participant)).path else {
             throw AIError.invalid("context paths")
         }
+    }
+
+    /// プロファイルの通し番号があれば枝を切る。旧requestは従来の平置きのまま検証する。
+    public static func sessionPath(for participant: AIParticipantContext) -> String {
+        sessionPath(slot: participant.profileSlot, generation: participant.sessionGeneration)
+    }
+    public static func sessionPath(slot: Int?, generation: Int) -> String {
+        guard let slot else { return "ai/sessions/\(generation).json" }
+        return "ai/sessions/\(slot)/\(generation).json"
     }
 
     public func validatePaths(outputDirectory: URL) throws {

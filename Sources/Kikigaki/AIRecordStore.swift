@@ -2,11 +2,44 @@ import Foundation
 import KikigakiCore
 import KikigakiAIIO
 
+/// 会議開始時に固定したAI設定。版2でプロファイルの配列になった。
 struct AIMeetingManifest: Codable {
+    static let currentSchemaVersion = 2
     let schemaVersion: Int
     let meetingID: UUID
     let markdownURL: URL
-    let config: ResolvedAIConfig
+    let profiles: [ResolvedAIConfig]
+    /// 既定のプロファイル。版1のmanifestは1つ目の新規起動プロファイルとして読む。
+    /// 復号も生成も空の配列を作らないので、添字で参照してよい
+    var config: ResolvedAIConfig { profiles[0] }
+
+    init(schemaVersion: Int = AIMeetingManifest.currentSchemaVersion, meetingID: UUID, markdownURL: URL, profiles: [ResolvedAIConfig]) {
+        self.schemaVersion = schemaVersion; self.meetingID = meetingID
+        self.markdownURL = markdownURL; self.profiles = profiles
+    }
+
+    private enum CodingKeys: String, CodingKey { case schemaVersion, meetingID, markdownURL, profiles, config }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        meetingID = try values.decode(UUID.self, forKey: .meetingID)
+        markdownURL = try values.decode(URL.self, forKey: .markdownURL)
+        switch schemaVersion {
+        case 1: profiles = [try values.decode(ResolvedAIConfig.self, forKey: .config)]
+        case 2: profiles = try values.decode([ResolvedAIConfig].self, forKey: .profiles)
+        default: throw AIError.invalid("manifest version")
+        }
+        guard !profiles.isEmpty, Set(profiles.map(\.slot)).count == profiles.count else { throw AIError.invalid("manifest profiles") }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(schemaVersion, forKey: .schemaVersion)
+        try values.encode(meetingID, forKey: .meetingID)
+        try values.encode(markdownURL, forKey: .markdownURL)
+        try values.encode(profiles, forKey: .profiles)
+    }
 }
 struct AIRegistration: Codable, Equatable {
     let meetingID: UUID
@@ -81,10 +114,13 @@ final class AIRecordStore {
         onChange?()
     }
     func begin(meetingID: UUID, markdownURL: URL, config: ResolvedAIConfig) throws -> Record {
-        guard registryHealthy else { throw AIError.invalid("registry unavailable") }
+        try begin(meetingID: meetingID, markdownURL: markdownURL, profiles: [config])
+    }
+    func begin(meetingID: UUID, markdownURL: URL, profiles: [ResolvedAIConfig]) throws -> Record {
+        guard registryHealthy, !profiles.isEmpty else { throw AIError.invalid("registry unavailable") }
         if let existing = records[meetingID] { return existing }
         let root = markdownURL.deletingLastPathComponent()
-        let manifest = AIMeetingManifest(schemaVersion: 1, meetingID: meetingID, markdownURL: markdownURL, config: config)
+        let manifest = AIMeetingManifest(meetingID: meetingID, markdownURL: markdownURL, profiles: profiles)
         let controller = try AIConversationController(meetingID: meetingID, outputDirectory: root, herdr: makeHerdr())
         let record = Record(manifest: manifest, controller: controller, recovered: false)
         try AIFileStore(root: root).write(AIJSON.encode(manifest), to: Self.base(meetingID) + ["manifest.json"], replacing: false)
@@ -162,7 +198,8 @@ final class AIRecordStore {
         try registry.write(AIJSON.encode(entries), to: ["ai-roots.json"])
     }
     private func validate(_ manifest: AIMeetingManifest, registration: AIRegistration) throws {
-        guard manifest.schemaVersion == 1, manifest.meetingID == registration.meetingID,
+        guard (1...AIMeetingManifest.currentSchemaVersion).contains(manifest.schemaVersion),
+              manifest.meetingID == registration.meetingID,
               manifest.markdownURL.isFileURL, manifest.markdownURL.pathExtension == "md",
               manifest.markdownURL.deletingLastPathComponent().path == registration.outputDirectory.path else { throw AIError.mismatch }
     }

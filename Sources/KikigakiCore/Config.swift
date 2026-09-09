@@ -38,10 +38,11 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     public var dropRepeatedBackchannels: Bool?
     public var hotkeys: Hotkeys?
     public var speakers: [Speaker]?
-    public var ai: AIConfig?
+    /// 単数の `[ai]` と配列の `[[ai]]` の両方を読む
+    public var ai: AIProfileList?
 
     public init(outputDir: String? = nil, saveRecording: Bool? = nil, hotkeys: Hotkeys? = nil, dropRepeatedBackchannels: Bool? = nil,
-                speakers: [Speaker]? = nil, ai: AIConfig? = nil) {
+                speakers: [Speaker]? = nil, ai: AIProfileList? = nil) {
         self.outputDir = outputDir
         self.saveRecording = saveRecording
         self.hotkeys = hotkeys
@@ -67,7 +68,19 @@ public struct ResolvedConfig: Equatable, Sendable {
     public var toggleRecording: KikigakiConfig.Hotkey
     public var togglePause: KikigakiConfig.Hotkey
     public var speakers: [KikigakiConfig.Speaker]
-    public var ai: ResolvedAIConfig?
+    /// 設定順のプロファイル。slotは1始まりで、この並びが宛先ポップアップの並びになる
+    public var aiProfiles: [ResolvedAIConfig]
+    /// 既定のプロファイル。ホットキーと設定の有無の判定はこれを見る。
+    /// 代入は1つ目の差し替えで、nilは全プロファイルの取り消し
+    public var ai: ResolvedAIConfig? {
+        get { aiProfiles.first }
+        set {
+            guard let newValue else { aiProfiles = []; return }
+            aiProfiles = [newValue] + aiProfiles.dropFirst()
+        }
+    }
+    /// 録音開始で自動送信を始めるプロファイル。設定で1つまでに制限している
+    public var aiAutoStart: ResolvedAIConfig? { aiProfiles.first { $0.autoStart } }
 
     public init(config: KikigakiConfig, home: URL = FileManager.default.homeDirectoryForCurrentUser) {
         outputDir = Self.expand(config.outputDir ?? Self.defaultOutputDir, home: home)
@@ -83,7 +96,9 @@ public struct ResolvedConfig: Equatable, Sendable {
             }
             return speaker
         }
-        ai = config.ai.map { ResolvedAIConfig(config: $0, home: home) }
+        aiProfiles = (config.ai?.profiles ?? []).enumerated().map {
+            ResolvedAIConfig(config: $1, home: home, slot: $0 + 1)
+        }
     }
 
     /// 先頭の `~` をホームに置き換える。`~user` 形式は扱わない
@@ -144,6 +159,15 @@ public enum ConfigLoader {
             }
         }
         let resolved = ResolvedConfig(config: config)
+        // 同じ条件の2プロファイルは同じペインへ解決する。streamと世代が別のまま会話が混ざるので止める。
+        var criteria = Set<String>()
+        for profile in resolved.aiProfiles {
+            guard let target = profile.criteria else { continue }
+            let key = (target.cwd ?? "") + "\n" + (target.displayAgent ?? "")
+            guard criteria.insert(key).inserted else {
+                throw ConfigError.invalid(description: "ai: two profiles resolve to the same pane: \(profile.name)")
+            }
+        }
         var hotkeys = [("toggleRecording", resolved.toggleRecording), ("togglePause", resolved.togglePause)]
         if let ai = resolved.ai { hotkeys.append(("ai", ai.hotkey)) }
         for (label, hotkey) in hotkeys {
