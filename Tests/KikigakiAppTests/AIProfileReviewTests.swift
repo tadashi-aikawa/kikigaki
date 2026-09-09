@@ -112,6 +112,12 @@ import KikigakiCore
             #expect(sends.contains { $0.displayText.hasPrefix("└ 迅雷へ") } || typed.contains { $0.addressText == "迅雷へ" })
             #expect(sends.contains { $0.displayText.hasPrefix("└ ネオへ") } || typed.contains { $0.addressText == "ネオへ" })
             #expect(Set(replies.map(\.item.participantName)) == ["迅雷", "ネオ"])
+            let waiting = try #require(replies.first { $0.isWaiting })
+            #expect(waiting.pillStyle == nil && waiting.statusPill.isHidden)
+            let cancel = try #require(descendants(waiting).compactMap { $0 as? AIActionButton }.first { $0.title == "取消" })
+            #expect(!cancel.isHidden && cancel.isEnabled)
+            var cancelled = false; waiting.onCancel = { cancelled = true }
+            cancel.performClick(nil); #expect(cancelled)
             // 送信の行と返事の行は同じrequestを指す。
             let requests = Set(conversation.questions.map(\.request.id))
             let rows = window.transcriptDocument.rows.compactMap { $0 as? (any AITimelineRowView) }

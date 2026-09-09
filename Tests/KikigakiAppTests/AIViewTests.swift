@@ -259,13 +259,13 @@ import KikigakiAIIO
         let failed = try #require(replies().first { $0.item.requestID == requests[3].id })
         #expect(answer.accent == Washi.red && answer.pillStyle == .unread)
         #expect(confirmation.accent == Washi.gold && confirmation.pillStyle == .confirmation)
-        #expect(waiting.isWaiting && waiting.pillStyle == .waiting && waiting.item.date == nil)
+        #expect(waiting.isWaiting && waiting.pillStyle == nil && waiting.item.date == nil)
         #expect(failed.isFailure && failed.failureText.hasSuffix("接続先を確認してください") && failed.height(for: 680) == 34)
         #expect(answer.item.date == started.addingTimeInterval(370))
         // 実画面で直した3件の回帰。実物の表題と可視性で見る。
         #expect(answer.statusPill.title == "未読" && answer.statusPill.isEnabled && !answer.statusPill.isHidden)
         #expect(confirmation.statusPill.title == "確認待ち" && !confirmation.statusPill.isEnabled)
-        #expect(waiting.statusPill.title == "返事待ち" && !waiting.statusPill.isEnabled)
+        #expect(waiting.statusPill.isHidden)
         #expect(!descendants(content).compactMap { $0 as? AIStatusPill }.contains { $0.title == "Button" })
         #expect(!failed.timeText.isEmpty && failed.statusPill.isHidden)   // 送信前の失敗は未読にならない
         #expect(!waiting.chipVisible && waiting.timeText.isEmpty)

@@ -318,7 +318,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
         return item.isUnread ? Washi.red : nil
     }
     var pillStyle: AIStatusPill.Style? {
-        if isWaiting { return .waiting }
+        if isWaiting { return nil }
         if item.kind == .reply(.needsInput) { return item.needsAnswer ? .confirmation : nil }
         // 返送された失敗も未読になる。送信前の失敗は未読にならないので印も出ない。
         return item.isUnread ? .unread : nil
