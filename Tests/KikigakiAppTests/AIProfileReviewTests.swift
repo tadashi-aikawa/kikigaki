@@ -105,8 +105,9 @@ import KikigakiCore
         }
 
         // 「議事録」には準備済みセッションがある想定。
-        let items: [AIDestinationPicker.Item] = [.init(slot: 1, name: "議事録", prepared: "13:05"),
-                                                 .init(slot: 2, name: "相談", prepared: nil)]
+        let items: [AIDestinationPicker.Item] = [
+            .init(slot: 1, name: "議事録", prepared: "Kikigaki 議事録抽出 · 13:05起動"),
+            .init(slot: 2, name: "相談", prepared: nil)]
         let ask = AIQuestionSheet(participant: "迅雷", parentNumber: nil, draft: "この段取りで抜けはありますか",
             voice: "", range: "対象: 3〜7行(14:05:20〜14:06:16) · 送信時に確定", tentative: false, canSubmit: true)
         ask.updateDestinations(items, selected: 1, participant: "迅雷")

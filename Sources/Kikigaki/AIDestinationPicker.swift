@@ -5,7 +5,8 @@ import KikigakiCore
 /// そのプロファイルに未紐づけの準備済みセッションがあれば行に添えて示す。
 @MainActor
 final class AIDestinationPicker: NSStackView {
-    /// 1行ぶんの表示。`prepared` は「議事録 (準備済み 13:05)」の括弧の中身
+    /// 1行ぶんの表示。`prepared` は名前に続けて出す「Kikigaki 議事録抽出 · 13:05起動」の部分で、
+    /// ペインの表題が取れないときは「13:05起動」だけになる。組み立ては呼び手が行う
     struct Item: Equatable {
         let slot: Int
         let name: String
@@ -31,7 +32,7 @@ final class AIDestinationPicker: NSStackView {
         self.items = items; self.selected = selected
         popup.removeAllItems()
         for item in items {
-            popup.addItem(withTitle: item.prepared.map { "\(item.name) (準備済み \($0))" } ?? item.name)
+            popup.addItem(withTitle: item.prepared.map { "\(item.name) · \($0)" } ?? item.name)
             popup.lastItem?.representedObject = item.slot
         }
         let index = popup.itemArray.firstIndex { ($0.representedObject as? Int) == selected }
