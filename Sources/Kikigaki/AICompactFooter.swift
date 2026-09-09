@@ -57,9 +57,13 @@ final class AIFooterCount: AIFooterButton {
 final class AIRobotButton: AIFooterButton {
     private(set) var displayText = ""
     private(set) var eyeOffset: CGFloat = 0
+    private(set) var isRunning = false
+    let statusFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+    var eyeColor: NSColor { isRunning && isEnabled ? .white : isEnabled ? Washi.red : Washi.muted }
     init() { super.init(symbol: "", label: "AIの操作") }
     required init?(coder: NSCoder) { fatalError() }
     func update(schedule: AIScheduleViewState, waiting: Bool, animate: Bool, now: Date) {
+        isRunning = waiting
         let remaining = max(0, Int(ceil(schedule.nextFire?.timeIntervalSince(now) ?? 0)))
         let countdown = String(format: "%d:%02d", remaining / 60, remaining % 60)
         displayText = waiting ? "実行中" : !schedule.active ? "" :
@@ -77,16 +81,19 @@ final class AIRobotButton: AIFooterButton {
         let x = bounds.midX - 11.5
         color.setStroke()
         let head = NSBezierPath(roundedRect: NSRect(x: x, y: 14, width: 23, height: 17), xRadius: 4, yRadius: 4)
-        head.lineWidth = 1.7; head.stroke()
+        head.lineWidth = 1.7
+        if isRunning && isEnabled { color.setFill(); head.fill() }
+        head.stroke()
         let antenna = NSBezierPath(); antenna.lineWidth = 1.7
         antenna.move(to: NSPoint(x: bounds.midX, y: 31)); antenna.line(to: NSPoint(x: bounds.midX, y: 35)); antenna.stroke()
         color.setFill()
         NSBezierPath(ovalIn: NSRect(x: bounds.midX - 1.5, y: 35, width: 3, height: 3)).fill()
+        eyeColor.setFill()
         for eye: CGFloat in [6, 16] {
             NSBezierPath(ovalIn: NSRect(x: x + eye + eyeOffset - 1.5, y: 21, width: 3, height: 3)).fill()
         }
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 8, weight: .medium),
+            .font: statusFont,
             .foregroundColor: displayText == "実行中" ? color : Washi.muted]
         let width = (displayText as NSString).size(withAttributes: attributes).width
         (displayText as NSString).draw(at: NSPoint(x: bounds.midX - width / 2, y: 1), withAttributes: attributes)

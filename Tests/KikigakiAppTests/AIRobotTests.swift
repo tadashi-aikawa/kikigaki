@@ -58,6 +58,7 @@ import KikigakiCore
         var state = SessionSnapshot(ai: AIViewState(), state: .recording)
         footer.update(state, reduceMotion: false, now: now)
         #expect(footer.robot.displayText.isEmpty && !footer.timerRunning)
+        #expect(!footer.robot.isRunning && footer.robot.eyeColor == Washi.red)
         state.aiSchedule.active = true; state.aiSchedule.nextFire = now.addingTimeInterval(45)
         state.aiSchedule.destination = "議事録"
         footer.update(state, reduceMotion: false, now: now)
@@ -72,6 +73,9 @@ import KikigakiCore
         state = try waitingState()
         footer.update(state, reduceMotion: false, now: now)
         #expect(footer.robot.displayText == "実行中" && footer.timerRunning && footer.robot.eyeOffset == -1.5)
+        #expect(footer.robot.isRunning && footer.robot.eyeColor == .white)
+        #expect(footer.robot.statusFont.pointSize == 11)
+        #expect(("実行中" as NSString).size(withAttributes: [.font: footer.robot.statusFont]).width <= 36)
         footer.refresh(now: now.addingTimeInterval(1))
         #expect(footer.robot.eyeOffset == 1.5 && footer.robot.tint == Washi.red)
         #expect(footer.robot.layer?.animationKeys()?.isEmpty != false)
@@ -84,6 +88,7 @@ import KikigakiCore
         footer.isHidden = false
         footer.update(state, reduceMotion: true, now: now)
         #expect(!footer.timerRunning && footer.robot.eyeOffset == 0 && footer.robot.displayText == "実行中")
+        #expect(footer.robot.isRunning && footer.robot.eyeColor == .white)
         footer.update(SessionSnapshot(), reduceMotion: false, now: now)
         #expect(!footer.timerRunning && footer.robot.displayText.isEmpty && !footer.robot.isEnabled)
         #expect(footer.robot.isHidden && footer.arrangedSubviews[1].isHidden)
@@ -100,5 +105,33 @@ import KikigakiCore
         window.apply(state)
         #expect(window.compactFooter.arrangedSubviews.count == 7)
         #expect(!window.footerMenu().items.contains { $0.title == "自動送信を停止" })
+    }
+
+    @Test func 実行中の反転とカウントダウンを600幅で撮る() throws {
+        guard let output = ProcessInfo.processInfo.environment["KIKIGAKI_UI_CAPTURE"] else { return }
+        _ = NSApplication.shared
+        let controller = TranscriptWindowController(shouldReduceMotion: { true })
+        let window = controller.window!
+        window.setFrameAutosaveName("")
+        window.setContentSize(NSSize(width: 600, height: 578))
+        window.setFrameOrigin(NSPoint(x: 20000, y: 20000))
+        var state = try waitingState()
+        state.timeline = .init(startedAt: Date(timeIntervalSince1970: 1_788_759_600))
+        state.elapsed = 754
+        state.utterances = [.init(speaker: 0, start: 2, end: 4, text: "会場は本社の大会議室にしましょう。")]
+        controller.apply(state)
+        let content = window.contentView!
+        content.layoutSubtreeIfNeeded()
+        for phase in 0...2 {
+            let robot = controller.compactFooter.robot
+            var schedule = AIScheduleViewState()
+            schedule.active = true; schedule.nextFire = Date(timeIntervalSince1970: 1150)
+            robot.update(schedule: schedule, waiting: phase < 2, animate: true, now: Date(timeIntervalSince1970: Double(1000 + (phase % 2))))
+            content.displayIfNeeded()
+            let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
+            content.cacheDisplay(in: content.bounds, to: bitmap)
+            try #require(bitmap.representation(using: .png, properties: [:])).write(to:
+                URL(fileURLWithPath: output).appendingPathComponent("robot-\(phase)-600.png"))
+        }
     }
 }
