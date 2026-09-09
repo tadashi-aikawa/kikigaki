@@ -84,6 +84,8 @@ replayの追加入力は通常起動では解釈せず、`--smoke --replay` で�
 
 # 準備済みセッションの結合検証(段8)
 
+> 以下は初回の記録。会話が0行だったCodex返送と、紐づけ前の取消だけでは完了条件を満たしていなかった。証跡の補完結果は末尾の「段8の再検証」に記録する。
+
 2026-09-09、`feature/ai-prepared` の段8で実施。上の記録とは別の案(会議に紐づかない準備済みセッションを起こして紐づける)の検証で、こちらが現行の設計。
 
 音声は `say -v Kyoko` で作った架空の会議24秒だけ。実データを含み得る既存WAVは使っていない。音声認識の精度を測る検証ではない。
@@ -155,3 +157,65 @@ Claude側は `permissions.allow` に同梱CLIのBash実行を1つ足すだけで
 
 `swift build` と全429テストが成功。`.app` と同梱CLIを使い、返送を模倣するfixtureは使っていない。実際のClaudeとCodexが `accept` と `reply` を呼んだ。
 
+## 段8の再検証
+
+2026-09-09、修正済みの `dfcfe93` と診断ログ追加の `092e6fd` を引き継いで不足分を検証した。証跡は `/private/tmp/kikigaki-prepared-verify2/`。
+
+### 録音中に次会議用を準備
+
+前の担当が取得した `runA.log` を `previous-recording-prepare.log` として保存した。会議1の録音中、状態 `recording`・経過5.5秒で相談プロファイルの準備を開始し、未紐づけ1件として完了している。元の証跡は `/private/tmp/kikigaki-prepared-verify/` にある。この準備は次の会議のためのもので、会議開始前に準備した初回記録とは区別する。
+
+### 会話本文を含むCodex返送
+
+今回起動したAIは両方ともCodex、モデル `gpt-6-astra`、effort `low`。Claudeは起動していない。検証設定の全文は `config.toml`、ペインのモデル表示と実際の `accept`・`reply` は `codex-reply-pane.txt` に保存した。`cwd` は信頼済みの既定ディレクトリを使った。
+
+音声は前の担当が `say -v Kyoko` で生成した架空会議 `meeting-long.wav` をコピーしたもの。実長44.9375秒で、実会議の録音は使っていない。`CODESIGN_IDENTITY=none ./scripts/make-app.sh` で組んだアプリと同梱CLIを実行した。
+
+```text
+KIKIGAKI_DEBUG_AI_PREPARE=議事録;相談
+KIKIGAKI_DEBUG_AI_ATTACH=1=oldest;2=oldest
+KIKIGAKI_DEBUG_AI_AUTO_SECONDS=12
+KIKIGAKI_DEBUG_REPLAY_HOLD=140
+```
+
+| 項目 | 結果 |
+| --- | --- |
+| 会議ID | `64D30263-7C2D-4448-9A19-38220989933C` |
+| 準備済みの紐づけ | 議事録 `w7E:p1`・相談 `w7F:p1`、失敗なし |
+| 送信 | 議事録へ自動 `#1`、20:13:03 |
+| request ID | `81DFC975-0F20-485D-AD97-46102DABFB6B` |
+| 会話範囲 | `read_line_count = 1`、架空会議の発話本文を含む |
+| 受領・返送 | 20:13:25に受領、20:13:38に `answered` |
+| 保存 | `out/2026-09-09_2012_2.md` に自動送信印・受領時刻・返事を保存 |
+
+返事は本社大会議室・参加者20名・松村さん担当・来週金曜期限・備品3万円など、実際に渡した本文の決定事項と一致した。アプリの受信箱と状態ファイルにも実CLIの返送が残っている。
+
+今回のreplayは約5秒で音声を流し終えるため、12秒の通常期限より録音停止が先になる。**初回は `autoStart` で有効になった自動送信の、停止時の最後の1回**である。録音中の通常期限による送信成功を示す証跡ではない。
+
+最初の試行 `reply.log` は保存先 `out` がまだ存在せず準備に失敗した。`AIFileStore` が既存のルートディレクトリを開く実装で、録音開始が保存先を作るより先に準備を呼ぶため。保存先が存在する状態で再実行した `reply2.log` が成功の証跡である。未作成の保存先での準備は別途対応が必要。
+
+### 紐づけ後の取消
+
+同じ設定で相談の準備済みを1件追加し、`KIKIGAKI_DEBUG_AI_ATTACH=2=oldest` と `KIKIGAKI_DEBUG_AI_ATTACH_CANCEL=1` を指定した。準備には `KIKIGAKI_DEBUG_AI_PREPARE=相談` を使った。`saveRecording = true` でWAVも取消対象に含めた。
+
+```text
+replay 取消前の紐づけ: 失敗 [] 紐づけ済み 3件
+replay 取消: 会議 0709B3EE-90EA-4EE1-B137-AE55C3EF8658 保存 false 残り [] 未紐づけ 1件
+```
+
+取消前の3件は前の会議に紐づいた2件と、今回紐づけた `w7G:p1` の1件。取消後の台帳 `ledger-after-cancel.json` では、今回の準備済み `0BCA1DC5-8B67-4AB4-89D7-D60514A02695` だけが未紐づけへ戻り、前の会議の2件は紐づいたままである。
+
+`cancel.log` の終了コードは0。アプリは取消前の会議IDと保存先を固定して、Markdown・WAV・会議の置き場・登録簿・紐づけ・片付け残しを検査した。終了後にも次を確認した。
+
+- `out/2026-09-09_2015.md` と同名WAVは存在しない。
+- `out/.kikigaki-context/0709B3EE-90EA-4EE1-B137-AE55C3EF8658` は存在しない。
+- `roots-after-cancel.json` に取消対象の会議IDはない。
+- 台帳に取消対象の紐づけはなく、今回の準備済みは未紐づけで残る。
+
+準備時のフック用ディレクトリは、未紐づけへ戻ったセッションのために残る。削除対象である実会議の置き場とは別である。
+
+### 検証と後片付け
+
+`swift build`、全437テスト、アプリと同梱CLIの署名検証が成功した。ログは `build.log` と `tests.log`。今回は表示の変更と新たな画面撮影は行っていない。実Codexの端末表示とアプリが保存した会議Markdownを確認した。
+
+検証で起動したworkspace `w7E`・`w7F`・`w7G` はすべて閉じた。最終一覧は `workspaces-after-cleanup.json`。開始時に存在しなかった `ai-prepared.json` は、この検証の3件だけを含むことを確認し、証跡をコピーしてから削除した。会議の登録簿は残し、既存の会議登録を変更していない。
