@@ -8,7 +8,7 @@ public enum Aligner {
     /// フレーズを切る無音の長さ(秒)
     public static let phraseGapSeconds = 0.35
     /// フレーズ内で別話者がこの長さ以上続く塊は、多数決から独立させる(秒)。
-    /// より短くても、語境界で完結する1語か文末までの塊は独立させる。
+    /// より短くても相槌プリセットや、主話者に挟まれていない完全語・文末の塊は独立させる。
     /// Apple のトークンは単語級で1個でも 0.5 秒を超えるため、本当の発話交代とみなせる 1.5 秒に
     /// しないと語の分断が残る(実測)
     public static let keepIslandSeconds = 1.5
@@ -45,7 +45,7 @@ public enum Aligner {
     /// フレーズの多数派は語内補正前に固定する。
     /// トークン単位のままだと、相槌の重なりや話者区間の数百msのずれが語の途中に切れ目を作る
     /// (「い / や本当に」のような分断。タダシの実録で確認)。フレーズの中で別話者が `keepIslandSeconds`
-    /// 以上続く塊と、語境界で完結する短い1語・文末の塊は独立させる
+    /// 以上続く塊と短い相槌は独立させる。主話者に挟まれた一般語は多数派へ戻す
     public static func speakers(
         for tokens: [TimedToken], segments: [SpeakerSegment], frozen: [Int?] = [],
         gapSeconds: Double = phraseGapSeconds, keepIslandSeconds: Double = keepIslandSeconds
@@ -96,11 +96,28 @@ public enum Aligner {
                 for k in word { speakers[k] = winner }
                 correctedWords.append(word)
             }
+            // 前後の連続性は吸収前のラベルで見る。先の吸収が後ろの島を連鎖的に吸収する根拠に
+            // ならないよう、語内補正後のこのフレーズだけを固定する。
+            let beforeSmoothing = Array(speakers[phrase])
+            // 句読点だけでは発話の連続性を裏付けない。同じラベルの句読点を越えた
+            // 実際の文字まで確認し、フレーズ端や別話者に達したら連続とは扱わない。
+            func hasMajorSpeech(from index: Int, step: Int) -> Bool {
+                var cursor = index
+                while phrase.contains(cursor) {
+                    guard beforeSmoothing[cursor - phrase.lowerBound] == major else { return false }
+                    if !Self.isPunctuationOnly(tokens[cursor]) { return true }
+                    cursor += step
+                }
+                return false
+            }
             // 多数派と違う短い塊を多数派に揃える(凍結済みは触らない)
             var i = phrase.lowerBound
             while i < phrase.upperBound {
                 var j = i
                 while j < phrase.upperBound && speakers[j] == speakers[i] { j += 1 }
+                // 凍結境界をまたぐ島は一部だけ吸収しない。「代 / 表」のように語の後半だけ
+                // 多数派へ移すと、凍結済みの前半を戻せず新しい語内分断になる。
+                if i < frozenCount && frozenCount < j { i = j; continue }
                 if speakers[i] != major {
                     let coreWords = lexicalRanges.filter { $0.lowerBound >= i && $0.upperBound <= j }
                     // 戻す側の隣も多数派である場合だけ端を戻す。第三話者への交代を多数派で埋めない。
@@ -126,8 +143,7 @@ public enum Aligner {
                     // 長さを 0 とみなすので、`keepIslandSeconds` を 0 にして吸収を止める検証は従来どおり効く
                     let unknownFragment = speakers[i] == nil && !words.containsWholeWords(local)
                     if (unknownFragment ? 0 : span) < keepIslandSeconds {
-                        // 「すごいね。」は0.84秒でも別話者の返答だった。短さだけで吸収せず、
-                        // 語境界で完結する塊は残す。上の境界補正でも完結しない部分語は従来通り。
+                        // 「すごいね。」は0.84秒でも別話者の返答だった。短さだけでは吸収しない。
                         if speakers[i] != nil {
                             // 多数派の声が区間全体を覆う場合、句点だけを根拠に複数語の島を保護せず、
                             // 1語も相槌・応答の語彙に限って保護する。相槌が重なると音声側の区間が
@@ -142,9 +158,14 @@ public enum Aligner {
                                 coveredUntil = segment.end
                             }
                             let coveredByMajor = coveredUntil >= tokens[j - 1].end
-                            // 語彙は島の本文全体との一致で見る。「確かに」は語境界では「確か / に」に割れるため
-                            let keepsWholeWords = coveredByMajor ? words.isBackchannel(local) : words.containsWholeWords(local)
-                            if keepsWholeWords || (span >= 0.6 && words.containsMeaningfulReply(local)) { i = j; continue }
+                            // 音声区間が途切れていても、前後が同じ多数派なら文中の一般語を戻す。
+                            // 「代表」は完全な1語でも独立した返答とは限らない。相槌は本文全体を
+                            // プリセットと照合して残す。「確かに」のような複数語も扱い、部分一致はしない。
+                            let surroundedByMajor = hasMajorSpeech(from: i - 1, step: -1)
+                                && hasMajorSpeech(from: j, step: 1)
+                            let keepsReply = coveredByMajor || surroundedByMajor
+                                ? words.isBackchannel(local) : words.containsWholeWords(local)
+                            if keepsReply || (span >= 0.6 && words.containsMeaningfulReply(local)) { i = j; continue }
                         }
                         for k in i..<j where k >= frozenCount { speakers[k] = major }
                     }

@@ -88,9 +88,8 @@ import Testing
         #expect(Aligner.utterances(tokens: Self.overlapTokens, speakers: speakers).map(\.text) == ["はい管理のプロ代表の松村です。"])
     }
 
-    @Test func 音声区間がなければ文中の1語は従来通り残す() {
-        // 区間を渡さない判定(旧経路)では「代表」の保護が続く。区間の有無で挙動が変わることを明示する
-        #expect(Aligner.smoothSpeakers(tokens: Self.overlapTokens, speakers: Self.overlapRaw)[7...8] == [0, 0])
+    @Test func 音声区間がなくても前後が多数派の代表は吸収する() {
+        #expect(Aligner.smoothSpeakers(tokens: Self.overlapTokens, speakers: Self.overlapRaw)[7...8] == [1, 1])
     }
 
     /// 主話者(1)が喋り続ける最中に、相手(0)の1語が文字として出た形。主話者の区間が島を覆う
@@ -116,11 +115,11 @@ import Testing
         let island = Self.coveredIsland(word)
         let speakers = Aligner.smoothSpeakers(tokens: island.tokens, speakers: island.raw, segments: island.segments)
         #expect(speakers == Array(repeating: 1, count: island.tokens.count), "\(word) が残った")
-        // 区間を渡さなければ従来どおり残す
-        #expect(Aligner.smoothSpeakers(tokens: island.tokens, speakers: island.raw)[3] == 0)
+        // 音声区間がなくても、同じフレーズの前後が多数派なら一般語は戻す
+        #expect(Aligner.smoothSpeakers(tokens: island.tokens, speakers: island.raw)[3] == 1)
     }
 
-    @Test func 多数派の声が途切れた1語は語彙に関係なく残す() {
+    @Test func 多数派の声が途切れても相槌は残し文中の一般語は吸収する() {
         // 2026-09-05_1529.wav の「はい」と同じ形。多数派(0)の区間が島の前で切れ、後で再開する
         let tokens: [TimedToken] = [
             .init(text: "一応経過報告させていただきますと", phraseId: 1146, start: 180.12, end: 182.82),
@@ -133,9 +132,9 @@ import Testing
             SpeakerSegment(speaker: 0, start: 183.36, end: 185.36),
         ]
         #expect(Aligner.smoothSpeakers(tokens: tokens, speakers: [0, 1, 1, 0], segments: segments) == [0, 1, 1, 0])
-        // 語彙にない1語でも、多数派が黙って聞いた場面なら残す
+        // プリセット外の1語は、前後の主話者の連続性を優先する
         let noun = tokens.enumerated().map { i, t in i == 1 ? TimedToken(text: "代", phraseId: 1146, start: t.start, end: t.end)
             : i == 2 ? TimedToken(text: "表", phraseId: 1146, start: t.start, end: t.end) : t }
-        #expect(Aligner.smoothSpeakers(tokens: noun, speakers: [0, 1, 1, 0], segments: segments) == [0, 1, 1, 0])
+        #expect(Aligner.smoothSpeakers(tokens: noun, speakers: [0, 1, 1, 0], segments: segments) == [0, 0, 0, 0])
     }
 }

@@ -99,18 +99,26 @@ struct WordBoundaries {
             .contains(where: value.hasSuffix)
     }
 
-    /// 相槌・応答の語彙。多数派の声が島を覆っていても保護する1語で、消す一覧ではない。
+    /// 相槌・応答のプリセット。多数派の声が区間を覆うか、前後が同じ主話者でも保持する。
     /// 重なった相手の「うん」が文字になったとき、主話者の本文へ混ぜないためのもの。
+    /// 複数語の定番応答も含む。語の一部への一致や一般語への拡張はしない。
     /// 品詞(NLTagger の lexicalClass)は日本語で提供されないため、語彙で限定する
     static let backchannelWords: Set<String> = [
         "はい", "はいはい", "うん", "うんうん", "ええ", "そう", "そうそう", "そうですね", "そうなんですね",
         "なるほど", "いや", "いいえ", "確かに", "本当", "ほんと", "本当に", "ほんとに", "ですね", "ですよね",
         "おお", "へえ", "ふーん", "了解", "了解です", "オッケー", "はーい", "いえ", "まあ", "うーん",
+        "そうです", "そうですよね", "そうなんです", "なるほどね", "なるほどですね",
+        "わかりました", "分かりました", "わかります", "分かります", "承知しました", "承知です",
     ]
 
     /// 空白・句読点を除いた本文が相槌・応答の語彙に一致するか
     func isBackchannel(_ range: Range<Int>) -> Bool {
-        let text = tokens[range].map(\.text).joined()
+        let raw = tokens[range].map(\.text).joined()
+        let start = offsets[range.lowerBound] + raw.prefix(while: Self.ignored).utf16.count
+        let end = offsets[range.upperBound] - String(raw.reversed().prefix(while: Self.ignored)).utf16.count
+        // 定番応答は複数語も許すが、「そうめん」の「そう」のような語の断片は残さない。
+        guard start < end, starts.contains(start), ends.contains(end) else { return false }
+        let text = raw
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: .punctuationCharacters)
         return Self.backchannelWords.contains(text)
