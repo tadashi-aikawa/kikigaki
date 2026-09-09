@@ -42,8 +42,12 @@ final class AIPreparedStore {
     // MARK: - 一覧
 
     var unbound: [AIPreparedSession] { ledger.unbound }
-    func available(for config: ResolvedAIConfig) -> [AIPreparedSession] { ledger.available(for: config) }
-    func stale(for config: ResolvedAIConfig) -> [AIPreparedSession] { ledger.stale(for: config) }
+    func available(for config: ResolvedAIConfig, contextRoot: URL? = nil) -> [AIPreparedSession] {
+        ledger.available(for: config, contextRoot: contextRoot)
+    }
+    func stale(for config: ResolvedAIConfig, contextRoot: URL? = nil) -> [AIPreparedSession] {
+        ledger.stale(for: config, contextRoot: contextRoot)
+    }
 
     /// 紐づけ済みも含めて台帳から引く。表題は保存していないので、呼ばれるたびに解決する。
     func label(id: UUID, includingName: Bool = true) -> String? {

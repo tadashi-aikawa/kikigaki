@@ -126,9 +126,12 @@ final class MeetingSession {
     weak var preparedStore: AIPreparedStore?
 
     /// 宛先ポップアップへ並べる項目。未紐づけの準備済みはプロファイルの下へ字下げして並べる。
+    /// この会議の保存先。準備済みの返送許可がここへ向いているかの判定に使う
+    var aiContextRoot: URL? { snapshot.markdownURL?.deletingLastPathComponent() }
+
     var aiDestinationItems: [AIDestinationPicker.Item] {
         meetingAIProfiles.map { profile in
-            let prepared = (preparedStore?.available(for: profile) ?? []).map {
+            let prepared = (preparedStore?.available(for: profile, contextRoot: aiContextRoot) ?? []).map {
                 AIDestinationPicker.Prepared(id: $0.id, label: preparedStore?.label($0, includingName: false) ?? "")
             }
             // 表題は台帳へ持たないので、閉じた表題も出すたびに解決する。
@@ -142,7 +145,11 @@ final class MeetingSession {
     private(set) var boundPrepared: [Int: UUID] = [:]
 
     /// その枠を会議側が使っている(送信中・準備中)。準備の起動と重ねないための判定
-    func isAIBusy(slot: Int) -> Bool { aiTasks[slot] != nil }
+    func isAIBusy(slot: Int) -> Bool { aiTasks[slot] != nil || bindingSlots.contains(slot) }
+
+    /// 紐づけの最中の枠。確定するまで送信させない。
+    /// 画面は選んだ先を出すのに送信は前の宛先へ飛ぶ、という食い違いを作らないため
+    private(set) var bindingSlots: Set<Int> = []
 
     /// 台帳が変わったので表示を作り直す。表題は台帳へ持たないので、出すたびに引き直す
     func refreshPrepared() { emit() }
@@ -178,6 +185,24 @@ final class MeetingSession {
         return store.unbound.map { store.label($0) }.joined(separator: "\n")
     }
 
+    /// 録音開始時の選択をまとめて当てる。**引き継げなかった枠を返す。**
+    /// 全部済むまで `autoStart` の保留を解かない。失敗した枠のまま進めると、
+    /// 下ごしらえを持たない新規セッションへ自動送信の1回目が飛ぶ。
+    func applyPreparedSelection(_ selection: [Int: UUID?]) async -> Set<Int> {
+        let meetingID = handoff.meetingID
+        var failed: Set<Int> = []
+        for (slot, id) in selection.sorted(by: { $0.key < $1.key }) {
+            guard handoff.meetingID == meetingID else { return failed }
+            guard let id, let profile = meetingAIProfiles.first(where: { $0.slot == slot }) else { continue }
+            if await adoptPrepared(id, profile: profile) == false { failed.insert(slot) }
+        }
+        guard handoff.meetingID == meetingID else { return failed }
+        guard failed.isEmpty else { return failed }
+        deferAutomaticStart = false
+        if snapshot.state == .recording || snapshot.state == .paused { startAutomaticSchedule() }
+        return []
+    }
+
     /// 準備済みセッションをこの会議のチャネルへ引き継ぐ。
     /// **会議側の保存が成功してから**台帳へ `bound` を書く。逆順にすると、台帳では使用済みなのに
     /// 会議側に接続が無い行が残る。
@@ -188,6 +213,8 @@ final class MeetingSession {
         // awaitを跨いで会議が入れ替わることがある(接続確認中に停止して次の録音を始める)。
         // 会議IDを固定し、各await後に照合して、古い処理が次の会議へ書き込まないようにする。
         let meetingID = handoff.meetingID
+        bindingSlots.insert(profile.slot); emit()
+        defer { bindingSlots.remove(profile.slot); emit() }
         do {
             let record = try aiStore.begin(meetingID: meetingID, markdownURL: url, profiles: meetingAIProfiles)
             // 紐づけの前に会議の全プロファイルを登録する。1つだけ登録すると保存パスが平置きになり、
@@ -391,6 +418,43 @@ final class MeetingSession {
         emit()
     }
 
+    /// 録音そのものを取り止める。**保存しない**。予約したMarkdownとWAV、AIの置き場も残さない。
+    /// 紐づけシートの「取消(録音を始めない)」から呼ぶ。表示している契約と動きを揃えるため、
+    /// 通常の停止(最終判定して保存する)とは別の道にしてある。
+    func abandon() async {
+        guard snapshot.state == .recording || snapshot.state == .paused else { return }
+        stopAISchedule()
+        for slot in aiPhases.keys { cancelAIPreparation(slot: slot) }
+        let markdownURL = snapshot.markdownURL
+        let meetingID = handoff.meetingID
+        let outputDir = config.outputDir
+        snapshot.state = .finishing
+        snapshot.message = "録音を取り止め中..."
+        emit()
+        await tearDown()
+        // 予約したMarkdownは中身が無いときだけ消す。書き込み済みのものは触らない。
+        if let markdownURL {
+            if (try? Data(contentsOf: markdownURL))?.isEmpty ?? false {
+                do { try FileManager.default.removeItem(at: markdownURL) } catch { log("予約の片付けに失敗: \(error)") }
+            }
+            let wav = MeetingFiles.wavURL(for: markdownURL)
+            if FileManager.default.fileExists(atPath: wav.path) {
+                do { try FileManager.default.removeItem(at: wav) } catch { log("録音の片付けに失敗: \(error)") }
+            }
+        }
+        // この会議のAIの置き場も残さない。まだ何も送っていないので、消しても回収対象は無い。
+        let context = outputDir.appendingPathComponent(".kikigaki-context").appendingPathComponent(meetingID.uuidString)
+        if FileManager.default.fileExists(atPath: context.path) {
+            do { try FileManager.default.removeItem(at: context) } catch { log("AIの置き場の片付けに失敗: \(error)") }
+        }
+        archive = nil; finalTokens = []; finalSegments = []; typedEntries = []
+        consumedAudioTime = 0
+        handoff = HandoffHistory()
+        resetMeetingAIState(config)
+        snapshot = SessionSnapshot(state: .idle, speakers: config.speakers, message: "録音を取り止めました")
+        emit()
+    }
+
     func togglePause() {
         switch snapshot.state {
         case .recording:
@@ -504,6 +568,7 @@ final class MeetingSession {
                 generations[profile.slot] = controller?.generation(slot: profile.slot) ?? 1
                 // 同じ枠で準備を起こしている間は送らせない。別の枠は止めない。
                 canSubmits[profile.slot] = snapshot.canShare && aiTasks[profile.slot] == nil
+                    && !bindingSlots.contains(profile.slot)
                     && preparedStore?.launching.contains(profile.slot) != true
                     && (controller?.canSend(slot: profile.slot) ?? true)
                 progresses[profile.slot] = aiProgresses[profile.slot]
@@ -641,7 +706,7 @@ final class MeetingSession {
         guard snapshot.canShare, let config = selected, aiTasks[config.slot] == nil,
               // 同じ枠の準備を起こしている最中は送らない。起動と送信が同じ枠で重なると、
               // どちらの接続が正本か決まらなくなる。
-              preparedStore?.launching.contains(config.slot) != true,
+              preparedStore?.launching.contains(config.slot) != true, !bindingSlots.contains(config.slot),
               let url = snapshot.markdownURL, let aiStore else { return }
         let slot = config.slot
         let meetingID = handoff.meetingID, capturedAt = Date(), cutoff = snapshot.state == .idle ? snapshot.elapsed : pause.audioTime
@@ -899,7 +964,7 @@ extension MeetingSession {
         // 手動シートを開いている間に止めるのは、そのシートが持つ枠と同じときだけ。
         // 選択中の宛先で判定すると、Aへの返答シートを開いている間にBの自動送信が止まる。
         // 準備の起動中も同じ枠は塞がっている扱いにする。送信すると起動と競合する。
-        if aiTasks[slot] != nil || manualAISheetSlot == slot
+        if aiTasks[slot] != nil || manualAISheetSlot == slot || bindingSlots.contains(slot)
             || preparedStore?.launching.contains(slot) == true { return .busy }
         if let controller {
             let generation = controller.generation(slot: slot)

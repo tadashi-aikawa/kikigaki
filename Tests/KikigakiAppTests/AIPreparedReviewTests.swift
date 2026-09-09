@@ -27,15 +27,16 @@ import KikigakiCore
         // 溜まっている状態。設定が変わって使えない行も混ぜる。
         let filled = AIPrepareSheet(profiles: profiles, selected: 1)
         filled.update(rows: [
-            .init(id: UUID(), label: "議事録 · Kikigaki 議事録抽出 · 13:05起動", stale: false),
-            .init(id: UUID(), label: "相談 · 段取りの相談 · 13:10起動", stale: false),
-            .init(id: UUID(), label: "相談 · 13:22起動", stale: true),
+            .init(id: UUID(), label: "議事録 · Kikigaki 議事録抽出 · 13:05起動", reason: nil),
+            .init(id: UUID(), label: "相談 · 段取りの相談 · 13:10起動", reason: nil),
+            .init(id: UUID(), label: "相談 · 13:22起動", reason: "設定が変わったため使えません"),
+            .init(id: UUID(), label: "議事録 · 13:31起動", reason: "保存先が変わったため使えません"),
         ], launching: false)
         try capture("prepared-sheet-list", filled.window.contentView!, to: output)
 
         // 起動中。操作は面を足さず色を抜く。
         let launching = AIPrepareSheet(profiles: profiles, selected: 2)
-        launching.update(rows: [.init(id: UUID(), label: "議事録 · Kikigaki 議事録抽出 · 13:05起動", stale: false)],
+        launching.update(rows: [.init(id: UUID(), label: "議事録 · Kikigaki 議事録抽出 · 13:05起動", reason: nil)],
                          launching: true)
         try capture("prepared-sheet-launching", launching.window.contentView!, to: output)
         let popup = try #require(descendants(launching.window.contentView!).compactMap { $0 as? NSPopUpButton }.first)
@@ -47,6 +48,12 @@ import KikigakiCore
             .init(slot: 2, name: "相談", prepared: [(UUID(), "段取りの相談 · 13:10起動"), (UUID(), "13:22起動")]),
         ])
         try capture("prepared-attach-sheet", attach.window.contentView!, to: output)
+
+        // 引き継ぎに失敗して選び直すとき。理由を先に出す。
+        let retry = AIAttachSheet(choices: [
+            .init(slot: 2, name: "相談", prepared: [(UUID(), "13:22起動")]),
+        ], warning: "選んだ準備済みセッションを引き継げませんでした。選び直してください")
+        try capture("prepared-attach-retry", retry.window.contentView!, to: output)
 
         // 宛先ポップアップ。紐づけた枠は閉じたままでも何を使っているか判る。
         let picker = AIDestinationPicker()

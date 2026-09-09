@@ -109,6 +109,17 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         window.contentView = stack
         editor.onSubmit = { [weak self] in self?.submit() }; editor.onCancel = { [weak self] in self?.cancel() }
     }
+    /// 準備済みを選んで紐づけている最中。確定するまで送信させない。
+    /// 画面は選んだ先を出すのに送信は前の宛先へ飛ぶ、という食い違いを作らないため
+    private var binding = false
+    /// 紐づけの開始と終了。終わったら通常の可否判定へ戻す
+    func setBinding(_ active: Bool, canSubmit: Bool) {
+        binding = active
+        destination.setEnabled(!active && activeSlot == nil && fixedSlot == nil)
+        sendButton.isEnabled = canSubmit && !sent && !active
+        if active { hint.stringValue = "準備済みのAIセッションへ紐づけています" }
+    }
+
     /// このシートが送信を始めた枠。取消はここへ返す。
     /// 送信後に宛先を選び直せると、接続待ちの依頼を取り消せなくなる。
     private(set) var activeSlot: Int?
@@ -127,11 +138,11 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     func update(progress: String?, canSubmit: Bool, warning: String? = nil) {
         if progress == nil { updateRange() }
         hint.stringValue = progress ?? warning ?? (canSubmit ? "空欄なら声の末尾を送ります" : "返事待ちです。下書きは保持されます")
-        sendButton.isEnabled = canSubmit && !sent
+        sendButton.isEnabled = canSubmit && !sent && !binding
         editor.isEditable = !sent || progress == nil
         work.isEnabled = !sent || progress == nil
         if progress == nil {
-            sent = false; sendButton.isEnabled = canSubmit
+            sent = false; sendButton.isEnabled = canSubmit && !binding
             // 送信が終わって次の下書きへ戻ったら、宛先をまた選べるようにする。
             activeSlot = nil; destination.setEnabled(true)
         }

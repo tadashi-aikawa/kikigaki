@@ -27,9 +27,9 @@ final class AIConversationController {
         var idleSince: Date?
         var hookBackgroundRunning = false
         var warning: String?
-        /// フック観測の置き場。準備済みセッションを引き継いだ枠は、起動時に焼き付いた
-        /// 仮の会議の置き場へ落ちるので、そちらを読む
-        var hookContext: (root: URL, meetingID: UUID)?
+        /// フック観測の置き場と、その通知が名乗る世代。準備済みセッションを引き継いだ枠は、
+        /// 起動時に焼き付いた仮の会議の置き場へ、常に第1世代として落ちる
+        var hookContext: (root: URL, meetingID: UUID, generation: Int)?
         var generation: Int { history.sessionGeneration }
         init(slot: Int, meetingID: UUID) throws {
             self.slot = slot
@@ -115,6 +115,8 @@ final class AIConversationController {
 
     /// 引き継いだフックの置き場。世代を作り直すと消えることの検証に使う
     func hookContextMeetingForTesting(slot: Int) -> UUID? { channels[slot]?.hookContext?.meetingID }
+    /// フックが伝えた背景処理中。引き継いだ枠の世代がずれていないかの検証に使う
+    func hookBackgroundRunningForTesting(slot: Int) -> Bool { channels[slot]?.hookBackgroundRunning ?? false }
     func generation(slot: Int) -> Int { channels[slot]?.generation ?? 1 }
     func connection(slot: Int) -> AIHerdrConnection? { channels[slot]?.connection }
     func connectionStatus(slot: Int) -> AIConnectionStatus { channels[slot]?.connectionStatus ?? .unknown }
@@ -196,10 +198,15 @@ final class AIConversationController {
         try register([config])
         let channel = try channel(config.slot)
         guard prepared.matches(config), let connection = prepared.connection else { throw AIError.mismatch }
+        // 起動時に許可した保存先と会議の保存先が違うと、返送がサンドボックスで落ちる。
+        // 起動引数は変えられないので、ここで断る。候補の絞り込みでも同じ条件を見る。
+        guard prepared.matchesContext(root: outputDirectory) else { throw AIError.mismatch }
         // 会議側だけ済んでいる同じ紐づけのやり直しは、そのまま成功として扱う。
         // 台帳の保存に失敗した紐づけを、利用者がもう一度選べるようにするため。
-        if let existing = channel.session, existing.token == prepared.token,
-           existing.connection == connection, channel.configuration == config { onChange?(); return }
+        // 一致は接続の識別だけで見る。生存確認で session や terminal が補われた分を差分にしない。
+        if let existing = channel.session, existing.token == prepared.token, channel.configuration == config,
+           existing.connection?.paneID == connection.paneID,
+           existing.connection?.workspaceID == connection.workspaceID { onChange?(); return }
         guard allowsSending, channel.session == nil, channel.connection == nil,
               !channel.launchingAttempted else { throw AIHerdrError.notReady }
         // 何も書く前に生存を確かめる。消えたペインを引き継ぐと枠が塞がり、別の準備済みを選び直せない。
@@ -222,7 +229,8 @@ final class AIConversationController {
         channel.configuration = config
         channel.connection = connection
         channel.launchingAttempted = true; channel.inputAttempted = true
-        channel.hookContext = (prepared.contextRoot, prepared.contextMeetingID)
+        // 準備の通知は第1世代を名乗る。会議側の世代と別に持たないと、作り直した枠で捨ててしまう。
+        channel.hookContext = (prepared.contextRoot, prepared.contextMeetingID, 1)
         // 引き継いだ直後に生存を確かめる。失敗しても記録は残し、状態は切断として見せる。
         try? await refreshConnection(slot: config.slot)
         onChange?()
@@ -415,7 +423,7 @@ final class AIConversationController {
         // 置き場ごとに束ねて、その中で持ち主を決める。
         var groups: [String: (store: AIFileStore, meetingID: UUID, owners: [(Channel, AISessionRecord)])] = [:]
         for owner in owners {
-            let context = owner.0.hookContext ?? (outputDirectory, meetingID)
+            let context = owner.0.hookContext ?? (outputDirectory, meetingID, owner.0.generation)
             let key = context.root.path + "\n" + context.meetingID.uuidString
             groups[key, default: (AIFileStore(root: context.root), context.meetingID, [])].owners.append(owner)
         }
@@ -426,8 +434,10 @@ final class AIConversationController {
                 let names = try FileManager.default.contentsOfDirectory(atPath: inbox.path)
                 var identities: [Int: String] = [:]
                 for (channel, _) in group.owners {
+                    // 置き場の中の世代で読む。引き継いだ枠は常に第1世代の隣に置かれている。
+                    let hookGeneration = channel.hookContext?.generation ?? channel.generation
                     if let identity = channel.connection?.sessionID ?? (try? AIJSON.decode(String.self,
-                        from: group.store.read(base + ["sessions", "\(channel.generation).identity.json"], limit: 2048))) {
+                        from: group.store.read(base + ["sessions", "\(hookGeneration).identity.json"], limit: 2048))) {
                         identities[channel.slot] = identity
                     }
                 }
@@ -443,9 +453,10 @@ final class AIConversationController {
                         // 現世代のどのチャネルにも属さないものは、旧世代の診断か未接続チャネル宛て。
                         // 壊れているとは限らないので不正には数えない。
                         guard let owner = group.owners.first(where: { channel, session in
-                            let expected = channel.hookContext == nil ? session
-                                : AISessionRecord(schemaVersion: 1, meetingID: group.meetingID, generation: channel.generation,
-                                                  provider: session.provider, token: session.token)
+                            let expected = channel.hookContext.map { hook in
+                                AISessionRecord(schemaVersion: 1, meetingID: group.meetingID, generation: hook.generation,
+                                                provider: session.provider, token: session.token)
+                            } ?? session
                             return (try? event.validate(session: expected)) != nil
                                 && identities[channel.slot] == event.sessionID
                         })?.0 else { continue }

@@ -25,13 +25,24 @@ import KikigakiAIIO
         """
         return ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: root).aiProfiles
     }
+    /// フックの世代を見るテスト用。Claudeだけが背景処理中を伝える
+    private func claudeProfiles(_ root: URL) throws -> [ResolvedAIConfig] {
+        ResolvedConfig(config: try ConfigLoader.parse(toml: """
+        [[ai]]
+        name = "議事録"
+        cli = "claude"
+        command = "/bin/echo"
+        cwd = "\(root.path)"
+        address = "迅雷へ"
+        """), home: root).aiProfiles
+    }
     private func session(_ root: URL, profiles list: [ResolvedAIConfig], fake: FakeHerdr,
-                         recordedSamples: Int = 0) -> MeetingSession {
+                         recordedSamples: Int = 0, markdown: URL? = nil) -> MeetingSession {
         let store = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
         var config = ResolvedConfig(config: KikigakiConfig(), home: root)
         config.aiProfiles = list
-        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config,
-                                     aiStore: store, recordedSamples: recordedSamples)
+        let session = MeetingSession(testingRecordingAt: markdown ?? root.appendingPathComponent("meeting.md"),
+                                     config: config, aiStore: store, recordedSamples: recordedSamples)
         session.automaticHelper = URL(fileURLWithPath: "/bin/echo")
         return session
     }
@@ -96,7 +107,7 @@ import KikigakiAIIO
     @Test func 警告を出しても一覧は隠さない() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let sheet = AIPrepareSheet(profiles: [(slot: 1, name: "議事録")], selected: 1)
-        sheet.update(rows: [.init(id: UUID(), label: "議事録 · 13:05起動", stale: false)], launching: false,
+        sheet.update(rows: [.init(id: UUID(), label: "議事録 · 13:05起動", reason: nil)], launching: false,
                      warning: "AIセッションを準備できません")
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let texts = descendants(sheet.window.contentView!).compactMap { ($0 as? NSTextField)?.stringValue }
@@ -299,6 +310,168 @@ import KikigakiAIIO
         // 会議側だけ保存が済んでいる状態からのやり直し。同じ紐づけなら通る。
         #expect(await session.adoptPrepared(id, profile: list[0]))
         #expect(prepared.unbound.isEmpty)
+    }
+
+    // MARK: - 2巡目の確認レビューの指摘
+
+    /// 【高】紐づけの確定を待っている間に送ると、画面はB・送信はAになる。
+    @Test func 紐づけの確定を待つ間は送信させない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake, recordedSamples: 16_000)
+        session.setScheduleTranscriptForTesting("架空の会議を始めます")
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[1], root: root)
+        let id = try #require(prepared.unbound.first?.id)
+
+        // 紐づけの生存確認の最中に、その枠へ送ろうとする。
+        let observed = Observed()
+        await fake.onCommand { args in
+            guard args.first == "agent", args.dropFirst().first == "get" else { return }
+            await MainActor.run {
+                observed.same = session.snapshot.ai?.canSubmit(slot: 2)
+                session.submitAI(question: "質問", full: false, parent: nil,
+                                 helper: URL(fileURLWithPath: "/bin/echo"), profile: list[1])
+                observed.started = session.submissionTaskForTesting(slot: 2) != nil
+            }
+        }
+        #expect(await session.adoptPrepared(id, profile: list[1]))
+        // 確定前は送信できない。送信の経路も始まらない。
+        #expect(observed.same == false)
+        #expect(observed.started == false)
+        #expect(session.aiRecord?.controller.conversation.questions.isEmpty != false)
+        // 確定したら、選んだ枠へ送れる。
+        #expect(session.aiConfiguration?.slot == 2)
+        #expect(session.snapshot.ai?.canSubmit(slot: 2) == true)
+    }
+
+    /// 【高】引き継ぎに失敗した枠のまま進めると、下ごしらえを持たないAIへ自動送信が飛ぶ。
+    @Test func 引き継ぎに失敗したら自動送信を始めない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try profiles(root, autoStart: true)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let gone = try #require(prepared.unbound.first)
+        await fake.removePane(try #require(gone.connection?.paneID))
+        session.deferAutomaticStart = true
+
+        let failed = await session.applyPreparedSelection([1: gone.id])
+        #expect(failed == [1])
+        // 保留は解かない。選び直すまで自動送信を始めない。
+        #expect(session.deferAutomaticStart)
+        #expect(!session.snapshot.aiSchedule.active)
+
+        // 選び直して新規起動にすれば、そこで始まる。
+        #expect(await session.applyPreparedSelection([1: nil]).isEmpty)
+        #expect(!session.deferAutomaticStart)
+        #expect(session.snapshot.aiSchedule.active)
+        session.stopAISchedule()
+    }
+
+    /// 【中】生存確認でsessionIDが補われると、台帳保存に失敗した紐づけをやり直せない。
+    @Test func 接続の識別が補われても紐づけをやり直せる() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        // 実際のherdrはagent sessionを返す。台帳の接続にはまだ入っていない。
+        await fake.setSession("codex-thread-1")
+        let list = try profiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let id = try #require(prepared.unbound.first?.id)
+        #expect(prepared.unbound.first?.connection?.sessionID == nil)
+
+        let ledgerFile = root.appendingPathComponent("ai-prepared.json")
+        try FileManager.default.removeItem(at: ledgerFile)
+        try FileManager.default.createDirectory(at: ledgerFile, withIntermediateDirectories: false)
+        #expect(await session.adoptPrepared(id, profile: list[0]) == false)
+        try FileManager.default.removeItem(at: ledgerFile)
+        // 会議側の接続にはsessionIDが入っている。台帳の値との差で弾かない。
+        #expect(session.aiRecord?.controller.connection(slot: 1)?.sessionID == "codex-thread-1")
+        #expect(await session.adoptPrepared(id, profile: list[0]))
+        #expect(prepared.unbound.isEmpty)
+    }
+
+    /// 【高】保存先を変えると、準備時に許可した返送先と会議の保存先がずれて返送できない。
+    @Test func 保存先が変わった準備済みは候補にしない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let list = try profiles(root)
+        // 準備は元の保存先で行い、会議は新しい保存先で始める。
+        let moved = root.appendingPathComponent("moved", isDirectory: true)
+        try FileManager.default.createDirectory(at: moved, withIntermediateDirectories: true)
+        let session = session(root, profiles: list, fake: fake, markdown: moved.appendingPathComponent("meeting.md"))
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let id = try #require(prepared.unbound.first?.id)
+
+        // 候補に出さない。選べないので誤って紐づけられない。
+        #expect(session.aiDestinationItems[0].prepared.isEmpty)
+        #expect(prepared.stale(for: list[0], contextRoot: moved).map(\.id) == [id])
+        // 直接呼んでも断る。
+        #expect(await session.adoptPrepared(id, profile: list[0]) == false)
+        #expect(prepared.unbound.map(\.id) == [id])
+    }
+
+    /// 【中】作り直した枠へ引き継ぐと、準備側の第1世代の通知を捨ててしまう。
+    @Test func 世代を作り直した枠でも準備側のフックを読む() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        await fake.setProvider("claude")
+        await fake.setSession("claude-session-1")
+        let list = try claudeProfiles(root)
+        let session = session(root, profiles: list, fake: fake)
+        let prepared = store(root, fake: fake, session: session)
+        await prepare(prepared, list[0], root: root)
+        let first = try #require(prepared.unbound.first)
+
+        // 一度作り直してから引き継ぐ。会議側は第2世代、準備側の通知は第1世代。
+        #expect(await session.adoptPrepared(first.id, profile: list[0]))
+        let live = try #require(session.aiRecord?.controller)
+        try live.newGeneration(slot: 1)
+        await prepare(prepared, list[0], root: root)
+        let second = try #require(prepared.unbound.first)
+        #expect(await session.adoptPrepared(second.id, profile: list[0]))
+        #expect(live.generation(slot: 1) == 2)
+
+        // 準備側の置き場へ、第1世代を名乗るStopフックが落ちる。
+        let record = AISessionRecord(meetingID: second.contextMeetingID, generation: 1, provider: .claude,
+                                     token: second.token)
+        let payload = Data("""
+        {"hook_event_name":"Stop","session_id":"claude-session-1","background_tasks":[{"status":"running"}]}
+        """.utf8)
+        let observation = try AIHookObservation(payload: payload, session: record, now: Date())
+        try AIFileStore(root: second.contextRoot).write(AIJSON.encode(observation),
+            to: [".kikigaki-context", second.contextMeetingID.uuidString, "ai", "inbox", observation.filename],
+            replacing: false)
+        live.scan()
+        #expect(live.hookBackgroundRunningForTesting(slot: 1))
+    }
+
+    /// 【中】「取消(録音を始めない)」が保存していた。取り止めた会議は残さない。
+    @Test func 取消は録音を保存せず片付ける() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let list = try profiles(root)
+        let session = session(root, profiles: list, fake: FakeHerdr())
+        let markdown = root.appendingPathComponent("meeting.md")
+        let wav = root.appendingPathComponent("meeting.wav")
+        // 録音開始が予約したMarkdownとWAVを模す。
+        try Data().write(to: markdown)
+        try Data([0]).write(to: wav)
+        await session.abandon()
+        #expect(session.snapshot.state == .idle)
+        #expect(!session.snapshot.saved)
+        #expect(!FileManager.default.fileExists(atPath: markdown.path))
+        #expect(!FileManager.default.fileExists(atPath: wav.path))
     }
 }
 

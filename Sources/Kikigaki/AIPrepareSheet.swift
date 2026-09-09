@@ -9,8 +9,10 @@ final class AIPrepareSheet: NSObject {
     struct Row {
         let id: UUID
         let label: String
-        /// 準備してから設定が変わって使えない行。破棄だけできる
-        let stale: Bool
+        /// 準備してから設定か保存先が変わって使えない行。理由を添えて、破棄だけできる
+        let reason: String?
+        var stale: Bool { reason != nil }
+        init(id: UUID, label: String, reason: String?) { self.id = id; self.label = label; self.reason = reason }
     }
     let window: NSWindow
     var onStart: ((Int) -> Void)?
@@ -80,9 +82,8 @@ final class AIPrepareSheet: NSObject {
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         var views: [NSView] = [label]
-        if row.stale {
-            let reason = Washi.label("設定が変わったため使えません", size: 11, color: Washi.gold)
-            views.append(reason)
+        if let reason = row.reason {
+            views.append(Washi.label(reason, size: 11, color: Washi.gold))
         }
         views.append(NSView())
         let pane = AIRowButton(title: "ペインを開く") { [weak self] in self?.onPane?(row.id) }

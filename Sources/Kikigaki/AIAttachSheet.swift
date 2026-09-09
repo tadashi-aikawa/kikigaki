@@ -20,7 +20,7 @@ final class AIAttachSheet: NSObject {
     private var groups: [Int: [NSButton]] = [:]
     private var choices: [Choice] = []
 
-    init(choices: [Choice]) {
+    init(choices: [Choice], warning: String? = nil) {
         self.choices = choices
         window = AIQuestionWindow(contentRect: NSRect(x: 0, y: 0, width: 504, height: 360),
                                   styleMask: [.titled], backing: .buffered, defer: false)
@@ -30,6 +30,8 @@ final class AIAttachSheet: NSObject {
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         var views: [NSView] = [Washi.label("準備済みのAIセッション", size: 17, weight: .semibold),
                                Washi.label("この録音で使うセッションをプロファイルごとに選んでください", size: 12, color: Washi.muted)]
+        // 引き継ぎに失敗して選び直すときは、理由を先に出す。
+        if let warning { views.append(Washi.label(warning, size: 12, color: Washi.gold)) }
         for (index, choice) in choices.enumerated() {
             if index > 0 { let line = NSBox(); line.boxType = .separator; views.append(line) }
             views.append(Washi.label(choice.name, size: 13, weight: .semibold))
@@ -59,6 +61,9 @@ final class AIAttachSheet: NSObject {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
         }
         window.contentView = stack
+        // 枠と候補の数で高さが変わる。余った高さを行間へ配らないよう、中身に合わせて詰める。
+        stack.layoutSubtreeIfNeeded()
+        window.setContentSize(NSSize(width: 504, height: max(240, stack.fittingSize.height)))
     }
 
     private func indented(_ view: NSView) -> NSView {

@@ -59,6 +59,15 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         textDidChange(Notification(name: NSText.didChangeNotification))
     }
 
+    /// 準備済みを選んで紐づけている最中。確定するまで開始させない
+    private var binding = false
+    func setBinding(_ active: Bool) {
+        binding = active
+        destination.setEnabled(!active)
+        if active { startButton.isEnabled = false; hint.stringValue = "準備済みのAIセッションへ紐づけています" }
+        else { update() }
+    }
+
     /// 宛先の一覧と選択を差し替える。
     func updateDestinations(_ items: [AIDestinationPicker.Item], selected: Int, participant: String) {
         destination.update(items: items, selected: selected)
@@ -74,7 +83,7 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         else if editor.string.contains("\0") { invalid = "使用できない文字が含まれています" }
         else if editor.string.utf8.count > AILimits.questionBytes { invalid = "入力が長すぎます。32 KiB以内に短くしてください" }
         else { invalid = nil }
-        startButton.isEnabled = invalid == nil
+        startButton.isEnabled = invalid == nil && !binding
         hint.stringValue = warning ?? invalid ?? "指定間隔ごとに差分を送ります。Shift+Enterで改行"
         hint.textColor = warning != nil || invalid != nil ? Washi.gold : Washi.tentative
     }

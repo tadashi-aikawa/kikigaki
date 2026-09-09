@@ -49,6 +49,16 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
     /// 準備してから設定を変えた場合に、別の設定のセッションを黙って紐づけないための判定。
     public func matches(_ other: ResolvedAIConfig) -> Bool { config == other }
 
+    /// 起動時に返送先として許可した保存先と、会議の保存先が同じか。
+    /// 許可はCLIの起動引数に焼き付いていて後から変えられないので、違えば返送できない。
+    public func matchesContext(root: URL) -> Bool {
+        // 末尾の区切りやsymlinkの違いで別物にしない。指すディレクトリが同じかだけを見る。
+        AIPreparedSession.normalize(contextRoot) == AIPreparedSession.normalize(root)
+    }
+    private static func normalize(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
     public mutating func bind(to meetingID: UUID, config: ResolvedAIConfig) throws {
         guard isUnbound else { throw AIError.conflict }
         guard connection != nil else { throw AIError.invalid("prepared session has no connection") }
@@ -119,13 +129,20 @@ public struct AIPreparedLedger: Codable, Equatable, Sendable {
 
     /// そのプロファイルへ紐づけられる候補。古い順で、先頭が既定の選択になる。
     /// 設定が変わったものは候補にしない。
-    public func available(for config: ResolvedAIConfig) -> [AIPreparedSession] {
-        unbound.filter { $0.isReady && $0.profileSlot == config.slot && $0.matches(config) }
+    /// - Parameter contextRoot: 会議の保存先。渡すと、返送先の許可が合わないものを候補から外す
+    public func available(for config: ResolvedAIConfig, contextRoot: URL? = nil) -> [AIPreparedSession] {
+        unbound.filter {
+            $0.isReady && $0.profileSlot == config.slot && $0.matches(config)
+                && (contextRoot.map($0.matchesContext(root:)) ?? true)
+        }
     }
 
-    /// 同じ枠の未紐づけだが、準備後に設定が変わって使えないもの。一覧で理由を示すために分ける。
-    public func stale(for config: ResolvedAIConfig) -> [AIPreparedSession] {
-        unbound.filter { $0.profileSlot == config.slot && !$0.matches(config) }
+    /// 同じ枠の未紐づけだが、準備後に設定か保存先が変わって使えないもの。一覧で理由を示すために分ける。
+    public func stale(for config: ResolvedAIConfig, contextRoot: URL? = nil) -> [AIPreparedSession] {
+        unbound.filter {
+            $0.profileSlot == config.slot
+                && (!$0.matches(config) || !(contextRoot.map($0.matchesContext(root:)) ?? true))
+        }
     }
 
     public mutating func add(_ session: AIPreparedSession) throws {
