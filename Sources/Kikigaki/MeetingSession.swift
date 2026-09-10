@@ -64,6 +64,27 @@ final class MeetingSession {
     private var handoff = HandoffHistory()
     private let diagnostics = Diagnostics()
     private let aiStore: AIRecordStore?
+    private(set) var waitingMinutesPath: String?
+    private var appliedWaitingMinutes: (meetingID: UUID, path: String)?
+    func previewMinutesStore() throws -> MinutesStore? {
+        guard let url = snapshot.markdownURL, let aiStore else { return nil }
+        let store = try aiStore.minutesStores.store(meetingID: handoff.meetingID, markdownURL: url)
+        if let waiting = waitingMinutesPath {
+            waitingMinutesPath = nil
+            // 成否にかかわらず自動適用は1回。失敗はstoreの警告に残し、人が再確定する。
+            do { try store.select(waiting); appliedWaitingMinutes = (handoff.meetingID, waiting) }
+            catch { log("議事録の指定を引き継げません: \(error)") }
+        }
+        return store
+    }
+    func selectMinutes(_ path: String?) throws {
+        if let store = try previewMinutesStore() { try store.select(path) }
+        else {
+            if let path { try MinutesPath.validate(path) }
+            waitingMinutesPath = path
+        }
+        emit()
+    }
     /// 会議開始時に固定したプロファイル。並び順が宛先ポップアップの並びになる
     private(set) var meetingAIProfiles: [ResolvedAIConfig] = []
     /// 手動送信の宛先。会議内では前回の選択を覚える
@@ -79,6 +100,15 @@ final class MeetingSession {
     private var aiSchedule: AIScheduleState?
     private var rangeAutomaticSlot: Int?
 #if DEBUG
+    func setMinutesPreparationForTesting() {
+        appliedWaitingMinutes = nil
+        handoff = HandoffHistory()
+        snapshot = SessionSnapshot(state: .preparing)
+    }
+    func completeMinutesPreparationForTesting(at url: URL) throws {
+        snapshot.state = .recording; snapshot.markdownURL = url
+        _ = try previewMinutesStore()
+    }
     private(set) var scheduleLinesBuildCount = 0
 #endif
     private var aiScheduleTimer: Timer?
@@ -324,6 +354,7 @@ final class MeetingSession {
     @discardableResult
     func start(source: AudioSource) async -> Bool {
         guard snapshot.state.canStart else { return false }
+        appliedWaitingMinutes = nil
         // 前回の取り止めで片付けきれなかったものがあれば、ここでもう一度片付ける。
         retryDiscard()
         cancelAIPreparation()
@@ -386,6 +417,8 @@ final class MeetingSession {
             snapshot.state = .recording
             snapshot.markdownURL = markdownURL
             snapshot.message = nil
+            do { _ = try previewMinutesStore() }
+            catch { snapshot.message = "議事録の設定を引き継げません。パスを指定し直してください" }
             startAutomaticSchedule()
             emit()
             return true
@@ -509,6 +542,9 @@ final class MeetingSession {
             aiWarning = "取り止めた会議のAIの記録が残っています"
             emit()
             return
+        }
+        if let applied = appliedWaitingMinutes, applied.meetingID == meetingID {
+            waitingMinutesPath = applied.path; appliedWaitingMinutes = nil
         }
         archive = nil; finalTokens = []; finalSegments = []; typedEntries = []
         consumedAudioTime = 0

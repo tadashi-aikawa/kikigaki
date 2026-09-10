@@ -249,7 +249,7 @@ import KikigakiAIIO
         #expect(window.compactFooter.unread.count == 1 && window.compactFooter.confirmation.count == 1)
         #expect(!window.compactFooter.warning.isHidden)
         // 手入力の横スクロール欄を除き、AI本文が独立スクロールを作らないことを確認する。
-        #expect(descendants(content).compactMap { $0 as? NSScrollView }.filter { !($0 is TypedEntryField) }.count == 1)
+        #expect(descendants(window.minutesSplit.left).compactMap { $0 as? NSScrollView }.filter { !($0 is TypedEntryField) }.count == 1)
         // 畳む操作と「ペインを開く」は行から消し、接続の操作はフッターへ集める。
         #expect(!descendants(content).compactMap { $0 as? NSButton }.contains { $0.title.hasPrefix("▸") || $0.title.hasPrefix("▾") })
         #expect(window.footerMenu().items.first { $0.title == "ペインを開く" }?.isEnabled == true)

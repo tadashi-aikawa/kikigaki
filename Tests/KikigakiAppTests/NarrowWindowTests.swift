@@ -52,6 +52,8 @@ import KikigakiCore
             content.layoutSubtreeIfNeeded()
             #expect(buttons.allSatisfy { !$0.title.isEmpty })
             #expect(abs(content.bounds.width - 600) < 0.1)
+            let minutes = try #require(descendants(content).compactMap { $0 as? NSButton }.first { $0.toolTip == "議事録を表示" || $0.toolTip == "議事録を隠す" })
+            #expect(content.bounds.contains(minutes.convert(minutes.bounds, to: content)))
             for button in buttons {
                 #expect(abs(button.frame.width - 120) < 0.1 && abs(button.frame.height - 32) < 0.1)
                 #expect(content.bounds.contains(button.convert(button.bounds, to: content)))

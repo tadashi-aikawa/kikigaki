@@ -14,6 +14,7 @@ class AIFooterButton: HoverButton {
     var callback: (() -> Void)?
     var symbolName: String
     var tint = Washi.red
+    var visibleLabel: String?
     init(symbol: String, label: String) {
         symbolName = symbol
         super.init(frame: .zero)
@@ -30,7 +31,13 @@ class AIFooterButton: HoverButton {
             .withSymbolConfiguration(.init(paletteColors: [isEnabled ? tint : Washi.muted])) else { return }
         let scale = 23 / max(image.size.width, image.size.height)
         let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
-        image.draw(in: NSRect(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2, width: size.width, height: size.height))
+        let centerY = visibleLabel == nil ? bounds.height / 2 : AIFooterMetrics.iconCenterY
+        image.draw(in: NSRect(x: (bounds.width - size.width) / 2, y: centerY - size.height / 2, width: size.width, height: size.height))
+        if let visibleLabel {
+            let attributes: [NSAttributedString.Key: Any] = [.font: AIFooterMetrics.labelFont, .foregroundColor: Washi.muted]
+            let label = visibleLabel as NSString
+            label.draw(at: NSPoint(x: (bounds.width - label.size(withAttributes: attributes).width) / 2, y: AIFooterMetrics.labelY), withAttributes: attributes)
+        }
     }
 }
 
@@ -122,6 +129,7 @@ final class AIRobotButton: AIFooterButton {
 
 /// 1秒単位の更新だけ。CALayerへ連続アニメーションを登録しない。
 final class AICompactFooter: NSStackView {
+    let minutesNotice = AIFooterButton(symbol: "doc.text", label: "議事録")
     let robot = AIRobotButton()
     private let rule = NSView()
     let unread = AIFooterCount(kind: .unread)
@@ -144,7 +152,11 @@ final class AICompactFooter: NSStackView {
         Washi.surface(rule, color: Washi.rule)
         rule.widthAnchor.constraint(equalToConstant: 1).isActive = true
         rule.heightAnchor.constraint(equalToConstant: 24).isActive = true
-        for view in [robot, rule, unread, confirmation, warning, NSView(), pin, more] { addArrangedSubview(view) }
+        minutesNotice.isHidden = true
+        minutesNotice.tint = Washi.muted
+        minutesNotice.visibleLabel = "議事録"
+        minutesNotice.setAccessibilityLabel("議事録あり。議事録を表示")
+        for view in [robot, rule, unread, confirmation, warning, NSView(), minutesNotice, pin, more] { addArrangedSubview(view) }
         pin.tint = Washi.muted
         pin.setAccessibilityValue("OFF")
         pin.callback = { [weak self] in

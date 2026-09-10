@@ -62,8 +62,10 @@ public enum MarkdownBlock: Equatable, Sendable {
 /// AIの返事用の限定Markdown。HTMLや任意のブロック入れ子を構築しない。
 /// 記法が成立しない行は原文の段落へ戻し、読める内容を捨てない。
 public enum MarkdownBlocks {
-    public static func parse(_ source: String) -> [MarkdownBlock] {
+    public static func parse(_ source: String, minutes: Bool = false) -> [MarkdownBlock] {
+        let source = minutes ? withoutFrontmatter(source) : source
         guard !source.isEmpty else { return [] }
+        func inline(_ text: String) -> [MarkdownInline] { InlineScanner(Array(text), minutes: minutes).parse() }
         let lines = source.replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n").components(separatedBy: "\n")
         var result: [MarkdownBlock] = []
@@ -108,9 +110,9 @@ public enum MarkdownBlocks {
                 if item.indent > indents.last! { indents.append(item.indent) }
                 result.append(.listItem(MarkdownListItem(depth: indents.count - 1,
                     marker: item.marker, ordered: item.ordered, checked: item.checked, content: inline(item.text))))
-            } else if let quote = quoteLine(line) {
+            } else if let quote = quoteLine(line, minutes: minutes) {
                 var quoted = [quote]
-                while index + 1 < lines.count, let next = quoteLine(lines[index + 1]) {
+                while index + 1 < lines.count, let next = quoteLine(lines[index + 1], minutes: minutes) {
                     quoted.append(next); index += 1
                 }
                 result.append(.quote(quoted)); indents = [0]
@@ -125,6 +127,14 @@ public enum MarkdownBlocks {
 
     public static func inline(_ source: String) -> [MarkdownInline] {
         InlineScanner(Array(source)).parse()
+    }
+
+    private static func withoutFrontmatter(_ source: String) -> String {
+        var text = source.replacingOccurrences(of: "\r\n", with: "\n")
+        if text.first == "\u{FEFF}" { text.removeFirst() }
+        let lines = text.components(separatedBy: "\n")
+        guard lines.first == "---", let end = lines.dropFirst().firstIndex(of: "---") else { return text }
+        return lines.dropFirst(end + 1).joined(separator: "\n")
     }
 
     private struct Fence {
@@ -162,7 +172,7 @@ public enum MarkdownBlocks {
         }
         return (indent, parts[1], parts[1].first?.isNumber == true, checked, text)
     }
-    private static func quoteLine(_ line: String) -> MarkdownQuoteLine? {
+    private static func quoteLine(_ line: String, minutes: Bool = false) -> MarkdownQuoteLine? {
         guard let parts = captures(#"^ {0,3}>(.*)$"#, line) else { return nil }
         var text = parts[0], depth = 1
         if text.first == " " { text.removeFirst() }
@@ -170,7 +180,7 @@ public enum MarkdownBlocks {
             depth += 1; text.removeFirst()
             if text.first == " " { text.removeFirst() }
         }
-        return MarkdownQuoteLine(depth: depth, content: inline(text))
+        return MarkdownQuoteLine(depth: depth, content: InlineScanner(Array(text), minutes: minutes).parse())
     }
     private static func startsBlock(_ line: String) -> Bool {
         openingFence(line) != nil || isRule(line) || listLine(line) != nil
@@ -231,7 +241,8 @@ public enum MarkdownBlocks {
 /// Character単位の走査にして絵文字・結合文字を割らない。閉じない記法は文字のまま残す。
 private struct InlineScanner {
     let chars: [Character]
-    init(_ chars: [Character]) { self.chars = chars }
+    let minutes: Bool
+    init(_ chars: [Character], minutes: Bool = false) { self.chars = chars; self.minutes = minutes }
     private static let escapable = Set(##"!\"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"##)
 
     func parse(style: MarkdownInline.Style = [], destination: String? = nil, depth: Int = 0) -> [MarkdownInline] {
@@ -263,15 +274,23 @@ private struct InlineScanner {
                 continue
             }
             // 対象外の画像・wikilinkは塊で残す。中のURLや装飾だけを誤って有効にしない。
+            if starts("![[", at: i), let end = find("]]", from: i + 3) {
+                plain(String(chars[i..<end + 2])); i = end + 2; continue
+            }
             if starts("![", at: i), let link = link(at: i + 1) {
                 plain(String(chars[i..<link.end])); i = link.end; continue
             }
             if starts("[[", at: i), let end = find("]]", from: i + 2) {
-                plain(String(chars[i..<end + 2])); i = end + 2; continue
+                if minutes {
+                    let inner = String(chars[i + 2..<end]).replacingOccurrences(of: "\\|", with: "|")
+                    let parts = inner.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+                    plain(String(parts.last?.isEmpty == false ? parts.last! : parts.first ?? ""))
+                } else { plain(String(chars[i..<end + 2])) }
+                i = end + 2; continue
             }
             if chars[i] == "[", let link = link(at: i) {
                 let label = Array(chars[i + 1..<link.labelEnd])
-                for run in InlineScanner(label).parse(style: style, destination: destination ?? link.target, depth: depth + 1) {
+                for run in InlineScanner(label, minutes: minutes).parse(style: style, destination: destination ?? link.target, depth: depth + 1) {
                     append(run)
                 }
                 i = link.end; continue
@@ -291,7 +310,7 @@ private struct InlineScanner {
                 let inner = Array(chars[i + delimiter.count..<end])
                 let added: MarkdownInline.Style = delimiter == "~~" ? .strikethrough
                     : delimiter.count == 3 ? [.strong, .emphasis] : delimiter.count == 2 ? .strong : .emphasis
-                for run in InlineScanner(inner).parse(style: style.union(added), destination: destination, depth: depth + 1) {
+                for run in InlineScanner(inner, minutes: minutes).parse(style: style.union(added), destination: destination, depth: depth + 1) {
                     append(run)
                 }
                 i = end + delimiter.count; continue

@@ -238,6 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let window = TranscriptWindowController()
         window.onRename = { session.rename(slot: $0, to: $1) }
         window.onSubmitTyped = { session.submitTyped($0) }
+        window.onSelectMinutes = { try session.selectMinutes($0) }
         window.onSpeakerMappingChange = { session.setSpeakerMapping(source: $0, target: $1) }
         window.onStartStop = { [weak self] in self?.toggleRecording() }
         window.onPauseResume = { session.togglePause() }
@@ -264,6 +265,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.onStartStop = { [weak self] in self?.toggleRecording() }
         statusItem.onPauseResume = { session.togglePause() }
         statusItem.onShowWindow = { window.show() }
+        statusItem.onToggleMinutes = { window.show(); window.toggleMinutes() }
+        window.onMinutesVisibility = { [weak statusItem] in statusItem?.setMinutesVisible($0) }
+        statusItem.setMinutesVisible(window.minutesSplit.isPreviewVisible)
         statusItem.onOpenOutputDir = { [weak self] in self?.openOutputDir() }
         statusItem.onReloadConfig = { [weak self] in self?.reloadConfig() }
         statusItem.onPrepareAI = { [weak self] in self?.showPrepareSheet() }
@@ -276,6 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.statusItem?.update(state: snapshot.state, elapsed: snapshot.elapsed)
             self.window?.apply(snapshot)
+            self.window?.connectMinutes(try? session.previewMinutesStore(), waitingPath: session.waitingMinutesPath)
             self.previousAI?.update()
             self.performReplayDebugActions(snapshot)
             if self.registeredAIHotkey != session.aiPrimaryConfiguration?.hotkey, let config = self.config { _ = self.registerHotkeys(config) }

@@ -9,6 +9,8 @@ final class StatusItem {
     private let startStopItem: NSMenuItem
     private let pauseResumeItem: NSMenuItem
     private let prepareAIItem: NSMenuItem
+    let minutesItem = NSMenuItem(title: "議事録を表示", action: nil, keyEquivalent: "")
+    var onToggleMinutes: (() -> Void)?
 
     // バンドル済みのアイコンを共有する。毎秒の経過更新でディスクから読み直さない。
     private static let owlIcon: NSImage? = {
@@ -63,6 +65,8 @@ final class StatusItem {
         let showItem = NSMenuItem(title: "書き起こしを表示", action: #selector(showWindow), keyEquivalent: "")
         showItem.target = self
         menu.addItem(showItem)
+        minutesItem.target = self; minutesItem.action = #selector(toggleMinutes)
+        menu.addItem(minutesItem)
         let openItem = NSMenuItem(title: "保存先を開く", action: #selector(openOutputDir), keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
@@ -89,6 +93,11 @@ final class StatusItem {
     @objc private func startStop() { onStartStop?() }
     @objc private func pauseResume() { onPauseResume?() }
     @objc private func showWindow() { onShowWindow?() }
+    @objc func toggleMinutes() { onToggleMinutes?() }
+    func setMinutesVisible(_ visible: Bool) {
+        minutesItem.title = visible ? "議事録を隠す" : "議事録を表示"
+        minutesItem.state = visible ? .on : .off
+    }
     @objc private func openOutputDir() { onOpenOutputDir?() }
     @objc private func reloadConfig() { onReloadConfig?() }
     @objc private func prepareAI() { onPrepareAI?() }

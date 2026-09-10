@@ -34,8 +34,15 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private var startStopWidth: NSLayoutConstraint?
     private var pauseWidth: NSLayoutConstraint?
     private var headerControls: NSStackView?
+    private var minutesHeader: NSView?
     private let pauseButton = WashiActionButton()
     private let openButton = HoverButton()
+    private let minutesButton = HoverButton(title: "議事録", target: nil, action: nil)
+    private(set) var minutesSplit: MinutesSplitView!
+    private var minutesStore: MinutesStore?
+    var onMinutesVisibility: ((Bool) -> Void)?
+    var onSelectMinutes: ((String?) throws -> Void)?
+    private var waitingMinutesPath: String?
     private let latestButton = HoverButton(title: "最新の発言へ ↓", target: nil, action: nil)
     private var transcriptBottom: NSLayoutConstraint?
     private let statusChip = RecordingStatusChip()
@@ -68,7 +75,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     struct RowID: Hashable { let kind: Utterance.Kind; let start: Double; let occurrence: Int }
     var rows: [RowID: TranscriptRow] = [:]
 
-    init(shouldReduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }) {
+    init(shouldReduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }, minutesDefaults: UserDefaults = .standard) {
         self.shouldReduceMotion = shouldReduceMotion
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 578),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -81,8 +88,18 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         window.setFrameAutosaveName("KikigakiTranscript")
         super.init(window: window)
         window.delegate = self
-        window.contentView = buildContent()
-        updateHeader(width: window.frame.width)
+        minutesSplit = MinutesSplitView(left: buildContent(), defaults: minutesDefaults)
+        window.contentView = minutesSplit
+        if let minutesHeader {
+            minutesSplit.preview.headerBar.heightAnchor.constraint(equalTo: minutesHeader.heightAnchor).isActive = true
+        }
+        minutesSplit.onLayout = { [weak self] in
+            guard let self else { return }; self.updateHeader(width: self.minutesSplit.left.frame.width)
+        }
+        minutesSplit.onVisibility = { [weak self] _ in self?.refreshMinutes() }
+        minutesSplit.preview.onSelect = { [weak self] path in try self?.onSelectMinutes?(path) }
+        minutesSplit.restore()
+        updateHeader(width: minutesSplit.left.frame.width)
         avatars.onChange = { [weak self] in
             guard let self else { return }
             for row in rows.values { row.updateAvatar(speakers: snapshot.speakers, store: avatars, editable: snapshot.canShare) }
@@ -97,7 +114,35 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     }
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
-    func show() { window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+    func show() { window?.makeKeyAndOrderFront(nil); refreshMinutes(); NSApp.activate(ignoringOtherApps: true) }
+
+    func connectMinutes(_ store: MinutesStore?, waitingPath: String? = nil) {
+        if minutesStore !== store {
+            minutesSplit.preview.resetContext()
+            minutesStore?.isVisible = false; minutesStore?.onPreviewChange = nil
+            minutesStore = store
+            store?.onPreviewChange = { [weak self] in self?.refreshMinutes() }
+        }
+        waitingMinutesPath = waitingPath; refreshMinutes()
+    }
+    private func refreshMinutes() {
+        guard let minutesSplit else { return }
+        let visible = minutesSplit.isPreviewVisible
+        minutesStore?.isVisible = visible && window?.isVisible == true
+        minutesSplit.preview.update(path: minutesStore?.state.minutesPath ?? (minutesStore == nil ? waitingMinutesPath : nil),
+            source: minutesStore?.state.targetSource, active: visible && window?.isVisible == true, warning: minutesStore?.warning)
+        minutesButton.toolTip = visible ? "議事録を隠す" : "議事録を表示"
+        minutesButton.setAccessibilityLabel(minutesButton.toolTip)
+        minutesButton.setAccessibilityValue(visible ? "ON" : "OFF")
+        compactFooter.minutesNotice.isHidden = minutesStore?.hasUnseenMinutes != true
+        onMinutesVisibility?(visible)
+    }
+    @objc func toggleMinutes() { minutesSplit.setVisible(!minutesSplit.isPreviewVisible) }
+    func windowWillClose(_ notification: Notification) { minutesSplit.preview.stop(); minutesStore?.isVisible = false }
+    func windowDidChangeScreen(_ notification: Notification) { minutesSplit.fitWindow() }
+    func windowDidExitFullScreen(_ notification: Notification) { minutesSplit.fitWindow() }
+    func windowDidEndLiveResize(_ notification: Notification) { minutesSplit.fitWindow() }
+    func windowDidDeminiaturize(_ notification: Notification) { refreshMinutes() }
 
     func apply(_ value: SessionSnapshot) {
         let previous = snapshot
@@ -137,7 +182,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         messageLabel.isHidden = message.isEmpty
         messageLabel.textColor = value.state == .idle && !value.saved && !message.isEmpty ? Washi.red : Washi.muted
         speakerButton.update(snapshot: value)
-        updateHeader(width: window?.frame.width ?? 600)
+        updateHeader(width: minutesSplit.left.frame.width)
         speakerSettingsPopover?.update(snapshot: value)
         updateRangeLabel()
         emptyView.isHidden = !value.utterances.isEmpty || value.tentativeText != nil || !(value.ai?.conversation?.questions.isEmpty ?? true)
@@ -154,16 +199,17 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
 
     func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
         // リサイズ前に固定幅を外す。事後だけだとAuto Layoutが旧ボタン幅で縮小を阻む。
-        updateHeader(width: frameSize.width)
+        updateHeader(width: minutesSplit.isPreviewVisible ? min(minutesSplit.left.frame.width, frameSize.width - MinutesLayout.minimumRight - minutesSplit.dividerThickness) : frameSize.width)
         return frameSize
     }
 
     func windowDidResize(_ notification: Notification) {
-        updateHeader(width: window?.frame.width ?? 600)
+        updateHeader(width: minutesSplit.left.frame.width)
     }
 
     private func updateHeader(width: CGFloat) {
         let compact = width < 600
+        minutesButton.title = compact ? "" : "議事録"
         let value = snapshot
         // 前の会議を共有できる画面ではフッターへ主操作を譲る。リサイズ時も状態だけで決める。
         startStopButton.emphasis = value.state.canStart
@@ -286,9 +332,15 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         messageLabel.maximumNumberOfLines = 3
         recordingRange.setContentCompressionResistancePriority(.required, for: .horizontal)
         recordingRange.lineBreakMode = .byTruncatingMiddle
-        let controls = row([Washi.logoView(size: 26), statusChip, recordingRange, speakerButton, NSView(), pauseButton, startStopButton, openButton], spacing: 8)
+        minutesButton.target = self; minutesButton.action = #selector(toggleMinutes)
+        minutesButton.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "議事録")
+        minutesButton.imagePosition = .imageLeading
+        minutesButton.isBordered = false; minutesButton.contentTintColor = Washi.muted
+        minutesButton.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        let controls = row([Washi.logoView(size: 26), statusChip, recordingRange, speakerButton, NSView(), pauseButton, startStopButton, openButton, minutesButton], spacing: 8)
         headerControls = controls
         let header = column([controls, messageLabel], spacing: 8, inset: 12)
+        minutesHeader = header
         Washi.surface(header)
         scrollView.documentView = transcriptDocument
         transcriptDocument.wantsLayer = true
@@ -324,6 +376,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         compactFooter.robot.callback = { [weak self] in self?.showRobotMenu() }
         compactFooter.more.callback = { [weak self] in self?.showFooterMenu() }
+        compactFooter.minutesNotice.target = self; compactFooter.minutesNotice.action = #selector(toggleMinutes)
         let footer = compactFooter
         Washi.surface(footer)
         searchField.placeholderString = "会話を検索"
@@ -535,6 +588,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         copyWithNotice { onCopy?(true) }
     }
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(toggleMinutes) {
+            menuItem.title = minutesSplit.isPreviewVisible ? "議事録を隠す" : "議事録を表示"
+            menuItem.state = minutesSplit.isPreviewVisible ? .on : .off
+            return true
+        }
         if menuItem.action == #selector(recopyPressed) { return snapshot.canShare && snapshot.hasCopied }
         if menuItem.action == #selector(fullCopyPressed) { return snapshot.canShare && (snapshot.hasCopied || !snapshot.utterances.isEmpty) }
         return true

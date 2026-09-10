@@ -32,6 +32,7 @@ import KikigakiAIIO
         didSet { if isVisible { hasUnseenMinutes = false } }
     }
     var onChange: (() -> Void)?
+    var onPreviewChange: (() -> Void)?
     private var pendingSelection: (path: String?, date: Date)?
     var needsRecovery: Bool { hasPendingEvents }
     /// 保存直前に競合を再現する検証用の注入点。通常の更新には処理を挟まない。
@@ -45,7 +46,7 @@ import KikigakiAIIO
     }
     private var change: Change { .init(state: state, warning: warning, pending: hasPendingEvents, failed: hasSaveFailure, unseen: hasUnseenMinutes) }
     private func notify(after previous: Change) {
-        if previous != change { onChange?() }
+        if previous != change { onChange?(); onPreviewChange?() }
     }
 
     init(meetingID: UUID, outputDirectory: URL, markdownURL: URL? = nil) {

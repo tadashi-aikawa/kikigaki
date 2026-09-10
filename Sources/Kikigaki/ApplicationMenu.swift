@@ -42,6 +42,10 @@ enum ApplicationMenu {
         ] {
             edit.submenu?.addItem(NSMenuItem(title: title, action: action, keyEquivalent: ""))
         }
+        let view = NSMenuItem()
+        view.submenu = NSMenu(title: "表示")
+        view.submenu?.addItem(NSMenuItem(title: "議事録を表示", action: #selector(TranscriptWindowController.toggleMinutes), keyEquivalent: ""))
+        menu.addItem(view)
         return menu
     }
 }
