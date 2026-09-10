@@ -12,7 +12,12 @@ final class AIPrepareSheet: NSObject, NSTextFieldDelegate {
         /// 準備してから設定か保存先が変わって使えない行。理由を添えて、破棄だけできる
         let reason: String?
         var stale: Bool { reason != nil }
-        init(id: UUID, label: String, reason: String?) { self.id = id; self.label = label; self.reason = reason }
+        let name: String
+        let avatar: String?
+        init(id: UUID, label: String, reason: String?, name: String? = nil, avatar: String? = nil) {
+            self.id = id; self.label = label; self.reason = reason
+            self.name = name ?? label; self.avatar = avatar
+        }
     }
     let window: NSWindow
     var onStart: ((Int, String?) -> Void)?
@@ -29,17 +34,25 @@ final class AIPrepareSheet: NSObject, NSTextFieldDelegate {
     private let listTitle = Washi.label("準備済み", size: 12, weight: .semibold)
     private let list = NSStackView()
     private let separator = NSBox()
+    private let avatars = AvatarStore()
+    private var rowAvatars: [(NSImageView, Row)] = []
+    private var profileNames: [Int: String] = [:]
+    private var avatarSources: [Int: String] = [:]
 
-    init(profiles: [(slot: Int, name: String)], selected: Int) {
+    init(profiles: [(slot: Int, name: String)], selected: Int, avatarSources: [Int: String] = [:]) {
         window = AIQuestionWindow(contentRect: NSRect(x: 0, y: 0, width: 504, height: 320),
                                   styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
+        self.avatarSources = avatarSources
+        profileNames = Dictionary(uniqueKeysWithValues: profiles.map { ($0.slot, $0.name) })
+        avatars.onChange = { [weak self] in self?.refreshAvatars() }
         window.appearance = NSAppearance(named: .aqua); window.backgroundColor = Washi.paper
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         let title = Washi.label("AIセッションを準備", size: 17, weight: .semibold)
         for item in profiles { profile.addItem(withTitle: item.name); profile.lastItem?.representedObject = item.slot }
         profile.selectItem(at: profiles.firstIndex { $0.slot == selected } ?? 0)
+        refreshAvatars()
         profile.setAccessibilityLabel("準備するプロファイル")
         let row = NSStackView(views: [Washi.label("プロファイル", size: 13), profile])
         row.orientation = .horizontal; row.spacing = 12; row.alignment = .centerY
@@ -75,10 +88,12 @@ final class AIPrepareSheet: NSObject, NSTextFieldDelegate {
         listTitle.isHidden = rows.isEmpty && warning == nil
         separator.isHidden = listTitle.isHidden
         list.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        rowAvatars.removeAll()
         // 警告があっても一覧は出す。起動に失敗しただけで、溜まっているものは使えるため。
         listTitle.stringValue = warning ?? "準備済み \(rows.count)件"
         listTitle.textColor = warning == nil ? Washi.ink : Washi.gold
         for row in rows { list.addArrangedSubview(entry(row)) }
+        refreshAvatars()
         self.launching = launching
         updateNameValidity()
         nameField.isEnabled = !launching
@@ -92,7 +107,12 @@ final class AIPrepareSheet: NSObject, NSTextFieldDelegate {
         let label = Washi.label(row.label, size: 12, color: row.stale ? Washi.muted : Washi.ink)
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        var views: [NSView] = [label]
+        let image = NSImageView()
+        image.alphaValue = row.stale ? 0.45 : 1
+        image.widthAnchor.constraint(equalToConstant: 20).isActive = true
+        image.heightAnchor.constraint(equalToConstant: 21).isActive = true
+        rowAvatars.append((image, row))
+        var views: [NSView] = [image, label]
         if let reason = row.reason {
             views.append(Washi.label(reason, size: 11, color: Washi.gold))
         }
@@ -103,6 +123,16 @@ final class AIPrepareSheet: NSObject, NSTextFieldDelegate {
         let line = NSStackView(views: views)
         line.orientation = .horizontal; line.spacing = 10; line.alignment = .centerY
         return line
+    }
+
+    private func refreshAvatars() {
+        for item in profile.itemArray {
+            guard let slot = item.representedObject as? Int else { continue }
+            item.image = AIProfileAvatar.image(name: profileNames[slot] ?? "", source: avatarSources[slot], store: avatars)
+        }
+        for (view, row) in rowAvatars {
+            view.image = AIProfileAvatar.image(name: row.name, source: row.avatar, store: avatars)
+        }
     }
 
     func present(on parent: NSWindow) {

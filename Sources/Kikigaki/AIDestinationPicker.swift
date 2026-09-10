@@ -63,15 +63,7 @@ final class AIDestinationPicker: NSStackView {
     /// メニューを作り直すと、準備済みの選択や開いているメニューを失ってしまう。
     private func refreshAvatars() {
         for item in items {
-            let avatar = AvatarView(frame: NSRect(x: 0, y: 0, width: 25, height: 26))
-            avatar.accent = Washi.ai
-            avatar.initial = String(item.name.prefix(1))
-            avatar.image = avatars.image(for: item.avatar)
-            let image = NSImage(size: avatar.bounds.size, flipped: true) { rect in
-                avatar.draw(rect)
-                return true
-            }
-            image.size = NSSize(width: 20, height: 21)
+            let image = AIProfileAvatar.image(name: item.name, source: item.avatar, store: avatars)
             for entry in popup.itemArray {
                 guard let choice = entry.representedObject as? Choice else { continue }
                 let slot: Int

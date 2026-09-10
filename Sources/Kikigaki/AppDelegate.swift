@@ -517,7 +517,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               !config.aiProfiles.isEmpty, preparedStore.isUsable, prepareSheet == nil else { return }
         let profiles = config.aiProfiles.map { (slot: $0.slot, name: $0.name) }
         let selected = session?.snapshot.ai?.selectedSlot ?? profiles.first?.slot ?? 1
-        let sheet = AIPrepareSheet(profiles: profiles, selected: selected)
+        let sheet = AIPrepareSheet(profiles: profiles, selected: selected,
+                                  avatarSources: Dictionary(uniqueKeysWithValues: config.aiProfiles.compactMap { p in p.avatar.map { (p.slot, $0) } }))
         sheet.onCancel = { [weak self] in self?.prepareSheet = nil }
         sheet.onStart = { [weak self] slot, name in
             guard let self, let profile = self.config?.aiProfiles.first(where: { $0.slot == slot }) else { return }
@@ -549,7 +550,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             else if let root = self.config?.outputDir, !session.matchesContext(root: root) {
                 reason = "保存先が変わったため使えません"
             } else { reason = nil }
-            return .init(id: session.id, label: preparedStore.label(session), reason: reason)
+            return .init(id: session.id, label: preparedStore.label(session), reason: reason,
+                         name: session.profileName, avatar: session.config.avatar)
         }
         sheet.update(rows: rows, launching: !preparedStore.launching.isEmpty, warning: preparedStore.warning)
     }
@@ -577,7 +579,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let parent = window?.window else { session?.deferAutomaticStart = false; return }
         // 出すものが無いときだけ、新規起動として続ける。呼び手は空の候補を渡さない。
         guard !choices.isEmpty else { session?.deferAutomaticStart = false; return }
-        let sheet = AIAttachSheet(choices: choices, warning: warning)
+        let profiles = session?.meetingAIProfiles ?? config?.aiProfiles ?? []
+        let sheet = AIAttachSheet(choices: choices, warning: warning,
+                                 avatarSources: Dictionary(uniqueKeysWithValues: profiles.compactMap { p in p.avatar.map { (p.slot, $0) } }))
         sheet.onCancel = { [weak self] in
             // 取消は録音を始めない。開始してからシートを出しているので、収録した分ごと取り止め、
             // Markdownも録音も残さない。

@@ -31,12 +31,16 @@ final class AIAttachSheet: NSObject {
 
     private var groups: [Int: [NSButton]] = [:]
     private var choices: [Choice] = []
+    private let avatars = AvatarStore()
+    private var avatarSources: [Int: String] = [:]
 
-    init(choices: [Choice], warning: String? = nil) {
+    init(choices: [Choice], warning: String? = nil, avatarSources: [Int: String] = [:]) {
         self.choices = choices
         window = AIQuestionWindow(contentRect: NSRect(x: 0, y: 0, width: 504, height: 360),
                                   styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
+        self.avatarSources = avatarSources
+        avatars.onChange = { [weak self] in self?.refreshAvatars() }
         window.appearance = NSAppearance(named: .aqua); window.backgroundColor = Washi.paper
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
@@ -60,6 +64,7 @@ final class AIAttachSheet: NSObject {
             buttons.append(fresh); views.append(indented(fresh))
             groups[choice.slot] = buttons
         }
+        refreshAvatars()
         views.append(Washi.label("使わなかった準備済みセッションは残ります。次の録音でも選べます", size: 11, color: Washi.muted))
         let start = NSButton(title: "開始", target: self, action: #selector(startPressed))
         start.bezelStyle = .rounded; start.keyEquivalent = "\r"
@@ -83,6 +88,23 @@ final class AIAttachSheet: NSObject {
         row.orientation = .horizontal
         row.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 0, right: 0)
         return row
+    }
+
+    private func refreshAvatars() {
+        for choice in choices {
+            let image = AIProfileAvatar.image(name: choice.name, source: avatarSources[choice.slot], store: avatars)
+            for button in groups[choice.slot] ?? [] where button.identifier != nil {
+                // radioのimageは選択印。上書きせず、タイトル内に画像を添える。
+                let attachment = NSTextAttachment()
+                attachment.image = image
+                attachment.bounds = NSRect(x: 0, y: -5, width: 20, height: 21)
+                let title = NSMutableAttributedString(attachment: attachment)
+                let prepared = choice.prepared.first { $0.id.uuidString == button.identifier?.rawValue }
+                title.append(NSAttributedString(string: " 準備済み \(prepared?.label ?? "") を使う",
+                                                attributes: [.font: button.font ?? NSFont.systemFont(ofSize: 13)]))
+                button.attributedTitle = title
+            }
+        }
     }
 
     /// いまの選択。値が nil の枠は新規に起動する。
