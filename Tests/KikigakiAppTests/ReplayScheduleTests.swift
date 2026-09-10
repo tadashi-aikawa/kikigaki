@@ -3,6 +3,16 @@ import Testing
 @testable import Kikigaki
 
 struct ReplayScheduleTests {
+    @Test func 議事録検証はreplayの明示指定だけで動く() throws {
+        for mode in ["main", "outside"] {
+            let env = ["KIKIGAKI_DEBUG_MINUTES_VERIFY": mode]
+            #expect(try ReplayDebugOptions.load(arguments: ["Kikigaki"], environment: env).verifyMinutes == nil)
+            #expect(try ReplayDebugOptions.load(arguments: ["Kikigaki", "--replay"], environment: env).verifyMinutes == mode)
+        }
+        #expect(throws: (any Error).self) {
+            try ReplayDebugOptions.load(arguments: ["Kikigaki", "--replay"], environment: ["KIKIGAKI_DEBUG_MINUTES_VERIFY": "invalid"])
+        }
+    }
     @Test func 自動送信はreplayだけで解釈してコロンと改行を保持する() throws {
         let env = ["KIKIGAKI_DEBUG_AI_AUTO": "2.5:議事録: 更新\n短く返す"]
         #expect(try ReplayDebugOptions.load(arguments: ["Kikigaki", "--smoke"], environment: env).automatic == nil)

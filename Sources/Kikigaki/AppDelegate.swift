@@ -12,6 +12,7 @@ struct ReplayDebugOptions {
     struct TypedEntry: Decodable { let seconds: Double; let text: String; let pauseSeconds: Double? }
     var typedEntries: [TypedEntry] = []
     var verifyTyped = false
+    var verifyMinutes: String?
     var automatic: AIScheduleOptions?
     /// 設定の `autoStart` を短い間隔で試すための上書き。分単位の設定ではreplayに収まらない
     var automaticSeconds: Double?
@@ -35,6 +36,10 @@ struct ReplayDebugOptions {
     static func load(arguments: [String] = CommandLine.arguments, environment env: [String: String] = ProcessInfo.processInfo.environment) throws -> Self {
         guard arguments.contains("--replay") else { return Self() }
         var result = Self()
+        if let mode = env["KIKIGAKI_DEBUG_MINUTES_VERIFY"] {
+            guard ["main", "outside"].contains(mode) else { throw AIError.invalid("KIKIGAKI_DEBUG_MINUTES_VERIFY") }
+            result.verifyMinutes = mode
+        }
         if let input = env["KIKIGAKI_DEBUG_AI_AUTO"] {
             let pair = input.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
             guard pair.count == 2, let seconds = Double(pair[0]) else {
@@ -170,6 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var nextDebugTyped = 0
     private var debugTypedPausing = false
     private var replayHolding = false
+    private let minutesVerification = ReplayMinutesVerification()
     private var debugRenamed = false
     private var performingReplayDebug = false
     /// 宛先の指定を当て終えるまでデバッグ送信を保留する。0秒指定の質問は start 内の
@@ -203,7 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let modelsTask = Task { try await SortformerModelStore.load() }
         self.modelsTask = modelsTask
-        let support = replayURL != nil && replayDebug.verifyTyped
+        let support = replayURL != nil && (replayDebug.verifyTyped || replayDebug.verifyMinutes != nil)
             ? config.outputDir.appendingPathComponent(".typed-test-support")
             : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/KIKIGAKI")
         do { try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true) }
@@ -661,6 +667,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               snapshot.state == .recording || replayHolding else { return }
         performingReplayDebug = true
         defer { performingReplayDebug = false }
+        if let mode = replayDebug.verifyMinutes, let session, let window {
+            do { try minutesVerification.step(session: session, window: window, mode: mode) }
+            catch { Self.log("replay minutes検証失敗: \(error)") }
+        }
         if let session, snapshot.state == .recording {
             while nextDebugTyped < replayDebug.typedEntries.count,
                   replayDebug.typedEntries[nextDebugTyped].seconds <= snapshot.elapsed {
@@ -722,6 +732,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         guard !replayDestinationPending, nextDebugQuestion < replayDebug.questions.count, let session else { return }
+        if replayDebug.verifyMinutes == "main", !minutesVerification.canAsk(index: nextDebugQuestion) { return }
         let question = replayDebug.questions[nextDebugQuestion]
         guard snapshot.elapsed >= question.seconds else { return }
         do { try ReplayDebugOptions.recoverForNextQuestion(session.aiRecord?.controller, preparing: snapshot.ai?.progress != nil) }

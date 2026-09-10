@@ -46,6 +46,8 @@ final class AIConversationController {
     private(set) var invalidInboxFiles: [String] = []
     private var lastScanReturnStatus: [UUID: Bool] = [:]
     var onChange: (() -> Void)?
+    /// 明示的なreplay検証だけで、受信直前に人のパス指定を再現する。
+    var beforeMinutesScanForReplay: (() -> Void)?
     /// 返事が届いた枠。通知音は返答元のプロファイルの設定で決める
     var onResult: ((Int) -> Void)?
     private var channels: [Int: Channel] = [:]
@@ -434,6 +436,7 @@ final class AIConversationController {
         invalidInboxFiles = []
         scanWarning = nil
         scanHooks()
+        beforeMinutesScanForReplay?()
         // resultのcommit/onChangeより先に議事録の保存失敗を確定し、登録簿から脱落させない。
         minutes.scan(questions: conversation.questions)
         var events: [AIReceiveEvent] = []
