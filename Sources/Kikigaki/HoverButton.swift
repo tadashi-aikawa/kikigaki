@@ -4,9 +4,18 @@ import AppKit
 class HoverButton: NSButton {
     private var pointerInside = false
     private var hoverTrackingArea: NSTrackingArea?
-    var isHovered: Bool { pointerInside && isEnabled && !isHiddenOrHasHiddenAncestor }
+    var isHovered: Bool {
+        pointerInside && isEnabled && !isHiddenOrHasHiddenAncestor
+            && (window == nil || pointerIsInVisibleRect)
+    }
+    private var pointerIsInVisibleRect: Bool {
+        // clipsToBoundsがfalseのビューではvisibleRectがboundsより広くなる。
+        // 親の可視範囲だけで判定すると、離れたボタンまで全てホバーになる。
+        window.map { $0.isKeyWindow && bounds.intersection(visibleRect)
+            .contains(convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? false
+    }
     var interactionCursor: NSCursor { isEnabled ? .pointingHand : .arrow }
-    // 標準ベゼルの外へ背景を描かない。枠なしの話者名などは背景を保つ。
+    // 標準ベゼルの外へ背景を描かない。
     var drawsHoverBackground: Bool { !isBordered }
 
     override var isEnabled: Bool {
@@ -19,11 +28,11 @@ class HoverButton: NSButton {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
-        let area = NSTrackingArea(rect: .zero,
-            options: [.mouseEnteredAndExited, .cursorUpdate, .activeInKeyWindow, .inVisibleRect], owner: self)
+        let area = NSTrackingArea(rect: bounds.intersection(visibleRect),
+            options: [.mouseEnteredAndExited, .cursorUpdate, .activeInKeyWindow], owner: self)
         addTrackingArea(area); hoverTrackingArea = area
         // スクロールや再配置でポインタの下へ来た場合も、次のマウス移動を待たず揃える。
-        pointerInside = window.map { $0.isKeyWindow && visibleRect.contains(convert($0.mouseLocationOutsideOfEventStream, from: nil)) } ?? false
+        pointerInside = pointerIsInVisibleRect
         needsDisplay = true
         window?.invalidateCursorRects(for: self)
     }
@@ -43,6 +52,14 @@ class HoverButton: NSButton {
     }
     override func layout() {
         super.layout()
+        // 退出イベントを待たず、行再配置後は現在位置から取り直す。
+        if window != nil {
+            let inside = pointerIsInVisibleRect
+            if pointerInside != inside {
+                pointerInside = inside
+                needsDisplay = true
+            }
+        }
         window?.invalidateCursorRects(for: self)
     }
     override func viewDidMoveToWindow() {

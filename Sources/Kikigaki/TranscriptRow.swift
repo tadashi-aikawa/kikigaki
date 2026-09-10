@@ -61,7 +61,9 @@ final class AvatarView: NSView {
     }
 }
 
-final class SpeakerButton: HoverButton {}
+final class SpeakerButton: HoverButton {
+    override var drawsHoverBackground: Bool { false }
+}
 
 final class TranscriptRow: NSView, DocumentRow {
     override var isFlipped: Bool { true }
