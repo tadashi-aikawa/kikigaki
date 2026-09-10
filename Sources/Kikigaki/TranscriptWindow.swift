@@ -2,7 +2,7 @@ import AppKit
 import KikigakiCore
 
 @MainActor
-final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegate, NSMenuItemValidation {
+final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegate, NSMenuItemValidation, NSWindowDelegate {
     var onRename: ((Int, String) -> Void)?
     var onSubmitTyped: ((String) -> Bool)?
     let typedEntry = TypedEntryField()
@@ -32,6 +32,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private var speakerSettingsPopover: SpeakerSettingsPopover?
     private let startStopButton = WashiActionButton()
     private var startStopWidth: NSLayoutConstraint?
+    private var pauseWidth: NSLayoutConstraint?
+    private var headerControls: NSStackView?
     private let pauseButton = WashiActionButton()
     private let openButton = HoverButton()
     private let latestButton = HoverButton(title: "最新の発言へ ↓", target: nil, action: nil)
@@ -74,11 +76,13 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         window.appearance = NSAppearance(named: .aqua)
         window.backgroundColor = Washi.shade
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 600, height: 460)
+        window.minSize = NSSize(width: 420, height: 460)
         window.center()
         window.setFrameAutosaveName("KikigakiTranscript")
         super.init(window: window)
+        window.delegate = self
         window.contentView = buildContent()
+        updateHeader(width: window.frame.width)
         avatars.onChange = { [weak self] in
             guard let self else { return }
             for row in rows.values { row.updateAvatar(speakers: snapshot.speakers, store: avatars, editable: snapshot.canShare) }
@@ -120,16 +124,10 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             }
         }
         if value.state == .preparing || previous.timeline.startedAt != value.timeline.startedAt { renamePopover?.close() }
-        let startTitle = value.state == .idle && value.markdownURL != nil ? "新しい録音"
-            : value.state.canStart ? value.state.startStopTitle : "停止"
-        symbol(startStopButton, name: value.state.canStart ? "record.circle" : "stop.fill", title: startTitle, showTitle: true)
         startStopButton.isEnabled = value.state.canStart || value.state.canStop
-        startStopWidth?.constant = value.state.canStart ? 112 : 72
         // 前の会議を共有できる画面では、フッターへ主操作を譲る。
         startStopButton.emphasis = value.state.canStart && !value.canShare ? .primary : .neutralOutline
-        symbol(pauseButton, name: value.state == .paused ? "play.fill" : "pause.fill", title: value.state.pauseResumeTitle, showTitle: true)
         pauseButton.isEnabled = value.state.canPauseOrResume
-        pauseButton.refreshStyle()
         pauseButton.isHidden = value.state == .idle
         openButton.isHidden = !(value.state == .idle && value.saved)
         statusChip.update(value, reduceMotion: shouldReduceMotion())
@@ -141,6 +139,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         messageLabel.isHidden = message.isEmpty
         messageLabel.textColor = value.state == .idle && !value.saved && !message.isEmpty ? Washi.red : Washi.muted
         speakerButton.update(snapshot: value)
+        updateHeader(width: window?.frame.width ?? 600)
         speakerSettingsPopover?.update(snapshot: value)
         updateRangeLabel()
         emptyView.isHidden = !value.utterances.isEmpty || value.tentativeText != nil || !(value.ai?.conversation?.questions.isEmpty ?? true)
@@ -153,6 +152,34 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         noticeDismissal?.cancel()
         noticeDismissal = nil
         handoffNotice = nil
+    }
+
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        // リサイズ前に固定幅を外す。事後だけだとAuto Layoutが旧ボタン幅で縮小を阻む。
+        updateHeader(width: frameSize.width)
+        return frameSize
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        updateHeader(width: window?.frame.width ?? 600)
+    }
+
+    private func updateHeader(width: CGFloat) {
+        let compact = width < 600
+        let value = snapshot
+        let title = value.state == .idle && value.markdownURL != nil ? "新しい録音"
+            : value.state.canStart ? value.state.startStopTitle : "停止"
+        symbol(startStopButton, name: value.state.canStart ? "record.circle" : "stop.fill",
+               title: title, showTitle: !compact)
+        symbol(pauseButton, name: value.state == .paused ? "play.fill" : "pause.fill",
+               title: value.state.pauseResumeTitle, showTitle: !compact)
+        startStopWidth?.constant = compact ? 34 : value.state.canStart ? 112 : 72
+        pauseWidth?.constant = compact ? 34 : 92
+        headerControls?.spacing = compact ? 6 : 8
+        // 経過時間が長くてもボタンを押し出さない。省略時の実時刻はホバーでも読める。
+        recordingRange.setContentCompressionResistancePriority(compact ? .defaultLow : .required, for: .horizontal)
+        recordingRange.toolTip = recordingRange.stringValue
+        startStopButton.refreshStyle(); pauseButton.refreshStyle()
     }
     private func updateRangeLabel() {
         compactFooter.more.toolTip = handoffNotice?.text ?? "その他の操作"
@@ -245,7 +272,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         startStopWidth = startStopButton.widthAnchor.constraint(equalToConstant: 112)
         startStopWidth?.isActive = true
-        pauseButton.widthAnchor.constraint(equalToConstant: 92).isActive = true
+        pauseWidth = pauseButton.widthAnchor.constraint(equalToConstant: 92)
+        pauseWidth?.isActive = true
         openButton.widthAnchor.constraint(equalToConstant: 34).isActive = true
         openButton.heightAnchor.constraint(equalToConstant: 32).isActive = true
         symbol(openButton, name: "doc.plaintext", title: "Markdownを開く")
@@ -254,7 +282,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         messageLabel.font = .systemFont(ofSize: 12)
         messageLabel.maximumNumberOfLines = 3
         recordingRange.setContentCompressionResistancePriority(.required, for: .horizontal)
+        recordingRange.lineBreakMode = .byTruncatingMiddle
         let controls = row([Washi.logoView(size: 26), statusChip, recordingRange, speakerButton, NSView(), pauseButton, startStopButton, openButton], spacing: 8)
+        headerControls = controls
         let header = column([controls, messageLabel], spacing: 8, inset: 12)
         Washi.surface(header)
         scrollView.documentView = transcriptDocument
