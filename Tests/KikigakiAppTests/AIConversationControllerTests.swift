@@ -16,7 +16,7 @@ import KikigakiAIIO
             if args.prefix(2) == ["agent", "get"] { try await hook.run() }
             return try await fake.run(args, timeout)
         })
-        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: adapter)
+        let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: adapter)
         let request = try prepare(controller, config)
         try await controller.connect(config: config, label: "test", executable: URL(fileURLWithPath: "/tmp/fake"), arguments: [])
         var observations = 0
@@ -32,7 +32,7 @@ import KikigakiAIIO
     @Test(arguments: [false, true]) func 開発用の次問は失敗や取消で送信不可でも旧問を再送せず進む(cancelled: Bool) async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr(), config = ResolvedAIConfig(config: AIConfig(), home: root)
-        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
+        let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
         let first = try prepare(controller, config)
         if cancelled {
             try await controller.connect(config: config, label: "test", executable: URL(fileURLWithPath: "/tmp/fake"), arguments: [])
@@ -66,7 +66,7 @@ import KikigakiAIIO
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr(); await fake.setProvider("claude"); await fake.setSession("main")
         let config = ResolvedAIConfig(config: AIConfig(cli: .claude), home: root)
-        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
+        let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
         let request = try prepare(controller, config)
         try await controller.connect(config: config, label: "test", executable: URL(fileURLWithPath: "/tmp/fake"), arguments: [])
         try await controller.send(request, config: config)
@@ -88,7 +88,7 @@ import KikigakiAIIO
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr(), config = ResolvedAIConfig(config: AIConfig(command: "/tmp/codex"), home: root)
         await fake.setStatuses(["missing", "missing", "unknown", "idle"])
-        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
+        let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
         let request = try prepare(controller, config)
         try await controller.connect(config: config, label: "会議", executable: URL(fileURLWithPath: "/tmp/codex"), arguments: [], readinessTimeout: 2)
         #expect(controller.connectionStatus == .idle)
@@ -104,7 +104,7 @@ import KikigakiAIIO
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr(), meeting = UUID(), config = ResolvedAIConfig(config: AIConfig(), home: root)
         await fake.setStatuses(["unknown", "working", "idle"])
-        let controller = try AIConversationController(meetingID: meeting, outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
+        let controller = try testAIController(meetingID: meeting, outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
         let request = try prepare(controller, config)
         #expect(!FileManager.default.fileExists(atPath: request.envelope.participant.sessionPath))
         try await controller.connect(config: config, label: "会議", executable: URL(fileURLWithPath: "/tmp/codex"), arguments: [], readinessTimeout: 2)
@@ -121,7 +121,7 @@ import KikigakiAIIO
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr(), config = ResolvedAIConfig(config: AIConfig(), home: root)
         await fake.setStatuses(["unknown"])
-        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
+        let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
         _ = try prepare(controller, config)
         await #expect(throws: AIProcessError.timeout) {
             try await controller.connect(config: config, label: "会議", executable: URL(fileURLWithPath: "/tmp/codex"), arguments: [], readinessTimeout: 0.02)
@@ -141,7 +141,7 @@ import KikigakiAIIO
             #expect(state.questions[0].state == .deliveryUnknown)
         }
         let herdr = AIHerdr(run: { try await fake.run($0, $1) })
-        let controller = try AIConversationController(meetingID: meeting, outputDirectory: root, herdr: herdr)
+        let controller = try testAIController(meetingID: meeting, outputDirectory: root, herdr: herdr)
         let config = ResolvedAIConfig(config: AIConfig(), home: root)
         let request = try prepare(controller, config)
         try await controller.connect(config: config, label: "検証", executable: URL(fileURLWithPath: "/tmp/codex"), arguments: [])
@@ -160,7 +160,7 @@ import KikigakiAIIO
         #expect(next.envelope.readStartLine == 2)
         try controller.cancel(next.id)
         let state = try AIJSON.decode(AIConversation.self, from: store.read(base + ["state.json"]))
-        let recovered = try AIConversationController(meetingID: meeting, outputDirectory: root, herdr: herdr, recovered: state)
+        let recovered = try testAIController(meetingID: meeting, outputDirectory: root, herdr: herdr, recovered: state)
         recovered.scan()
         #expect(recovered.conversation == state)
         #expect(!recovered.canSend && recovered.connection == nil)
@@ -171,7 +171,7 @@ import KikigakiAIIO
     @Test func 回答は質問順でなく保存時刻順に取り込む() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID(), fake = FakeHerdr(), config = ResolvedAIConfig(config: AIConfig(), home: root)
-        let controller = try AIConversationController(meetingID: meeting, outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
+        let controller = try testAIController(meetingID: meeting, outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
         let first = try prepare(controller, config)
         try await controller.connect(config: config, label: "会議", executable: URL(fileURLWithPath: "/tmp/codex"), arguments: [])
         try await controller.send(first, config: config)
@@ -194,7 +194,7 @@ import KikigakiAIIO
     @Test func 既存の世代ファイルを上書きせず接続を公開しない() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID(), fake = FakeHerdr(), config = ResolvedAIConfig(config: AIConfig(), home: root)
-        let controller = try AIConversationController(meetingID: meeting, outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
+        let controller = try testAIController(meetingID: meeting, outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
         _ = try prepare(controller, config)
         let store = AIFileStore(root: root), path = [".kikigaki-context", meeting.uuidString, "ai", "sessions", "1.json"]
         try store.write(Data("既存".utf8), to: path, replacing: false)

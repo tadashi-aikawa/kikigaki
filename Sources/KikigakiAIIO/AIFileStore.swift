@@ -8,11 +8,17 @@ public enum AIFileError: Error { case missing }
 /// 完成した一時ファイルをcloseしてから公開する。outputDir自体の権限は変えない。
 public struct AIFileStore: Sendable {
     public let root: URL
-    public init(root: URL) { self.root = root }
+    private let allowsMissingParents: Bool
+    private let sync: @Sendable (Int32) -> Int32
+    private let owner: uid_t
+    public init(root: URL, allowsMissingParents: Bool = false,
+                sync: @escaping @Sendable (Int32) -> Int32 = { fsync($0) }, owner: uid_t = getuid()) {
+        self.root = root; self.allowsMissingParents = allowsMissingParents; self.sync = sync; self.owner = owner
+    }
     /// 排他公開の再実行でも、先行プロセスのfsync前に成功を返さない。
     public func syncDirectory(_ parts: [String]) throws {
         try withDirectory(parts, create: false) { fd in
-            guard fsync(fd) == 0 else { throw AIError.unsafeFile }
+            guard sync(fd) == 0 else { throw AIError.unsafeFile }
         }
     }
     public func directory(_ parts: [String], create: Bool = true) throws -> URL {
@@ -57,7 +63,7 @@ public struct AIFileStore: Sendable {
                     written += size
                 }
             }
-            guard fsync(fd) == 0 else { throw AIError.unsafeFile }
+            guard sync(fd) == 0 else { throw AIError.unsafeFile }
             let closed = close(fd); fd = -1
             guard closed == 0 else { throw AIError.unsafeFile }
             if replacing {
@@ -73,14 +79,14 @@ public struct AIFileStore: Sendable {
                 }
                 guard unlinkat(parent, temporary, 0) == 0 else { throw AIError.unsafeFile }
             }
-            guard fsync(parent) == 0 else { throw AIError.unsafeFile }
+            guard sync(parent) == 0 else { throw AIError.unsafeFile }
         }
     }
     private func checkName(_ name: String) throws {
         guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains("\0") else { throw AIError.unsafeFile }
     }
     private func checkRegular(_ info: stat) throws {
-        guard info.st_mode & S_IFMT == S_IFREG, info.st_uid == getuid(), info.st_mode & 0o7777 == 0o600, info.st_nlink == 1 else { throw AIError.unsafeFile }
+        guard info.st_mode & S_IFMT == S_IFREG, info.st_uid == owner, info.st_mode & 0o7777 == 0o600, info.st_nlink == 1 else { throw AIError.unsafeFile }
     }
     private func regularFile(_ fd: Int32) throws -> stat {
         var info = stat(); guard fstat(fd, &info) == 0 else { throw AIError.unsafeFile }
@@ -95,9 +101,12 @@ public struct AIFileStore: Sendable {
             try checkName(part)
             if create, mkdirat(fd, part, 0o700) != 0, errno != EEXIST { throw AIError.unsafeFile }
             let next = openat(fd, part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-            guard next >= 0 else { throw AIError.unsafeFile }
+            guard next >= 0 else {
+                if allowsMissingParents, errno == ENOENT { throw AIFileError.missing }
+                throw AIError.unsafeFile
+            }
             var info = stat()
-            guard fstat(next, &info) == 0, info.st_uid == getuid(), info.st_mode & 0o7777 == 0o700 else { close(next); throw AIError.unsafeFile }
+            guard fstat(next, &info) == 0, info.st_uid == owner, info.st_mode & 0o7777 == 0o700 else { close(next); throw AIError.unsafeFile }
             close(fd); fd = next
         }
         return try body(fd)

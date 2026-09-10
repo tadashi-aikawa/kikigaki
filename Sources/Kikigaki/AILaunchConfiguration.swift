@@ -9,17 +9,16 @@ struct AILaunchConfiguration {
                     codexConfigURL: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/config.toml")) throws {
         guard let token = controller.sessionToken(slot: config.slot) else { throw AIError.invalid("AI launch configuration") }
         try self.init(config: config, helper: helper, outputDirectory: controller.outputDirectory,
-                      meetingID: controller.meetingID, sessionURL: controller.sessionURL(slot: config.slot),
+                      sessionURL: controller.sessionURL(slot: config.slot),
                       generation: controller.generation(slot: config.slot), token: token,
                       codexConfigURL: codexConfigURL)
     }
 
     /// 会議のcontrollerを持たない起動にも同じ引数を組ませる。準備済みセッションは
     /// まだどの会議のものでもないので、仮の会議IDで作った置き場を使う。
-    /// - Parameter contextWide: Codexの書き込み許可を保存先の `.kikigaki-context` 全体にする。
-    ///   準備済みセッションは紐づけ先の会議が決まっておらず、起動引数は後から変えられないため。
-    init(config: ResolvedAIConfig, helper: URL, outputDirectory: URL, meetingID: UUID,
-         sessionURL: URL, generation: Int, token: String, contextWide: Bool = false,
+    /// 通常・準備済みとも議事録の保存先outputDirを許可する。起動引数は後から変えられない。
+    init(config: ResolvedAIConfig, helper: URL, outputDirectory: URL,
+         sessionURL: URL, generation: Int, token: String,
          codexConfigURL: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/config.toml")) throws {
         executable = try AIProcessRunner.executable(config.command ?? config.cli.rawValue)
         _ = try AIProcessRunner.executable(helper.path)
@@ -38,17 +37,11 @@ struct AILaunchConfiguration {
             args += ["-c", "notify=" + String(decoding: try encoder.encode(notify), as: UTF8.self)]
             // 更新プロンプトで会議への依頼が止まらないよう、この起動だけ確認を抑止する。
             args += ["-c", "check_for_update_on_startup=false"]
-            // Codexの workspace-write サンドボックスは cwd と writable_roots 以外へ書けない。同梱CLIが返送を
-            // 保存する会議の `ai/` を許可先へ足す(実測: 保存先が ~/Documents だと unsafe_file で返送に失敗した)。
-            // `-c` は同じキーを置き換えるため、利用者の設定にある許可先を先に写して失わない。
-            // 準備済みセッションはどの会議へ紐づくかまだ決まっておらず、起動後に引数を変えられない。
-            // 保存先は設定で固定なので、その中の `.kikigaki-context` 全体を許可先にする。
-            // 会議ごとの枝より広いが、同じ利用者の保存先の中に閉じる。
-            let context = outputDirectory.appendingPathComponent(".kikigaki-context")
-            let aiDirectory = contextWide ? context.path
-                : context.appendingPathComponent(meetingID.uuidString).appendingPathComponent("ai").path
+            // 議事録はai/の外へ書くためoutputDirを許可する。任意に選んだパスは追加しない。
+            // 受け入れたリスク: 全会議のMarkdown・state・tokenを含むrequestsも書ける。
+            // `-c` は置換なので、対応している最上位の利用者設定を先に引き継ぐ。
             var roots = CodexUserConfig.writableRoots(at: codexConfigURL)
-            if !roots.contains(aiDirectory) { roots.append(aiDirectory) }
+            if !roots.contains(outputDirectory.path) { roots.append(outputDirectory.path) }
             args += ["-c", "sandbox_workspace_write.writable_roots=" + String(decoding: try encoder.encode(roots), as: UTF8.self)]
         } else {
             // allow規則の構文として解釈される文字を含む配置先は、権限を広げず拒否する。

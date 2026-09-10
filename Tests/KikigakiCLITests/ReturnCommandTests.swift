@@ -10,22 +10,22 @@ import KikigakiAIIO
         let root: URL, request: AIRequest, session: AISessionRecord, path: String
         var base: [String] { [".kikigaki-context", session.meetingID.uuidString, "ai"] }
         var files: AIFileStore { .init(root: root) }
-        init(provider: AIProvider = .codex, slot: Int? = nil) throws {
+        init(provider: AIProvider = .codex, slot: Int? = nil, generation: Int = 1) throws {
             root = FileManager.default.temporaryDirectory.appendingPathComponent("kikigaki cli ' $ " + UUID().uuidString)
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             let meeting = UUID()
-            var history = try AIStreamHistory(meetingID: meeting)
+            var history = try AIStreamHistory(meetingID: meeting, sessionGeneration: generation)
             let snapshot = try history.prepare(lines: ["[12:00:00] A: 質問です"], outputDirectory: root)
-            let branch = AIEnvelope.sessionPath(slot: slot, generation: 1)
+            let branch = AIEnvelope.sessionPath(slot: slot, generation: generation)
             path = root.appendingPathComponent(".kikigaki-context/\(meeting.uuidString)/" + branch).path
-            let participant = AIParticipantContext(streamID: history.streamID, requestID: UUID(), sessionGeneration: 1,
+            let participant = AIParticipantContext(streamID: history.streamID, requestID: UUID(), sessionGeneration: generation,
                 participantName: "迅雷", cliPath: "/tmp/helper", sessionPath: path, requestToken: "request-secret",
                 question: "質問", capturedAt: Date(), audioCutoffSeconds: 1,
                 profile: slot == nil ? nil : "議事録", profileSlot: slot)
             request = try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant), number: 1, snapshot: snapshot)
-            session = AISessionRecord(meetingID: meeting, generation: 1, provider: provider, token: "hook-secret",
+            session = AISessionRecord(meetingID: meeting, generation: generation, provider: provider, token: "hook-secret",
                 connection: .init(workspaceID: "w", paneID: "p", provider: provider, sessionID: "main-thread"))
-            try files.write(AIJSON.encode(session), to: base + ["sessions"] + (slot.map { ["\($0)"] } ?? []) + ["1.json"])
+            try files.write(AIJSON.encode(session), to: base + ["sessions"] + (slot.map { ["\($0)"] } ?? []) + ["\(generation).json"])
             try files.write(AIJSON.encode(request), to: base + ["requests", request.id.uuidString + ".json"])
         }
         deinit { try? FileManager.default.removeItem(at: root) }

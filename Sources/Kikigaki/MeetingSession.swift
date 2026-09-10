@@ -846,6 +846,11 @@ final class MeetingSession {
               let url = snapshot.markdownURL, let aiStore else { return }
         let slot = config.slot
         let meetingID = handoff.meetingID, capturedAt = Date(), cutoff = snapshot.state == .idle ? snapshot.elapsed : pause.audioTime
+        // 確定待ち後のprepareでは遅い。人の書き先を送信操作の入口で固定する。
+        // AI通知は表示対象だけを変えるので、この値へ混ぜない。
+        let minutesPath: String?
+        do { minutesPath = try aiStore.minutesStores.store(meetingID: meetingID, markdownURL: url).state.humanMinutesPath }
+        catch { aiWarning = "議事録の書き先を確認できません"; emit(); return }
         let names = snapshot.names, timeline = snapshot.timeline, typed = typedEntries
         let workAllowed = suppliedWorkAllowed ?? aiWorkAllowed
         let owner = UUID(), scheduleRun = aiSchedule?.runID
@@ -894,7 +899,7 @@ final class MeetingSession {
                 aiPhases[slot] = .preparingAndSending
                 let fixed = try record.controller.prepare(lines: capture.lines, question: question, voiceQuestion: capture.voice,
                     capturedAt: capturedAt, cutoff: cutoff, tail: capture.tail, config: config, helper: helper, parent: parent, full: full,
-                    workAllowed: workAllowed, voiceUtteranceStart: capture.voiceUtteranceStart, trigger: trigger)
+                    workAllowed: workAllowed, voiceUtteranceStart: capture.voiceUtteranceStart, trigger: trigger, minutesPath: minutesPath)
                 request = fixed
                 aiRequestOwners[fixed.id] = owner
                 if trigger == .scheduled, let scheduleRun {

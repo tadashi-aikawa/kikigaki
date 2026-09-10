@@ -1,6 +1,7 @@
 import AppKit
 import FluidAudio
 import KikigakiCore
+import KikigakiAIIO
 
 /// replayだけで使う開発用入力。通常起動では環境変数自体を解釈しない。
 struct ReplayDebugOptions {
@@ -550,7 +551,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // 使えない理由は分けて示す。設定を戻すのか、保存先を戻すのかが変わる。
             let profile = profiles.first { $0.slot == session.profileSlot }
             let reason: String?
-            if profile == nil || !session.matches(profile!) { reason = "設定が変わったため使えません" }
+            if !session.hasCurrentLaunch {
+                reason = (session.launchRevision ?? 0) > AIPreparedSession.currentLaunchRevision
+                    ? "起動条件が異なるため使えません" : "起動条件が古いため使えません"
+            }
+            else if profile == nil || !session.matches(profile!) { reason = "設定が変わったため使えません" }
             else if let root = self.config?.outputDir, !session.matchesContext(root: root) {
                 reason = "保存先が変わったため使えません"
             } else { reason = nil }

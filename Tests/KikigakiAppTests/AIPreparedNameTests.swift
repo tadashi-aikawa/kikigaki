@@ -50,7 +50,7 @@ import KikigakiAIIO
         #expect(store.label(entry, includingName: false) == store.label(entry))
         let restored = AIPreparedStore(directory: root, makeHerdr: { herdr }); restored.load()
         #expect(restored.unbound.first?.name == entry.name)
-        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: herdr)
+        let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: herdr)
         try await controller.adopt(entry, config: config)
         let request = try controller.prepare(lines: [], question: "確認", voiceQuestion: "", capturedAt: Date(), cutoff: 0,
             tail: nil, config: config, helper: URL(fileURLWithPath: "/bin/echo"))

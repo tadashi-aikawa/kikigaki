@@ -99,12 +99,16 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     /// 送信先プロファイルの通し番号。session recordの枝名になる。旧requestには無い
     public let profileSlot: Int?
     public let preparedSessionName: String?
+    /// 人が指定した議事録の書き先だけ。AI通知の表示対象を伝播させない。
+    public let minutesPath: String?
 
     public init(streamID: UUID, requestID: UUID, sessionGeneration: Int, participantName: String,
                 cliPath: String, sessionPath: String, requestToken: String, question: String,
                 capturedAt: Date, audioCutoffSeconds: Double, tentativeTail: AITentativeTail? = nil,
                 inReplyToRequestID: UUID? = nil, inReplyToEventID: String? = nil, workAllowed: Bool = true,
-                trigger: Trigger? = nil, profile: String? = nil, profileSlot: Int? = nil, preparedSessionName: String? = nil) {
+                trigger: Trigger? = nil, profile: String? = nil, profileSlot: Int? = nil, preparedSessionName: String? = nil,
+                minutesPath: String? = nil) {
+        self.minutesPath = minutesPath
         self.preparedSessionName = preparedSessionName
         self.trigger = trigger; self.profile = profile; self.profileSlot = profileSlot
         schemaVersion = 1; mode = "meeting"; self.streamID = streamID; self.requestID = requestID
@@ -119,6 +123,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
 
     public func validate() throws {
         _ = try AIPreparedName.parse(preparedSessionName)
+        if let minutesPath { try MinutesPath.validate(minutesPath) }
         guard schemaVersion == 1, mode == "meeting", sessionGeneration > 0,
               AIValidation.singleLine(participantName), AIValidation.absolutePath(cliPath),
               AIValidation.absolutePath(sessionPath), AIValidation.singleLine(requestToken),
@@ -154,6 +159,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case trigger, profile
         case preparedSessionName = "prepared_session_name"
+        case minutesPath = "minutes_path"
         case profileSlot = "profile_slot"
         case schemaVersion = "schema_version", mode, streamID = "stream_id", requestID = "request_id"
         case sessionGeneration = "session_generation", participantName = "participant_name"
@@ -166,6 +172,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         trigger = try values.contains(.trigger) ? values.decode(Trigger.self, forKey: .trigger) : nil
+        minutesPath = try values.contains(.minutesPath) ? values.decode(String.self, forKey: .minutesPath) : nil
         // 複数プロファイル以前のrequestはこのキーを持たない。欠損は既定プロファイルとして読む。
         profile = try values.decodeIfPresent(String.self, forKey: .profile)
         profileSlot = try values.decodeIfPresent(Int.self, forKey: .profileSlot)

@@ -2,18 +2,20 @@ import Foundation
 import KikigakiCore
 import KikigakiAIIO
 
+enum MinutesCommandError: Error { case invalidPath }
+
 struct ReturnCommand: Sendable {
     let action: String
     let options: [String: String]
     let payload: String?
     init(_ arguments: [String]) throws {
-        guard let action = arguments.first, ["accept", "reply", "notify"].contains(action) else { throw AIError.invalid("command") }
+        guard let action = arguments.first, ["accept", "reply", "notify", "minutes"].contains(action) else { throw AIError.invalid("command") }
         self.action = action
         var options: [String: String] = [:], payload: String?, index = 1
         while index < arguments.count {
             let name = arguments[index]
             if name.hasPrefix("--") {
-                guard ["--session", "--request", "--token", "--kind", "--reason", "--provider"].contains(name),
+                guard ["--session", "--request", "--token", "--kind", "--reason", "--provider", "--path"].contains(name),
                       options[name] == nil, index + 1 < arguments.count else { throw AIError.invalid("arguments") }
                 options[name] = arguments[index + 1]; index += 2
             } else {
@@ -21,7 +23,8 @@ struct ReturnCommand: Sendable {
                 payload = name; index += 1
             }
         }
-        let required: Set<String> = action == "notify" ? ["--session", "--token", "--provider"] : ["--session", "--token", "--request"]
+        var required: Set<String> = action == "notify" ? ["--session", "--token", "--provider"] : ["--session", "--token", "--request"]
+        if action == "minutes" { required.insert("--path") }
         let allowed = action == "reply" ? required.union(["--kind", "--reason"]) : required
         guard required.isSubset(of: Set(options.keys)), Set(options.keys).isSubset(of: allowed),
               options.values.allSatisfy({ !$0.isEmpty && !$0.contains("\0") }),
@@ -30,7 +33,8 @@ struct ReturnCommand: Sendable {
         self.options = options; self.payload = payload
     }
 
-    func execute(input: () throws -> Data, environment: [String: String] = ProcessInfo.processInfo.environment, now: Date = Date()) throws -> String {
+    func execute(input: () throws -> Data, environment: [String: String] = ProcessInfo.processInfo.environment, now: Date = Date(),
+                 makeFileStore: (URL) -> AIFileStore = { AIFileStore(root: $0) }) throws -> String {
         let path = options["--session"]!
         guard path.hasPrefix("/"), !path.contains("\0"), !path.contains("//"),
               !path.split(separator: "/").contains(where: { $0 == "." || $0 == ".." }) else { throw AIError.unsafeFile }
@@ -50,7 +54,7 @@ struct ReturnCommand: Sendable {
               pieces[pieces.count - depth + 1] == meeting.uuidString,
               pieces[pieces.count - depth + 2] == "ai" else { throw AIError.unsafeFile }
         let root = (0..<depth).reduce(url) { value, _ in value.deletingLastPathComponent() }
-        let files = AIFileStore(root: root), base = [".kikigaki-context", meeting.uuidString, "ai"]
+        let files = makeFileStore(root), base = [".kikigaki-context", meeting.uuidString, "ai"]
         let sessions = base + ["sessions"] + (slot.map { ["\($0)"] } ?? [])
         let session = try AIJSON.decode(AISessionRecord.self, from: files.read(sessions + ["\(generation).json"], limit: AILimits.eventBytes))
         guard session.schemaVersion == 1, session.meetingID == meeting, session.generation == generation,
@@ -77,6 +81,22 @@ struct ReturnCommand: Sendable {
               request.envelope.participant.sessionGeneration == generation,
               request.envelope.participant.sessionPath == path,
               options["--token"] == request.envelope.participant.requestToken else { throw AIError.mismatch }
+        if action == "minutes" {
+            do { try MinutesPath.validate(options["--path"]!) }
+            catch { throw MinutesCommandError.invalidPath }
+            let event = try AIMinutesEvent(request: request, path: options["--path"]!, recordedAt: now)
+            let encoded = try AIJSON.encode(event)
+            guard encoded.count <= AILimits.eventBytes else { throw AIError.tooLarge }
+            try saveIdentity(session: session, environment: environment, files: files, sessions: sessions, generation: generation)
+            let target = base + ["inbox", event.filename]
+            do { try files.write(encoded, to: target, replacing: false) }
+            catch AIError.conflict {
+                let previous = try AIInbox.decodeMinutes(files.read(target, limit: AILimits.eventBytes), filename: event.filename, for: request)
+                guard previous.sameContent(as: event) else { throw AIError.conflict }
+                try files.syncDirectory(Array(target.dropLast()))
+            }
+            return event.eventID
+        }
         let kind: AIReceiveEvent.Kind
         if action == "accept" { kind = .accept }
         else {
@@ -93,6 +113,19 @@ struct ReturnCommand: Sendable {
         let event = try AIReceiveEvent(request: request, kind: kind, recordedAt: now, body: body, reason: options["--reason"])
         let encoded = try AIJSON.encode(event)
         guard encoded.count <= AILimits.eventBytes else { throw AIError.tooLarge }
+        try saveIdentity(session: session, environment: environment, files: files, sessions: sessions, generation: generation)
+        let target = base + ["inbox", event.filename]
+        do { try files.write(encoded, to: target, replacing: false) }
+        catch AIError.conflict {
+            let previous = try AIInbox.decode(files.read(target, limit: AILimits.eventBytes), filename: event.filename, for: request)
+            guard previous.sameContent(as: event) else { throw AIError.conflict }
+            try files.syncDirectory(Array(target.dropLast()))
+        }
+        return event.eventID
+    }
+
+    private func saveIdentity(session: AISessionRecord, environment: [String: String], files: AIFileStore,
+                              sessions: [String], generation: Int) throws {
         // 実行環境のthreadだけを保存する。質問トークンでsession本体は変更できない。
         if session.provider == .codex, let thread = environment["CODEX_THREAD_ID"], !thread.isEmpty {
             guard thread.utf8.count <= 512, !thread.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
@@ -105,13 +138,5 @@ struct ReturnCommand: Sendable {
                 try files.syncDirectory(Array(target.dropLast()))
             }
         }
-        let target = base + ["inbox", event.filename]
-        do { try files.write(encoded, to: target, replacing: false) }
-        catch AIError.conflict {
-            let previous = try AIInbox.decode(files.read(target, limit: AILimits.eventBytes), filename: event.filename, for: request)
-            guard previous.sameContent(as: event) else { throw AIError.conflict }
-            try files.syncDirectory(Array(target.dropLast()))
-        }
-        return event.eventID
     }
 }

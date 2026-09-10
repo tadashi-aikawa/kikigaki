@@ -191,7 +191,7 @@ import KikigakiAIIO
             // 起動時点で実在するディレクトリを許可先に渡す。
             #expect(FileManager.default.fileExists(atPath: context.path))
             #expect(args.contains { $0.contains("sandbox_workspace_write.writable_roots=")
-                && $0.contains(context.path) })
+                && $0.contains(output.path) })
         }
 
         await prepare(prepared, profile, root: output)

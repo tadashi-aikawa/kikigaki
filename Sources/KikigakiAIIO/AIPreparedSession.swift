@@ -4,6 +4,10 @@ import KikigakiCore
 /// 会議に紐づかないAIセッション。KIKIGAKIが従来どおり起こすので、
 /// フック・サンドボックス許可・返送コマンド許可はすべて付いた状態で待つ。
 public struct AIPreparedSession: Codable, Equatable, Sendable {
+    /// 起動引数に焼き付く許可の世代。旧起動を新仕様の候補に出すと、紐づけ後に保存が失敗する。
+    public static let currentLaunchRevision = 1
+    public let launchRevision: Int?
+    public var hasCurrentLaunch: Bool { launchRevision == Self.currentLaunchRevision }
     /// 紐づけ先。会議側の `ai/sessions/<slot>/<generation>.json` が正本で、こちらは履歴
     public struct Binding: Codable, Equatable, Sendable {
         public let meetingID: UUID
@@ -29,7 +33,9 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
 
     public init(id: UUID = UUID(), profileSlot: Int, profileName: String, startedAt: Date,
                 config: ResolvedAIConfig, token: String, contextRoot: URL, contextMeetingID: UUID,
-                connection: AIHerdrConnection? = nil, bound: Binding? = nil, name: String? = nil) {
+                connection: AIHerdrConnection? = nil, bound: Binding? = nil, name: String? = nil,
+                launchRevision: Int? = Self.currentLaunchRevision) {
+        self.launchRevision = launchRevision
         self.name = name
         self.id = id; self.profileSlot = profileSlot; self.profileName = profileName
         self.startedAt = startedAt; self.config = config; self.token = token
@@ -45,7 +51,7 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
 
     public var isUnbound: Bool { bound == nil }
     /// 一覧と紐づけに出せる状態。起動が終わって接続先が判っているものだけ
-    public var isReady: Bool { isUnbound && connection != nil }
+    public var isReady: Bool { isUnbound && connection != nil && hasCurrentLaunch }
 
     /// 会議開始時に固定した設定と同じ設定で起こされたか。
     /// 準備してから設定を変えた場合に、別の設定のセッションを黙って紐づけないための判定。
@@ -66,6 +72,7 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
 
     public mutating func bind(to meetingID: UUID, config: ResolvedAIConfig) throws {
         guard isUnbound else { throw AIError.conflict }
+        guard hasCurrentLaunch else { throw AIError.invalid("prepared launch revision") }
         guard connection != nil else { throw AIError.invalid("prepared session has no connection") }
         guard matches(config) else { throw AIError.mismatch }
         bound = Binding(meetingID: meetingID, profileSlot: profileSlot)
@@ -73,6 +80,7 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
 
     public func validate() throws {
         _ = try AIPreparedName.parse(name)
+        guard launchRevision.map({ $0 >= 0 }) ?? true else { throw AIError.invalid("prepared launch revision") }
         guard profileSlot > 0, config.slot == profileSlot,
               // 長さは設定の解析側でだけ見る。宛名から補った名前は制限の対象外。
               !profileName.trimmingCharacters(in: .whitespaces).isEmpty,
@@ -87,9 +95,11 @@ public struct AIPreparedSession: Codable, Equatable, Sendable {
         case name, id, profileSlot = "profile_slot", profileName = "profile_name"
         case startedAt = "started_at", config, token, connection, bound
         case contextRoot = "context_root", contextMeetingID = "context_meeting_id"
+        case launchRevision = "launch_revision"
     }
     public init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        launchRevision = try values.contains(.launchRevision) ? values.decode(Int.self, forKey: .launchRevision) : nil
         name = try AIPreparedName.parse(values.decodeIfPresent(String.self, forKey: .name))
         id = try values.decode(UUID.self, forKey: .id)
         profileSlot = try values.decode(Int.self, forKey: .profileSlot)
@@ -148,7 +158,7 @@ public struct AIPreparedLedger: Codable, Equatable, Sendable {
     public func stale(for config: ResolvedAIConfig, contextRoot: URL? = nil) -> [AIPreparedSession] {
         unbound.filter {
             $0.profileSlot == config.slot
-                && (!$0.matches(config) || !(contextRoot.map($0.matchesContext(root:)) ?? true))
+                && (!$0.hasCurrentLaunch || !$0.matches(config) || !(contextRoot.map($0.matchesContext(root:)) ?? true))
         }
     }
 

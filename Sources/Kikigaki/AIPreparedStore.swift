@@ -137,8 +137,7 @@ final class AIPreparedStore {
             _ = try store.directory(base + ["inbox"])
             try store.write(AIJSON.encode(record), to: base + ["sessions", "1.json"], replacing: false)
             let launch = try AILaunchConfiguration(config: profile, helper: helper, outputDirectory: outputDirectory,
-                meetingID: context, sessionURL: session.sessionURL, generation: 1, token: session.token,
-                contextWide: true)
+                sessionURL: session.sessionURL, generation: 1, token: session.token)
             let herdr = try makeHerdr()
             let format = DateFormatter(); format.dateFormat = "HH:mm"
             let created = try await herdr.create(cwd: profile.cwd, label: "KIKIGAKI \(profile.name) 準備 \(format.string(from: now))",

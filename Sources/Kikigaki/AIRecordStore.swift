@@ -67,13 +67,15 @@ final class AIRecordStore {
         }
         var needsRecovery: Bool {
             let questions = controller.conversation.questions
-            return hasUnpersistedChanges || questions.contains {
+            return hasUnpersistedChanges || controller.minutes.needsRecovery || questions.contains {
                 $0.sendAttemptedAt != nil
                     && ($0.result == nil || ($0.state == .needsInput && !AIQuestion.isAnswered($0, in: questions)))
             }
         }
     }
     private(set) var records: [UUID: Record] = [:]
+    /// AI未利用時の人の指定もここから取得し、後のcontrollerへ同じ参照を渡す。
+    let minutesStores = MinutesStores()
     private(set) var warnings: [String] = []
     var onChange: (() -> Void)?
     /// 会議IDと、返事が届いたプロファイルの枠
@@ -101,7 +103,8 @@ final class AIRecordStore {
                     let conversation = try AIJSON.decode(AIConversation.self, from: files.read(base + ["state.json"]))
                     // 回収用には実行できないadapterを渡す。herdr未導入でも記録を読める。
                     let controller = try AIConversationController(meetingID: entry.meetingID, outputDirectory: entry.outputDirectory,
-                        herdr: AIHerdr(run: { _, _ in throw AIHerdrError.notReady }), recovered: conversation)
+                        herdr: AIHerdr(run: { _, _ in throw AIHerdrError.notReady }), recovered: conversation,
+                        minutes: minutesStores.store(meetingID: entry.meetingID, markdownURL: manifest.markdownURL))
                     let record = Record(manifest: manifest, controller: controller, recovered: true)
                     records[entry.meetingID] = record
                     do {
@@ -128,7 +131,8 @@ final class AIRecordStore {
         if let existing = records[meetingID] { return existing }
         let root = markdownURL.deletingLastPathComponent()
         let manifest = AIMeetingManifest(meetingID: meetingID, markdownURL: markdownURL, profiles: profiles)
-        let controller = try AIConversationController(meetingID: meetingID, outputDirectory: root, herdr: makeHerdr())
+        let controller = try AIConversationController(meetingID: meetingID, outputDirectory: root, herdr: makeHerdr(),
+            minutes: minutesStores.store(meetingID: meetingID, markdownURL: markdownURL))
         let record = Record(manifest: manifest, controller: controller, recovered: false)
         try AIFileStore(root: root).write(AIJSON.encode(manifest), to: Self.base(meetingID) + ["manifest.json"], replacing: false)
         // 登録簿が保存できなければ、起動・送信へ進めない。
@@ -154,6 +158,7 @@ final class AIRecordStore {
             return false
         }
         onChange?()
+        minutesStores.discard(meetingID)
         return true
     }
 
@@ -201,6 +206,10 @@ final class AIRecordStore {
         }
     }
     func retrySaves() {
+        for record in records.values {
+            record.controller.minutes.retrySelection()
+            record.controller.scan()
+        }
         for record in records.values where record.hasUnpersistedChanges {
             if record.archive == nil {
                 do {
@@ -216,6 +225,9 @@ final class AIRecordStore {
         onChange?()
     }
     private func bind(_ record: Record) {
+        record.controller.minutes.onChange = { [weak self, weak record] in
+            guard let self, let record else { return }; changed(record)
+        }
         record.controller.onChange = { [weak self, weak record] in
             guard let self, let record else { return }; changed(record)
         }

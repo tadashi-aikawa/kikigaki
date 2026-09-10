@@ -108,7 +108,7 @@ import TOMLKit
     @Test @MainActor func Codex通知引数はTOMLの文字列配列として復元できる() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let config = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path), home: root)
-        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { _, _ in throw AIHerdrError.notReady }))
+        let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { _, _ in throw AIHerdrError.notReady }))
         _ = try controller.prepare(lines: [], question: "質問", voiceQuestion: "", capturedAt: Date(), cutoff: 0, tail: nil, config: config, helper: URL(fileURLWithPath: "/bin/echo"))
         let launch = try AILaunchConfiguration(config: config, helper: URL(fileURLWithPath: "/bin/echo"), controller: controller)
         struct Settings: Decodable { let notify: [String] }
@@ -116,29 +116,28 @@ import TOMLKit
         #expect(settings.notify == ["/bin/echo", "notify", "--provider", "codex", "--session", controller.sessionURL.path, "--token", controller.sessionToken!])
         #expect(launch.arguments.contains("check_for_update_on_startup=false"))
     }
-    @Test @MainActor func Codexの書込み許可先に利用者の設定を引き継いで会議のaiディレクトリを足す() throws {
+    @Test @MainActor func Codexの書込み許可先に利用者の設定を引き継いで保存先を足す() throws {
         // 実測: workspace-write のサンドボックスは ~/Documents の受信箱へ書けず、同梱CLIが unsafe_file で失敗した
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let userConfig = root.appendingPathComponent("codex-config.toml")
         try Data("[sandbox_workspace_write]\nwritable_roots = [\"/Users/me/work\", \"/private/tmp\"]\n".utf8).write(to: userConfig)
         let config = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path), home: root)
-        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { _, _ in throw AIHerdrError.notReady }))
+        let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { _, _ in throw AIHerdrError.notReady }))
         _ = try controller.prepare(lines: [], question: "質問", voiceQuestion: "", capturedAt: Date(), cutoff: 0, tail: nil, config: config, helper: URL(fileURLWithPath: "/bin/echo"))
         let launch = try AILaunchConfiguration(config: config, helper: URL(fileURLWithPath: "/bin/echo"), controller: controller, codexConfigURL: userConfig)
         struct Roots: Decodable { let sandbox_workspace_write: Sandbox; struct Sandbox: Decodable { let writable_roots: [String] } }
         let index = try #require(launch.arguments.firstIndex { $0.hasPrefix("sandbox_workspace_write.writable_roots=") })
         #expect(launch.arguments[index - 1] == "-c")
         let roots = try TOMLDecoder().decode(Roots.self, from: "[sandbox_workspace_write]\n" + launch.arguments[index].replacingOccurrences(of: "sandbox_workspace_write.", with: ""))
-        let aiDirectory = root.appendingPathComponent(".kikigaki-context").appendingPathComponent(controller.meetingID.uuidString).appendingPathComponent("ai").path
-        #expect(roots.sandbox_workspace_write.writable_roots == ["/Users/me/work", "/private/tmp", aiDirectory])
-        // 利用者の設定が無くても会議のaiディレクトリだけは許可する
+        #expect(roots.sandbox_workspace_write.writable_roots == ["/Users/me/work", "/private/tmp", root.path])
+        // 利用者の設定が無くても保存先は許可する。
         let missing = try AILaunchConfiguration(config: config, helper: URL(fileURLWithPath: "/bin/echo"), controller: controller, codexConfigURL: root.appendingPathComponent("none.toml"))
-        #expect(missing.arguments.contains { $0 == "sandbox_workspace_write.writable_roots=[\"\(aiDirectory)\"]" })
+        #expect(missing.arguments.contains { $0 == "sandbox_workspace_write.writable_roots=[\"\(root.path)\"]" })
     }
     @Test @MainActor func 生成設定は指定helperだけを許可しセッションへ限定する() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let config = ResolvedAIConfig(config: AIConfig(cli: .claude, command: "/bin/echo", model: "test-model", cwd: root.path), home: root)
-        let controller = try AIConversationController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { _, _ in throw AIHerdrError.notReady }))
+        let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { _, _ in throw AIHerdrError.notReady }))
         _ = try controller.prepare(lines: [], question: "質問", voiceQuestion: "", capturedAt: Date(), cutoff: 0, tail: nil,
             config: config, helper: URL(fileURLWithPath: "/bin/echo"))
         let launch = try AILaunchConfiguration(config: config, helper: URL(fileURLWithPath: "/bin/echo"), controller: controller)

@@ -11,10 +11,18 @@ public struct AIInbox: Sendable {
 
     /// fdで専用の階層を辿る。リンク・FIFO・ディレクトリ・過大ファイルを読む前に拒否する。
     public func read(filename: String, for request: AIRequest) throws -> AIReceiveEvent {
+        try Self.decode(readBytes(filename: filename, for: request, suffixes: ["accept", "result"]), filename: filename, for: request)
+    }
+
+    public func readMinutes(filename: String, for request: AIRequest) throws -> AIMinutesEvent {
+        try Self.decodeMinutes(readBytes(filename: filename, for: request, suffixes: ["minutes"]), filename: filename, for: request)
+    }
+
+    private func readBytes(filename: String, for request: AIRequest, suffixes: [String]) throws -> Data {
         try request.validate()
         try request.envelope.validatePaths(outputDirectory: outputDirectory)
         guard outputDirectory.isFileURL,
-              ["\(request.id.uuidString).accept.json", "\(request.id.uuidString).result.json"].contains(filename) else {
+              suffixes.map({ "\(request.id.uuidString).\($0).json" }).contains(filename) else {
             throw AIError.unsafeFile
         }
         let root = open(outputDirectory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
@@ -45,13 +53,21 @@ public struct AIInbox: Sendable {
             guard data.count <= AILimits.eventBytes - count else { throw AIError.tooLarge }
             data.append(contentsOf: buffer.prefix(count))
         }
-        return try Self.decode(data, filename: filename, for: request)
+        return data
     }
 
     /// ファイルI/Oから独立してJSON・名前・サイズ・requestの対応を検証できる。
     public static func decode(_ data: Data, filename: String, for request: AIRequest) throws -> AIReceiveEvent {
         guard data.count <= AILimits.eventBytes else { throw AIError.tooLarge }
         let event = try AIJSON.decode(AIReceiveEvent.self, from: data)
+        try event.validate(for: request)
+        guard filename == event.filename else { throw AIError.mismatch }
+        return event
+    }
+
+    public static func decodeMinutes(_ data: Data, filename: String, for request: AIRequest) throws -> AIMinutesEvent {
+        guard data.count <= AILimits.eventBytes else { throw AIError.tooLarge }
+        let event = try AIJSON.decode(AIMinutesEvent.self, from: data)
         try event.validate(for: request)
         guard filename == event.filename else { throw AIError.mismatch }
         return event

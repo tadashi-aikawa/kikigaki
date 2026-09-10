@@ -40,9 +40,11 @@ final class AIConversationController {
 
     let meetingID: UUID
     let outputDirectory: URL
+    let minutes: MinutesStore
     private(set) var conversation: AIConversation
     private var recoveredRangeHistories: [Int: AIStreamHistory] = [:]
     private(set) var invalidInboxFiles: [String] = []
+    private var lastScanReturnStatus: [UUID: Bool] = [:]
     var onChange: (() -> Void)?
     /// 返事が届いた枠。通知音は返答元のプロファイルの設定で決める
     var onResult: ((Int) -> Void)?
@@ -60,8 +62,11 @@ final class AIConversationController {
 
     private var base: [String] { [".kikigaki-context", meetingID.uuidString, "ai"] }
 
-    init(meetingID: UUID, outputDirectory: URL, herdr: AIHerdr, recovered: AIConversation? = nil) throws {
+    init(meetingID: UUID, outputDirectory: URL, herdr: AIHerdr, recovered: AIConversation? = nil,
+         minutes: MinutesStore) throws {
         self.meetingID = meetingID; self.outputDirectory = outputDirectory; self.herdr = herdr
+        self.minutes = minutes
+        guard self.minutes.meetingID == meetingID else { throw AIError.mismatch }
         files = AIFileStore(root: outputDirectory); allowsSending = recovered == nil
         conversation = recovered ?? AIConversation(meetingID: meetingID)
         guard conversation.meetingID == meetingID else { throw AIError.mismatch }
@@ -180,7 +185,8 @@ final class AIConversationController {
     func prepare(lines: [String], question: String, voiceQuestion: String, capturedAt: Date, cutoff: Double,
                  tail: AITentativeTail?, config: ResolvedAIConfig, helper: URL, parent: UUID? = nil,
                  full: Bool = false, workAllowed: Bool? = nil, voiceUtteranceStart: Double? = nil,
-                 trigger: AIParticipantContext.Trigger? = nil) throws -> AIRequest {
+                 trigger: AIParticipantContext.Trigger? = nil, minutesPath: String? = nil) throws -> AIRequest {
+        if let minutesPath { try minutes.validateTarget(minutesPath) }
         try register([config])
         let channel = try channel(config.slot)
         guard canSend(slot: config.slot) else { throw AIHerdrError.notReady }
@@ -197,7 +203,8 @@ final class AIConversationController {
             requestToken: UUID().uuidString + UUID().uuidString, question: question, capturedAt: capturedAt,
             audioCutoffSeconds: cutoff, tentativeTail: tail, inReplyToRequestID: parent,
             inReplyToEventID: parent.map { "\($0.uuidString)/result" }, workAllowed: workAllowed ?? config.allowWork,
-            trigger: trigger, profile: slot == nil ? nil : config.name, profileSlot: slot, preparedSessionName: channel.preparedSessionName)
+            trigger: trigger, profile: slot == nil ? nil : config.name, profileSlot: slot, preparedSessionName: channel.preparedSessionName,
+            minutesPath: minutesPath)
         let request = try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant),
             number: conversation.questions.count + 1, voiceQuestion: voiceQuestion, snapshot: snapshot, voiceUtteranceStart: voiceUtteranceStart)
         var next = conversation
@@ -223,7 +230,7 @@ final class AIConversationController {
         guard !discarded else { throw AIHerdrError.notReady }
         try register([config])
         let channel = try channel(config.slot)
-        guard prepared.matches(config), let connection = prepared.connection else { throw AIError.mismatch }
+        guard prepared.hasCurrentLaunch, prepared.matches(config), let connection = prepared.connection else { throw AIError.mismatch }
         // 起動時に許可した保存先と会議の保存先が違うと、返送がサンドボックスで落ちる。
         // 起動引数は変えられないので、ここで断る。候補の絞り込みでも同じ条件を見る。
         guard prepared.matchesContext(root: outputDirectory) else { throw AIError.mismatch }
@@ -422,9 +429,13 @@ final class AIConversationController {
 
     func scan() {
         guard !discarded else { return }
+        let oldWarning = warning, oldInvalid = invalidInboxFiles
+        let oldBackground = channels.mapValues { $0.hookBackgroundRunning }
         invalidInboxFiles = []
         scanWarning = nil
         scanHooks()
+        // resultのcommit/onChangeより先に議事録の保存失敗を確定し、登録簿から脱落させない。
+        minutes.scan(questions: conversation.questions)
         var events: [AIReceiveEvent] = []
         for q in conversation.questions where q.sendAttemptedAt != nil {
             for suffix in ["accept", "result"] {
@@ -474,7 +485,12 @@ final class AIConversationController {
                 for slot in notify { onResult?(slot) }
             } catch { scanWarning = "返事の取り込み状態を保存できません" }
         }
-        onChange?()
+        let returns = Dictionary(uniqueKeysWithValues: conversation.questions.map { ($0.request.id, isReturnUnconfirmed($0)) })
+        let returnChanged = returns != lastScanReturnStatus
+        lastScanReturnStatus = returns
+        if changed || returnChanged || oldWarning != warning || oldInvalid != invalidInboxFiles || oldBackground != channels.mapValues({ $0.hookBackgroundRunning }) {
+            onChange?()
+        }
     }
 
     func isReturnUnconfirmed(_ q: AIQuestion, now: Date = Date(), backgroundRunning: Bool = false) -> Bool {

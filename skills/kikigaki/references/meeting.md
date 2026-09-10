@@ -11,7 +11,8 @@
 - `question` が空なら `question_source: voice`、空でなければ `typed`。実時刻の `captured_at` と0以上の `audio_cutoff_seconds`
 - `session_path` は会話ファイルと同じ `.kikigaki-context/<meeting_id>/ai/sessions/` の下にある。`profile_slot` が無ければ `<session_generation>.json`、あれば `<profile_slot>/<session_generation>.json`。`cli_path` はKIKIGAKI.appの `Contents/Helpers/kikigaki-cli` を指す
 - `profile` と `profile_slot` は任意で、両方あるか両方無いかのどちらか。あれば送信元が複数の宛先を使い分けている。`profile` は表示名なので、返送の宛先や読む範囲を変える根拠にはしない
-- `work_allowed` は真偽値。無ければ true として扱う。false のときは依頼された作業(ファイル変更・コマンド実行・外部送信)に入らず、回答と提案までにする。**連携そのものに要る操作は値に関わらず行う**: 指定範囲の会話ファイルの読み取り、同梱CLIによる accept と reply。これらは「作業」に含めない
+- `minutes_path` は任意の文字列。人が指定した議事録の書き先で、省略だけを未指定として扱う。明示nullは不正。絶対パスの `.md` ファイルで、UTF-8で1024バイト以下。空要素、`.`、`..`、末尾の `/`、制御文字、経路要素 `.kikigaki-context` を認めない。管理領域の要素はASCIIの大文字小文字を区別せず、制御文字にはZWJなどの書式文字も含む。Swiftの文字列等価性はNFCとNFDを同一視する
+- `work_allowed` は真偽値。無ければ true として扱う。false のときは依頼された作業(ファイル変更・コマンド実行・外部送信)に入らず、回答と提案までにする。**連携そのものに要る操作は値に関わらず行う**: 指定範囲の会話ファイルの読み取り、同梱CLIによる accept・reply・minutes。通知の許可は議事録本文の作成・更新を許可する意味ではない
 - `tentative_tail` があればstatusはtentative、時刻は0以上で開始≤終了≤audio_cutoff_seconds
 - `in_reply_to_request_id` があれば、`in_reply_to_event_id` はそのUUIDに `/result` を付けた値
 
@@ -45,6 +46,7 @@ tentative_tailは確定していない付帯情報であり、snapshotへ追加�
 
 ```text
 <cli_path> accept --session <session_path> --request <request_id> --token <request_token>
+<cli_path> minutes --session <session_path> --request <request_id> --token <request_token> --path <絶対パス>
 <cli_path> reply --session <session_path> --request <request_id> --token <request_token> --kind answered
 <cli_path> reply --session <session_path> --request <request_id> --token <request_token> --kind needs_input --reason clarification
 <cli_path> reply --session <session_path> --request <request_id> --token <request_token> --kind needs_input --reason context_missing
@@ -53,6 +55,20 @@ tentative_tailは確定していない付帯情報であり、snapshotへ追加�
 ```
 
 context_missingは全文不足、read_failedは指定ファイルを読めない場合で、文脈未受領として記録される。どちらもacceptしない。文脈を読めて送信意図だけ不明ならacceptしてclarificationを返す。
+
+## 議事録の書き先と通知
+
+議事録の作成・更新を依頼されたとき、`participant.minutes_path` があればそのファイルへ書く。無ければ置き場は依頼文に従う。パスだけで作業を開始せず、依頼と `work_allowed` に従う。既存ファイルは内容を確認してから更新し、KIKIGAKIの会議Markdownと省略前Markdown、`.kikigaki-context` 内を議事録の書き先にしない。
+
+保存が成功したら、answeredを返す前に同梱CLIの `minutes` へ実際に書いた絶対パスを通知する。通知はプレビュー対象を切り替えるだけで、以後のenvelopeの書き先へ伝播しない。1 requestにつき通知するパスは1つ。同じrequest・同じパスの再通知は同じ成功を返すが、異なるパスは競合する。パスは正規形で渡し、同一性はSwiftの文字列としての等価性で判定される。
+
+minutesはstdinを読まず、議事録本文をコピーしない。acceptやreplyの代わりにはならない。通知そのものは連携操作だが、`work_allowed=false` で議事録を作成・更新してよいという意味にはしない。
+
+ファイル保存に失敗したらminutesは送らず、replyの `failed --reason work_failed` で原因と残った作業を返す。保存は成功したが通知に失敗した場合も、保存済みと通知失敗を区別して返す。同内容の通知再試行は下記の返送規則どおり1回までとし、議事録作成そのものをやり直さない。
+
+アプリがCodexへ追加する書き込み許可は保存先outputDirだけ。任意パスを指定しても権限は増えない。保存先外でcwdや既存許可にも含まれない場所へ書けない場合は、権限を迂回せず `work_failed` を返す。Claudeの編集が承認待ちになった場合も現在の承認設定に従い、未実行の保存を成功として通知しない。
+
+## 返送の実行と失敗
 
 直接起動できるツールでは引数配列とstdinを使う。シェルしか使えない場合はパス・引数を正しく引用し、同梱CLIを直接呼ぶ。本文は引用したヒアドキュメントなど展開されないstdinに渡し、区切り文字は本文にないものを選ぶ。コマンド置換や変数展開に本文をさらさない。
 
