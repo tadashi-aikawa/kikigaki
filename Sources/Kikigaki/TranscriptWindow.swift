@@ -125,8 +125,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         if value.state == .preparing || previous.timeline.startedAt != value.timeline.startedAt { renamePopover?.close() }
         startStopButton.isEnabled = value.state.canStart || value.state.canStop
-        // 前の会議を共有できる画面では、フッターへ主操作を譲る。
-        startStopButton.emphasis = value.state.canStart && !value.canShare ? .primary : .neutralOutline
         pauseButton.isEnabled = value.state.canPauseOrResume
         pauseButton.isHidden = value.state == .idle
         openButton.isHidden = !(value.state == .idle && value.saved)
@@ -167,14 +165,19 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private func updateHeader(width: CGFloat) {
         let compact = width < 600
         let value = snapshot
+        // 前の会議を共有できる画面ではフッターへ主操作を譲る。リサイズ時も状態だけで決める。
+        startStopButton.emphasis = value.state.canStart
+            ? (value.canShare ? .neutralOutline : .primary) : .accentOutline
+        pauseButton.emphasis = .goldOutline
         let title = value.state == .idle && value.markdownURL != nil ? "新しい録音"
             : value.state.canStart ? value.state.startStopTitle : "停止"
         symbol(startStopButton, name: value.state.canStart ? "record.circle" : "stop.fill",
                title: title, showTitle: !compact)
         symbol(pauseButton, name: value.state == .paused ? "play.fill" : "pause.fill",
                title: value.state.pauseResumeTitle, showTitle: !compact)
-        startStopWidth?.constant = compact ? 34 : value.state.canStart ? 112 : 72
-        pauseWidth?.constant = compact ? 34 : 92
+        // 最長ラベルでも左右に14pt以上を残し、開始/停止・一時停止/再開で幅を変えない。
+        startStopWidth?.constant = compact ? 34 : 120
+        pauseWidth?.constant = compact ? 34 : 120
         headerControls?.spacing = compact ? 6 : 8
         // 経過時間が長くてもボタンを押し出さない。省略時の実時刻はホバーでも読める。
         recordingRange.setContentCompressionResistancePriority(compact ? .defaultLow : .required, for: .horizontal)
@@ -270,9 +273,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             button.isBordered = false
             button.heightAnchor.constraint(equalToConstant: 32).isActive = true
         }
-        startStopWidth = startStopButton.widthAnchor.constraint(equalToConstant: 112)
+        startStopWidth = startStopButton.widthAnchor.constraint(equalToConstant: 120)
         startStopWidth?.isActive = true
-        pauseWidth = pauseButton.widthAnchor.constraint(equalToConstant: 92)
+        pauseWidth = pauseButton.widthAnchor.constraint(equalToConstant: 120)
         pauseWidth?.isActive = true
         openButton.widthAnchor.constraint(equalToConstant: 34).isActive = true
         openButton.heightAnchor.constraint(equalToConstant: 32).isActive = true

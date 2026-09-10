@@ -14,8 +14,14 @@ enum Washi {
     static let tentative = color(0x4A443D)
     static let red = color(0xAA1405)
     static let brightRed = color(0xCF321F)
+    static let pressedRed = color(0x8B1004)
+    static let activeRedInk = color(0x881004)
     static let white = NSColor.white
     static let gold = color(0xC4801F)
+    // 金の面に使うgoldとは分け、和紙の上の文字と輪郭を読める濃さにする。
+    static let goldInk = color(0x8A5A12)
+    // ホバー・押下の地が重なっても文字のコントラストを保つ。
+    static let activeGoldInk = color(0x6E480E)
     static let searchMatch = color(0xE09C3C).withAlphaComponent(0.25)
     static let searchCurrent = color(0xE09C3C).withAlphaComponent(0.6)
     struct SpeakerColor { let background: NSColor; let foreground: NSColor }

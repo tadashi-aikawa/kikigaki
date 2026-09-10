@@ -26,9 +26,10 @@ import KikigakiCore
             #expect(!buttons.isEmpty)
             for button in buttons {
                 #expect(button.title.isEmpty && button.image != nil)
-                #expect(button.toolTip?.isEmpty == false && button.frame.width >= 32)
+                #expect(button.toolTip?.isEmpty == false)
+                #expect(abs(button.frame.width - 34) < 0.1 && abs(button.frame.height - 32) < 0.1)
                 let rect = button.convert(button.bounds, to: content)
-                #expect(rect.minX >= 0 && rect.maxX <= content.bounds.width)
+                #expect(content.bounds.contains(rect))
             }
             let header = try #require(buttons.first?.superview as? NSStackView)
             let visible = header.arrangedSubviews.filter { !$0.isHiddenOrHasHiddenAncestor }
@@ -50,6 +51,11 @@ import KikigakiCore
             controller.windowDidResize(Notification(name: NSWindow.didResizeNotification, object: window))
             content.layoutSubtreeIfNeeded()
             #expect(buttons.allSatisfy { !$0.title.isEmpty })
+            #expect(abs(content.bounds.width - 600) < 0.1)
+            for button in buttons {
+                #expect(abs(button.frame.width - 120) < 0.1 && abs(button.frame.height - 32) < 0.1)
+                #expect(content.bounds.contains(button.convert(button.bounds, to: content)))
+            }
         }
     }
 }
