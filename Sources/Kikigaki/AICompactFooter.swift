@@ -128,6 +128,7 @@ final class AICompactFooter: NSStackView {
     let confirmation = AIFooterCount(kind: .confirmation)
     let warning = AIFooterButton(symbol: "exclamationmark.triangle", label: "警告")
     let more = AIFooterButton(symbol: "ellipsis", label: "その他の操作")
+    let pin = AIFooterButton(symbol: "pin", label: "最前面に固定")
     var onSelect: ((String) -> Void)?
     private var state = SessionSnapshot()
     private var reduceMotion = false
@@ -143,7 +144,20 @@ final class AICompactFooter: NSStackView {
         Washi.surface(rule, color: Washi.rule)
         rule.widthAnchor.constraint(equalToConstant: 1).isActive = true
         rule.heightAnchor.constraint(equalToConstant: 24).isActive = true
-        for view in [robot, rule, unread, confirmation, warning, NSView(), more] { addArrangedSubview(view) }
+        for view in [robot, rule, unread, confirmation, warning, NSView(), pin, more] { addArrangedSubview(view) }
+        pin.tint = Washi.muted
+        pin.setAccessibilityValue("OFF")
+        pin.callback = { [weak self] in
+            guard let self, let window = self.window else { return }
+            let pinned = window.level != .floating
+            window.level = pinned ? .floating : .normal
+            self.pin.symbolName = pinned ? "pin.fill" : "pin"
+            self.pin.tint = pinned ? Washi.red : Washi.muted
+            self.pin.toolTip = pinned ? "最前面の固定を解除" : "最前面に固定"
+            self.pin.setAccessibilityLabel(self.pin.toolTip)
+            self.pin.setAccessibilityValue(pinned ? "ON" : "OFF")
+            self.pin.needsDisplay = true
+        }
         more.tint = Washi.muted
         Washi.surface(self)
     }

@@ -110,7 +110,8 @@ import KikigakiCore
         var state = SessionSnapshot(ai: AIViewState(), state: .recording)
         state.aiSchedule.active = true
         window.apply(state)
-        #expect(window.compactFooter.arrangedSubviews.count == 7)
+        #expect(window.compactFooter.arrangedSubviews.first === window.compactFooter.robot)
+        #expect(window.compactFooter.arrangedSubviews.last === window.compactFooter.more)
         #expect(!window.footerMenu().items.contains { $0.title == "自動送信を停止" })
     }
 
