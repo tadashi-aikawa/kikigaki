@@ -110,6 +110,12 @@ final class MeetingSession {
     private var aiProgresses: [Int: String] = [:]
     private var aiWarning: String?
     private(set) var aiDraft = ""
+    /// 通常の手動依頼は自動と独立して宛先ごとに保持する。空文字も編集済みとして扱う。
+    private var manualDrafts: [Int: String] = [:]
+    func manualDraft(for profile: ResolvedAIConfig) -> String {
+        manualDrafts[profile.slot] ?? profile.autoPrompt
+    }
+    func updateManualDraft(_ text: String, slot: Int) { manualDrafts[slot] = text }
     private(set) var aiWorkAllowed: Bool
     private var aiCompleted: UUID?
     private var consumedAudioTime: Double = 0
@@ -173,6 +179,7 @@ final class MeetingSession {
     /// 宛先の選択も、紐づけた準備済みの表示も、前の会議のものを残さない。
     private func resetMeetingAIState(_ meetingConfig: ResolvedConfig) {
         scheduleDrafts = [:]
+        manualDrafts = [:]
         meetingAIProfiles = meetingConfig.aiProfiles
         meetingAI = meetingConfig.aiProfiles.first; scheduleAI = meetingConfig.aiProfiles.first
         boundPrepared = [:]

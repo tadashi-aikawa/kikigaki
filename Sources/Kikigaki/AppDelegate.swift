@@ -814,21 +814,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let slot = config.slot
         let range = session.aiRangePreview(full: false, slot: slot)
         let sheet = AIQuestionSheet(participant: config.participantName, parentNumber: question?.request.number,
-            draft: session.aiDraft, voice: snapshot.voiceQuestionPlaceholder,
+            draft: fixed ? session.aiDraft : session.manualDraft(for: config), voice: snapshot.voiceQuestionPlaceholder,
             range: range, tentative: snapshot.tentativeText != nil,
             canSubmit: snapshot.ai?.canSubmit(slot: slot) == true, confirmation: question?.result?.body,
             workAllowed: session.aiWorkAllowed, fixedSlot: fixed ? slot : nil)
         sheet.updateDestinations(session.aiDestinationItems, selected: slot, participant: config.participantName)
+        // 紐づけがsessionの選択を先に変えても、表示していた宛先へ編集内容を保存する。
+        var displayedSlot = slot
         // 宛先の選び直しで動かすもの。準備済みの行を選んだときも、紐づけたあとに同じ処理を通す。
         let applyDestination: @MainActor (Int) -> Void = { [weak self, weak sheet] chosen in
+            guard let sheet, session.meetingAIProfiles.contains(where: { $0.slot == chosen }) else { return }
+            session.updateManualDraft(sheet.draft, slot: displayedSlot)
             session.selectAIProfile(slot: chosen)
             guard let profile = session.aiConfiguration else { return }
+            displayedSlot = profile.slot
+            sheet.restoreDraft(session.manualDraft(for: profile))
             // シートが持つ枠も選び直しに追随させる。開始処理と抑制判定の対象を揃える。
             session.beginAIDraft(slot: profile.slot)
             self?.aiSheetSlot = profile.slot
-            sheet?.updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
+            sheet.updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
             // 選択前のemitは旧owningSlotで可否を描く。一時停止中も次の発話を待たず更新する。
-            sheet?.update(progress: session.snapshot.ai?.progress(slot: profile.slot),
+            sheet.update(progress: session.snapshot.ai?.progress(slot: profile.slot),
                           canSubmit: session.snapshot.ai?.canSubmit(slot: profile.slot) == true,
                           warning: session.snapshot.ai?.warning)
         }
@@ -847,13 +853,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-        sheet.onDraft = { session.updateAIDraft($0) }
+        sheet.onDraft = {
+            if fixed { session.updateAIDraft($0) }
+            else { session.updateManualDraft($0, slot: displayedSlot) }
+        }
         sheet.onWorkAllowedChange = { session.updateAIWorkAllowed($0) }
         // 返答シートは親の枠に固定。それ以外は開いている間の選び直しへ追随する。
         sheet.rangePreview = { session.aiRangePreview(full: $0, slot: fixed ? slot : session.aiConfiguration?.slot) }
-        sheet.onCancel = { [weak self] in self?.dismissAISheet() }
+        sheet.onCancel = { [weak self, weak sheet] in
+            if !fixed, let sheet { session.updateManualDraft(sheet.draft, slot: displayedSlot) }
+            self?.dismissAISheet()
+        }
         sheet.onPane = { session.showAIPane(slot: fixed ? slot : session.aiConfiguration?.slot) }
         sheet.onSubmit = { [weak self] text, full in
+            if !fixed { session.updateManualDraft(text, slot: displayedSlot) }
             let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
             let target = fixed ? config : session.aiConfiguration
             self?.aiSheetSlot = target?.slot

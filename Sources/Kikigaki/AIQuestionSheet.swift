@@ -196,6 +196,14 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         parent.beginSheet(window); window.makeFirstResponder(editor)
         (window as? AIQuestionWindow)?.monitorOutsideClicks()
     }
+    var draft: String { editor.string }
+    func restoreDraft(_ text: String) {
+        editor.unmarkText()
+        editor.string = text
+        editor.setSelectedRange(NSRange(location: 0, length: 0))
+        editor.scrollRangeToVisible(NSRange(location: 0, length: 0))
+        editor.needsDisplay = true
+    }
     func close() { if let parent = window.sheetParent { parent.endSheet(window) }; window.orderOut(nil) }
     func update(progress: String?, canSubmit: Bool, warning: String? = nil) {
         if progress == nil { updateRange() }

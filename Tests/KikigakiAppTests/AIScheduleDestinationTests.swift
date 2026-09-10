@@ -57,7 +57,7 @@ import KikigakiCore
         defer { window.window?.orderOut(nil) }
         let app = AppDelegate(testingSession: session, config: config, preparedStore: prepared, window: window)
         let fromAuto = mode.hasPrefix("自動"), toAuto = mode.hasSuffix("自動")
-        session.updateAIDraft("手動の依頼")
+        session.updateManualDraft("手動の依頼", slot: config.aiProfiles[0].slot)
         if fromAuto { app.showScheduleSheet() } else { app.showAISheet(parent: nil) }
         let originalWindow = try #require(app.scheduleSheet?.window ?? app.aiSheet?.window)
         let editor = try #require(descendants(originalWindow.contentView!).compactMap { $0 as? AIQuestionEditor }.first)
@@ -95,7 +95,7 @@ import KikigakiCore
         }
         #expect(start.isEnabled)
         let switched = fromAuto == toAuto && !fail
-        #expect(currentEditor.string == (fromAuto && toAuto && !fail ? "相談の依頼" : originalText))
+        #expect(currentEditor.string == (switched ? "相談の依頼" : originalText))
         if toAuto {
             #expect(app.scheduleSheet?.draft.minutes == (switched ? 11 : 7))
             #expect(session.aiScheduleConfiguration?.slot == config.aiProfiles[switched ? 1 : 0].slot)
@@ -104,6 +104,60 @@ import KikigakiCore
             #expect(session.aiConfiguration?.slot == config.aiProfiles[switched ? 1 : 0].slot)
         }
         #expect(!session.snapshot.aiSchedule.active)
+    }
+
+    @Test func 手動シートも宛先の既定と空欄を含む編集を独立して保持する() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let config = try ResolvedConfig(config: ConfigLoader.parse(toml: """
+        [[ai]]
+        name = "議事録"
+        autoPrompt = "議事録を更新"
+        [[ai]]
+        name = "相談"
+        autoPrompt = "疑問点を列挙"
+        [[ai]]
+        name = "空欄"
+        """), home: root)
+        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config,
+                                     aiStore: AIRecordStore(directory: root))
+        let window = TranscriptWindowController(shouldReduceMotion: { true })
+        window.window?.setFrameAutosaveName("")
+        defer { window.window?.orderOut(nil) }
+        let prepared = AIPreparedStore(directory: root)
+        let app = AppDelegate(testingSession: session, config: config, preparedStore: prepared, window: window)
+        app.showAISheet(parent: nil)
+        defer { app.aiSheet?.close() }
+        let sheet = try #require(app.aiSheet)
+        let views = descendants(try #require(sheet.window.contentView))
+        let editor = try #require(views.compactMap { $0 as? AIQuestionEditor }.first)
+        let popup = try #require(views.compactMap { $0 as? NSPopUpButton }.first)
+        func select(_ index: Int) {
+            popup.selectItem(withTitle: config.aiProfiles[index].name)
+            popup.sendAction(popup.action, to: popup.target)
+        }
+        #expect(editor.string == "議事録を更新")
+        editor.string = "担当者も記録"; sheet.textDidChange(Notification(name: NSText.didChangeNotification))
+        select(1)
+        #expect(editor.string == "疑問点を列挙")
+        select(0)
+        #expect(editor.string == "担当者も記録")
+        sheet.updateDestinations(session.aiDestinationItems, selected: config.aiProfiles[0].slot, participant: "議事録")
+        #expect(editor.string == "担当者も記録")
+        editor.string = ""; sheet.textDidChange(Notification(name: NSText.didChangeNotification))
+        select(2)
+        #expect(editor.string.isEmpty)
+        select(0)
+        #expect(editor.string.isEmpty)
+        let close = try #require(views.compactMap { $0 as? NSButton }.first { $0.title == "閉じる" })
+        close.performClick(nil)
+        app.showAISheet(parent: nil)
+        #expect(app.aiSheet?.draft == "")
+        #expect(session.scheduleDraft(for: config.aiProfiles[0]).prompt == "議事録を更新")
+        app.aiSheet?.onCancel?()
+        session.beginNextMeetingForTesting(recording: true)
+        app.showAISheet(parent: nil)
+        #expect(app.aiSheet?.draft == "議事録を更新")
     }
 
     @Test func 実シートで宛先の既定と編集を往復し閉じて開いても復元する() throws {
