@@ -148,8 +148,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 停止処理(最終判定と保存)の最中に終了操作を受けたら、保存が終わってから終了する
     private var terminateWhenIdle = false
     private var aiStore: AIRecordStore?
-    private var aiSheet: AIQuestionSheet?
-    private var scheduleSheet: AIScheduleSheet?
+    private(set) var aiSheet: AIQuestionSheet?
+    private(set) var scheduleSheet: AIScheduleSheet?
+    /// シートを閉じても紐づけ処理は続く。開き直したシートにも送信待ちを引き継ぐ。
+    private var preparedBinding = false
     private var scheduleSheetMeetingID: UUID?
     private var aiSheetMeetingID: UUID?
     /// 確認への返答シートが固定している枠。通常のシートはnilで選択中の宛先へ追随する
@@ -174,9 +176,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var replayDestinationPending = false
     init(replayDebug: ReplayDebugOptions = .init()) { self.replayDebug = replayDebug; super.init() }
 
-    convenience init(testingSession: MeetingSession, config: ResolvedConfig, preparedStore: AIPreparedStore) {
+    convenience init(testingSession: MeetingSession, config: ResolvedConfig, preparedStore: AIPreparedStore,
+                     window: TranscriptWindowController? = nil) {
         self.init()
         self.session = testingSession; self.config = config; self.preparedStore = preparedStore
+        self.window = window
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -617,15 +621,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 宛先ポップアップで準備済みを選んだ。紐づけてから送信先も切り替える。
     /// 表示だけ変えて送信先が元のままにならないよう、`session` 側で選択も動かす。
     private func adoptPrepared(slot: Int, id: UUID, forSchedule: Bool, then: @escaping (Bool) -> Void) {
-        guard let session, let profile = session.meetingAIProfiles.first(where: { $0.slot == slot }) else { return }
+        guard !preparedBinding, let session,
+              let profile = session.meetingAIProfiles.first(where: { $0.slot == slot }) else { then(false); return }
+        let meetingID = session.aiMeetingID
+        preparedBinding = true
         // 確定するまで送信させない。画面は選んだ先を出すのに、送信は前の宛先へ飛ぶ食い違いを作らない。
         aiSheet?.setBinding(true, canSubmit: false)
         scheduleSheet?.setBinding(true)
         Task {
             let bound = await session.adoptPrepared(id, profile: profile, forSchedule: forSchedule)
+            self.preparedBinding = false
             let owning = self.aiSheet?.owningSlot
             self.aiSheet?.setBinding(false, canSubmit: owning.map { session.snapshot.ai?.canSubmit(slot: $0) == true } ?? false)
             self.scheduleSheet?.setBinding(false)
+            guard session.aiMeetingID == meetingID else { return }
             self.preparedChanged()
             then(bound)
         }
@@ -783,7 +792,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         session?.endAIDraft(); aiSheet = nil; aiSheetSlot = nil
     }
 
-    private func showAISheet(parent: UUID?, resend: UUID? = nil) {
+    func showAISheet(parent: UUID?, resend: UUID? = nil) {
         guard let session, session.snapshot.canShare, let window = window?.window else { return }
         let questions = session.aiRecord?.controller.conversation.questions
         // 失敗した依頼はそのまま送り直せるよう、送信文・親・作業許可を元requestから戻す。
@@ -818,13 +827,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             session.beginAIDraft(slot: profile.slot)
             self?.aiSheetSlot = profile.slot
             sheet?.updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
+            // 選択前のemitは旧owningSlotで可否を描く。一時停止中も次の発話を待たず更新する。
+            sheet?.update(progress: session.snapshot.ai?.progress(slot: profile.slot),
+                          canSubmit: session.snapshot.ai?.canSubmit(slot: profile.slot) == true,
+                          warning: session.snapshot.ai?.warning)
         }
         if !fixed { sheet.onDestination = applyDestination }
-        sheet.onPrepared = { [weak self, weak sheet] chosen, id in
+        sheet.onPrepared = { [weak self] chosen, id in
             // 返答シートは親の枠に固定なので、紐づけても送信先は動かさない。
-            self?.adoptPrepared(slot: chosen, id: id, forSchedule: false) { bound in
-                if bound, !fixed { applyDestination(chosen) }
-                else if let session = self?.session, let sheet {
+            self?.adoptPrepared(slot: chosen, id: id, forSchedule: false) { [weak self] bound in
+                guard let self, let sheet = self.aiSheet else { return }
+                // 開き直したシートへ反映する。返答・再送の固定シートにはonDestinationがない。
+                if bound { sheet.onDestination?(chosen) }
+                else {
                     // 失敗したら送信先(session側)へ表示を揃える。画面だけBに残さない。
                     let restored = session.aiConfiguration?.slot ?? sheet.owningSlot
                     let name = session.meetingAIProfiles.first { $0.slot == restored }?.participantName ?? ""
@@ -844,39 +859,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.aiSheetSlot = target?.slot
             session.submitAI(question: text, full: full, parent: parent, helper: helper, profile: target)
         }
+        sheet.setBinding(preparedBinding, canSubmit: snapshot.ai?.canSubmit(slot: slot) == true)
         aiSheet = sheet; aiSheetMeetingID = session.aiMeetingID
         aiSheetSlot = slot
         self.window?.show(); sheet.present(on: window)
         // 宛先の準備済みも出すたびに引き直す。消えたペインを候補に残さない。
         if let preparedStore { Task { await preparedStore.refresh() } }
     }
-    private func showScheduleSheet() {
+    func showScheduleSheet() {
         guard let session, let config = session.aiConfiguration, let parent = window?.window,
               session.snapshot.state == .recording || session.snapshot.state == .paused,
               aiSheet == nil, scheduleSheet == nil else { return }
-        let previous = session.lastScheduleOptions
         let target = session.aiScheduleConfiguration ?? config
-        let sheet = AIScheduleSheet(prompt: session.scheduleDraft ?? previous?.prompt ?? target.autoPrompt,
-            minutes: previous.map { Int($0.interval / 60) } ?? target.autoIntervalMinutes,
-            workAllowed: previous?.workAllowed ?? session.aiWorkAllowed, sendFinal: previous?.sendFinal ?? true,
-            participant: target.participantName)
-        sheet.updateDestinations(session.aiDestinationItems, selected: target.slot, participant: target.participantName)
-        let applySchedule: @MainActor (Int) -> Void = { [weak sheet] slot in
-            session.selectAIProfile(slot: slot, forSchedule: true)
-            guard let profile = session.aiScheduleConfiguration else { return }
-            sheet?.updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
-        }
-        sheet.onDestination = applySchedule
-        sheet.onPrepared = { [weak self, weak sheet] slot, id in
-            self?.adoptPrepared(slot: slot, id: id, forSchedule: true) { bound in
-                if bound { applySchedule(slot) }
-                else if let session = self?.session, let target = session.aiScheduleConfiguration {
-                    sheet?.updateDestinations(session.aiDestinationItems, selected: target.slot,
+        let sheet = AIScheduleSheet(session: session, profile: target)
+        sheet.onPrepared = { [weak self] slot, id in
+            self?.adoptPrepared(slot: slot, id: id, forSchedule: true) { [weak self] bound in
+                // await中に閉じて開き直していても、現在のシートへ宛先と文面を一緒に反映する。
+                guard let self, let sheet = self.scheduleSheet else { return }
+                if bound { sheet.onDestination?(slot) }
+                else if let target = session.aiScheduleConfiguration {
+                    sheet.updateDestinations(session.aiDestinationItems, selected: target.slot,
                                               participant: target.participantName)
                 }
             }
         }
-        sheet.onDraft = { session.updateScheduleDraft($0) }
         sheet.onCancel = { [weak self] in self?.scheduleSheet = nil }
         sheet.onStart = { [weak self, weak sheet] options in
             do {
@@ -889,6 +895,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 sheet?.update(warning: "開始できませんでした。録音状態を確認して、もう一度開始してください")
             }
         }
+        sheet.setBinding(preparedBinding)
         scheduleSheet = sheet; scheduleSheetMeetingID = session.aiMeetingID
         window?.show(); sheet.present(on: parent)
         if let preparedStore { Task { await preparedStore.refresh() } }

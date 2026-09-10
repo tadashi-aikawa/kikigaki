@@ -20,7 +20,7 @@ import KikigakiAIIO
         let editor = try #require(descendants(sheet.window.contentView!).compactMap { $0 as? AIQuestionEditor }.first)
         sheet.window.makeFirstResponder(editor)
         var submitted = 0, cancelled = 0, draft = ""
-        sheet.onStart = { _ in submitted += 1 }; sheet.onCancel = { cancelled += 1 }; sheet.onDraft = { draft = $0 }
+        sheet.onStart = { _ in submitted += 1 }; sheet.onCancel = { cancelled += 1 }; sheet.onDraft = { draft = $0.prompt }
         editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))
         try key(sheet.window, code: 36, shift: true)
         #expect(editor.string.contains("\n") && submitted == 0)

@@ -3,10 +3,17 @@ import KikigakiCore
 
 @MainActor
 final class AIScheduleSheet: NSObject, NSTextViewDelegate {
+    /// 空欄や編集中の文面も保持するため、検証済みのAIScheduleOptionsとは分ける。
+    struct Draft: Equatable {
+        var prompt: String
+        var minutes: Int
+        var workAllowed: Bool
+        var sendFinal: Bool = true
+    }
     let window: NSWindow
     var onStart: ((AIScheduleOptions) -> Void)?
     var onCancel: (() -> Void)?
-    var onDraft: ((String) -> Void)?
+    var onDraft: ((Draft) -> Void)?
     var onDestination: ((Int) -> Void)?
     /// 準備済みセッションを選んだ。呼び手が紐づけてから一覧を差し替える
     var onPrepared: ((Int, UUID) -> Void)?
@@ -18,6 +25,50 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
     private let final = NSButton(checkboxWithTitle: "録音停止時に最後の1回を送る", target: nil, action: nil)
     private let startButton = NSButton(title: "開始", target: nil, action: nil)
     private let hint = Washi.label(size: 11, color: Washi.tentative)
+
+    convenience init(session: MeetingSession, profile: ResolvedAIConfig) {
+        let draft = session.scheduleDraft(for: profile)
+        self.init(prompt: draft.prompt, minutes: draft.minutes, workAllowed: draft.workAllowed,
+                  sendFinal: draft.sendFinal, participant: profile.participantName)
+        // 準備済みへの紐づけ中はsession側の宛先が先に変わり得る。エディターに表示中の
+        // 枠へ保存し、一覧の非同期refreshでは文面を初期化しない。
+        var displayedSlot = profile.slot
+        onDraft = { session.updateScheduleDraft($0, slot: displayedSlot) }
+        onDestination = { [weak self] slot in
+            guard let self, let target = session.meetingAIProfiles.first(where: { $0.slot == slot }) else { return }
+            session.updateScheduleDraft(self.draft, slot: displayedSlot)
+            session.selectAIProfile(slot: slot, forSchedule: true)
+            displayedSlot = slot
+            self.restoreDraft(session.scheduleDraft(for: target))
+            self.updateDestinations(session.aiDestinationItems, selected: slot, participant: target.participantName)
+        }
+        updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
+    }
+
+    var draft: Draft {
+        Draft(prompt: editor.string, minutes: interval.selectedTag(), workAllowed: work.state == .on,
+              sendFinal: final.state == .on)
+    }
+
+    private func restoreDraft(_ draft: Draft) {
+        editor.unmarkText()
+        editor.string = draft.prompt
+        editor.setSelectedRange(NSRange(location: 0, length: 0))
+        editor.scrollRangeToVisible(NSRange(location: 0, length: 0))
+        setMinutes(draft.minutes)
+        work.state = draft.workAllowed ? .on : .off
+        final.state = draft.sendFinal ? .on : .off
+        editor.needsDisplay = true
+        update()
+    }
+
+    private func setMinutes(_ minutes: Int) {
+        interval.removeAllItems()
+        for minute in AIScheduleOptions.minuteChoices(including: minutes) {
+            interval.addItem(withTitle: "\(minute)分"); interval.lastItem?.tag = minute
+        }
+        interval.selectItem(withTag: minutes)
+    }
 
     init(prompt: String, minutes: Int, workAllowed: Bool, sendFinal: Bool = true, participant: String = "迅雷") {
         window = AIQuestionWindow(contentRect: NSRect(x: 0, y: 0, width: 504, height: 360), styleMask: [.titled], backing: .buffered, defer: false)
@@ -40,10 +91,10 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         editor.frame = NSRect(x: 0, y: 0, width: 460, height: 100)
         let scroll = NSScrollView(); scroll.documentView = editor; scroll.hasVerticalScroller = true; scroll.borderType = .bezelBorder
         scroll.heightAnchor.constraint(equalToConstant: 100).isActive = true
-        for minute in AIScheduleOptions.minuteChoices(including: minutes) {
-            interval.addItem(withTitle: "\(minute)分"); interval.lastItem?.tag = minute
+        setMinutes(minutes); interval.setAccessibilityLabel("送信間隔")
+        for control in [interval, work, final] {
+            control.target = self; control.action = #selector(draftChanged)
         }
-        interval.selectItem(withTag: minutes); interval.setAccessibilityLabel("送信間隔")
         let frequency = NSStackView(views: [Washi.label("間隔", size: 13), interval]); frequency.spacing = 12
         work.state = workAllowed ? .on : .off; final.state = sendFinal ? .on : .off
         startButton.bezelStyle = .rounded; startButton.target = self; startButton.action = #selector(start)
@@ -92,8 +143,9 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         hint.textColor = warning != nil || invalid != nil ? Washi.gold : Washi.tentative
     }
     func textDidChange(_ notification: Notification) {
-        editor.needsDisplay = true; onDraft?(editor.string); update()
+        editor.needsDisplay = true; draftChanged()
     }
+    @objc private func draftChanged() { onDraft?(draft); update() }
     @objc private func start() {
         guard startButton.isEnabled, !editor.hasMarkedText(),
               let options = try? AIScheduleOptions(prompt: editor.string, interval: Double(interval.selectedTag()) * 60,
@@ -101,5 +153,5 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         startButton.isEnabled = false
         onStart?(options)
     }
-    @objc private func cancel() { close(); onCancel?() }
+    @objc private func cancel() { onDraft?(draft); close(); onCancel?() }
 }

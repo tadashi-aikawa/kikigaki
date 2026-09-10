@@ -96,8 +96,12 @@ final class MeetingSession {
     /// 開いている手動シートが持つ枠。抑制も譲りもこの枠だけに効かせる
     private var manualAISheetSlot: Int?
     private(set) var lastScheduleOptions: AIScheduleOptions?
-    private(set) var scheduleDraft: String?
-    func updateScheduleDraft(_ value: String) { scheduleDraft = value }
+    private var scheduleDrafts: [Int: AIScheduleSheet.Draft] = [:]
+    func updateScheduleDraft(_ value: AIScheduleSheet.Draft, slot: Int) { scheduleDrafts[slot] = value }
+    func scheduleDraft(for profile: ResolvedAIConfig) -> AIScheduleSheet.Draft {
+        scheduleDrafts[profile.slot] ?? .init(prompt: profile.autoPrompt, minutes: profile.autoIntervalMinutes,
+                                             workAllowed: profile.allowWork)
+    }
     private enum AIPhase { case confirmationWait, preparingAndSending }
     private var aiPhases: [Int: AIPhase] = [:]
     private var pendingAIDispatch: [Int: UUID] = [:]
@@ -168,6 +172,7 @@ final class MeetingSession {
     /// 会議をまたいで引き継がないAIの状態。録音開始のたびにここを通す。
     /// 宛先の選択も、紐づけた準備済みの表示も、前の会議のものを残さない。
     private func resetMeetingAIState(_ meetingConfig: ResolvedConfig) {
+        scheduleDrafts = [:]
         meetingAIProfiles = meetingConfig.aiProfiles
         meetingAI = meetingConfig.aiProfiles.first; scheduleAI = meetingConfig.aiProfiles.first
         boundPrepared = [:]
@@ -316,7 +321,7 @@ final class MeetingSession {
         retryDiscard()
         cancelAIPreparation()
         stopAISchedule()
-        aiSchedule = nil; lastScheduleOptions = nil; scheduleDraft = nil; aiScheduleWarning = nil
+        aiSchedule = nil; lastScheduleOptions = nil; aiScheduleWarning = nil
         rangeAutomaticSlot = nil
         let preparation = UUID()
         preparationID = preparation
@@ -1087,6 +1092,10 @@ extension MeetingSession {
         aiSchedule = next
         rangeAutomaticSlot = aiScheduleConfiguration?.slot
         lastScheduleOptions = options; aiScheduleHelper = helper; aiScheduleWarning = nil
+        if let slot = aiScheduleConfiguration?.slot {
+            updateScheduleDraft(.init(prompt: options.prompt, minutes: Int(options.interval / 60),
+                                      workAllowed: options.workAllowed, sendFinal: options.sendFinal), slot: slot)
+        }
         aiScheduleTimer?.invalidate()
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] timer in
             MainActor.assumeIsolated {
