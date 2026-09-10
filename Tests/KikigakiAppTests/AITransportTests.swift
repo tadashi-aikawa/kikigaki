@@ -114,6 +114,7 @@ import TOMLKit
         struct Settings: Decodable { let notify: [String] }
         let settings = try TOMLDecoder().decode(Settings.self, from: launch.arguments[1])
         #expect(settings.notify == ["/bin/echo", "notify", "--provider", "codex", "--session", controller.sessionURL.path, "--token", controller.sessionToken!])
+        #expect(launch.arguments.contains("check_for_update_on_startup=false"))
     }
     @Test @MainActor func Codexの書込み許可先に利用者の設定を引き継いで会議のaiディレクトリを足す() throws {
         // 実測: workspace-write のサンドボックスは ~/Documents の受信箱へ書けず、同梱CLIが unsafe_file で失敗した

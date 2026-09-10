@@ -36,6 +36,8 @@ struct AILaunchConfiguration {
         if config.cli == .codex {
             let encoder = JSONEncoder(); encoder.outputFormatting = [.withoutEscapingSlashes]
             args += ["-c", "notify=" + String(decoding: try encoder.encode(notify), as: UTF8.self)]
+            // 更新プロンプトで会議への依頼が止まらないよう、この起動だけ確認を抑止する。
+            args += ["-c", "check_for_update_on_startup=false"]
             // Codexの workspace-write サンドボックスは cwd と writable_roots 以外へ書けない。同梱CLIが返送を
             // 保存する会議の `ai/` を許可先へ足す(実測: 保存先が ~/Documents だと unsafe_file で返送に失敗した)。
             // `-c` は同じキーを置き換えるため、利用者の設定にある許可先を先に写して失わない。
