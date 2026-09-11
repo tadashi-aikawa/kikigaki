@@ -18,7 +18,9 @@ import KikigakiCore
         content.layoutSubtreeIfNeeded()
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
         let views = descendants(content)
-        let range = try #require(views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "14:40〜" })
+        // 表示は端末のタイムゾーンに従うため、期待値も同じ整形で作る(CIのUTCで "14:40〜" 固定は落ちる)。
+        let expected = state.timeline.clock(at: 0) + "〜"
+        let range = try #require(views.compactMap { $0 as? NSTextField }.first { $0.stringValue == expected })
         let speakers = try #require(views.compactMap { $0 as? SpeakerCountButton }.first)
         #expect(range.font?.pointSize == 11 && speakers.countFont.pointSize == 11)
         #expect(speakers.countText == "3/4")
