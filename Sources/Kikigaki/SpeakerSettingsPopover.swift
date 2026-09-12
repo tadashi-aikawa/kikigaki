@@ -8,7 +8,7 @@ final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
     var onDiarizationChange: ((Bool) -> Void)?
     var onAudioExclusionChange: ((AudioExclusion) -> Void)?
     let exclusionSwitch = NSSwitch()
-    let exclusionSlider = NSSlider(value: -55, minValue: -80, maxValue: -20, target: nil, action: nil)
+    let exclusionSlider = NSSlider(value: -45, minValue: -80, maxValue: -20, target: nil, action: nil)
     private let exclusionValue = Washi.label(size: 11)
     private var pendingExclusion: AudioExclusion?
     private var exclusionTimer: Timer?

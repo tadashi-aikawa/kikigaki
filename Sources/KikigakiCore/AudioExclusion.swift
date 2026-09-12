@@ -4,9 +4,9 @@ import Foundation
 public struct AudioExclusion: Codable, Equatable, Sendable {
     public var enabled: Bool
     public private(set) var thresholdDBFS: Double
-    public init(enabled: Bool = false, thresholdDBFS: Double = -55) {
+    public init(enabled: Bool = false, thresholdDBFS: Double = -45) {
         self.enabled = enabled
-        self.thresholdDBFS = thresholdDBFS.isFinite ? min(-20, max(-80, thresholdDBFS)) : -55
+        self.thresholdDBFS = thresholdDBFS.isFinite ? min(-20, max(-80, thresholdDBFS)) : -45
     }
     private enum CodingKeys: String, CodingKey { case enabled, thresholdDBFS }
     public init(from decoder: Decoder) throws {

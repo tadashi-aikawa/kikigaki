@@ -18,8 +18,8 @@ import Testing
         #expect(AudioExclusion().included(rows, track: track) == rows)
         #expect(AudioExclusion(enabled: true, thresholdDBFS: -70).included(rows, track: track) == rows)
         #expect(on.included(rows, track: nil) == rows)
-        #expect(!on.belowThreshold(-55) && on.belowThreshold(-55.01))
-        #expect(AudioExclusion(thresholdDBFS: .nan).thresholdDBFS == -55)
+        #expect(!on.belowThreshold(-45) && on.belowThreshold(-45.01))
+        #expect(AudioExclusion(thresholdDBFS: .nan).thresholdDBFS == -45)
     }
     @Test func 診断OFFで本文から除外し元発話と設定を保存して復元する() throws {
         let (track, rows) = try fixture()
