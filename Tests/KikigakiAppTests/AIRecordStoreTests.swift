@@ -5,6 +5,27 @@ import KikigakiAIIO
 @testable import Kikigaki
 
 @Suite @MainActor struct AIRecordStoreTests {
+    @Test func 音量だけの保存失敗をポーリングで繰り返さず明示再試行できる() throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let registry = try testDirectory(); defer { try? FileManager.default.removeItem(at: registry) }
+        let store = AIRecordStore(directory: registry, makeHerdr: { AIHerdr(run: { _, _ in throw AIHerdrError.notReady }) })
+        let id = UUID(), markdown = root.appendingPathComponent("meeting.md")
+        let record = try store.begin(meetingID: id, markdownURL: markdown, config: .init(config: AIConfig(), home: root))
+        var meter = AudioLevelMeter(); meter.append(Array(repeating: 0.1, count: 1600))
+        var archive = MeetingArchive(original: .init(startedAt: Date(), duration: 0.1, utterances: [], names: SpeakerNames(), audioLevels: meter.track()), processed: nil, candidateCount: 0, markdownURL: markdown)
+        let levels = MeetingFiles.levelsURL(for: markdown)
+        try Data("別のファイル".utf8).write(to: levels)
+        let saved = store.save(&archive, for: id)
+        #expect(saved.succeeded && !saved.levelsSucceeded && record.saveWarning != nil)
+        try "再保存が走らない目印".write(to: markdown, atomically: true, encoding: .utf8)
+        record.controller.onChange?()
+        #expect(try String(contentsOf: markdown, encoding: .utf8) == "再保存が走らない目印")
+        #expect(record.saveWarning != nil)
+        try FileManager.default.removeItem(at: levels)
+        store.retrySaves()
+        #expect(record.saveResult?.levelsSucceeded == true && record.saveWarning == nil)
+        #expect(try String(contentsOf: markdown, encoding: .utf8).contains("# KIKIGAKI"))
+    }
     @Test func archive保存失敗ではMarkdownを変えず回復後に再保存する() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let registry = try testDirectory(); defer { try? FileManager.default.removeItem(at: registry) }

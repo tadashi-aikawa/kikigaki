@@ -10,7 +10,7 @@ public enum MeetingFiles {
         while true {
             let stem = base + (suffix == 1 ? "" : "_\(suffix)")
             let url = directory.appendingPathComponent(stem + ".md")
-            if [url, rawURL(for: url), wavURL(for: url)].contains(where: { FileManager.default.fileExists(atPath: $0.path) }) {
+            if [url, rawURL(for: url), wavURL(for: url), levelsURL(for: url)].contains(where: { FileManager.default.fileExists(atPath: $0.path) }) {
                 suffix += 1
                 continue
             }
@@ -30,6 +30,10 @@ public enum MeetingFiles {
 
     public static func wavURL(for markdownURL: URL) -> URL {
         markdownURL.deletingPathExtension().appendingPathExtension("wav")
+    }
+
+    public static func levelsURL(for markdownURL: URL) -> URL {
+        markdownURL.deletingPathExtension().appendingPathExtension("levels.json")
     }
 
     /// `2026-09-05_1240` の形。日付順に並び、Obsidian などでノート名としてそのまま使える文字だけにする

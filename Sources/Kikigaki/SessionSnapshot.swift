@@ -9,6 +9,7 @@ struct SessionSnapshot {
     var aiRecoveryWarning: String?
     var state: RecordingState = .idle
     var utterances: [Utterance] = []
+    var audioLevels: [AudioLevelAssessment?] = []
     var tentativeText: String?
     var pendingSpeakerRows: Set<Int> = []
     var timeline = MeetingTimeline(startedAt: Date())

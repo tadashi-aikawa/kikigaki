@@ -98,6 +98,7 @@ import KikigakiCore
         let anchor = transcript.anchor()
         let meeting = record.archive?.original
         let utterances = record.saveResult?.utterances ?? meeting?.utterances ?? []
+        let audioLevels = meeting?.audioLevels?.assessments(for: utterances) ?? []
         let timeline = meeting?.timeline ?? MeetingTimeline(startedAt: Date(timeIntervalSince1970: 0))
         let items = AITimeline.items(conversation: state.conversation, utterances: utterances,
                                     timeline: timeline,
@@ -138,6 +139,7 @@ import KikigakiCore
             let row = speechRows[index] ?? TranscriptRow()
             speechRows[index] = row
             row.update(utterance, names: meeting?.names ?? SpeakerNames(), timeline: timeline)
+            row.updateAudioLevel(audioLevels.indices.contains(index) ? audioLevels[index] : nil)
             rows.append(row)
             rows.append(contentsOf: attached[index, default: []])
             utteranceRows.append(rows.last!)

@@ -41,6 +41,8 @@ outputDir = "~/Documents/KIKIGAKI"
 saveRecording = false
 # 実験機能: 停止時に短い繰り返し相槌の候補を省く。原文を .raw.md にも保存する。既定: false
 dropRepeatedBackchannels = false
+# 実験機能: 発話ごとの音量と小音量候補を表示・保存する。本文からは除外しない。既定: false
+measureAudioLevels = false
 
 # グローバルショートカット。既定は ctrl+alt+cmd+K (開始/停止) と ctrl+alt+cmd+P (一時停止/再開)
 [hotkeys.toggleRecording]
@@ -149,6 +151,8 @@ Codexは通常起動・準備済み起動とも、議事録を書けるよう保
 1回だけの相槌や同じ話者に判定された繰り返しは対象外です。実際の発話者を保証する機能ではなく、誤った省略もあり得ます。詳細は [繰り返し相槌の仕様と検証](docs/repeated-backchannels.md) を参照してください。設定変更は次の録音から適用します。
 
 ## AIへの受け渡し
+
+`measureAudioLevels = true` は次の会議から音量の計測を有効にします。行にdBFSと小音量候補を表示し、停止時に `.levels.json` とMarkdown末尾の計測表を保存します。WAV保存とは独立し、本文・コピー・AI送信には全発話を含めます。詳細は [小音量発話の計測](docs/audio-levels.md) を参照してください。
 
 会議中・停止後の「会話をコピー」は、固定したローカル会話ファイルへの参照と読む範囲をコピーします。AI側には `skills/kikigaki` を導入します。続きのコピー、訂正、再コピーの契約は [AIへの受け渡し](docs/ai-handoff.md) を参照してください。話者名はウィンドウ上部の「話者名…」でまとめて変更できます。
 

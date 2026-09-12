@@ -36,17 +36,20 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     public var saveRecording: Bool?
     /// 停止時に短い繰り返し相槌を省き、省略前のMarkdownも残す実験機能
     public var dropRepeatedBackchannels: Bool?
+    /// 小音量候補の計測・表示だけを行う。本文からの除外はしない。
+    public var measureAudioLevels: Bool?
     public var hotkeys: Hotkeys?
     public var speakers: [Speaker]?
     /// 単数の `[ai]` と配列の `[[ai]]` の両方を読む
     public var ai: AIProfileList?
 
     public init(outputDir: String? = nil, saveRecording: Bool? = nil, hotkeys: Hotkeys? = nil, dropRepeatedBackchannels: Bool? = nil,
-                speakers: [Speaker]? = nil, ai: AIProfileList? = nil) {
+                speakers: [Speaker]? = nil, ai: AIProfileList? = nil, measureAudioLevels: Bool? = nil) {
         self.outputDir = outputDir
         self.saveRecording = saveRecording
         self.hotkeys = hotkeys
         self.dropRepeatedBackchannels = dropRepeatedBackchannels
+        self.measureAudioLevels = measureAudioLevels
         self.speakers = speakers
         self.ai = ai
     }
@@ -65,6 +68,7 @@ public struct ResolvedConfig: Equatable, Sendable {
     /// 別エンジンでの再処理のとき(タダシの決定)
     public var saveRecording: Bool
     public var dropRepeatedBackchannels: Bool
+    public var measureAudioLevels: Bool
     public var toggleRecording: KikigakiConfig.Hotkey
     public var togglePause: KikigakiConfig.Hotkey
     public var speakers: [KikigakiConfig.Speaker]
@@ -86,6 +90,7 @@ public struct ResolvedConfig: Equatable, Sendable {
         outputDir = Self.expand(config.outputDir ?? Self.defaultOutputDir, home: home)
         saveRecording = config.saveRecording ?? false
         dropRepeatedBackchannels = config.dropRepeatedBackchannels ?? false
+        measureAudioLevels = config.measureAudioLevels ?? false
         toggleRecording = config.hotkeys?.toggleRecording ?? Self.defaultToggleRecording
         togglePause = config.hotkeys?.togglePause ?? Self.defaultTogglePause
         speakers = (config.speakers ?? []).map { speaker in

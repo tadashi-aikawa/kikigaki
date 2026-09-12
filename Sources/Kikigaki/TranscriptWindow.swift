@@ -283,6 +283,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             if rows[id] == nil { inserted.append(row) }
             if row.update(utterance, names: snapshot.names, timeline: snapshot.timeline,
                           speakerPending: snapshot.pendingSpeakerRows.contains(index)) { changed.append(row) }
+            row.updateAudioLevel(snapshot.audioLevels.indices.contains(index) ? snapshot.audioLevels[index] : nil)
             row.updateAvatar(speakers: snapshot.speakers, store: avatars, editable: snapshot.canShare)
             row.onRename = { [weak self] slot, view in self?.showRename(slot: slot, relativeTo: view) }
             next[id] = row

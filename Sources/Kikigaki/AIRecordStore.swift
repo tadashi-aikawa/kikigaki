@@ -264,9 +264,11 @@ final class AIRecordStore {
             let result = archive.save()
             record.archive = archive; record.saveResult = result
             try files.write(AIJSON.encode(archive), to: path)
-            record.hasUnpersistedChanges = !result.succeeded || !result.rawSucceeded
+            record.hasUnpersistedChanges = !result.succeeded || !result.rawSucceeded || !result.levelsSucceeded
             record.saveWarning = record.hasUnpersistedChanges ? result.message : nil
-            if !record.hasUnpersistedChanges { record.savedConversation = record.controller.conversation }
+            // 音量だけの失敗で、会話が変わらないポーリングのたびに全文を保存し直さない。
+            // 警告と明示的な再試行対象は上のフラグで維持する。
+            if result.succeeded && result.rawSucceeded { record.savedConversation = record.controller.conversation }
         } catch { record.hasUnpersistedChanges = true; record.saveResult = nil; record.saveWarning = "会議データの保存に失敗。返事は受信箱に保持します" }
     }
     private func persistRegistry() throws {

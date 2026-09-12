@@ -81,6 +81,8 @@ final class TranscriptRow: NSView, DocumentRow {
     private let nameLabel = Washi.label(size: 12, weight: .semibold)
     private let timeLabel = Washi.label(color: Washi.muted)
     private let hint = Washi.label("コピーには含めません", size: 11, color: Washi.muted)
+    private let levelLabel = Washi.label(size: 11, color: Washi.muted)
+    private var audioLevel: AudioLevelAssessment?
     private let body = NSTextField(wrappingLabelWithString: "")
     private let typedBody = TypedEntryBody()
     private let speakerButton = SpeakerButton()
@@ -123,8 +125,10 @@ final class TranscriptRow: NSView, DocumentRow {
         if tentative { nameLabel.font = .systemFont(ofSize: 12) }
         hint.isHidden = !tentative
         hint.alignment = .right
+        levelLabel.isHidden = true
+        levelLabel.lineBreakMode = .byTruncatingTail
         typedBody.isHidden = true
-        for view in [avatar, nameLabel, timeLabel, hint, body, typedBody] { addSubview(view) }
+        for view in [avatar, nameLabel, timeLabel, hint, levelLabel, body, typedBody] { addSubview(view) }
         speakerButton.isBordered = false
         speakerButton.title = ""
         speakerButton.target = self
@@ -185,6 +189,16 @@ final class TranscriptRow: NSView, DocumentRow {
         timeLabel.stringValue = ""
         setBody(text)
     }
+    func updateAudioLevel(_ value: AudioLevelAssessment?) {
+        guard audioLevel != value else { return }
+        audioLevel = value
+        levelLabel.isHidden = value == nil
+        levelLabel.stringValue = value?.label ?? ""
+        levelLabel.toolTip = value?.detail
+        levelLabel.textColor = value?.isCandidate == true ? Washi.goldInk : Washi.muted
+        measuredWidth = -1
+        needsLayout = true
+    }
     func markSearch(nameRanges: [NSRange], textRanges: [NSRange], currentName: NSRange?, currentText: NSRange?) {
         let style = SearchStyle(name: nameLabel.stringValue, text: utterance?.text ?? body.stringValue, nameRanges: nameRanges,
                                 textRanges: textRanges, currentName: currentName, currentText: currentText)
@@ -231,7 +245,7 @@ final class TranscriptRow: NSView, DocumentRow {
             // NSTextFieldの内側余白まで含めて測る。文字列だけのboundingRectでは
             // 折り返し境界の数pt差で最終行が切れるため、描画するセル自身に問い合わせる。
             let size = body.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: max(44, width - 74), height: .greatestFiniteMagnitude)) ?? .zero
-            measuredHeight = max(20, typedBody.isHidden ? ceil(size.height) : typedBody.height(for: max(44, width - 74))) + 36
+            measuredHeight = max(20, typedBody.isHidden ? ceil(size.height) : typedBody.height(for: max(44, width - 74))) + 36 + (audioLevel == nil ? 0 : 20)
             measuredWidth = width
         }
         return measuredHeight
@@ -248,8 +262,10 @@ final class TranscriptRow: NSView, DocumentRow {
         speakerButton.frame = NSRect(x: 18, y: 5, width: nameWidth + 40, height: 29)
         timeLabel.frame = NSRect(x: 54 + nameWidth + 12, y: 8, width: 62, height: 18)
         hint.frame = NSRect(x: bounds.width - 150, y: 8, width: 130, height: 18)
-        body.frame = NSRect(x: 54, y: 31, width: max(44, bounds.width - 74), height: max(20, bounds.height - 36))
+        let levelHeight: CGFloat = audioLevel == nil ? 0 : 20
+        body.frame = NSRect(x: 54, y: 31, width: max(44, bounds.width - 74), height: max(20, bounds.height - 36 - levelHeight))
         typedBody.frame = body.frame
+        levelLabel.frame = NSRect(x: 54, y: bounds.height - 23, width: max(44, bounds.width - 74), height: 18)
     }
     func appear(animated: Bool) {
         guard animated else { stopAnimations(); return }

@@ -11,16 +11,18 @@ public enum MeetingMarkdown {
         public var names: SpeakerNames
         public var pauses: [MeetingTimeline.Pause]
         public var ai: AIConversation?
+        public var audioLevels: AudioLevelTrack?
         public var timeline: MeetingTimeline { MeetingTimeline(startedAt: startedAt, pauses: pauses) }
 
         public init(startedAt: Date, duration: Double, utterances: [Utterance], names: SpeakerNames,
-                    pauses: [MeetingTimeline.Pause] = [], ai: AIConversation? = nil) {
+                    pauses: [MeetingTimeline.Pause] = [], ai: AIConversation? = nil, audioLevels: AudioLevelTrack? = nil) {
             self.startedAt = startedAt
             self.duration = duration
             self.utterances = utterances
             self.names = names
             self.pauses = pauses
             self.ai = ai
+            self.audioLevels = audioLevels
         }
     }
 
@@ -44,6 +46,16 @@ public enum MeetingMarkdown {
         if let ai = meeting.ai, !ai.questions.isEmpty {
             lines.append("")
             lines.append(AIMarkdown.section(ai, timeZone: timeZone))
+        }
+        if let track = meeting.audioLevels {
+            lines += ["", "## 音量の計測", "", "観察用の仮判定です。小音量候補も本文・コピー・AI送信から除外していません。", "",
+                      "| 時刻 | 話者 | 音量 |", "|---|---|---|"]
+            for (utterance, assessment) in zip(meeting.utterances, track.assessments(for: meeting.utterances)) {
+                guard let assessment else { continue }
+                let name = meeting.names.displayName(for: utterance).replacingOccurrences(of: "|", with: "&#124;")
+                let clock = TranscriptRenderer.clock(for: utterance, timeline: meeting.timeline, timeZone: timeZone)
+                lines.append("| \(clock) | \(name) | \(assessment.label) |")
+            }
         }
         return lines.joined(separator: "\n") + "\n"
     }

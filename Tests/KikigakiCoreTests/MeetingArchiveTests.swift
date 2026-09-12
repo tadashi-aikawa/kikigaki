@@ -140,7 +140,7 @@ private func temporaryDirectory() throws -> URL {
         #expect(MeetingFiles.wavURL(for: url).path == dir.appendingPathComponent("2026-09-05_1240.wav").path)
     }
 
-    @Test(arguments: ["md", "raw.md", "wav"])
+    @Test(arguments: ["md", "raw.md", "wav", "levels.json"])
     func どの保存物が存在していてもその基底名を再利用しない(_ ext: String) throws {
         let dir = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }

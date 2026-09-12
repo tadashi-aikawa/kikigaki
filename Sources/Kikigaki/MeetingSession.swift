@@ -58,6 +58,7 @@ final class MeetingSession {
     /// 停止後に話者名を付け直して保存し直すために持つ
     private var archive: MeetingArchive?
     private var dropRepeatedBackchannels = false
+    private var audioLevelMeter: AudioLevelMeter?
     private var speakerMapping = SpeakerMapping()
     private var liveSource = SpeakerTranscript()
     private var lastUndiarizedDraw = -Double.infinity
@@ -385,6 +386,7 @@ final class MeetingSession {
         resetMeetingAIState(meetingConfig)
         consumedAudioTime = 0
         dropRepeatedBackchannels = diarizationEnabled && meetingConfig.dropRepeatedBackchannels
+        audioLevelMeter = meetingConfig.measureAudioLevels ? AudioLevelMeter() : nil
         snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers, message: "エンジンを準備中...")
         snapshot.names.diarizationEnabled = diarizationEnabled
         speakerMapping = SpeakerMapping()
@@ -519,7 +521,8 @@ final class MeetingSession {
         let merged = TranscriptEntries.merge(voice: final.utterances, typed: typedEntries, timeline: snapshot.timeline).utterances
         let processed = final.processed.map { TranscriptEntries.merge(voice: $0, typed: typedEntries, timeline: snapshot.timeline).utterances }
         let meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: duration, utterances: merged,
-                                              names: snapshot.names, pauses: snapshot.timeline.pauses)
+                                              names: snapshot.names, pauses: snapshot.timeline.pauses,
+                                              audioLevels: audioLevelMeter?.track(includingPartial: true))
         if let url = snapshot.markdownURL {
             archive = MeetingArchive(original: meeting, processed: processed,
                                      candidateCount: final.candidates.count, markdownURL: url)
@@ -724,6 +727,8 @@ final class MeetingSession {
 
     private func emit() {
         snapshot.nextDiarizationEnabled = nextDiarizationEnabled
+        let track = archive?.original.audioLevels ?? audioLevelMeter?.track()
+        snapshot.audioLevels = track?.assessments(for: snapshot.utterances) ?? []
         snapshot.timeline = pause.timeline
         snapshot.handoffPreview = handoff.preview(utterances: snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
         snapshot.hasCopied = handoff.lastCopy != nil
@@ -1102,7 +1107,12 @@ final class MeetingSession {
                 do { try diarizer?.process(chunk) } catch { log("話者判別に失敗: \(error)") }
                 do { try transcriber.feed(chunk) } catch { log("文字起こしへの入力に失敗: \(error)") }
                 let consumed = Double(result.fedSamples) / 16000
-                await MainActor.run { self.consumedAudioTime = consumed }
+                // 既存の供給後の更新へ計測を併せる。OFF時に供給前のMainActor待ちを増やさない。
+                await MainActor.run {
+                    guard self.preparationID == generation else { return }
+                    self.audioLevelMeter?.append(chunk)
+                    self.consumedAudioTime = consumed
+                }
 
                 guard Date().timeIntervalSince(lastDraw) >= 0.5 else { continue }
                 lastDraw = Date()
