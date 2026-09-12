@@ -1,0 +1,7 @@
+Neovim mark: https://github.com/neovim/neovim.github.io/blob/master/static/logos/neovim-mark.svg
+Copyright Neovim contributors. CC BY 3.0: https://creativecommons.org/licenses/by/3.0/
+Unmodified official logo.
+
+Obsidian logo: https://obsidian.md/images/obsidian-logo-gradient.svg
+Copyright Dynalist Inc. Used to identify the destination application.
+Unmodified official logo.

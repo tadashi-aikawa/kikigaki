@@ -88,6 +88,21 @@ import Testing
         preview.update(path: file.path, source: .human, active: true)
         try await wait { preview.document.renderedText.contains("体験会の準備会議") }
         let web = preview.document.webView
+        // チェックの有無で、本文に対する丸の縦位置が変わらないこと。
+        let checkboxOffsets = try await web.evaluateJavaScript("[...document.querySelectorAll('.task-list-item-checkbox')].map(box => { const text = document.createRange(); text.selectNodeContents(box.nextSibling); return box.getBoundingClientRect().top - text.getBoundingClientRect().top; })") as? [Double]
+        let offsets = try #require(checkboxOffsets)
+        #expect(offsets.count == 2)
+        #expect(abs(offsets[0] - offsets[1]) < 0.5)
+        #expect(try await web.evaluateJavaScript("getComputedStyle(document.body).fontSize") as? String == "15px")
+        #expect(try await web.evaluateJavaScript("!document.getElementById('toc').hidden && !document.getElementById('toc').open") as? Bool == true)
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('#toc nav a').length") as? Int == 3)
+        window.setContentSize(NSSize(width: 1200, height: 400)); preview.layoutSubtreeIfNeeded()
+        try await wait { try await web.evaluateJavaScript("innerHeight < 500") as? Bool == true }
+        _ = try await web.evaluateJavaScript("document.querySelector('#toc summary').click(); document.querySelectorAll('#toc nav a')[2].click()")
+        #expect(try await web.evaluateJavaScript("!document.getElementById('toc').open && document.querySelector('#toc a[aria-current]').textContent === '当日の流れ'") as? Bool == true)
+        _ = try await web.evaluateJavaScript("document.querySelector('#toc summary').click(); document.querySelector('main').dispatchEvent(new PointerEvent('pointerdown', {bubbles:true})); scrollTo(0,0)")
+        #expect(try await web.evaluateJavaScript("!document.getElementById('toc').open") as? Bool == true)
+        window.setContentSize(NSSize(width: 1200, height: 1500)); preview.layoutSubtreeIfNeeded()
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.diagram svg').length") as? Int == 1)
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.katex').length") as? Int == 1)
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.callout').length") as? Int == 1)
@@ -132,6 +147,13 @@ import Testing
         try await Task.sleep(for: .milliseconds(150))
         let after = try await web.evaluateJavaScript("scrollY") as? Double
         #expect(abs(try #require(before) - #require(after)) < 2)
+        preview.document.render(String(repeating: "# 見出し\n\n", count: 1000), reset: true)
+        try await wait { try await web.evaluateJavaScript("document.querySelectorAll('main h1').length === 1000") as? Bool == true }
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('#toc a').length") as? Int == 300)
+        #expect(try await web.evaluateJavaScript("document.querySelector('#toc nav').textContent.includes('先頭300見出し')") as? Bool == true)
+        preview.document.render("見出しなし", reset: true)
+        try await wait { preview.document.renderedText == "見出しなし" }
+        #expect(try await web.evaluateJavaScript("document.getElementById('toc').hidden") as? Bool == true)
     }
     @Test func 画像取得は通常ファイルと上限を守り非画像やFIFOを拒否する() throws {
         let preview = MinutesPreviewView(frame: .zero)

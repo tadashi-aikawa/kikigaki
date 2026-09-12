@@ -2,6 +2,58 @@ import { createRenderer, withoutFrontmatter } from './renderer.js';
 import DOMPurify from 'dompurify';
 import mermaid from 'mermaid';
 const md = createRenderer(), root = document.getElementById('minutes');
+const toc = document.getElementById('toc'), tocNav = toc.querySelector('nav');
+let headings = [], tocLinks = [], activeTOCLink = null, tocFrame = 0;
+function updateTOCPosition() {
+  tocFrame = 0;
+  if (!toc.open) return;
+  let low = 0, high = headings.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (headings[middle].getBoundingClientRect().top <= 80) low = middle + 1;
+    else high = middle;
+  }
+  const current = tocLinks[low - 1] || null;
+  if (current === activeTOCLink) return;
+  activeTOCLink?.removeAttribute('aria-current');
+  current?.setAttribute('aria-current', 'location'); activeTOCLink = current;
+}
+function rebuildTOC(reset) {
+  const allHeadings = root.querySelectorAll('h1,h2,h3,h4,h5,h6');
+  headings = Array.from(allHeadings).slice(0, 300);
+  toc.hidden = headings.length === 0;
+  if (reset || toc.hidden) toc.open = false;
+  activeTOCLink = null;
+  const base = headings.reduce((level, heading) => Math.min(level, Number(heading.tagName.slice(1))), 6);
+  tocLinks = headings.map(heading => {
+    const link = document.createElement('a');
+    link.href = '#' + encodeURIComponent(heading.id); link.dataset.target = heading.id;
+    const label = heading.cloneNode(true);
+    label.querySelectorAll('.katex-mathml').forEach(node => node.remove());
+    link.textContent = label.textContent;
+    link.style.setProperty('--depth', Number(heading.tagName.slice(1)) - base);
+    return link;
+  });
+  tocNav.replaceChildren(...tocLinks);
+  if (allHeadings.length > headings.length) {
+    const note = document.createElement('p'); note.textContent = '目次は先頭300見出しまで表示しています';
+    tocNav.append(note);
+  }
+  updateTOCPosition();
+}
+addEventListener('scroll', () => { if (!tocFrame) tocFrame = requestAnimationFrame(updateTOCPosition); }, { passive:true });
+addEventListener('resize', () => { if (!tocFrame) tocFrame = requestAnimationFrame(updateTOCPosition); });
+addEventListener('pointerdown', event => { if (!toc.contains(event.target)) toc.open = false; });
+toc.addEventListener('pointerdown', () => report({ kind: 'focus' }));
+toc.addEventListener('toggle', () => { if (toc.open) updateTOCPosition(); });
+toc.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && toc.open) { event.preventDefault(); toc.open = false; toc.querySelector('summary').focus(); }
+});
+tocNav.addEventListener('click', event => {
+  const link = event.target.closest('a'); if (!link) return;
+  event.preventDefault(); document.getElementById(link.dataset.target)?.scrollIntoView({ block:'start' });
+  updateTOCPosition(); toc.open = false; toc.querySelector('summary').focus({ preventScroll:true });
+});
 mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'base',
   themeVariables: { primaryColor: '#ede0cd', primaryTextColor: '#221f1c', primaryBorderColor: '#6b6157', lineColor: '#6b6157', fontFamily: '-apple-system, sans-serif' },
   htmlLabels: false, flowchart: { htmlLabels: false }, maxTextSize: 100000, maxEdges: 1000,
@@ -100,6 +152,7 @@ window.minutes = {
     const saved = reset ? null : anchor(), selection = reset ? null : selectionOffsets();
     source = text; context = newContext;
     root.innerHTML = safeHTML(md.render(withoutFrontmatter(text), { context }));
+    rebuildTOC(reset);
     for (const pre of [...root.querySelectorAll('.svg-source')]) {
       const clean = DOMPurify.sanitize(pre.textContent, { USE_PROFILES: { svg: true, svgFilters: true },
         FORBID_TAGS: ['foreignObject', 'script', 'image', 'use', 'a', 'style', 'animate', 'set'],
@@ -141,11 +194,12 @@ window.minutes = {
     }
     if (current !== generation) return;
     if (restore) { restoreAnchor(saved); restoreSelection(selection); }
+    updateTOCPosition();
     refreshSearch();
     report({ kind: 'rendered', ticket, text: root.innerText });
     return true;
   },
-  clear() { generation++; updateListeners.abort(); source = ''; root.replaceChildren(); query = ''; refreshSearch(); scrollTo(0, 0); },
+  clear() { generation++; updateListeners.abort(); source = ''; root.replaceChildren(); rebuildTOC(true); query = ''; refreshSearch(); scrollTo(0, 0); },
   invalidate() { generation++; updateListeners.abort(); },
   search(value, direction = 0, reveal = true) {
     if (query !== value) { query = value; hit = 0; return refreshSearch(reveal); }

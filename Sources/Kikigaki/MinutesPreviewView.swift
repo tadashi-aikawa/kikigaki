@@ -30,8 +30,8 @@ private final class MinutesPathField: NSTextField {
     let searchField = NSSearchField()
     private let searchBar = NSStackView()
     private let searchCount = Washi.label("", size: 11)
-    private let neovimButton = HoverButton(title: "Neovimで開く", target: nil, action: nil)
-    private let obsidianButton = HoverButton(title: "Obsidianで開く", target: nil, action: nil)
+    private let neovimButton = HoverButton(title: "", target: nil, action: nil)
+    private let obsidianButton = HoverButton(title: "", target: nil, action: nil)
     private var editorTask: Task<Void, Never>?
     private var searchGeneration = 0
     private var resetNextRender = true
@@ -71,19 +71,26 @@ private final class MinutesPathField: NSTextField {
         close.toolTip = "議事録を隠す"; close.setAccessibilityLabel("議事録を隠す")
         neovimButton.target = self; neovimButton.action = #selector(openNeovim)
         obsidianButton.target = self; obsidianButton.action = #selector(openObsidian)
-        neovimButton.toolTip = "議事録をherdrの新しいタブで開く"
+        for (button, asset, label) in [(neovimButton, "neovim", "Neovimで開く"), (obsidianButton, "obsidian", "Obsidianで開く")] {
+            button.image = NSImage(contentsOf: MinutesResourceHandler.assets.appendingPathComponent(asset + ".svg"))
+            button.image?.size = NSSize(width: 18, height: 18)
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
+            button.setAccessibilityLabel(label)
+            button.widthAnchor.constraint(equalToConstant: 28).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        }
+        neovimButton.toolTip = "Neovimで開く — herdrの新しいタブ"
         obsidianButton.toolTip = "議事録をObsidianで開く"
         neovimButton.isEnabled = false; obsidianButton.isEnabled = false
-        let actions = row([neovimButton, obsidianButton], spacing: 8)
-        let pathRow = row([pathField, choose, close], spacing: 8)
-        let top = column([pathRow, actions], spacing: 6, inset: 0)
+        let top = row([pathField, neovimButton, obsidianButton, choose, close], spacing: 8)
         headerBar.addSubview(top); top.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            headerBar.heightAnchor.constraint(equalToConstant: 88),
+            headerBar.heightAnchor.constraint(equalToConstant: 56),
             top.leadingAnchor.constraint(equalTo: headerBar.leadingAnchor, constant: 24),
             top.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor, constant: -24),
             top.topAnchor.constraint(equalTo: headerBar.topAnchor, constant: 12),
-            top.heightAnchor.constraint(equalToConstant: 62),
+            top.heightAnchor.constraint(equalToConstant: 32),
             pathField.heightAnchor.constraint(equalToConstant: 24)
         ])
         notice.font = .systemFont(ofSize: 11); notice.textColor = Washi.muted; notice.isHidden = true

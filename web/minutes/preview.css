@@ -1,7 +1,7 @@
 :root { color-scheme:light; --paper:#f5ead9; --shade:#ede0cd; --ink:#221f1c; --muted:#6b6157; --rule:#d5c6b1; --accent:#5b3e7a; }
 * { box-sizing:border-box; }
 html { background:var(--paper); color:var(--ink); overflow-wrap:anywhere; }
-body { margin:0; padding:24px; font:14px/1.8 -apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif; }
+body { margin:0; padding:24px; font:15px/1.8 -apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif; }
 main { min-width:0; width:100%; }
 p { margin:10px 0; }
 /* parliamentの段階差と上を厚くする余白を、和紙の配色で表す。本文幅に上限を置かない。 */
@@ -13,7 +13,10 @@ h4 { font-size:15px; } h5,h6 { font-size:14px; color:var(--muted); }
 main > :first-child { margin-top:0; }
 a { color:var(--accent); text-underline-offset:3px; }
 ul,ol { padding-left:26px; margin:8px 0; } li > ul,li > ol { margin:4px 0; }
-li > p { margin:4px 0; } .task-list-item { list-style:none; } .task-list-item-checkbox { margin-left:-20px; margin-right:6px; accent-color:var(--accent); }
+li > p { margin:4px 0; } .task-list-item { list-style:none; }
+.task-list-item-checkbox { appearance:none; display:inline-block; position:relative; width:18px; height:18px; margin:0 8px 0 -26px; border:2px solid var(--accent); border-radius:50%; background:var(--paper); vertical-align:-3px; opacity:1; }
+.task-list-item-checkbox:checked { background:var(--accent); }
+.task-list-item-checkbox:checked::after { content:""; position:absolute; left:3px; top:4px; width:8px; height:4px; border-left:2px solid white; border-bottom:2px solid white; transform:rotate(-45deg); }
 blockquote { margin:14px 0; border-left:3px solid var(--rule); padding:2px 14px; color:var(--muted); }
 .callout { border:1px solid var(--rule); border-left:4px solid var(--accent); border-radius:6px; padding:10px 14px; margin:14px 0; }
 .callout-title { color:var(--accent); font-weight:650; margin-bottom:6px; }
@@ -35,3 +38,11 @@ mark { background:#e09c3c55; color:inherit; } mark.current { background:#e09c3cb
 ::selection { background:#e09c3c70; }
 ::highlight(matches) { background:#e09c3c55; color:inherit; }
 ::highlight(current) { background:#e09c3cb0; color:inherit; }
+#toc { position:fixed; top:12px; right:16px; z-index:10; max-width:calc(100vw - 32px); border:1px solid var(--rule); border-radius:8px; background:#fffaf2; box-shadow:0 3px 12px #221f1c18; font-size:13px; line-height:1.5; }
+#toc[hidden] { display:none; }
+#toc summary { padding:8px 12px; cursor:pointer; color:var(--accent); font-weight:600; user-select:none; }
+#toc[open] { width:240px; }
+#toc nav { max-height:40vh; overflow:auto; padding:0 6px 6px; }
+#toc a { display:block; padding:6px 8px; padding-left:calc(8px + var(--depth) * 12px); border-radius:4px; text-decoration:none; overflow-wrap:anywhere; }
+#toc a:hover,#toc a:focus-visible { background:var(--shade); }
+#toc a[aria-current] { background:#5b3e7a15; font-weight:650; }
