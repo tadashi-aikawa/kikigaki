@@ -23,7 +23,11 @@ import KikigakiCore
         controller.onSelectMinutes = { try store.select($0) }
         do { try store.select(path) }
         catch { FileHandle.standardError.write(Data("preview: \(error)\n".utf8)) }
-        controller.apply(SessionSnapshot())
+        var snapshot = SessionSnapshot()
+        if CommandLine.arguments.contains("--preview-warning") {
+            snapshot.aiRecoveryWarning = "検証用の警告: AIセッションを復元できませんでした。接続先を確認してください。"
+        }
+        controller.apply(snapshot)
         controller.show()
         if !controller.minutesSplit.isPreviewVisible { controller.toggleMinutes() }
         controller.window?.setContentSize(NSSize(width: 1500, height: 900))

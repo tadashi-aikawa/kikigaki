@@ -4,6 +4,27 @@ import KikigakiCore
 @testable import Kikigaki
 
 @Suite @MainActor struct AICompactFooterTests {
+    @Test func 会話行のない警告はクリックで全文を表示する() async throws {
+        _ = NSApplication.shared
+        let footer = AICompactFooter(visibility: { false })
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = footer; window.orderFront(nil)
+        defer {
+            if let sheet = window.attachedSheet { window.endSheet(sheet); sheet.orderOut(nil) }
+            window.orderOut(nil)
+        }
+        var state = SessionSnapshot()
+        state.aiRecoveryWarning = "接続先を確認してください"
+        footer.update(state, reduceMotion: true)
+        footer.update(state, reduceMotion: true)
+        #expect(footer.warning.toolTip == state.aiRecoveryWarning)
+        footer.warning.performClick(nil)
+        let sheet = try #require(window.attachedSheet)
+        func text(_ view: NSView) -> [String] {
+            (view as? NSTextField).map { [$0.stringValue] } ?? view.subviews.flatMap(text)
+        }
+        #expect(text(try #require(sheet.contentView)).contains("接続先を確認してください"))
+    }
     @Test func コピー成功通知が消えたら元のエラー色へ戻る() async throws {
         _ = NSApplication.shared
         let window = TranscriptWindowController()

@@ -95,9 +95,10 @@ final class AIRobotButton: AIFooterButton {
             !schedule.canCountDown || schedule.nextFire == nil ? "—" : countdown
         eyeOffset = (waiting || preparing) && animate ? (Int(now.timeIntervalSince1970) % 2 == 0 ? -1.5 : 1.5) : 0
         let status = waiting ? "AI実行中・返事待ち" : preparing ? "AI送信の準備中" : !schedule.active ? "クリックで自動実行・手動実行を選択" :
-            schedule.skipReason ?? (schedule.nextFire == nil ? "最終送信を待っています" : "次 " + countdown)
-        toolTip = isEnabled ? [status, schedule.active ? schedule.destination.map { $0 + "へ" } : nil,
+            schedule.skipReason ?? (schedule.nextFire == nil ? "最終送信を待っています" : "自動実行を待っています")
+        let tooltip = isEnabled ? [status, schedule.active ? schedule.destination.map { $0 + "へ" } : nil,
             waiting ? schedule.skipReason : nil].compactMap { $0 }.joined(separator: " · ") : "AI連携が設定されていません"
+        if toolTip != tooltip { toolTip = tooltip }
         setAccessibilityLabel("AIの操作、" + (toolTip ?? ""))
         needsDisplay = true
     }
@@ -190,13 +191,24 @@ final class AICompactFooter: NSStackView {
         let failures = questions.filter { $0.state == .failed || $0.state == .deliveryUnknown }
         let warnings = [state.ai?.warning, state.aiSchedule.warning, state.aiRecoveryWarning,
                         state.handoffFailed ? state.handoffMessage : nil].compactMap { $0 }.filter { !$0.isEmpty }
-        warning.toolTip = (warnings + failures.map {
+        let warningText = (warnings + failures.map {
             ["#\($0.request.number) \($0.state == .failed ? "失敗" : "送達不明")", $0.failure, $0.result?.body]
                 .compactMap { $0 }.joined(separator: "\n")
         }).joined(separator: "\n")
-        warning.isHidden = warning.toolTip?.isEmpty != false
+        // 定期更新で同じtooltipを再登録すると、ホバーの表示待ちがリセットされる。
+        if warning.toolTip != warningText { warning.toolTip = warningText }
+        warning.setAccessibilityValue(warningText)
+        warning.isHidden = warningText.isEmpty
         warning.callback = { [weak self] in
-            if let first = failures.first { self?.onSelect?((first.state == .deliveryUnknown ? AIBadgeKind.unknown : .failed).rowID(first)) }
+            if let first = failures.first {
+                self?.onSelect?((first.state == .deliveryUnknown ? AIBadgeKind.unknown : .failed).rowID(first))
+            } else if let window = self?.window, !warningText.isEmpty {
+                let alert = NSAlert()
+                alert.messageText = "AIの警告"
+                alert.informativeText = warningText
+                alert.addButton(withTitle: "閉じる")
+                alert.beginSheetModal(for: window)
+            }
         }
         refresh(now: now)
         updateVisibility()

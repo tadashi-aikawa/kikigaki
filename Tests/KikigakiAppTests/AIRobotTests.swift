@@ -65,7 +65,7 @@ import KikigakiCore
         footer.update(state, reduceMotion: false, now: now)
         #expect(footer.robot.displayText == "0:45" && footer.timerRunning)
         #expect(footer.robot.tint == Washi.red && footer.robot.eyeColor == Washi.red)
-        #expect(footer.robot.toolTip == "次 0:45 · 議事録へ")
+        #expect(footer.robot.toolTip == "自動実行を待っています · 議事録へ")
         state.aiSchedule.nextFire = now.addingTimeInterval(150)
         footer.update(state, reduceMotion: true, now: now)
         #expect(footer.robot.displayText == "2:30" && footer.timerRunning)
