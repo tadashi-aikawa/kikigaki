@@ -26,6 +26,12 @@ struct SessionSnapshot {
     var detectedSpeakerSlots: [Int] = []
     var speakerMapping: [Int: Int] = [:]
     var speakerOverrides: [Int: Int] = [:]
+    var nextDiarizationEnabled = true
+    /// 本文のある会議を優先する。停止後に次回設定を変えてもヘッダーを塗り替えない。
+    var displayedDiarizationEnabled: Bool {
+        markdownURL != nil || state != .idle ? names.diarizationEnabled : nextDiarizationEnabled
+    }
+    var canChangeDiarization: Bool { state == .idle }
 
     var canSubmitTyped: Bool { state == .recording || state == .paused }
     var voiceQuestionPlaceholder: String {

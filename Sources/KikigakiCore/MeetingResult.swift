@@ -32,4 +32,10 @@ public struct MeetingResult: Equatable, Sendable {
         let processed = RepeatedBackchannels.utterances(tokens: tokens, speakers: speakers, omitting: candidates)
         return MeetingResult(speakers: speakers, utterances: utterances, processed: processed, candidates: candidates)
     }
+
+    /// 話者なしの会議では最終判定も相槌の省略もせず、録音中と同じ境界を使う。
+    public static func withoutDiarization(tokens: [TimedToken]) -> MeetingResult {
+        MeetingResult(speakers: Array(repeating: nil, count: tokens.count),
+                      utterances: UndiarizedTranscript.utterances(tokens: tokens), processed: nil, candidates: [])
+    }
 }

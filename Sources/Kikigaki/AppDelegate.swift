@@ -5,6 +5,7 @@ import KikigakiAIIO
 
 /// replayだけで使う開発用入力。通常起動では環境変数自体を解釈しない。
 struct ReplayDebugOptions {
+    var diarizationEnabled: Bool?
     struct Question { let seconds: Double; let text: String }
     var questions: [Question] = []
     var hold: Double = 0
@@ -36,6 +37,10 @@ struct ReplayDebugOptions {
     static func load(arguments: [String] = CommandLine.arguments, environment env: [String: String] = ProcessInfo.processInfo.environment) throws -> Self {
         guard arguments.contains("--replay") else { return Self() }
         var result = Self()
+        if let mode = env["KIKIGAKI_DEBUG_DIARIZATION"] {
+            guard ["on", "off"].contains(mode) else { throw AIError.invalid("KIKIGAKI_DEBUG_DIARIZATION") }
+            result.diarizationEnabled = mode == "on"
+        }
         if let mode = env["KIKIGAKI_DEBUG_MINUTES_VERIFY"] {
             guard ["main", "outside"].contains(mode) else { throw AIError.invalid("KIKIGAKI_DEBUG_MINUTES_VERIFY") }
             result.verifyMinutes = mode
@@ -207,8 +212,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.config = config
         replayURL = Self.argument(after: "--replay").map { URL(fileURLWithPath: $0) }
 
-        let modelsTask = Task { try await SortformerModelStore.load() }
-        self.modelsTask = modelsTask
         let support = replayURL != nil && (replayDebug.verifyTyped || replayDebug.verifyMinutes != nil)
             ? config.outputDir.appendingPathComponent(".typed-test-support")
             : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/KIKIGAKI")
@@ -234,7 +237,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         })
         self.preparedStore = preparedStore
         preparedStore.load()
-        let session = MeetingSession(config: config, models: { try await modelsTask.value }, log: Self.log, aiStore: aiStore)
+        let session = MeetingSession(config: config, models: { [weak self] in
+            guard let self else { throw CancellationError() }
+            return try await self.loadModels()
+        }, log: Self.log, aiStore: aiStore, diarizationDefaults: replayURL == nil ? .standard : nil)
+        if let enabled = replayDebug.diarizationEnabled { session.setDiarizationEnabled(enabled) }
+        if session.snapshot.nextDiarizationEnabled { preloadModels() }
         session.preparedStore = preparedStore
         preparedStore.onChange = { [weak self] in self?.preparedChanged() }
         // 同じ枠の送信と準備の起動を重ねない。判定はどちらの入口からも同じものを見る。
@@ -247,6 +255,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onSubmitTyped = { session.submitTyped($0) }
         window.onSelectMinutes = { try session.selectMinutes($0) }
         window.onSpeakerMappingChange = { session.setSpeakerMapping(source: $0, target: $1) }
+        window.onDiarizationChange = { [weak self] enabled in
+            session.setDiarizationEnabled(enabled)
+            if session.snapshot.nextDiarizationEnabled { self?.preloadModels() }
+        }
         window.onStartStop = { [weak self] in self?.toggleRecording() }
         window.onPauseResume = { session.togglePause() }
         window.onCopy = { full in session.copyContext(full: full, writeClipboard: Self.writeClipboard) }
@@ -753,6 +765,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         debugRenamed = true
         Self.log("replay AI改名: 枡\(rename.slot)")
         session.rename(slot: rename.slot, to: rename.name)
+    }
+
+    /// 有効なら先読みし、開始要求と同じTaskを共有する。失敗を永続キャッシュしない。
+    private func loadModels() async throws -> SortformerModelStore.Loaded {
+        if let modelsTask { return try await modelsTask.value }
+        Self.log("話者モデルを準備中...")
+        let task = Task { try await SortformerModelStore.load() }
+        modelsTask = task
+        do { return try await task.value }
+        catch { modelsTask = nil; throw error }
+    }
+
+    private func preloadModels() {
+        Task { [weak self] in
+            do { _ = try await self?.loadModels() }
+            catch { Self.log("話者モデルの準備に失敗。録音開始時に再試行します: \(error)") }
+        }
     }
 
     private func reloadConfig() {

@@ -9,6 +9,7 @@ final class AvatarView: NSView {
     var slot: Int?
     var tentative = false
     var typed = false
+    var undiarized = false
     /// 話者枡の代わりに使う色。AI参加者だけが指定する。
     var accent: Washi.SpeakerColor?
     /// typedのとき、鉛筆の代わりに描く記号。
@@ -44,6 +45,13 @@ final class AvatarView: NSView {
         if typed {
             (glyph ?? pencil)?.draw(in: NSRect(x: 5, y: 5, width: 14, height: 14), from: .zero,
                                     operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            return
+        }
+        if undiarized {
+            NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "発言")?
+                .withSymbolConfiguration(.init(paletteColors: [color.foreground]))?
+                .draw(in: NSRect(x: 5, y: 4, width: 14, height: 16), from: .zero,
+                      operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             return
         }
         if let image {
@@ -157,12 +165,14 @@ final class TranscriptRow: NSView, DocumentRow {
         displayedTimeline = timeline
         searchStyle = nil
         nameLabel.stringValue = name
+        nameLabel.textColor = value.kind == .voice && !names.diarizationEnabled ? Washi.muted : Washi.ink
         timeLabel.stringValue = TranscriptRenderer.clock(for: value, timeline: timeline)
         timeLabel.toolTip = value.kind == .typed
             ? "会話の位置 \(TranscriptRenderer.elapsed(value.start)) · 投稿 \(TranscriptRenderer.clock(for: value, timeline: timeline, seconds: true))"
             : TranscriptRenderer.elapsed(value.start)
         avatar.slot = value.speaker
         avatar.typed = value.kind == .typed
+        avatar.undiarized = value.kind == .voice && !names.diarizationEnabled
         avatar.initial = value.speaker.map { names.customName(for: $0) == nil ? SpeakerNames.letter(for: $0) : String(name.prefix(1)) } ?? "?"
         avatar.setAccessibilityLabel(name)
         avatar.needsDisplay = true

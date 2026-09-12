@@ -43,6 +43,9 @@ final class MeetingSession {
     private var config: ResolvedConfig
     private let models: () async throws -> SortformerModelStore.Loaded
     private let log: (String) -> Void
+    static let diarizationDefaultsKey = "KikigakiDiarizationEnabled"
+    private let diarizationDefaults: UserDefaults?
+    private var nextDiarizationEnabled: Bool
 
     private var source: AudioSource?
     private var samplesIn: AsyncStream<[Float]>.Continuation?
@@ -57,6 +60,9 @@ final class MeetingSession {
     private var dropRepeatedBackchannels = false
     private var speakerMapping = SpeakerMapping()
     private var liveSource = SpeakerTranscript()
+    private var lastUndiarizedDraw = -Double.infinity
+    private var lastUndiarizedFinalCount = 0
+    private var pendingUndiarizedDraw: Task<Void, Never>?
     private var typedEntries: [Utterance] = []
     private var finalTokens: [TimedToken] = []
     private var finalSegments: [SpeakerSegment] = []
@@ -328,7 +334,8 @@ final class MeetingSession {
         }
     }
 
-    init(config: ResolvedConfig, models: @escaping () async throws -> SortformerModelStore.Loaded, log: @escaping (String) -> Void, aiStore: AIRecordStore? = nil) {
+    init(config: ResolvedConfig, models: @escaping () async throws -> SortformerModelStore.Loaded, log: @escaping (String) -> Void,
+         aiStore: AIRecordStore? = nil, diarizationDefaults: UserDefaults? = nil) {
         self.config = config
         self.aiStore = aiStore; meetingAIProfiles = config.aiProfiles
         // 手動と自動の宛先はどちらも先頭で独立に初期化する。
@@ -336,6 +343,8 @@ final class MeetingSession {
         aiWorkAllowed = config.ai?.allowWork ?? true
         self.models = models
         self.log = log
+        self.diarizationDefaults = diarizationDefaults
+        nextDiarizationEnabled = diarizationDefaults?.object(forKey: Self.diarizationDefaultsKey) as? Bool ?? true
         snapshot.speakers = config.speakers
         aiStore?.onChange = { [weak self] in self?.aiChanged() }
         emit()
@@ -349,6 +358,13 @@ final class MeetingSession {
     }
 
     // MARK: - 操作
+
+    func setDiarizationEnabled(_ enabled: Bool) {
+        guard snapshot.canChangeDiarization else { return }
+        nextDiarizationEnabled = enabled
+        diarizationDefaults?.set(enabled, forKey: Self.diarizationDefaultsKey)
+        emit()
+    }
 
     /// 録音を始める。準備に失敗したら false(理由は snapshot.message とログ)
     @discardableResult
@@ -365,12 +381,16 @@ final class MeetingSession {
         preparationID = preparation
         // 準備中や録音中の再読込で、同じ会議の保存方針を途中から切り替えない。
         let meetingConfig = config
+        let diarizationEnabled = nextDiarizationEnabled
         resetMeetingAIState(meetingConfig)
         consumedAudioTime = 0
-        dropRepeatedBackchannels = meetingConfig.dropRepeatedBackchannels
+        dropRepeatedBackchannels = diarizationEnabled && meetingConfig.dropRepeatedBackchannels
         snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers, message: "エンジンを準備中...")
+        snapshot.names.diarizationEnabled = diarizationEnabled
         speakerMapping = SpeakerMapping()
         liveSource = SpeakerTranscript()
+        pendingUndiarizedDraw?.cancel(); pendingUndiarizedDraw = nil
+        lastUndiarizedDraw = -Double.infinity; lastUndiarizedFinalCount = 0
         typedEntries = []
         finalTokens = []
         finalSegments = []
@@ -382,9 +402,12 @@ final class MeetingSession {
             if source is MicSource, !(await MicSource.requestPermission()) {
                 throw NSError(domain: "kikigaki", code: 3, userInfo: [NSLocalizedDescriptionKey: "マイクの使用が許可されていない。システム設定 > プライバシーとセキュリティ > マイク で KIKIGAKI を許可する"])
             }
-            let models = try await models()
-            let transcriber = try await AppleTranscriber(log: log)
-            let diarizer = SpeakerDiarizer(models: models)
+            let loaded = diarizationEnabled ? try await models() : nil
+            let onResult: (([TimedToken], Int) async -> Void)? = diarizationEnabled ? nil : { [weak self] tokens, count in
+                await self?.publishUndiarized(tokens: tokens, finalCount: count, generation: preparation)
+            }
+            let transcriber = try await AppleTranscriber(log: log, onResult: onResult)
+            let diarizer = loaded.map { SpeakerDiarizer(models: $0) }
             guard snapshot.state == .preparing, preparationID == preparation else { return false }
 
             startedAt = Date()
@@ -405,7 +428,7 @@ final class MeetingSession {
             // SpeechTranscriber は実時間に十分追いつく。プロトで実測)
             let (stream, continuation) = AsyncStream<[Float]>.makeStream()
             samplesIn = continuation
-            consumer = makeConsumer(stream: stream, transcriber: transcriber, diarizer: diarizer, wav: wav)
+            consumer = makeConsumer(stream: stream, transcriber: transcriber, diarizer: diarizer, wav: wav, generation: preparation)
             let pause = self.pause
             // 一時停止の判定は収録時(音声スレッド)に行う。消費側で判定すると、処理が遅れている間に
             // 収録した分が利用者の操作した境界とずれる
@@ -445,7 +468,8 @@ final class MeetingSession {
         // prepare以降は固定済みの会話を使い、最終保存と並行して接続・送信を続ける。
         for (slot, phase) in aiPhases where phase == .confirmationWait { cancelAIPreparation(slot: slot) }
         snapshot.state = .finishing
-        snapshot.message = "最終判定と保存中..."
+        pendingUndiarizedDraw?.cancel(); pendingUndiarizedDraw = nil
+        snapshot.message = snapshot.names.diarizationEnabled ? "最終判定と保存中..." : "文字起こしの確定と保存中..."
         emit()
 
         source?.stop()
@@ -483,8 +507,10 @@ final class MeetingSession {
         finalSegments = segments
 
         diagnostics.liveLines(snapshot.utterances, names: snapshot.names).forEach(log)
-        let final = MeetingResult.make(tokens: tokens, segments: segments,
-                                       dropRepeatedBackchannels: dropRepeatedBackchannels, mapping: speakerMapping)
+        let final = snapshot.names.diarizationEnabled
+            ? MeetingResult.make(tokens: tokens, segments: segments,
+                                 dropRepeatedBackchannels: dropRepeatedBackchannels, mapping: speakerMapping)
+            : MeetingResult.withoutDiarization(tokens: tokens)
         diagnostics.backchannelLines(tokens: tokens, candidates: final.candidates).forEach(log)
         diagnostics.phraseLines(tokens: tokens, segments: segments, speakers: final.speakers).forEach(log)
 
@@ -633,7 +659,7 @@ final class MeetingSession {
 
     /// 枡に名前を付ける。停止後なら Markdown を保存し直す
     func rename(slot: Int, to name: String) {
-        guard snapshot.canShare, (0..<SpeakerNames.slotCount).contains(slot) else { return }
+        guard snapshot.canShare, snapshot.names.diarizationEnabled, (0..<SpeakerNames.slotCount).contains(slot) else { return }
         var names = snapshot.names
         names.set(name, for: slot)
         guard names != snapshot.names else { return }
@@ -646,7 +672,7 @@ final class MeetingSession {
     }
 
     func setSpeakerMapping(source: Int, target: Int?) {
-        guard snapshot.canShare, snapshot.detectedSpeakerSlots.contains(source),
+        guard snapshot.canShare, snapshot.names.diarizationEnabled, snapshot.detectedSpeakerSlots.contains(source),
               target == nil || snapshot.detectedSpeakerSlots.contains(target!) else { return }
         speakerMapping.overrides[source] = target
         refreshSpeakerMapping()
@@ -697,6 +723,7 @@ final class MeetingSession {
     // MARK: - 内部
 
     private func emit() {
+        snapshot.nextDiarizationEnabled = nextDiarizationEnabled
         snapshot.timeline = pause.timeline
         snapshot.handoffPreview = handoff.preview(utterances: snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
         snapshot.hasCopied = handoff.lastCopy != nil
@@ -922,11 +949,16 @@ final class MeetingSession {
                     guard self.handoff.meetingID == meetingID, self.snapshot.canShare else { throw CancellationError() }
                     if let transcriber = self.transcriber {
                         let (tokens, count) = await transcriber.snapshot()
-                        let speakers = self.speakerMapping.apply(Aligner.speakers(for: tokens, segments: self.diarizer?.segments() ?? []))
+                        let speakers = names.diarizationEnabled
+                            ? self.speakerMapping.apply(Aligner.speakers(for: tokens, segments: self.diarizer?.segments() ?? []))
+                            : Array<Int?>(repeating: nil, count: tokens.count)
                         return try AICapture(tokens: tokens, speakers: speakers, finalCount: count, processedUntil: self.consumedAudioTime,
                             cutoff: cutoff, names: names, timeline: timeline, typed: typed)
                     } else {
-                        return try AICapture(tokens: self.finalTokens, speakers: self.speakerMapping.apply(Aligner.speakers(for: self.finalTokens, segments: self.finalSegments)),
+                        let speakers = names.diarizationEnabled
+                            ? self.speakerMapping.apply(Aligner.speakers(for: self.finalTokens, segments: self.finalSegments))
+                            : Array<Int?>(repeating: nil, count: self.finalTokens.count)
+                        return try AICapture(tokens: self.finalTokens, speakers: speakers,
                             finalCount: self.finalTokens.count, processedUntil: self.snapshot.elapsed, cutoff: cutoff, names: names, timeline: timeline, typed: typed)
                     }
                 }, progress: { seconds in self.aiProgresses[slot] = "聞き取りの確定待ち · あと\(seconds)秒"; self.emit() })
@@ -997,9 +1029,10 @@ final class MeetingSession {
 #if DEBUG
     /// 音声エンジンを起動せず、送信と録音終了の競合を本番メソッドで検証するための初期状態。
     convenience init(testingRecordingAt url: URL, config: ResolvedConfig, aiStore: AIRecordStore,
-                     recordedSamples: Int = 0, finishAudio: @escaping () async -> Void = {}) {
+                     recordedSamples: Int = 0, finishAudio: @escaping () async -> Void = {}, diarizationEnabled: Bool = true) {
         self.init(config: config, models: { throw CancellationError() }, log: { _ in }, aiStore: aiStore)
         snapshot.state = .recording; snapshot.markdownURL = url
+        snapshot.names.diarizationEnabled = diarizationEnabled
         let (stream, continuation) = AsyncStream<[Float]>.makeStream()
         pause.accept(Array(repeating: 0, count: recordedSamples), into: continuation)
         continuation.finish()
@@ -1013,10 +1046,18 @@ final class MeetingSession {
     /// 次の会議へ移った状態を作る。録音の全経路を通さずに、会議IDの入れ替わりと
     /// 会議をまたがない状態の初期化だけを再現する。録音中の状態も作り直す
     func beginNextMeetingForTesting(recording: Bool = false) {
+        preparationID = UUID()
         handoff = HandoffHistory()
         resetMeetingAIState(config)
         if recording { snapshot.state = .recording }
     }
+    var undiarizedResultHandlerForTesting: ([TimedToken], Int) -> Void {
+        let generation = preparationID
+        return { [weak self] tokens, count in
+            self?.publishUndiarized(tokens: tokens, finalCount: count, generation: generation)
+        }
+    }
+    var pendingUndiarizedDrawForTesting: Task<Void, Never>? { pendingUndiarizedDraw }
     var submissionTaskForTesting: Task<Void, Never>? { aiTasks[meetingAI?.slot ?? 1] ?? aiTasks.values.first }
     func submissionTaskForTesting(slot: Int) -> Task<Void, Never>? { aiTasks[slot] }
     func publishForTesting(tokens: [TimedToken], speakers: [Int?], elapsed: Double) {
@@ -1031,6 +1072,7 @@ final class MeetingSession {
 #endif
 
     private func tearDown() async {
+        pendingUndiarizedDraw?.cancel(); pendingUndiarizedDraw = nil
         source?.stop()
         source = nil
         samplesIn?.finish()
@@ -1047,7 +1089,7 @@ final class MeetingSession {
     /// 音声を1本の消費タスクで処理する。WAV書き出し→話者判別→文字起こしの順に同じチャンクを流し、
     /// 0.5秒ごとに突き合わせて表示へ渡す。話者判定は `SpeakerFreeze` の猶予を過ぎた分から凍結する
     private func makeConsumer(
-        stream: AsyncStream<[Float]>, transcriber: AppleTranscriber, diarizer: SpeakerDiarizer, wav: WavWriter?
+        stream: AsyncStream<[Float]>, transcriber: AppleTranscriber, diarizer: SpeakerDiarizer?, wav: WavWriter?, generation: UUID
     ) -> Task<PipelineResult, Never> {
         let log = self.log
         // self を強く持つ。stop() が消費タスクの終了を待つので、タスクの寿命は会議の間だけ
@@ -1057,13 +1099,23 @@ final class MeetingSession {
             for await chunk in stream {
                 result.fedSamples += chunk.count
                 do { try wav?.write(chunk) } catch { log("WAV書き出しに失敗: \(error)") }
-                do { try diarizer.process(chunk) } catch { log("話者判別に失敗: \(error)") }
+                do { try diarizer?.process(chunk) } catch { log("話者判別に失敗: \(error)") }
                 do { try transcriber.feed(chunk) } catch { log("文字起こしへの入力に失敗: \(error)") }
                 let consumed = Double(result.fedSamples) / 16000
                 await MainActor.run { self.consumedAudioTime = consumed }
 
                 guard Date().timeIntervalSince(lastDraw) >= 0.5 else { continue }
                 lastDraw = Date()
+                // 無効時の本文は結果通知だけで更新する。古いsnapshotが新しい確定結果を戻さない。
+                guard let diarizer else {
+                    await MainActor.run {
+                        guard self.preparationID == generation,
+                              self.snapshot.state == .recording || self.snapshot.state == .paused else { return }
+                        self.snapshot.elapsed = consumed
+                        self.emit()
+                    }
+                    continue
+                }
                 let (tokens, finalCount) = await transcriber.snapshot()
                 let segments = diarizer.segments()
                 let elapsed = Double(result.fedSamples) / 16000
@@ -1078,6 +1130,47 @@ final class MeetingSession {
                 }
             }
             return result
+        }
+    }
+
+    /// 入力が止まった一時停止中にも確定を反映する。有効時の凍結列には触れない。
+    private func publishUndiarized(tokens: [TimedToken], finalCount: Int, generation: UUID) {
+        guard preparationID == generation, !snapshot.names.diarizationEnabled,
+              snapshot.state == .recording || snapshot.state == .paused else { return }
+        let newlyFinalized = finalCount > liveSource.finalCount
+        liveSource.tokens = tokens
+        liveSource.finalCount = finalCount
+        let remaining = 0.5 - (ProcessInfo.processInfo.systemUptime - lastUndiarizedDraw)
+        if newlyFinalized || remaining <= 0 {
+            pendingUndiarizedDraw?.cancel(); pendingUndiarizedDraw = nil
+            flushUndiarized(generation: generation)
+        } else if pendingUndiarizedDraw == nil {
+            // 暫定だけをまとめる。最後の通知の後に入力が止まっても最新の暫定文字を反映する。
+            let deadline = lastUndiarizedDraw + 0.5
+            pendingUndiarizedDraw = Task { [weak self] in
+                // MainActorが混んでTaskの開始が遅れても、そこからさらに0.5秒待たない。
+                let delay = deadline - ProcessInfo.processInfo.systemUptime
+                if delay > 0 {
+                    do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                }
+                guard !Task.isCancelled, let self, self.preparationID == generation else { return }
+                self.pendingUndiarizedDraw = nil
+                self.flushUndiarized(generation: generation)
+            }
+        }
+    }
+
+    private func flushUndiarized(generation: UUID) {
+        guard preparationID == generation, !snapshot.names.diarizationEnabled,
+              snapshot.state == .recording || snapshot.state == .paused else { return }
+        let newlyFinalized = liveSource.finalCount > lastUndiarizedFinalCount
+        lastUndiarizedFinalCount = liveSource.finalCount
+        lastUndiarizedDraw = ProcessInfo.processInfo.systemUptime
+        refreshLive()
+        diagnostics.liveTraceLines(snapshot.utterances, names: snapshot.names, elapsed: consumedAudioTime).forEach(log)
+        emit()
+        if diagnostics.showsLiveTrace && newlyFinalized {
+            log(String(format: "[undiarized-final count=%d published=%.6f]", liveSource.finalCount, ProcessInfo.processInfo.systemUptime))
         }
     }
 
@@ -1097,7 +1190,8 @@ final class MeetingSession {
 
     private func refreshLive() {
         let live = LiveTranscript(tokens: liveSource.tokens, speakers: speakerMapping.apply(liveSource.speakers),
-                                  finalCount: liveSource.finalCount, frozenCount: liveSource.frozenCount)
+                                  finalCount: liveSource.finalCount, frozenCount: liveSource.frozenCount,
+                                  diarizationEnabled: snapshot.names.diarizationEnabled)
         let merged = TranscriptEntries.merge(voice: live.utterances, typed: typedEntries, timeline: pause.timeline,
                                              pendingVoiceRows: live.pendingSpeakerRows)
         snapshot.utterances = merged.utterances

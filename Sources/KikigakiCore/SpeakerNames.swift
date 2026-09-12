@@ -7,6 +7,8 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
     public static var slotCount: Int { letters.count }
 
     private var names: [Int: String] = [:]
+    /// 会議開始で固定する。名前と同じ保存・コピー経路を通し、次回設定で過去会議を変えない。
+    public var diarizationEnabled = true
 
     public init() {}
 
@@ -25,7 +27,7 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
 
     /// 表示名。nil(どの話者区間にも当たらなかった)は "?"
     public func name(for slot: Int?) -> String {
-        guard let slot else { return "?" }
+        guard let slot else { return diarizationEnabled ? "?" : "発言" }
         return names[slot] ?? Self.defaultName(for: slot)
     }
 
@@ -59,5 +61,12 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
     public func otherSlot(using name: String, excluding slot: Int) -> Int? {
         let name = Self.normalized(name)
         return (0..<Self.slotCount).first { $0 != slot && self.name(for: $0) == name }
+    }
+
+    private enum CodingKeys: String, CodingKey { case names, diarizationEnabled }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        names = try values.decode([Int: String].self, forKey: .names)
+        diarizationEnabled = try values.decodeIfPresent(Bool.self, forKey: .diarizationEnabled) ?? true
     }
 }

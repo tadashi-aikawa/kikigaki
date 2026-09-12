@@ -30,6 +30,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private var aiRows: [String: any AITimelineRowView] = [:]
     private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
     private var speakerSettingsPopover: SpeakerSettingsPopover?
+    var onDiarizationChange: ((Bool) -> Void)?
     private let startStopButton = WashiActionButton()
     private var startStopWidth: NSLayoutConstraint?
     private var pauseWidth: NSLayoutConstraint?
@@ -314,7 +315,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         configure(openButton, #selector(openPressed))
         configure(latestButton, #selector(latestPressed))
         configure(speakerButton, #selector(speakerPressed))
-        speakerButton.setAccessibilityLabel("話者の統合先")
+        speakerButton.setAccessibilityLabel("話者")
         for button in [startStopButton, pauseButton] {
             button.isBordered = false
             button.heightAnchor.constraint(equalToConstant: 32).isActive = true
@@ -568,6 +569,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         renamePopover?.close()
         let popover = SpeakerSettingsPopover(snapshot: snapshot)
         popover.onMappingChange = { [weak self] slot, target in self?.onSpeakerMappingChange?(slot, target) }
+        popover.onDiarizationChange = { [weak self] enabled in self?.onDiarizationChange?(enabled) }
         speakerSettingsPopover = popover
         popover.present(relativeTo: speakerButton.bounds, of: speakerButton)
     }

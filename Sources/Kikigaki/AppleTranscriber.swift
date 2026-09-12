@@ -38,7 +38,8 @@ final class AppleTranscriber {
         func snapshot() -> (tokens: [TimedToken], finalCount: Int) { (finalTokens + volatileTokens, finalTokens.count) }
     }
 
-    init(locale: Locale = Locale(identifier: "ja-JP"), log: @escaping (String) -> Void) async throws {
+    init(locale: Locale = Locale(identifier: "ja-JP"), log: @escaping (String) -> Void,
+         onResult: (([TimedToken], Int) async -> Void)? = nil) async throws {
         guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else {
             throw NSError(domain: "kikigaki", code: 1, userInfo: [NSLocalizedDescriptionKey: "SpeechTranscriber は \(locale.identifier) に未対応"])
         }
@@ -64,9 +65,11 @@ final class AppleTranscriber {
 
         let store = self.store
         let results = transcriber.results
+        let trace = Diagnostics().showsLiveTrace
         resultsTask = Task {
             do {
                 for try await result in results {
+                    let receivedAt = ProcessInfo.processInfo.systemUptime
                     var toks: [TimedToken] = []
                     for run in result.text.runs {
                         let piece = String(result.text[run.range].characters)
@@ -74,6 +77,13 @@ final class AppleTranscriber {
                         toks.append(TimedToken(text: piece, phraseId: 0, start: tr.start.seconds, end: tr.end.seconds))
                     }
                     await store.apply(toks, isFinal: result.isFinal)
+                    if let onResult {
+                        let value = await store.snapshot()
+                        if trace && result.isFinal {
+                            log(String(format: "[asr-final count=%d received=%.6f]", value.finalCount, receivedAt))
+                        }
+                        await onResult(value.tokens, value.finalCount)
+                    }
                 }
             } catch {
                 log("Apple Speech results error: \(error)")

@@ -18,7 +18,9 @@ public struct AICapture: Equatable, Sendable {
               else { throw AIError.invalid("capture boundary") }
         let count = tokens.prefix { $0.start < cutoff }.count
         let fixed = tokens.prefix(min(finalCount, count)).prefix { $0.end <= cutoff }.count
-        let utterances = Aligner.utterances(tokens: Array(tokens.prefix(fixed)), speakers: Array(speakers.prefix(fixed)))
+        let utterances = names.diarizationEnabled
+            ? Aligner.utterances(tokens: Array(tokens.prefix(fixed)), speakers: Array(speakers.prefix(fixed)))
+            : UndiarizedTranscript.utterances(tokens: Array(tokens.prefix(fixed)))
         // typedは送信操作時点の値コピーを受け取る。一時停止中にも届くよう境界の等号を含める。
         let merged = TranscriptEntries.merge(voice: utterances, typed: typed.filter { $0.start <= cutoff }, timeline: timeline)
         lines = TranscriptRenderer.lines(merged.utterances, names: names, timeline: timeline)

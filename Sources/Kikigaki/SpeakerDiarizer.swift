@@ -3,7 +3,7 @@ import Foundation
 import KikigakiCore
 
 /// Sortformer(FluidAudio)のモデル。初回は HuggingFace から
-/// ~/Library/Application Support/FluidAudio/Models へ落ちるため、起動時に一度だけ読み込んで使い回す
+/// ~/Library/Application Support/FluidAudio/Models へ落ちる。有効なときだけ先読みして使い回す
 enum SortformerModelStore {
     /// 品質を優先し、既定は High Context(出力遅延 ≈30.4秒)。
     /// 環境変数で比較用モデルを選ぶ。各モデルは初回に HuggingFace から取得する。
