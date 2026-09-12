@@ -4,7 +4,7 @@ import KikigakiCore
 @testable import Kikigaki
 
 @Suite(.serialized) @MainActor struct MinutesPerformanceTests {
-    @Test func 四MiB更新のメインスレッド占有を測る() async throws {
+    @Test func 四MiBの描画更新と検索を測る() async throws {
         guard ProcessInfo.processInfo.environment["KIKIGAKI_MINUTES_PERF"] == "1" else { return }
         NSApplication.shared.setActivationPolicy(.prohibited)
         let view = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
@@ -15,22 +15,25 @@ import KikigakiCore
         var text = String(repeating: unit, count: MinutesPath.bodyBytes / unit.utf8.count)
         text += String(repeating: "a", count: MinutesPath.bodyBytes - text.utf8.count)
         #expect(text.utf8.count == 4 * 1_048_576)
-        let blocks = MarkdownBlocks.parse(text, minutes: true)
         view.layoutSubtreeIfNeeded()
-        view.receive(.body(text, blocks))
+        let started = Date()
+        view.receive(.body(text, []))
         for _ in 0..<1000 {
-            if !view.textView.string.isEmpty { break }
+            if !view.document.renderedText.isEmpty { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        try #require(!view.textView.string.isEmpty)
+        try #require(!view.document.renderedText.isEmpty)
         let changed = "b" + text.dropFirst()
-        let next = MarkdownBlocks.parse(changed, minutes: true)
-        view.receive(.body(changed, next))
+        let updated = Date()
+        view.receive(.body(changed, []))
         for _ in 0..<1000 {
-            if view.textView.string.hasPrefix("b") { break }
+            if view.document.renderedText.hasPrefix("b") { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        #expect(view.textView.string.hasPrefix("b"))
-        print("MINUTES_PERF update_main_ms=\(view.lastRenderMainMilliseconds) bytes=\(text.utf8.count)")
+        #expect(view.document.renderedText.hasPrefix("b"))
+        let searched = Date()
+        let result = try await view.document.webView.evaluateJavaScript("window.minutes.search('担当')") as? [String: Int]
+        #expect(result?["count"] == 10000)
+        print("MINUTES_PERF initial_s=\(updated.timeIntervalSince(started)) update_s=\(searched.timeIntervalSince(updated)) search_s=\(Date().timeIntervalSince(searched)) bytes=\(text.utf8.count)")
     }
 }

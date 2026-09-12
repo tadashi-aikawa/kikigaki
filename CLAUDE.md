@@ -162,6 +162,8 @@ Claudeのフック設定はセッション専用の `--settings` JSONへ生成�
 
 議事録の受け渡しでは `participant.minutes_path` に人の指定した書き先だけを固定します。AIが作成・更新した場所は同梱CLIの `minutes --session ... --request ... --token ... --path ...` で通知し、次のAIの書き先には伝播させません。議事録の既定パスや自動生成はありません。会議ごとの対象は `ai/minutes.json` へ保存し、古い後着通知は人の指定や対象解除を巻き戻しません。ヘッダーの「議事録」か「表示」メニューで右ペインを開けます。パス欄はReturnで確定し、Escapeで取り消します。指定ファイルの更新は自動で表示します。詳細は [議事録プレビューの設計](docs/minutes-preview.md) を参照してください。
 
+議事録本文は専用WebKitでペイン幅に追従し、脚注・callout・画像・Mermaid・数式・SVGを描画します。⌘Fは焦点のあるペインを検索します。パス欄の下にNeovim・Obsidianで開くボタンがあります。対応記法と配布資産の再生成は [議事録の描画と検索](docs/minutes-rendering.md) を参照してください。
+
 ## コミットメッセージ
 
 Conventional Commits 形式で日本語で書く。

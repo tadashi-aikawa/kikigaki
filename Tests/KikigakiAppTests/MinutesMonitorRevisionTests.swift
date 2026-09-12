@@ -81,24 +81,24 @@ import Testing
         view.update(path: a.path, source: .human, active: true)
         view.resetContext()
         view.update(path: b.path, source: .human, active: true)
-        try await eventually { view.textView.string == "次会議" }
-        try await Task.sleep(for: .milliseconds(350)); #expect(!view.textView.string.contains("前会議"))
+        try await eventually { view.document.renderedText == "次会議" }
+        try await Task.sleep(for: .milliseconds(350)); #expect(!view.document.renderedText.contains("前会議"))
         view.update(path: b.path, source: .human, active: false)
         try Data("非表示中更新".utf8).write(to: b)
-        try await Task.sleep(for: .milliseconds(350)); #expect(view.textView.string == "次会議")
+        try await Task.sleep(for: .milliseconds(350)); #expect(view.document.renderedText == "次会議")
         view.update(path: b.path, source: .human, active: true)
-        try await eventually { view.textView.string == "非表示中更新" }
+        try await eventually { view.document.renderedText == "非表示中更新" }
         view.update(path: b.path, source: .human, active: false)
         view.update(path: b.path, source: .human, active: true)
-        try await eventually { !view.scroll.isHidden }
-        #expect(view.textView.string == "非表示中更新")
+        try await eventually { !view.document.isHidden }
+        #expect(view.document.renderedText == "非表示中更新")
         view.receive(.body("背景生成中", [.paragraph([.init("背景生成中")])]))
         view.update(path: b.path, source: .human, active: false)
         try await Task.sleep(for: .milliseconds(100))
-        #expect(view.textView.string == "非表示中更新")
+        #expect(view.document.renderedText == "非表示中更新")
         view.receive(.body("途中版", [.paragraph([.init("途中版")])]))
         view.receive(.body("非表示中更新", [.paragraph([.init("非表示中更新")])]))
         try await Task.sleep(for: .milliseconds(100))
-        #expect(view.textView.string == "非表示中更新")
+        #expect(view.document.renderedText == "非表示中更新")
     }
 }

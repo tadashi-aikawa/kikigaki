@@ -43,7 +43,7 @@ import KikigakiAIIO
             try capture("01-notice", window: window, root: root, store: store)
             window.toggleMinutes()
         }
-        if phase == 2, !preview.scroll.isHidden, !preview.textView.string.isEmpty, questions.first?.result != nil {
+        if phase == 2, !preview.document.isHidden, !preview.document.renderedText.isEmpty, questions.first?.result != nil {
             try capture("02-ai-body", window: window, root: root, store: store)
             phase = 3
             try select(root.appendingPathComponent("human.md").path, window: window, store: store)
@@ -55,7 +55,7 @@ import KikigakiAIIO
                   store.state.minutesPath == root.appendingPathComponent("human.md").path else { throw AIError.invalid("human path result") }
             phase = 4; window.toggleMinutes()
         }
-        if phase == 4, !preview.scroll.isHidden, !preview.textView.string.isEmpty {
+        if phase == 4, !preview.document.isHidden, !preview.document.renderedText.isEmpty {
             try capture("04-human-body", window: window, root: root, store: store,
                 extra: ["request": questions[1].request.id.uuidString, "minutes_path": questions[1].request.envelope.participant.minutesPath ?? ""])
             phase = 5

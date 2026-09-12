@@ -242,6 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.session = session
 
         let window = TranscriptWindowController()
+        window.minutesSplit.preview.herdrCommand = { [weak self] in self?.config?.ai?.herdrCommand }
         window.onRename = { session.rename(slot: $0, to: $1) }
         window.onSubmitTyped = { session.submitTyped($0) }
         window.onSelectMinutes = { try session.selectMinutes($0) }

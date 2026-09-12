@@ -1,0 +1,16 @@
+{
+  "name": "kikigaki-minutes-renderer",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "node build.mjs", "test": "node --test renderer.test.mjs" },
+  "dependencies": {
+    "dompurify": "3.4.15",
+    "katex": "0.18.7",
+    "markdown-it": "15.0.1",
+    "markdown-it-footnote": "4.0.0",
+    "markdown-it-task-lists": "2.1.1",
+    "markdown-it-texmath": "1.0.0",
+    "mermaid": "12.0.0"
+  },
+  "devDependencies": { "esbuild": "0.28.2" }
+}

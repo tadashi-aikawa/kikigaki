@@ -17,6 +17,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Helpers"
 cp "$BIN" "$APP/Contents/MacOS/KIKIGAKI"
 cp "$ROOT/.build/$CONFIG/kikigaki-cli" "$APP/Contents/Helpers/kikigaki-cli"
 cp "$ROOT/Resources/kikigaki.icns" "$APP/Contents/Resources/"
+cp -R "$ROOT/.build/$CONFIG/Kikigaki_Kikigaki.bundle" "$APP/Contents/Resources/"
 sed "s/0\.0\.0-development/$VERSION/" "$ROOT/Resources/Info.plist" >"$APP/Contents/Info.plist"
 
 # 署名: CODESIGN_IDENTITY(デフォルト "kikigaki-dev")の自己署名証明書が Keychain に

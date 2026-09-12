@@ -7,7 +7,7 @@ import KikigakiAIIO
 
 @Suite(.serialized) @MainActor struct MinutesPreviewTests {
     private func eventually(_ condition: () -> Bool) async throws {
-        for _ in 0..<150 {
+        for _ in 0..<500 {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -124,15 +124,14 @@ import KikigakiAIIO
         #expect(window.makeFirstResponder(preview.pathField))
         #expect(preview.pathField.currentEditor() != nil)
         preview.pathField.stringValue = root.path + "/notes/../指定.md"
-        _ = preview.control(preview.pathField, textView: preview.textView, doCommandBy: #selector(NSResponder.insertNewline(_:)))
+        _ = preview.control(preview.pathField, textView: NSTextView(), doCommandBy: #selector(NSResponder.insertNewline(_:)))
         #expect(store.state.humanMinutesPath == root.path + "/指定.md")
         preview.pathField.stringValue = ""
-        _ = preview.control(preview.pathField, textView: preview.textView, doCommandBy: #selector(NSResponder.insertNewline(_:)))
+        _ = preview.control(preview.pathField, textView: NSTextView(), doCommandBy: #selector(NSResponder.insertNewline(_:)))
         #expect(store.state.humanMinutesPath == nil)
         func capture(_ name: String) throws {
             guard let output = ProcessInfo.processInfo.environment["KIKIGAKI_MINUTES_CAPTURE"] else { return }
             content.layoutSubtreeIfNeeded(); content.displayIfNeeded()
-            if !preview.scroll.isHidden { #expect(preview.textView.frame.minY == 0) }
             let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
             content.cacheDisplay(in: content.bounds, to: bitmap)
             try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: output).appendingPathComponent(name + ".png"))
@@ -140,16 +139,16 @@ import KikigakiAIIO
         try capture("01-empty")
         let path = root.appendingPathComponent("定例会議.md")
         try Data(markdown.utf8).write(to: path); try store.select(path.path)
-        try await eventually { preview.textView.string.contains("当日の手順") }; content.layoutSubtreeIfNeeded()
-        #expect(preview.textView.string.contains("当日の手順"))
-        #expect(!preview.scroll.isHidden)
+        try await eventually { preview.document.renderedText.contains("当日の手順") }; content.layoutSubtreeIfNeeded()
+        #expect(preview.document.renderedText.contains("当日の手順"))
+        #expect(!preview.document.isHidden)
         try capture("02-body")
-        preview.controlTextDidBeginEditing(Notification(name: NSControl.textDidBeginEditingNotification))
+        preview.controlTextDidBeginEditing(Notification(name: NSControl.textDidBeginEditingNotification, object: preview.pathField))
         preview.pathField.stringValue = "/tmp/編集中.md"
         let missing = root.appendingPathComponent("見つからない.md")
         try store.select(missing.path)
         #expect(preview.pathField.stringValue == "/tmp/編集中.md")
-        _ = preview.control(preview.pathField, textView: preview.textView, doCommandBy: #selector(NSResponder.cancelOperation(_:)))
+        _ = preview.control(preview.pathField, textView: NSTextView(), doCommandBy: #selector(NSResponder.cancelOperation(_:)))
         #expect(preview.pathField.stringValue == missing.path)
         try await eventually { preview.message.stringValue == "指定したファイルはまだありません。作成されると自動で表示します" }; try capture("03-missing")
         #expect(preview.message.stringValue.contains("自動で表示"))
@@ -169,32 +168,31 @@ import KikigakiAIIO
         controller.apply(SessionSnapshot(ai: AIViewState(conversation: conversation, connection: .idle), state: .paused,
             utterances: utterances, timeline: MeetingTimeline(startedAt: started), names: SpeakerNames([0: "佐藤", 1: "鈴木", 2: "田中"]), elapsed: 900, markdownURL: root.appendingPathComponent("meeting.md")))
         try Data((markdown + String(repeating: "\n\n## 補足\n\n会場の接続環境と案内手順を確認し、次回の会議で担当者から報告します。", count: 30)).utf8).write(to: path)
-        try store.select(path.path); try await eventually { preview.textView.string.contains("補足") }
+        try store.select(path.path); try await eventually { preview.document.renderedText.contains("補足") }
         content.layoutSubtreeIfNeeded()
         if let reply = controller.transcriptDocument.rows.compactMap({ $0 as? AIReplyRow }).first {
             controller.transcriptDocument.scroll(NSPoint(x: 0, y: max(0, reply.frame.minY - 60)))
         }
         try capture("04-busy")
         window.setContentSize(NSSize(width: 1800, height: 900)); content.layoutSubtreeIfNeeded()
-        preview.scroll.contentView.scroll(to: .zero)
-        preview.scroll.reflectScrolledClipView(preview.scroll.contentView)
+        _ = try await preview.document.webView.evaluateJavaScript("scrollTo(0, 0)")
         try capture("05-wide-1800")
-        #expect(try #require(preview.textView.textContainer).containerSize.width <= 720)
+        let width = try await preview.document.webView.evaluateJavaScript("window.minutes.state().width") as? Double
+        #expect(try #require(width) > 720)
         #expect(abs(content.bounds.width - 1800) < 1)
-        preview.scroll.contentView.scroll(to: NSPoint(x: 0, y: 500))
-        preview.scroll.reflectScrolledClipView(preview.scroll.contentView)
-        let selected = (preview.textView.string as NSString).range(of: "接続環境")
-        preview.textView.setSelectedRange(selected)
-        let oldY = preview.scroll.contentView.bounds.minY
+        _ = try await preview.document.webView.evaluateJavaScript("scrollTo(0, 500); window.minutes.select(10, 20)")
+        let oldY = try await preview.document.webView.evaluateJavaScript("scrollY") as? Double
         let oldBody = try String(contentsOf: path, encoding: .utf8)
         try Data((oldBody + "\n追記しました").utf8).write(to: path, options: .atomic)
-        try await eventually { preview.textView.string.contains("追記しました") }
-        #expect(abs(preview.scroll.contentView.bounds.minY - oldY) < 2)
-        #expect(preview.textView.selectedRange() == selected)
+        try await eventually { preview.document.renderedText.contains("追記しました") }
+        let newY = try await preview.document.webView.evaluateJavaScript("scrollY") as? Double
+        #expect(abs(try #require(newY) - #require(oldY)) < 2)
+        #expect(try await preview.document.webView.evaluateJavaScript("window.minutes.state().selection") as? [Int] == [10, 20])
         try Data("短い本文".utf8).write(to: path, options: .atomic)
-        try await eventually { preview.textView.string == "短い本文" }
-        #expect(preview.scroll.contentView.bounds.minY == 0)
-        #expect(NSMaxRange(preview.textView.selectedRange()) <= (preview.textView.string as NSString).length)
+        try await eventually { preview.document.renderedText == "短い本文" }
+        #expect(try await preview.document.webView.evaluateJavaScript("scrollY") as? Int == 0)
+        let selection = try await preview.document.webView.evaluateJavaScript("window.minutes.state().selection") as? [Int]
+        #expect(selection?.last ?? 0 <= (preview.document.renderedText as NSString).length)
         let left = controller.minutesSplit.left.frame.width
         controller.toggleMinutes(); #expect(abs(window.frame.width - left) < 1)
         let notificationRequest = try #require(conversation.questions.first?.request)

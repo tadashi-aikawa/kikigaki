@@ -23,7 +23,7 @@ enum MinutesFileResult: Sendable {
     case missing, cloud, changed
     case failure(String)
 
-    static func read(_ path: String) -> Self {
+    static func read(_ path: String, parseBlocks: Bool = true) -> Self {
         let url = URL(fileURLWithPath: path)
         if let values = try? url.resourceValues(forKeys: [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]),
            values.isUbiquitousItem == true, values.ubiquitousItemDownloadingStatus == .notDownloaded {
@@ -57,7 +57,7 @@ enum MinutesFileResult: Sendable {
         guard fstat(fd, &after) == 0, MinutesFileStamp(before) == MinutesFileStamp(after),
               MinutesFileStamp.at(path) == MinutesFileStamp(after) else { return .changed }
         guard let text = String(data: bytes, encoding: .utf8) else { return .failure("UTF-8のファイルとして読めません") }
-        return .body(text, MarkdownBlocks.parse(text, minutes: true))
+        return .body(text, parseBlocks ? MarkdownBlocks.parse(text, minutes: true) : [])
     }
 }
 
@@ -77,7 +77,7 @@ enum MinutesFileResult: Sendable {
     private var retry = true
 
     init(path: String, interval: TimeInterval = 2,
-         read: @escaping @Sendable (String) async -> MinutesFileResult = { MinutesFileResult.read($0) },
+         read: @escaping @Sendable (String) async -> MinutesFileResult = { MinutesFileResult.read($0, parseBlocks: false) },
          receive: @escaping (MinutesFileResult) -> Void) {
         self.path = path; self.receive = receive; self.read = read
         scan(force: true)

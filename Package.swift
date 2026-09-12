@@ -36,6 +36,7 @@ let package = Package(
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ],
             path: "Sources/Kikigaki",
+            resources: [.copy("MinutesAssets")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(

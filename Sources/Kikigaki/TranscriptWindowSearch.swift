@@ -3,6 +3,10 @@ import KikigakiCore
 
 /// 会話内の検索。一致箇所は行ビューへ塗り、現在位置だけ濃くする
 extension TranscriptWindowController {
+    // WebKitの検索アクションとの衝突を避け、必ずペイン選択へ送る。
+    @objc func kikigakiShowSearch(_ sender: Any?) { showSearch(sender) }
+    @objc func kikigakiFindNext(_ sender: Any?) { findNext(sender) }
+    @objc func kikigakiFindPrevious(_ sender: Any?) { findPrevious(sender) }
     struct SearchHit: Equatable {
         let row: RowID
         let rowIndex: Int
@@ -11,6 +15,9 @@ extension TranscriptWindowController {
     }
 
     @objc func showSearch(_ sender: Any?) {
+        if minutesSplit.isPreviewVisible && minutesSplit.preview.hasSearchFocus {
+            minutesSplit.preview.showSearch(); return
+        }
         let anchor = transcriptDocument.anchor()
         searchOpen = true
         transcriptDocument.followsBottom = false
@@ -36,6 +43,9 @@ extension TranscriptWindowController {
     @objc func findNext(_ sender: Any?) { moveSearch(by: 1) }
     @objc func findPrevious(_ sender: Any?) { moveSearch(by: -1) }
     func moveSearch(by direction: Int) {
+        if minutesSplit.isPreviewVisible && minutesSplit.preview.hasSearchFocus {
+            minutesSplit.preview.search(direction: direction); return
+        }
         if !searchOpen { showSearch(nil); return }
         guard !searchHits.isEmpty else { return }
         currentHit = ((currentHit ?? 0) + direction + searchHits.count) % searchHits.count

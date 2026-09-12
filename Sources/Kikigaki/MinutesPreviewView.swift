@@ -2,22 +2,6 @@ import AppKit
 import UniformTypeIdentifiers
 import KikigakiCore
 
-/// 背景で構築を終えた後は変更しない。表示中のTextKitオブジェクトは背景へ渡さない。
-private struct MinutesRenderedBody: @unchecked Sendable {
-    let value: NSAttributedString
-}
-
-/// 本文と表を同じ行長へ制限し、余った紙面は右側に残す。
-private final class MinutesTextView: NSTextView {
-    // 上部バーの高さ変更でclip viewが文書原点を移しても、本文の先頭は常に0に置く。
-    override func setFrameOrigin(_ newOrigin: NSPoint) { super.setFrameOrigin(.zero) }
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        super.setFrameOrigin(.zero)
-        textContainer?.containerSize = NSSize(width: min(720, max(1, newSize.width - 48)), height: .greatestFiniteMagnitude)
-    }
-}
-
 private final class MinutesPathCell: NSTextFieldCell {
     override func drawingRect(forBounds rect: NSRect) -> NSRect {
         var result = super.drawingRect(forBounds: rect).insetBy(dx: 6, dy: 0)
@@ -39,11 +23,18 @@ private final class MinutesPathField: NSTextField {
 }
 
 /// パス編集と本文閲読を分離する。通知が来てもfield editorのドラフトは変更しない。
-@MainActor final class MinutesPreviewView: NSView, NSTextFieldDelegate {
+@MainActor final class MinutesPreviewView: NSView, NSSearchFieldDelegate {
     let pathField: NSTextField = MinutesPathField(string: "")
     let headerBar = NSView()
-    let textView: NSTextView
-    let scroll = NSScrollView()
+    let document = MinutesWebView(frame: .zero)
+    let searchField = NSSearchField()
+    private let searchBar = NSStackView()
+    private let searchCount = Washi.label("", size: 11)
+    private let neovimButton = HoverButton(title: "Neovimで開く", target: nil, action: nil)
+    private let obsidianButton = HoverButton(title: "Obsidianで開く", target: nil, action: nil)
+    private var editorTask: Task<Void, Never>?
+    private var searchGeneration = 0
+    private var resetNextRender = true
     let message = NSTextField(wrappingLabelWithString: "")
     let notice = NSTextField(wrappingLabelWithString: "")
     private let retryButton = HoverButton(title: "再読込", target: nil, action: nil)
@@ -51,6 +42,7 @@ private final class MinutesPathField: NSTextField {
     private let emptyChoose = HoverButton(title: "ファイルを選ぶ…", target: nil, action: nil)
     var onSelect: ((String?) throws -> Void)?
     var onClose: (() -> Void)?
+    var herdrCommand: () -> String? = { nil }
     private var path: String?
     private var source: MinutesState.Source?
     private var editing = false
@@ -59,16 +51,7 @@ private final class MinutesPathField: NSTextField {
     private var active = false
     private var monitor: MinutesFileMonitor?
     private var body: String?
-    private var renderTask: Task<Void, Never>?
-    private var renderGeneration = 0
-    private(set) var lastRenderMainMilliseconds: Double = 0
-
     override init(frame: NSRect) {
-        let storage = NSTextStorage(), manager = NSLayoutManager()
-        manager.allowsNonContiguousLayout = true
-        let container = NSTextContainer(containerSize: NSSize(width: 1, height: CGFloat.greatestFiniteMagnitude))
-        storage.addLayoutManager(manager); manager.addTextContainer(container)
-        textView = MinutesTextView(frame: .zero, textContainer: container)
         super.init(frame: frame)
         Washi.surface(self, color: Washi.paper)
         pathField.cell = MinutesPathCell(textCell: "")
@@ -86,30 +69,46 @@ private final class MinutesPathField: NSTextField {
         let close = HoverButton(title: "", target: self, action: #selector(closePreview))
         close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "議事録を隠す")
         close.toolTip = "議事録を隠す"; close.setAccessibilityLabel("議事録を隠す")
-        let top = row([pathField, choose, close], spacing: 8)
+        neovimButton.target = self; neovimButton.action = #selector(openNeovim)
+        obsidianButton.target = self; obsidianButton.action = #selector(openObsidian)
+        neovimButton.toolTip = "議事録をherdrの新しいタブで開く"
+        obsidianButton.toolTip = "議事録をObsidianで開く"
+        neovimButton.isEnabled = false; obsidianButton.isEnabled = false
+        let actions = row([neovimButton, obsidianButton], spacing: 8)
+        let pathRow = row([pathField, choose, close], spacing: 8)
+        let top = column([pathRow, actions], spacing: 6, inset: 0)
         headerBar.addSubview(top); top.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            headerBar.heightAnchor.constraint(greaterThanOrEqualToConstant: 56),
+            headerBar.heightAnchor.constraint(equalToConstant: 88),
             top.leadingAnchor.constraint(equalTo: headerBar.leadingAnchor, constant: 24),
             top.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor, constant: -24),
             top.topAnchor.constraint(equalTo: headerBar.topAnchor, constant: 12),
-            top.heightAnchor.constraint(equalToConstant: 32),
+            top.heightAnchor.constraint(equalToConstant: 62),
             pathField.heightAnchor.constraint(equalToConstant: 24)
         ])
         notice.font = .systemFont(ofSize: 11); notice.textColor = Washi.muted; notice.isHidden = true
         Washi.surface(headerBar)
-        textView.isEditable = false; textView.isSelectable = true; textView.isRichText = true
-        textView.drawsBackground = false
-        textView.isVerticallyResizable = true; textView.isHorizontallyResizable = false
-        textView.autoresizingMask = [.width]
-        textView.minSize = .zero; textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.textContainerInset = NSSize(width: 24, height: 24)
-        container.widthTracksTextView = false; container.heightTracksTextView = false
-        container.lineFragmentPadding = 0
-        textView.setAccessibilityLabel("議事録")
-        scroll.automaticallyAdjustsContentInsets = false
-        scroll.contentInsets = NSEdgeInsetsZero
-        scroll.documentView = textView; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
+        searchField.placeholderString = "議事録を検索"; searchField.font = .systemFont(ofSize: 12)
+        searchField.delegate = self
+        searchField.setAccessibilityLabel("議事録を検索")
+        searchField.sendsSearchStringImmediately = true
+        let previous = HoverButton(title: "↑", target: self, action: #selector(previousMatch))
+        let next = HoverButton(title: "↓", target: self, action: #selector(nextMatch))
+        let dismiss = HoverButton(title: "閉じる", target: self, action: #selector(closeSearch))
+        previous.setAccessibilityLabel("前の一致"); next.setAccessibilityLabel("次の一致")
+        searchBar.orientation = .horizontal; searchBar.spacing = 8
+        searchBar.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        searchBar.edgeInsets = NSEdgeInsets(top: 6, left: 24, bottom: 6, right: 24)
+        for view in [searchField, searchCount, previous, next, dismiss] { searchBar.addArrangedSubview(view) }
+        searchField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        searchCount.setContentHuggingPriority(.required, for: .horizontal)
+        searchBar.isHidden = true
+        document.onRendered = { [weak self] text in
+            guard let self, self.active else { return }
+            if text.isEmpty { self.showMessage("議事録はまだ空です") } else { self.showBody() }
+            if !self.searchBar.isHidden { self.search(reveal: false) }
+        }
+        document.onError = { [weak self] text in self?.body = nil; self?.showMessage(text, retry: true) }
         message.font = .systemFont(ofSize: 14); message.textColor = Washi.muted; message.alignment = .center
         message.setAccessibilityLabel("議事録の状態")
         retryButton.target = self; retryButton.action = #selector(reload)
@@ -120,11 +119,12 @@ private final class MinutesPathField: NSTextField {
         status.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 24, right: 24)
         message.widthAnchor.constraint(equalTo: status.widthAnchor, constant: -48).isActive = true
         let bodyView = NSView()
-        bodyView.addSubview(scroll); bodyView.addSubview(status)
-        for view in [scroll, status] { view.translatesAutoresizingMaskIntoConstraints = false }
+        bodyView.setContentHuggingPriority(.defaultLow, for: .vertical)
+        bodyView.addSubview(document); bodyView.addSubview(status)
+        for view in [document, status] { view.translatesAutoresizingMaskIntoConstraints = false }
         NSLayoutConstraint.activate([
-            scroll.leadingAnchor.constraint(equalTo: bodyView.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: bodyView.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: bodyView.topAnchor), scroll.bottomAnchor.constraint(equalTo: bodyView.bottomAnchor),
+            document.leadingAnchor.constraint(equalTo: bodyView.leadingAnchor), document.trailingAnchor.constraint(equalTo: bodyView.trailingAnchor),
+            document.topAnchor.constraint(equalTo: bodyView.topAnchor), document.bottomAnchor.constraint(equalTo: bodyView.bottomAnchor),
             status.centerXAnchor.constraint(equalTo: bodyView.centerXAnchor),
             status.widthAnchor.constraint(equalTo: bodyView.widthAnchor, constant: -48),
             status.leadingAnchor.constraint(greaterThanOrEqualTo: bodyView.leadingAnchor, constant: 20),
@@ -136,7 +136,8 @@ private final class MinutesPathField: NSTextField {
         guide.heightAnchor.constraint(equalTo: bodyView.heightAnchor, multiplier: 0.28).isActive = true
         status.topAnchor.constraint(equalTo: guide.bottomAnchor).isActive = true
         let bodyColumn = column([notice, bodyView], spacing: 0, inset: 0)
-        let layout = column([headerBar, separator(), bodyColumn], spacing: 0, inset: 0)
+        bodyColumn.setContentHuggingPriority(.defaultLow, for: .vertical)
+        let layout = column([headerBar, separator(), searchBar, bodyColumn], spacing: 0, inset: 0)
         addSubview(layout); layout.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             layout.leadingAnchor.constraint(equalTo: leadingAnchor), layout.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -148,8 +149,8 @@ private final class MinutesPathField: NSTextField {
     func resetContext() {
         stop(); path = nil; body = nil; editing = false; commitError = nil; contextGeneration += 1
         window?.makeFirstResponder(nil)
-        textView.textStorage?.setAttributedString(NSAttributedString(string: ""))
-        scroll.contentView.scroll(to: .zero)
+        document.clear(); document.setFile(nil); resetNextRender = true
+        closeSearch(); editorTask?.cancel(); editorTask = nil
     }
 
     private func row(_ views: [NSView], spacing: CGFloat) -> NSStackView {
@@ -171,6 +172,9 @@ private final class MinutesPathField: NSTextField {
         let changed = self.path != path
         let start = active && (!self.active || changed || self.source != source)
         self.path = path; self.source = source; self.active = active
+        if changed { document.setFile(path.map { URL(fileURLWithPath: $0) }); resetNextRender = true }
+        neovimButton.isEnabled = path != nil && editorTask == nil
+        obsidianButton.isEnabled = path != nil
         if editing || pathField.currentEditor() != nil {
             if changed { notice.stringValue = "表示対象が変わりました。編集中のパスは保持しています"; notice.isHidden = false }
         } else { pathField.stringValue = path ?? ""; pathField.toolTip = path; notice.isHidden = warning == nil; notice.stringValue = warning ?? "" }
@@ -182,7 +186,7 @@ private final class MinutesPathField: NSTextField {
     private func beginRead(reset: Bool) {
         cancelRender()
         monitor?.stop(); monitor = nil
-        if reset { body = nil; textView.textStorage?.setAttributedString(NSAttributedString(string: "")); scroll.contentView.scroll(to: .zero) }
+        if reset { body = nil; document.clear(); resetNextRender = true }
         guard let path else { showMessage("議事録のファイルを指定するか、AIに書かせると表示します"); return }
         showMessage("読み込んでいます…", cancel: true)
         monitor = MinutesFileMonitor(path: path) { [weak self] result in self?.receive(result) }
@@ -190,18 +194,11 @@ private final class MinutesPathField: NSTextField {
 
     func receive(_ result: MinutesFileResult) {
         switch result {
-        case .body(let source, let blocks):
-            if blocks.isEmpty { cancelRender(); body = source; showMessage("議事録はまだ空です"); return }
-            guard body != source else { cancelRender(); showBody(); return }
-            cancelRender()
-            let generation = renderGeneration
-            renderTask = Task { [weak self] in
-                let rendered = await Task.detached(priority: .utility) {
-                    MinutesRenderedBody(value: MarkdownBodyRenderer.render(blocks))
-                }.value
-                guard !Task.isCancelled, let self, self.renderGeneration == generation else { return }
-                self.install(rendered.value, source: source)
-            }
+        case .body(let source, _):
+            guard body != source else { showBody(); return }
+            body = source
+            document.render(source, reset: resetNextRender)
+            resetNextRender = false
         case .missing: cancelRender(); showMessage(source == .ai ? "AIが通知したファイルはまだありません。作成されると自動で表示します" : "指定したファイルはまだありません。作成されると自動で表示します", retry: true)
         case .cloud: cancelRender(); showMessage("iCloudからのダウンロードを待っています…", cancel: true)
         case .failure(let reason): cancelRender(); showMessage(reason, retry: true)
@@ -209,48 +206,33 @@ private final class MinutesPathField: NSTextField {
         }
     }
 
-    private func install(_ rendered: NSAttributedString, source: String) {
-            let started = Date()
-            defer { lastRenderMainMilliseconds = Date().timeIntervalSince(started) * 1000 }
-            showBody()
-            body = source
-            let selection = textView.selectedRange(), oldY = scroll.contentView.bounds.minY
-            let manager = textView.layoutManager!, container = textView.textContainer!
-            let visible = NSRect(x: 0, y: max(0, oldY - textView.textContainerInset.height), width: container.containerSize.width, height: scroll.contentSize.height)
-            manager.ensureLayout(forBoundingRect: visible, in: container)
-            let point = NSPoint(x: 0, y: max(0, oldY - textView.textContainerInset.height))
-            let glyph = manager.glyphIndex(for: point, in: container)
-            let character = glyph < manager.numberOfGlyphs ? manager.characterIndexForGlyph(at: glyph) : 0
-            let offset = glyph < manager.numberOfGlyphs ? manager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minY - oldY : 0
-            textView.textStorage?.setAttributedString(rendered)
-            manager.ensureLayout(forBoundingRect: visible, in: container)
-            let count = (textView.string as NSString).length
-            textView.setSelectedRange(NSRange(location: min(selection.location, count), length: min(selection.length, max(0, count - selection.location))))
-            var y: CGFloat = 0
-            if count > 0, oldY > 0 {
-                let anchor = manager.glyphIndexForCharacter(at: min(character, count - 1))
-                y = manager.lineFragmentRect(forGlyphAt: anchor, effectiveRange: nil).minY - offset
-            }
-            scroll.contentView.scroll(to: NSPoint(x: 0, y: min(max(0, y), max(0, textView.frame.height - scroll.contentSize.height))))
-            scroll.reflectScrolledClipView(scroll.contentView)
-    }
-
-    private func cancelRender() { renderGeneration += 1; renderTask?.cancel(); renderTask = nil }
+    private func cancelRender() { body = nil; document.invalidate() }
     private func showBody() {
-        message.isHidden = true; emptyChoose.isHidden = true; retryButton.isHidden = true; cancelButton.isHidden = true; scroll.isHidden = false
+        message.isHidden = true; emptyChoose.isHidden = true; retryButton.isHidden = true; cancelButton.isHidden = true; document.isHidden = false
     }
 
     private func showMessage(_ value: String, retry: Bool = false, cancel: Bool = false) {
-        message.stringValue = value; message.isHidden = false; scroll.isHidden = true
+        message.stringValue = value; message.isHidden = false; document.isHidden = true
         emptyChoose.isHidden = path != nil
         retryButton.isHidden = !retry; cancelButton.isHidden = !cancel
     }
-    func controlTextDidBeginEditing(_ obj: Notification) { editing = true; (pathField as? MinutesPathField)?.focused = true }
+    func controlTextDidBeginEditing(_ obj: Notification) {
+        guard obj.object as? NSTextField === pathField else { return }
+        editing = true; (pathField as? MinutesPathField)?.focused = true
+    }
     func controlTextDidEndEditing(_ obj: Notification) {
+        guard obj.object as? NSTextField === pathField else { return }
         editing = false; pathField.stringValue = path ?? ""; notice.isHidden = commitError == nil
         (pathField as? MinutesPathField)?.focused = false
     }
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if control === searchField {
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) { closeSearch(); return true }
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                search(direction: NSApp.currentEvent?.modifierFlags.contains(.shift) == true ? -1 : 1); return true
+            }
+            return false
+        }
         if commandSelector == #selector(NSResponder.insertNewline(_:)) { commitPath(); return true }
         if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
             editing = false; commitError = nil; window?.makeFirstResponder(nil); pathField.stringValue = path ?? ""; notice.isHidden = true
@@ -291,7 +273,63 @@ private final class MinutesPathField: NSTextField {
         }
     }
     @objc private func closePreview() { onClose?() }
-    @objc private func reload() { beginRead(reset: false) }
+    @objc private func reload() { body = nil; beginRead(reset: false) }
     @objc private func cancelRead() { cancelRender(); monitor?.stop(); monitor = nil; showMessage("読み込みを取り消しました", retry: true) }
-    func stop() { cancelRender(); active = false; monitor?.stop(); monitor = nil }
+    func stop() { cancelRender(); active = false; body = nil; monitor?.stop(); monitor = nil; editorTask?.cancel(); editorTask = nil }
+    var hasSearchFocus: Bool {
+        guard !isHidden, let responder = window?.firstResponder else { return false }
+        if responder === searchField.currentEditor() || responder === pathField.currentEditor() { return true }
+        return (responder as? NSView)?.isDescendant(of: self) == true
+    }
+    func showSearch() {
+        searchBar.isHidden = false; layoutSubtreeIfNeeded()
+        window?.makeFirstResponder(searchField); searchField.selectText(nil); search()
+    }
+    @objc func closeSearch() {
+        searchGeneration += 1
+        searchBar.isHidden = true; searchField.stringValue = ""
+        document.search("") { _, _ in }
+        if let editor = searchField.currentEditor(), window?.firstResponder === editor {
+            window?.makeFirstResponder(document.webView)
+        }
+    }
+    func controlTextDidChange(_ notification: Notification) {
+        if notification.object as? NSSearchField === searchField { search() }
+    }
+    func search(direction: Int = 0, reveal: Bool = true) {
+        if searchBar.isHidden { showSearch(); return }
+        searchGeneration += 1; let current = searchGeneration
+        document.search(searchField.stringValue, direction: direction, reveal: reveal) { [weak self] at, count in
+            guard let self, self.searchGeneration == current else { return }
+            self.searchCount.stringValue = count == 0 ? "一致なし" : "\(at) / \(count)"
+        }
+    }
+    @objc private func previousMatch() { search(direction: -1) }
+    @objc private func nextMatch() { search(direction: 1) }
+    @objc private func openNeovim() {
+        guard let path, editorTask == nil else { return }
+        let generation = contextGeneration
+        neovimButton.isEnabled = false
+        editorTask = Task { [weak self] in
+            do { try await MinutesExternalEditor.openNeovim(path: path, herdrCommand: self?.herdrCommand()) }
+            catch {
+                guard let self, !Task.isCancelled, self.contextGeneration == generation else { return }
+                self.notice.stringValue = error.localizedDescription; self.notice.isHidden = false
+            }
+            guard let self, self.contextGeneration == generation else { return }
+            self.editorTask = nil; self.neovimButton.isEnabled = self.path != nil
+        }
+    }
+    @objc private func openObsidian() {
+        guard let path else { return }
+        openObsidianFile(path)
+    }
+    private func openObsidianFile(_ path: String) {
+        do {
+            _ = try MinutesExternalEditor.existingFile(path)
+            guard NSWorkspace.shared.open(MinutesExternalEditor.obsidianURL(path: path)) else {
+                throw MinutesEditorError.failed("Obsidianを開けません。インストールを確認してください")
+            }
+        } catch { notice.stringValue = error.localizedDescription; notice.isHidden = false }
+    }
 }

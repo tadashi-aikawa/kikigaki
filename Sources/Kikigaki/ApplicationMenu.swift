@@ -27,9 +27,9 @@ enum ApplicationMenu {
         menu.addItem(edit)
         edit.submenu?.addItem(.separator())
         for (title, action, key, modifiers) in [
-            ("検索…", #selector(TranscriptWindowController.showSearch(_:)), "f", NSEvent.ModifierFlags.command),
-            ("次を検索", #selector(TranscriptWindowController.findNext(_:)), "g", NSEvent.ModifierFlags.command),
-            ("前を検索", #selector(TranscriptWindowController.findPrevious(_:)), "G", NSEvent.ModifierFlags([.command, .shift]))
+            ("検索…", #selector(TranscriptWindowController.kikigakiShowSearch(_:)), "f", NSEvent.ModifierFlags.command),
+            ("次を検索", #selector(TranscriptWindowController.kikigakiFindNext(_:)), "g", NSEvent.ModifierFlags.command),
+            ("前を検索", #selector(TranscriptWindowController.kikigakiFindPrevious(_:)), "G", NSEvent.ModifierFlags([.command, .shift]))
         ] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
             item.keyEquivalentModifierMask = modifiers
