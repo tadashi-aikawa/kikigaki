@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRenderer, withoutFrontmatter, imageURL } from './renderer.js';
 import { changedEntries } from './updates.js';
+import { isTimeline, wrapTimeline } from './timeline.js';
 const render = text => createRenderer().render(withoutFrontmatter(text), { context: 'test' });
 test('変更行は追加と書換えだけで移動と削除は光らせない', () => {
   const entries = values => values.map(key => ({ key }));
@@ -27,6 +28,17 @@ test('脚注とcalloutとチェックボックス', () => {
   assert.match(html, /callout-title">注意/); assert.match(html, /<strong>本文/);
   assert.match(html, /<\/aside>/); assert.match(html, /type="checkbox"/);
   assert.doesNotMatch(html, /\[!NOTE\]/);
+});
+test('timelineの期間と出来事だけを枠幅で改行し他の行は変えない', () => {
+  const fits = text => [...text].length <= 6;
+  const source = 'timeline\n    title 振り返りと展望とその先\n    section 長い区分の名前です\n    %% コメント: 長い長い長い長い\n    1年前 : テーマ「ユーザーからビルダーへ」 : 自身は<br/>まだビルダーではなかった\n      : 次の年 : 時刻 12:30 に集合\n    accTitle: 長い長い長い長い長い\n';
+  assert.equal(wrapTimeline(source, fits), 'timeline\n    title 振り返りと展望とその先\n    section 長い区分の名前です\n    %% コメント: 長い長い長い長い\n    1年前 : テーマ「ユー<br>ザーからビル<br>ダーへ」 : 自身は<br>まだビルダー<br>ではなかった\n      : 次の年 : 時刻 12:<br>30 に集合\n    accTitle: 長い長い長い長い長い\n');
+  assert.equal(wrapTimeline('timeline\n  2024 : 短い\n', fits), 'timeline\n  2024 : 短い\n');
+  assert.equal(wrapTimeline('timeline\n  2025 : エージェントと組織AI : abcdefghij\n', fits), 'timeline\n  2025 : エージェント<br>と組織AI : abcdef<br>ghij\n');
+  assert.ok(isTimeline('%%{init: {}}%%\n\ntimeline\n  a : b'));
+  assert.ok(isTimeline('---\ntitle: x\n---\ntimeline LR\n  a : b'));
+  assert.ok(!isTimeline('flowchart LR\n  A --> B'));
+  assert.ok(!isTimeline('mindmap\n  root((timeline))'));
 });
 test('数式と図を処理しHTMLはsanitizer未指定なら文字で残す', () => {
   const html = render('$x^2$\n\n$$\nx+y\n$$\n\n```mermaid\nflowchart LR\n A-->B\n```\n\n<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>\n\n<script>alert(1)</script>');

@@ -3,6 +3,7 @@ import DOMPurify from 'dompurify';
 import mermaid from 'mermaid';
 import { cleanHTML } from './html.js';
 import { changedEntries, updateEntries, clearUpdates, highlightUpdates } from './updates.js';
+import { isTimeline, wrapTimeline } from './timeline.js';
 const md = createRenderer(), root = document.getElementById('minutes');
 const toc = document.getElementById('toc'), tocNav = toc.querySelector('nav');
 let headings = [], tocLinks = [], activeTOCLink = null, tocFrame = 0;
@@ -123,10 +124,16 @@ tocNav.addEventListener('click', event => {
   if (target) { revealElement(target); target.scrollIntoView({ block:'start' }); }
   updateTOCPosition();
 });
-mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'base',
+mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'base', fontFamily: '-apple-system, sans-serif',
   themeVariables: { primaryColor: '#ede0cd', primaryTextColor: '#221f1c', primaryBorderColor: '#6b6157', lineColor: '#6b6157', fontFamily: '-apple-system, sans-serif' },
-  htmlLabels: false, flowchart: { htmlLabels: false }, maxTextSize: 100000, maxEdges: 1000,
+  htmlLabels: false, flowchart: { htmlLabels: false }, mindmap: { maxNodeWidth: 320 }, maxTextSize: 100000, maxEdges: 1000,
   suppressErrorRendering: true });
+// timelineの枠は150px固定(Mermaidの内部値)。描画と同じ16pxの書体で測り、端の余裕として4%残す。
+const timelineMeasure = document.createElement('canvas').getContext('2d');
+const fitsTimelineNode = text => {
+  timelineMeasure.font = '16px -apple-system, sans-serif';
+  return timelineMeasure.measureText(text).width <= 144;
+};
 let generation = 0, query = '', hit = -1, ranges = [], source = '', context = '';
 let lastUpdateEntries = null;
 let updateListeners = new AbortController();
@@ -276,7 +283,8 @@ window.minutes = {
       if (current !== generation) return;
       const holder = document.createElement('div'); holder.className = 'diagram';
       try {
-        const { svg } = await mermaid.render('diagram-' + current + '-' + crypto.randomUUID(), pre.textContent);
+        const definition = isTimeline(pre.textContent) ? wrapTimeline(pre.textContent, fitsTimelineNode) : pre.textContent;
+        const { svg } = await mermaid.render('diagram-' + current + '-' + crypto.randomUUID(), definition);
         if (current !== generation) return;
         holder.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, FORBID_TAGS: ['foreignObject', 'script', 'a'] });
         pre.replaceWith(holder);
