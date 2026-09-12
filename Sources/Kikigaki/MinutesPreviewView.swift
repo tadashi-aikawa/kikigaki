@@ -9,6 +9,19 @@ private final class MinutesPathCell: NSTextFieldCell {
         result.origin.y += (result.height - height) / 2; result.size.height = height
         return result
     }
+
+    // 通常描画の補正だけではfield editorが枠の左上を使う。両方の編集開始経路へ同じ領域を渡す。
+    override func edit(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText,
+                       delegate: Any?, event: NSEvent?) {
+        super.edit(withFrame: drawingRect(forBounds: rect), in: controlView, editor: textObj,
+                   delegate: delegate, event: event)
+    }
+
+    override func select(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText,
+                         delegate: Any?, start: Int, length: Int) {
+        super.select(withFrame: drawingRect(forBounds: rect), in: controlView, editor: textObj,
+                     delegate: delegate, start: start, length: length)
+    }
 }
 
 private final class MinutesPathField: NSTextField {

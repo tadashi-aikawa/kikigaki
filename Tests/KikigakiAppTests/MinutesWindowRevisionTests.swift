@@ -66,7 +66,27 @@ import KikigakiCore
         window.contentView = view; window.orderFront(nil)
         defer { window.orderOut(nil); view.stop() }
         view.update(path: "/tmp/old.md", source: .human, active: false)
+        view.layoutSubtreeIfNeeded()
         #expect(window.makeFirstResponder(view.pathField))
+        let editor = try #require(view.pathField.currentEditor() as? NSTextView)
+        let editorRect = view.pathField.convert(editor.visibleRect, from: editor)
+        // AppKitは編集領域を広げ、textContainer内にも余白を持つ。外枠ではなく文字の位置を確認する。
+        let layout = try #require(editor.layoutManager), container = try #require(editor.textContainer)
+        layout.ensureLayout(for: container)
+        let glyphs = layout.boundingRect(forGlyphRange: NSRange(location: 0, length: layout.numberOfGlyphs), in: container)
+        let textRect = view.pathField.convert(glyphs.offsetBy(dx: editor.textContainerOrigin.x,
+                                                             dy: editor.textContainerOrigin.y), from: editor)
+        #expect(textRect.minX >= 6)
+        #expect(textRect.minY >= 2)
+        #expect(abs(editorRect.midY - view.pathField.bounds.midY) <= 1)
+        if let output = ProcessInfo.processInfo.environment["KIKIGAKI_PATH_CAPTURE"] {
+            editor.setSelectedRange(NSRange(location: 0, length: 0))
+            let header = view.headerBar
+            let bitmap = try #require(header.bitmapImageRepForCachingDisplay(in: header.bounds))
+            header.cacheDisplay(in: header.bounds, to: bitmap)
+            try #require(bitmap.representation(using: .png, properties: [:]))
+                .write(to: URL(fileURLWithPath: output))
+        }
         view.update(path: "/tmp/new.md", source: .ai, active: false)
         #expect(view.pathField.stringValue == "/tmp/old.md")
         view.pathField.stringValue = "relative.md"; view.commitPath()
