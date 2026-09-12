@@ -34,6 +34,8 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 
 `~/.config/kikigaki/config.toml` (TOML)。すべて省略可で、省略時は既定値です。話者の統合先は画面から操作できます。
 
+小音量の除外は「話者」ポップアップのスイッチとスライダーから操作します。初回はOFF、しきい値は−55 dBFS。設定は次回も記憶し、計測表示の設定とは独立しています。薄い行はコピー・AI送信から外れ、OFFやしきい値の引き下げで復元できます。マイクや入力ゲインを変えたら再調整してください。詳細は[小音量発話の除外](docs/audio-exclusion.md)を参照してください。
+
 ```toml
 # Markdown (と録音WAV) の保存先。既定: ~/Documents/KIKIGAKI
 outputDir = "~/Documents/KIKIGAKI"
@@ -41,7 +43,7 @@ outputDir = "~/Documents/KIKIGAKI"
 saveRecording = false
 # 実験機能: 停止時に短い繰り返し相槌の候補を省く。原文を .raw.md にも保存する。既定: false
 dropRepeatedBackchannels = false
-# 実験機能: 発話ごとの音量と小音量候補を表示・保存する。本文からは除外しない。既定: false
+# 診断表示: 発話ごとの音量と候補を表示・別途保存する。除外設定とは独立。既定: false
 measureAudioLevels = false
 
 # グローバルショートカット。既定は ctrl+alt+cmd+K (開始/停止) と ctrl+alt+cmd+P (一時停止/再開)

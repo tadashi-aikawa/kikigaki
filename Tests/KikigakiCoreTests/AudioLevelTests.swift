@@ -86,7 +86,7 @@ import Testing
         let report = try JSONDecoder().decode(AudioLevelReport.self, from: Data(contentsOf: MeetingFiles.levelsURL(for: url)))
         #expect(report.track == meeting.audioLevels && report.utterances == rows)
         let rendered = try String(contentsOf: url, encoding: .utf8)
-        #expect(rendered.contains("話者A: 小さな声。") && rendered.contains("小音量候補・未除外"))
+        #expect(rendered.contains("話者A: 小さな声。") && rendered.contains("小音量候補") && rendered.contains("除外OFF"))
         let capture = try AICapture(tokens: tokens, speakers: [0], finalCount: 1, processedUntil: 1, cutoff: 1, names: meeting.names, timeline: meeting.timeline)
         #expect(capture.lines.count == 1 && capture.voice == "小さな声。")
         #expect(!capture.lines[0].contains("dBFS"))

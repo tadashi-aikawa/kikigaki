@@ -44,7 +44,7 @@ public struct AudioLevelTrack: Codable, Equatable, Sendable {
     }
 
     /// 各表示の行集合の順で評価する。未来の行は基準へ入れない。手入力は数えない。
-    public func assessments(for utterances: [Utterance]) -> [AudioLevelAssessment?] {
+    public func assessments(for utterances: [Utterance], exclusion: AudioExclusion? = nil) -> [AudioLevelAssessment?] {
         var recent: [Double] = []
         return utterances.map { utterance in
             guard utterance.kind == .voice else { return nil }
@@ -58,7 +58,7 @@ public struct AudioLevelTrack: Codable, Equatable, Sendable {
                 recent.append(value)
                 if recent.count > 60 { recent.removeFirst() }
             }
-            return AudioLevelAssessment(dbFS: value, referenceDBFS: reference)
+            return AudioLevelAssessment(dbFS: value, referenceDBFS: reference, exclusion: exclusion)
         }
     }
 }
@@ -95,17 +95,22 @@ public struct AudioLevelMeter: Sendable {
 public struct AudioLevelAssessment: Equatable, Sendable {
     public let dbFS: Double?
     public let referenceDBFS: Double?
+    public var exclusion: AudioExclusion? = nil
+    public init(dbFS: Double?, referenceDBFS: Double? = nil, exclusion: AudioExclusion? = nil) {
+        self.dbFS = dbFS; self.referenceDBFS = referenceDBFS; self.exclusion = exclusion
+    }
     public var isCandidate: Bool {
         guard let dbFS else { return false }
+        if let exclusion { return exclusion.belowThreshold(dbFS) }
         return dbFS < -45 || referenceDBFS.map { dbFS <= $0 - 15 } == true
     }
     public var label: String {
         guard let dbFS else { return "音量 未計測" }
         let value = String(format: "音量 %.1f dBFS", dbFS)
-        return value + (isCandidate ? " · 小音量候補・未除外" : " · 未除外")
+        return value + (isCandidate ? " · 小音量候補" : " · しきい値以上")
     }
     public var detail: String {
-        var text = "100ms RMSの行内90パーセンタイル。別会議かどうかは判定しません。本文・コピー・AI送信には全発話を含めます。"
+        var text = "100ms RMSの行内90パーセンタイル。別会議かどうかは判定しません。" + (exclusion ?? AudioExclusion()).label + "。"
         if let referenceDBFS { text += String(format: " 直前の基準 %.1f dBFS。", referenceDBFS) }
         if dbFS == nil { text += " 区間が短い、音声待ち、または欠測のため未計測です。" }
         return text
@@ -122,9 +127,11 @@ public struct AudioLevelReport: Codable, Equatable, Sendable {
     public let pauses: [MeetingTimeline.Pause]
     public let utterances: [Utterance]
     public let names: SpeakerNames
+    public var audioExclusion: AudioExclusion?
     public init(meeting: MeetingMarkdown.Meeting, track: AudioLevelTrack) {
-        schemaVersion = 1; sampleRate = AudioLevelTrack.sampleRate; windowSamples = AudioLevelTrack.windowSamples
+        schemaVersion = 2; sampleRate = AudioLevelTrack.sampleRate; windowSamples = AudioLevelTrack.windowSamples
         self.track = track; startedAt = meeting.startedAt; pauses = meeting.pauses
         utterances = meeting.utterances; names = meeting.names
+        audioExclusion = meeting.audioExclusion
     }
 }

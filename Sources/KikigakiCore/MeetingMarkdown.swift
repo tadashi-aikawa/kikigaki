@@ -12,6 +12,9 @@ public enum MeetingMarkdown {
         public var pauses: [MeetingTimeline.Pause]
         public var ai: AIConversation?
         public var audioLevels: AudioLevelTrack?
+        public var audioExclusion: AudioExclusion?
+        public var showAudioLevels: Bool?
+        public var displaysAudioLevels: Bool { showAudioLevels ?? (audioLevels != nil) }
         public var timeline: MeetingTimeline { MeetingTimeline(startedAt: startedAt, pauses: pauses) }
 
         public init(startedAt: Date, duration: Double, utterances: [Utterance], names: SpeakerNames,
@@ -42,15 +45,23 @@ public enum MeetingMarkdown {
         lines.append("## 書き起こし")
         lines.append("")
         // 箇条書きにするのは、素の行を並べると Markdown レンダラが1段落に繋げてしまうため
-        lines += AIMarkdown.transcriptLines(meeting, timeZone: timeZone)
+        let exclusion = meeting.audioExclusion ?? AudioExclusion()
+        var included = meeting
+        included.utterances = exclusion.included(meeting.utterances, track: meeting.audioLevels)
+        lines += AIMarkdown.transcriptLines(included, timeZone: timeZone)
+        let excluded = meeting.utterances.filter { exclusion.excludes($0, track: meeting.audioLevels) }
+        if !excluded.isEmpty {
+            lines += ["", "## 小音量で除外した発話", "", exclusion.label + "。元の発話は以下に保持します。", ""]
+            lines += excluded.map { "- " + TranscriptRenderer.line($0, names: meeting.names, timeline: meeting.timeline, timeZone: timeZone) + " — 小音量のため除外" }
+        }
         if let ai = meeting.ai, !ai.questions.isEmpty {
             lines.append("")
             lines.append(AIMarkdown.section(ai, timeZone: timeZone))
         }
-        if let track = meeting.audioLevels {
-            lines += ["", "## 音量の計測", "", "観察用の仮判定です。小音量候補も本文・コピー・AI送信から除外していません。", "",
+        if meeting.displaysAudioLevels, let track = meeting.audioLevels {
+            lines += ["", "## 音量の計測", "", exclusion.label + "。候補表示はしきい値との比較です。", "",
                       "| 時刻 | 話者 | 音量 |", "|---|---|---|"]
-            for (utterance, assessment) in zip(meeting.utterances, track.assessments(for: meeting.utterances)) {
+            for (utterance, assessment) in zip(meeting.utterances, track.assessments(for: meeting.utterances, exclusion: meeting.audioExclusion)) {
                 guard let assessment else { continue }
                 let name = meeting.names.displayName(for: utterance).replacingOccurrences(of: "|", with: "&#124;")
                 let clock = TranscriptRenderer.clock(for: utterance, timeline: meeting.timeline, timeZone: timeZone)

@@ -10,7 +10,18 @@ struct SessionSnapshot {
     var state: RecordingState = .idle
     var utterances: [Utterance] = []
     var audioLevels: [AudioLevelAssessment?] = []
+    var audioExclusion = AudioExclusion()
+    var excludedRows: Set<Int> = []
+    var includedUtterances: [Utterance] { utterances.enumerated().filter { !excludedRows.contains($0.offset) }.map(\.element) }
+    var canChangeAudioExclusion: Bool { state != .preparing && state != .finishing }
+    var canRecopy = false
+    var copyBoundaryIndex: Int? {
+        guard let preview = handoffPreview else { return nil }
+        let indices = utterances.indices.filter { !excludedRows.contains($0) }
+        return indices.indices.contains(preview.startLine - 1) ? indices[preview.startLine - 1] : nil
+    }
     var tentativeText: String?
+    var tentativeExcluded = false
     var pendingSpeakerRows: Set<Int> = []
     var timeline = MeetingTimeline(startedAt: Date())
     var names = SpeakerNames()
@@ -36,7 +47,11 @@ struct SessionSnapshot {
 
     var canSubmitTyped: Bool { state == .recording || state == .paused }
     var voiceQuestionPlaceholder: String {
-        tentativeText ?? utterances.last(where: { $0.kind == .voice })?.text ?? "空欄なら声の末尾を送ります"
+        let last = utterances.lastIndex(where: { $0.kind == .voice })
+        if tentativeExcluded || (tentativeText == nil && last.map { excludedRows.contains($0) } == true) {
+            return "末尾の声は小音量のため除外されます。問いを入力してください"
+        }
+        return tentativeText ?? last.flatMap { excludedRows.contains($0) ? nil : utterances[$0].text } ?? "空欄なら声の末尾を送ります"
     }
     /// 音声消費が遅れていても、投稿済みの位置までを表示範囲に含める。
     var contextEnd: Double { max(elapsed, utterances.filter { $0.kind == .typed }.map(\.start).max() ?? 0) }
@@ -50,7 +65,8 @@ struct SessionSnapshot {
 
     func contextStartClock(_ preview: HandoffPreview) -> String {
         let index = preview.startLine - 1
-        if utterances.indices.contains(index) { return TranscriptRenderer.clock(for: utterances[index], timeline: timeline) }
+        let included = includedUtterances
+        if included.indices.contains(index) { return TranscriptRenderer.clock(for: included[index], timeline: timeline) }
         return timeline.clock(at: preview.startTime, seconds: true)
     }
 

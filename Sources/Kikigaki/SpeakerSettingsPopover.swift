@@ -3,9 +3,15 @@ import KikigakiCore
 
 /// 表示中の会議の統合と、次に始める録音の設定を分ける。
 @MainActor
-final class SpeakerSettingsPopover: NSObject {
+final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
     var onMappingChange: ((Int, Int?) -> Void)?
     var onDiarizationChange: ((Bool) -> Void)?
+    var onAudioExclusionChange: ((AudioExclusion) -> Void)?
+    let exclusionSwitch = NSSwitch()
+    let exclusionSlider = NSSlider(value: -55, minValue: -80, maxValue: -20, target: nil, action: nil)
+    private let exclusionValue = Washi.label(size: 11)
+    private var pendingExclusion: AudioExclusion?
+    private var exclusionTimer: Timer?
     private let popover = NSPopover()
     let diarizationSwitch = NSSwitch()
     private let modeHint = NSTextField(wrappingLabelWithString: "")
@@ -25,6 +31,7 @@ final class SpeakerSettingsPopover: NSObject {
         self.snapshot = snapshot
         super.init()
         popover.behavior = .transient
+        popover.delegate = self
         popover.animates = false
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 400))
         content.appearance = NSAppearance(named: .aqua)
@@ -57,6 +64,22 @@ final class SpeakerSettingsPopover: NSObject {
         mappingHint.widthAnchor.constraint(equalToConstant: 384).isActive = true
         meetingSection.addArrangedSubview(mappingHint)
         stack.addArrangedSubview(meetingSection)
+        let exclusionRow = NSStackView(views: [Washi.label("小音量発話を除外", size: 12, weight: .semibold), NSView(), exclusionSwitch])
+        exclusionRow.widthAnchor.constraint(equalToConstant: 384).isActive = true
+        stack.addArrangedSubview(exclusionRow)
+        exclusionSwitch.target = self; exclusionSwitch.action = #selector(exclusionChanged)
+        exclusionSwitch.setAccessibilityLabel("小音量発話を除外")
+        exclusionSlider.target = self; exclusionSlider.action = #selector(exclusionChanged)
+        exclusionSlider.isContinuous = true
+        exclusionSlider.widthAnchor.constraint(equalToConstant: 384).isActive = true
+        exclusionSlider.setAccessibilityLabel("除外する音量のしきい値 dBFS")
+        stack.addArrangedSubview(exclusionSlider)
+        stack.addArrangedSubview(exclusionValue)
+        let exclusionHint = NSTextField(wrappingLabelWithString:
+            "左ほど声を残し、右ほど除外します。薄い行はコピー・AI送信から除きます。\nOFFやしきい値の引き下げで復元できます。変更は次回も記憶します。\nマイク・入力音量を変えたら再調整してください。遠くの大声は区別できません。")
+        exclusionHint.font = .systemFont(ofSize: 11); exclusionHint.textColor = Washi.muted
+        exclusionHint.widthAnchor.constraint(equalToConstant: 384).isActive = true
+        stack.addArrangedSubview(exclusionHint)
         let nextTitle = Washi.label("次の録音", size: 12, weight: .semibold)
         stack.addArrangedSubview(nextTitle)
         let modeLabel = Washi.label("話者判別")
@@ -78,10 +101,44 @@ final class SpeakerSettingsPopover: NSObject {
     func present(relativeTo rect: NSRect, of view: NSView) {
         popover.show(relativeTo: rect, of: view, preferredEdge: .maxY)
     }
-    func close() { popover.close() }
+    func close() { flushExclusion(); popover.close() }
+    func popoverDidClose(_ notification: Notification) { flushExclusion() }
+
+    @objc private func exclusionChanged() {
+        guard snapshot.canChangeAudioExclusion else { return }
+        pendingExclusion = AudioExclusion(enabled: exclusionSwitch.state == .on, thresholdDBFS: exclusionSlider.doubleValue.rounded())
+        refreshExclusionControls()
+        exclusionTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.15, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.flushExclusion() }
+        }
+        exclusionTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+    func flushExclusion() {
+        exclusionTimer?.invalidate(); exclusionTimer = nil
+        guard let value = pendingExclusion else { return }
+        guard snapshot.canChangeAudioExclusion else { refreshExclusionControls(); return }
+        pendingExclusion = nil
+        onAudioExclusionChange?(value)
+    }
+    private func refreshExclusionControls() {
+        let value = pendingExclusion ?? snapshot.audioExclusion
+        exclusionSwitch.state = value.enabled ? .on : .off
+        exclusionSlider.doubleValue = value.thresholdDBFS
+        exclusionSwitch.isEnabled = snapshot.canChangeAudioExclusion
+        exclusionSlider.isEnabled = snapshot.canChangeAudioExclusion
+        exclusionValue.stringValue = String(format: "%.0f dBFS未満 · %@", value.thresholdDBFS,
+            value.enabled ? "除外ON" : "除外OFF・全発話を含む")
+    }
 
     func update(snapshot: SessionSnapshot) {
+        let resumed = !self.snapshot.canChangeAudioExclusion && snapshot.canChangeAudioExclusion
+        if self.snapshot.timeline.startedAt != snapshot.timeline.startedAt || snapshot.state == .preparing {
+            pendingExclusion = nil; exclusionTimer?.invalidate(); exclusionTimer = nil
+        }
         self.snapshot = snapshot
+        refreshExclusionControls()
         let hasMeeting = snapshot.markdownURL != nil || snapshot.state != .idle
         let enabled = snapshot.names.diarizationEnabled
         meetingSection.isHidden = !hasMeeting
@@ -134,6 +191,7 @@ final class SpeakerSettingsPopover: NSObject {
         popover.contentSize = size
         contentView.setFrameSize(size)
         contentView.layoutSubtreeIfNeeded()
+        if resumed { flushExclusion() }
     }
 
     @objc private func modeChanged() {

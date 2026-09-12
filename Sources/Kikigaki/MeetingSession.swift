@@ -59,6 +59,15 @@ final class MeetingSession {
     private var archive: MeetingArchive?
     private var dropRepeatedBackchannels = false
     private var audioLevelMeter: AudioLevelMeter?
+    static let audioExclusionDefaultsKey = "KikigakiAudioExclusion"
+    private var audioExclusion = AudioExclusion()
+    private var showAudioLevels = false
+    private var recopyInvalidated = false
+    private struct AudioInterval: Hashable { let start: Double; let end: Double }
+    private var cachedAudioLevels: [AudioInterval: Double?] = [:]
+#if DEBUG
+    private(set) var audioLevelCalculationCount = 0
+#endif
     private var speakerMapping = SpeakerMapping()
     private var liveSource = SpeakerTranscript()
     private var lastUndiarizedDraw = -Double.infinity
@@ -346,6 +355,8 @@ final class MeetingSession {
         self.log = log
         self.diarizationDefaults = diarizationDefaults
         nextDiarizationEnabled = diarizationDefaults?.object(forKey: Self.diarizationDefaultsKey) as? Bool ?? true
+        if let data = diarizationDefaults?.data(forKey: Self.audioExclusionDefaultsKey),
+           let saved = try? JSONDecoder().decode(AudioExclusion.self, from: data) { audioExclusion = saved }
         snapshot.speakers = config.speakers
         aiStore?.onChange = { [weak self] in self?.aiChanged() }
         emit()
@@ -364,6 +375,15 @@ final class MeetingSession {
         guard snapshot.canChangeDiarization else { return }
         nextDiarizationEnabled = enabled
         diarizationDefaults?.set(enabled, forKey: Self.diarizationDefaultsKey)
+        emit()
+    }
+
+    func setAudioExclusion(_ value: AudioExclusion) {
+        guard snapshot.canChangeAudioExclusion, value != audioExclusion else { return }
+        audioExclusion = value
+        if let data = try? JSONEncoder().encode(value) { diarizationDefaults?.set(data, forKey: Self.audioExclusionDefaultsKey) }
+        recopyInvalidated = true
+        if archive != nil { archive?.original.audioExclusion = value; save() }
         emit()
     }
 
@@ -386,7 +406,10 @@ final class MeetingSession {
         resetMeetingAIState(meetingConfig)
         consumedAudioTime = 0
         dropRepeatedBackchannels = diarizationEnabled && meetingConfig.dropRepeatedBackchannels
-        audioLevelMeter = meetingConfig.measureAudioLevels ? AudioLevelMeter() : nil
+        audioLevelMeter = AudioLevelMeter()
+        cachedAudioLevels = [:]
+        showAudioLevels = meetingConfig.measureAudioLevels
+        recopyInvalidated = false
         snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers, message: "エンジンを準備中...")
         snapshot.names.diarizationEnabled = diarizationEnabled
         speakerMapping = SpeakerMapping()
@@ -520,9 +543,11 @@ final class MeetingSession {
         snapshot.timeline = pause.timeline
         let merged = TranscriptEntries.merge(voice: final.utterances, typed: typedEntries, timeline: snapshot.timeline).utterances
         let processed = final.processed.map { TranscriptEntries.merge(voice: $0, typed: typedEntries, timeline: snapshot.timeline).utterances }
-        let meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: duration, utterances: merged,
+        var meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: duration, utterances: merged,
                                               names: snapshot.names, pauses: snapshot.timeline.pauses,
                                               audioLevels: audioLevelMeter?.track(includingPartial: true))
+        meeting.audioExclusion = audioExclusion
+        meeting.showAudioLevels = showAudioLevels
         if let url = snapshot.markdownURL {
             archive = MeetingArchive(original: meeting, processed: processed,
                                      candidateCount: final.candidates.count, markdownURL: url)
@@ -693,9 +718,10 @@ final class MeetingSession {
     func copyContext(full: Bool = false, writeClipboard: (String) -> Bool) {
         guard snapshot.canShare, let url = snapshot.markdownURL else { return }
         do {
-            if let copy = try handoff.copy(utterances: snapshot.utterances, names: snapshot.names,
+            if let copy = try handoff.copy(utterances: snapshot.includedUtterances, names: snapshot.names,
                                           outputDirectory: url.deletingLastPathComponent(), timeline: snapshot.timeline, full: full,
                                           writeClipboard: writeClipboard) {
+                recopyInvalidated = false
                 snapshot.handoffMessage = copy.preview.lineCount == 0
                     ? "会話の訂正をコピーしました"
                     : "\(snapshot.contextStartClock(copy.preview))以降をコピーしました。AIへ貼り付けられます"
@@ -711,7 +737,7 @@ final class MeetingSession {
     }
 
     func recopyContext(writeClipboard: (String) -> Bool) {
-        guard snapshot.canShare else { return }
+        guard snapshot.canShare, !recopyInvalidated else { return }
         do {
             guard try handoff.recopy(writeClipboard: writeClipboard) != nil else { return }
             snapshot.handoffMessage = "直前と同じ範囲をコピーしました"
@@ -725,13 +751,44 @@ final class MeetingSession {
 
     // MARK: - 内部
 
+    private func refreshAudioSnapshot() {
+        let track = archive?.original.audioLevels ?? audioLevelMeter?.track()
+        snapshot.audioExclusion = audioExclusion
+        // 確定窓に収まった区間のP90は、その後の音声・設定・AI通知では変化しない。
+        // 未到着はキャッシュせず、再分割で使わなくなった区間は解放する。
+        var used = Set<AudioInterval>()
+        func level(_ start: Double, _ end: Double) -> Double? {
+            let key = AudioInterval(start: start, end: end)
+            used.insert(key)
+            if let value = cachedAudioLevels[key] { return value }
+#if DEBUG
+            audioLevelCalculationCount += 1
+#endif
+            let value = track?.level(start: start, end: end)
+            if let track, end <= track.duration { cachedAudioLevels.updateValue(value, forKey: key) }
+            return value
+        }
+        let assessments: [AudioLevelAssessment?] = snapshot.utterances.map { row in
+            row.kind == .typed ? nil : AudioLevelAssessment(dbFS: level(row.start, row.end), exclusion: audioExclusion)
+        }
+        snapshot.excludedRows = audioExclusion.enabled
+            ? Set(assessments.indices.filter { assessments[$0]?.isCandidate == true }) : []
+        let pending = liveSource.tokens.dropFirst(min(liveSource.finalCount, liveSource.tokens.count))
+        snapshot.tentativeExcluded = snapshot.tentativeText != nil && pending.first.flatMap { first in pending.last.map { last in
+            audioExclusion.enabled && audioExclusion.belowThreshold(level(first.start, last.end))
+        } } == true
+        snapshot.audioLevels = (archive?.original.displaysAudioLevels ?? showAudioLevels)
+            ? assessments : []
+        cachedAudioLevels = cachedAudioLevels.filter { used.contains($0.key) }
+    }
+
     private func emit() {
         snapshot.nextDiarizationEnabled = nextDiarizationEnabled
-        let track = archive?.original.audioLevels ?? audioLevelMeter?.track()
-        snapshot.audioLevels = track?.assessments(for: snapshot.utterances) ?? []
+        refreshAudioSnapshot()
         snapshot.timeline = pause.timeline
-        snapshot.handoffPreview = handoff.preview(utterances: snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
+        snapshot.handoffPreview = handoff.preview(utterances: snapshot.includedUtterances, names: snapshot.names, timeline: snapshot.timeline)
         snapshot.hasCopied = handoff.lastCopy != nil
+        snapshot.canRecopy = snapshot.hasCopied && !recopyInvalidated
         snapshot.previousAIUnread = aiStore?.records.values.filter { $0.manifest.meetingID != handoff.meetingID }
             .reduce(0) { count, record in
                 let questions = record.controller.conversation.questions
@@ -808,6 +865,7 @@ final class MeetingSession {
         let result = aiStore?.save(&archive, for: handoff.meetingID) ?? archive.save()
         self.archive = archive
         snapshot.utterances = result.utterances
+        refreshAudioSnapshot()
         snapshot.message = result.message
         snapshot.saved = result.succeeded
         if !result.succeeded { log(result.message) }
@@ -885,7 +943,7 @@ final class MeetingSession {
     }
 
     func aiRangePreview(full: Bool, slot: Int? = nil) -> String {
-        let lines = TranscriptRenderer.lines(snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
+        let lines = TranscriptRenderer.lines(snapshot.includedUtterances, names: snapshot.names, timeline: snapshot.timeline)
         guard let url = snapshot.markdownURL else { return "確定した会話はまだありません" }
         let context: AIContextSnapshot?
         if let controller = aiRecord?.controller { context = try? controller.preview(lines: lines, full: full, slot: slot ?? meetingAI?.slot) }
@@ -923,6 +981,7 @@ final class MeetingSession {
         do { minutesPath = try aiStore.minutesStores.store(meetingID: meetingID, markdownURL: url).state.humanMinutesPath }
         catch { aiWarning = "議事録の書き先を確認できません"; emit(); return }
         let names = snapshot.names, timeline = snapshot.timeline, typed = typedEntries
+        let exclusion = audioExclusion
         let workAllowed = suppliedWorkAllowed ?? aiWorkAllowed
         let owner = UUID(), scheduleRun = aiSchedule?.runID
         aiSubmissionOwners[slot] = owner; aiSubmissionTriggers[slot] = trigger
@@ -958,18 +1017,24 @@ final class MeetingSession {
                             ? self.speakerMapping.apply(Aligner.speakers(for: tokens, segments: self.diarizer?.segments() ?? []))
                             : Array<Int?>(repeating: nil, count: tokens.count)
                         return try AICapture(tokens: tokens, speakers: speakers, finalCount: count, processedUntil: self.consumedAudioTime,
-                            cutoff: cutoff, names: names, timeline: timeline, typed: typed)
+                            cutoff: cutoff, names: names, timeline: timeline, typed: typed,
+                            audioExclusion: exclusion, audioLevels: self.audioLevelMeter?.track())
                     } else {
                         let speakers = names.diarizationEnabled
                             ? self.speakerMapping.apply(Aligner.speakers(for: self.finalTokens, segments: self.finalSegments))
                             : Array<Int?>(repeating: nil, count: self.finalTokens.count)
                         return try AICapture(tokens: self.finalTokens, speakers: speakers,
-                            finalCount: self.finalTokens.count, processedUntil: self.snapshot.elapsed, cutoff: cutoff, names: names, timeline: timeline, typed: typed)
+                            finalCount: self.finalTokens.count, processedUntil: self.snapshot.elapsed, cutoff: cutoff, names: names, timeline: timeline, typed: typed,
+                            audioExclusion: exclusion, audioLevels: self.archive?.original.audioLevels ?? self.audioLevelMeter?.track())
                     }
                 }, progress: { seconds in self.aiProgresses[slot] = "聞き取りの確定待ち · あと\(seconds)秒"; self.emit() })
                 try Task.checkCancellation()
                 guard aiSubmissionOwners[slot] == owner else { throw CancellationError() }
                 guard consumedAudioTime >= cutoff else { throw AIError.invalid("audio not processed") }
+                if question.isEmpty, capture.voiceExcluded {
+                    aiWarning = "末尾の声は小音量のため除外されました。問いを入力するか、除外設定を調整してください"
+                    return
+                }
                 if trigger == .scheduled, !record.controller.hasChanges(lines: capture.lines, slot: config.slot) { return }
                 // prepareの通知から録音停止が始まっても、確定待ちの取消へ戻さない。
                 aiPhases[slot] = .preparingAndSending
@@ -1303,7 +1368,7 @@ extension MeetingSession {
 #if DEBUG
         scheduleLinesBuildCount += 1
 #endif
-        let lines = TranscriptRenderer.lines(snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
+        let lines = TranscriptRenderer.lines(snapshot.includedUtterances, names: snapshot.names, timeline: snapshot.timeline)
         return aiRecord?.controller.hasChanges(lines: lines, slot: aiScheduleConfiguration?.slot) ?? !lines.isEmpty
     }
 
@@ -1316,7 +1381,7 @@ extension MeetingSession {
         observeAIScheduleResults()
         guard immediately || aiSchedule?.phase == .awaitingFinal ||
               (aiSchedule?.phase == .running && aiSchedule?.nextFire.map({ now >= $0 }) == true) else { return }
-        let lines = TranscriptRenderer.lines(snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
+        let lines = TranscriptRenderer.lines(snapshot.includedUtterances, names: snapshot.names, timeline: snapshot.timeline)
         let changed = aiRecord?.controller.hasChanges(lines: lines, slot: aiScheduleConfiguration?.slot) ?? !lines.isEmpty
         let availability = scheduleAvailability
         let effect: AIScheduleState.Effect?
@@ -1345,6 +1410,17 @@ extension MeetingSession {
     }
 
 #if DEBUG
+    func setAudioTranscriptForTesting(_ utterances: [Utterance], meter: AudioLevelMeter, url: URL) {
+        snapshot.state = .recording; snapshot.markdownURL = url
+        snapshot.utterances = utterances; audioLevelMeter = meter
+        cachedAudioLevels = [:]
+        finalTokens = utterances.filter { $0.kind == .voice }.enumerated().map {
+            TimedToken(text: $0.element.text, phraseId: $0.offset, start: $0.element.start, end: $0.element.end)
+        }
+        typedEntries = utterances.filter { $0.kind == .typed }
+        consumedAudioTime = meter.track().duration; snapshot.elapsed = consumedAudioTime
+        emit()
+    }
     func setScheduleTranscriptForTesting(_ text: String) {
         finalTokens = [.init(text: text, phraseId: 0, start: 0, end: 0)]
         snapshot.utterances = [.init(speaker: nil, start: 0, end: 0, text: text)]

@@ -31,6 +31,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
     private var speakerSettingsPopover: SpeakerSettingsPopover?
     var onDiarizationChange: ((Bool) -> Void)?
+    var onAudioExclusionChange: ((AudioExclusion) -> Void)?
     private let startStopButton = WashiActionButton()
     private var startStopWidth: NSLayoutConstraint?
     private var pauseWidth: NSLayoutConstraint?
@@ -274,7 +275,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         var changed: [TranscriptRow] = []
         for item in attached[-1, default: []] { ordered.append(aiRowView(item)) }
         for (index, utterance) in snapshot.utterances.enumerated() {
-            if snapshot.hasCopied, snapshot.handoffPreview?.startLine == index + 1 { ordered.append(boundary) }
+            if snapshot.hasCopied, snapshot.copyBoundaryIndex == index { ordered.append(boundary) }
             let key = RowKey(kind: utterance.kind, start: utterance.start)
             let occurrence = occurrences[key, default: 0]
             occurrences[key] = occurrence + 1
@@ -284,6 +285,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             if row.update(utterance, names: snapshot.names, timeline: snapshot.timeline,
                           speakerPending: snapshot.pendingSpeakerRows.contains(index)) { changed.append(row) }
             row.updateAudioLevel(snapshot.audioLevels.indices.contains(index) ? snapshot.audioLevels[index] : nil)
+            row.updateExclusion(snapshot.excludedRows.contains(index))
             row.updateAvatar(speakers: snapshot.speakers, store: avatars, editable: snapshot.canShare)
             row.onRename = { [weak self] slot, view in self?.showRename(slot: slot, relativeTo: view) }
             next[id] = row
@@ -293,6 +295,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         if let tentative = snapshot.tentativeText {
             tentativeRow.updateTentative(tentative)
+            tentativeRow.updateExclusion(snapshot.tentativeExcluded)
             ordered.append(tentativeRow)
         }
         rows = next
@@ -501,7 +504,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         add("会話をコピー", #selector(copyPressed), enabled: snapshot.canShare && snapshot.handoffPreview != nil)
         menu.items.last?.toolTip = snapshot.handoffMessage
         if snapshot.hasCopied {
-            add("直前の範囲を再コピー", #selector(recopyPressed), enabled: snapshot.canShare)
+            add("直前の範囲を再コピー", #selector(recopyPressed), enabled: snapshot.canShare && snapshot.canRecopy)
             add("会議の最初からコピー", #selector(fullCopyPressed), enabled: snapshot.canShare)
         }
         if snapshot.aiSchedule.active {
@@ -571,6 +574,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         let popover = SpeakerSettingsPopover(snapshot: snapshot)
         popover.onMappingChange = { [weak self] slot, target in self?.onSpeakerMappingChange?(slot, target) }
         popover.onDiarizationChange = { [weak self] enabled in self?.onDiarizationChange?(enabled) }
+        popover.onAudioExclusionChange = { [weak self] value in self?.onAudioExclusionChange?(value) }
         speakerSettingsPopover = popover
         popover.present(relativeTo: speakerButton.bounds, of: speakerButton)
     }
@@ -583,7 +587,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     }
     @objc private func copyPressed() { copyWithNotice { onCopy?(false) } }
     @objc func recopyPressed() {
-        guard snapshot.canShare && snapshot.hasCopied else { return }
+        guard snapshot.canShare && snapshot.canRecopy else { return }
         copyWithNotice { onRecopy?() }
     }
     @objc func fullCopyPressed() {
@@ -596,7 +600,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             menuItem.state = minutesSplit.isPreviewVisible ? .on : .off
             return true
         }
-        if menuItem.action == #selector(recopyPressed) { return snapshot.canShare && snapshot.hasCopied }
+        if menuItem.action == #selector(recopyPressed) { return snapshot.canShare && snapshot.canRecopy }
         if menuItem.action == #selector(fullCopyPressed) { return snapshot.canShare && (snapshot.hasCopied || !snapshot.utterances.isEmpty) }
         return true
     }

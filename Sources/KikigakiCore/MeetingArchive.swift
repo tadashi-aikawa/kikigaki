@@ -44,7 +44,7 @@ public struct MeetingArchive: Codable {
         var rawSucceeded = true
         var levelsSucceeded = true
         var levelsWarning: String?
-        if let track = original.audioLevels {
+        if original.displaysAudioLevels, let track = original.audioLevels {
             do {
                 let url = MeetingFiles.levelsURL(for: markdownURL)
                 let encoder = JSONEncoder()
@@ -80,7 +80,9 @@ public struct MeetingArchive: Codable {
                     try Data().write(to: rawURL, options: .withoutOverwriting)
                     ownsRawFile = true
                 }
-                try MeetingMarkdown.render(original).write(to: rawURL, atomically: true, encoding: .utf8)
+                var raw = original
+                raw.audioExclusion?.enabled = false
+                try MeetingMarkdown.render(raw).write(to: rawURL, atomically: true, encoding: .utf8)
                 if !omissionDisabledAfterFailure { displayed.utterances = processed }
             } catch {
                 // 原文が保存できないときに文字を省かない。この会議では改名後も原文表示を続ける。
