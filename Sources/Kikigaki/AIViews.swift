@@ -7,11 +7,11 @@ enum AINoticeTone {
 }
 
 enum AIBadgeKind: String, CaseIterable {
-    case unread = "未読", confirmation = "確認待ち", waiting = "返事待ち", unknown = "送達不明", failed = "失敗"
+    case unread = "未読", confirmation = "要返答", waiting = "返事待ち", unknown = "送達不明", failed = "失敗"
     /// 確認待ちの判定に会話全体が要る。失敗・取消で終わった返答は返答済みと数えないため。
     func matches(_ question: AIQuestion, in questions: [AIQuestion]) -> Bool {
         switch self {
-        case .unread: return question.isUnread && question.result?.kind != .needsInput
+        case .unread: return false // 保存済みの既読情報は互換性のため残し、UIの集計には使わない。
         case .confirmation: return question.state == .needsInput && !AIQuestion.isAnswered(question, in: questions)
         case .waiting: return question.isAwaitingResult && question.state != .deliveryUnknown
         case .unknown: return question.state == .deliveryUnknown
@@ -41,13 +41,13 @@ final class AIBadgeButton: HoverButton {
     }
     override func draw(_ dirtyRect: NSRect) {
         drawHoverBackground()
-        let color = kind == .confirmation ? Washi.color(0xC4801F) : kind == .unread || kind == .failed ? Washi.red : Washi.muted
+        let color = kind == .confirmation || kind == .unread || kind == .failed ? Washi.red : Washi.muted
         let filled = kind == .unread || kind == .confirmation || kind == nil
         let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 1), xRadius: 6, yRadius: 6)
         if filled { (kind == nil ? Washi.rule : color).setFill(); pill.fill() }
         else { color.setStroke(); pill.lineWidth = 1; pill.stroke() }
-        // 金地に白は3.25:1しかない。塗りの色に応じて読める方の文字色を選ぶ。
-        let text = filled && kind != nil ? (kind == .confirmation ? Washi.ink : NSColor.white) : color
+        // 朱の塗りには白文字を使う。
+        let text = filled && kind != nil ? NSColor.white : color
         let attributes: [NSAttributedString.Key: Any] = [.font: font!, .foregroundColor: text]
         let size = (title as NSString).size(withAttributes: attributes)
         (title as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2), withAttributes: attributes)

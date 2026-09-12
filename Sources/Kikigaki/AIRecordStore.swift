@@ -97,8 +97,15 @@ final class AIRecordStore {
             guard Set(entries.map(\.meetingID)).count == entries.count else { throw AIError.conflict }
             for entry in entries {
                 do {
-                    let files = AIFileStore(root: entry.outputDirectory), base = Self.base(entry.meetingID)
-                    let manifest = try AIJSON.decode(AIMeetingManifest.self, from: files.read(base + ["manifest.json"]))
+                    let files = AIFileStore(root: entry.outputDirectory, allowsMissingParents: true), base = Self.base(entry.meetingID)
+                    let manifestData: Data
+                    do { manifestData = try files.read(base + ["manifest.json"]) }
+                    catch AIFileError.missing {
+                        // 削除済み・一時保存先の登録は復元に備えて保持するが、対処不能な警告は出さない。
+                        unresolved.append(entry)
+                        continue
+                    }
+                    let manifest = try AIJSON.decode(AIMeetingManifest.self, from: manifestData)
                     try validate(manifest, registration: entry)
                     let conversation = try AIJSON.decode(AIConversation.self, from: files.read(base + ["state.json"]))
                     // 回収用には実行できないadapterを渡す。herdr未導入でも記録を読める。

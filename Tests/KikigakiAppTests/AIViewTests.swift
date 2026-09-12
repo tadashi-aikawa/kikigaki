@@ -47,7 +47,7 @@ import KikigakiAIIO
             let content = window.window!.contentView!
             content.layoutSubtreeIfNeeded()
             #expect(window.compactFooter.frame.height <= 54)
-            #expect(window.compactFooter.unread.count == 1 && window.compactFooter.confirmation.count == 1)
+            #expect(window.compactFooter.unread.isHidden && window.compactFooter.confirmation.count == 1)
             #expect(window.compactFooter.robot.displayText == "1:42")
             try capture("footer-recording-\(width)", view: content.superview!)
             state.state = .idle; state.saved = true; state.aiSchedule = AIScheduleViewState()
@@ -245,8 +245,8 @@ import KikigakiAIIO
         func apply() { state.ai?.conversation = conversation; window.apply(state); content.layoutSubtreeIfNeeded() }
         func replies() -> [AIReplyRow] { window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow } }
         apply()
-        #expect(state.ai?.badges == "未読 1 · 確認待ち 1 · 返事待ち 1 · 失敗 1")
-        #expect(window.compactFooter.unread.count == 1 && window.compactFooter.confirmation.count == 1)
+        #expect(state.ai?.badges == "要返答 1 · 返事待ち 1 · 失敗 1")
+        #expect(window.compactFooter.unread.isHidden && window.compactFooter.confirmation.count == 1)
         #expect(!window.compactFooter.warning.isHidden)
         // 手入力の横スクロール欄を除き、AI本文が独立スクロールを作らないことを確認する。
         #expect(descendants(window.minutesSplit.left).compactMap { $0 as? NSScrollView }.filter { !($0 is TypedEntryField) }.count == 1)
@@ -257,14 +257,14 @@ import KikigakiAIIO
         let confirmation = try #require(replies().first { $0.item.requestID == requests[1].id })
         let waiting = try #require(replies().first { $0.item.requestID == requests[2].id })
         let failed = try #require(replies().first { $0.item.requestID == requests[3].id })
-        #expect(answer.accent == Washi.red && answer.pillStyle == .unread)
-        #expect(confirmation.accent == Washi.gold && confirmation.pillStyle == .confirmation)
+        #expect(answer.accent == nil && answer.pillStyle == nil)
+        #expect(confirmation.accent == Washi.red && confirmation.pillStyle == .confirmation)
         #expect(waiting.isWaiting && waiting.pillStyle == nil && waiting.item.date == nil)
         #expect(failed.isFailure && failed.failureText.hasSuffix("接続先を確認してください") && failed.height(for: 680) == 34)
         #expect(answer.item.date == started.addingTimeInterval(370))
         // 実画面で直した3件の回帰。実物の表題と可視性で見る。
-        #expect(answer.statusPill.title == "未読" && answer.statusPill.isEnabled && !answer.statusPill.isHidden)
-        #expect(confirmation.statusPill.title == "確認待ち" && !confirmation.statusPill.isEnabled)
+        #expect(answer.statusPill.isHidden)
+        #expect(confirmation.statusPill.title == "要返答" && !confirmation.statusPill.isEnabled)
         #expect(waiting.statusPill.isHidden)
         #expect(!descendants(content).compactMap { $0 as? AIStatusPill }.contains { $0.title == "Button" })
         #expect(!failed.timeText.isEmpty && failed.statusPill.isHidden)   // 送信前の失敗は未読にならない
@@ -277,7 +277,7 @@ import KikigakiAIIO
         var previousOpened = false
         window.onShowPreviousAI = { previousOpened = true }
         let menu = window.footerMenu()
-        let previous = try #require(menu.items.firstIndex { $0.title == "前の会議に返事あり" })
+        let previous = try #require(menu.items.firstIndex { $0.title == "前の会議に要返答・警告あり" })
         menu.performActionForItem(at: previous); #expect(previousOpened)
         let footer = window.compactFooter
         try capture("timeline-footer", view: footer)
@@ -293,7 +293,7 @@ import KikigakiAIIO
         #expect(readIDs.isEmpty)
         answer.statusPill.performClick(nil)
         #expect(try #require(descendants(confirmation).compactMap { $0 as? MarkdownBodyView }.first).accessibilityPerformPress())
-        #expect(readIDs.first == requests[0].id)
+        #expect(readIDs.isEmpty)
         #expect(!readIDs.contains(requests[2].id) && !readIDs.contains(requests[3].id))
         #expect(answer.accent == nil && answer.pillStyle == nil)
         #expect(!state.ai!.badges.contains("未読"))
@@ -311,7 +311,7 @@ import KikigakiAIIO
         // 確認待ちの帯は返答されるまで残す。既読では消さない。
         confirmation.onRead?()
         apply()
-        #expect(confirmation.item.needsAnswer && confirmation.accent == Washi.gold)
+        #expect(confirmation.item.needsAnswer && confirmation.accent == Washi.red)
         #expect(confirmation.pillStyle == .confirmation && !confirmation.item.isUnread)
         var cancelled: UUID?
         window.onCancelAI = { cancelled = $0 }
@@ -380,7 +380,7 @@ import KikigakiAIIO
         let unread = window.compactFooter.unread
         unread.performClick(nil)
         let nextAnswer = try #require(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.first { $0.item.rowID == next.id.uuidString + "/reply" })
-        #expect(window.scrollView.contentView.bounds.intersects(nextAnswer.frame))
+        #expect(unread.isHidden && !window.scrollView.contentView.bounds.intersects(nextAnswer.frame))
     }
 
     @Test(arguments: [false, true]) func AIの行追加と返事到着も末尾追従し検索中だけ止める(searching: Bool) throws {
@@ -434,7 +434,7 @@ import KikigakiAIIO
         _ = try conversation.receive(AIReceiveEvent(request: first, kind: .needsInput, recordedAt: started.addingTimeInterval(401), body: "社内だけですか？", reason: "clarification"), at: started.addingTimeInterval(402))
         state.ai?.conversation = conversation; window.apply(state); content.layoutSubtreeIfNeeded()
         let row = try #require(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.first)
-        #expect(row.accent == Washi.gold && row.pillStyle == .confirmation)
+        #expect(row.accent == Washi.red && row.pillStyle == .confirmation)
         #expect(abs(window.scrollView.contentView.bounds.minY - before) < 1)
         // 上を読んでいる間は画面に入らないので既読にならない。
         var read: [UUID] = []
@@ -447,7 +447,7 @@ import KikigakiAIIO
         #expect(window.scrollView.contentView.bounds.intersects(row.frame))
         #expect(read.isEmpty)
         #expect(try #require(descendants(row).compactMap { $0 as? MarkdownBodyView }.first).accessibilityPerformPress())
-        #expect(read == [first.id])
+        #expect(read.isEmpty)
         let snapshot = try history.prepare(lines: [], outputDirectory: root)
         let participant = AIParticipantContext(streamID: history.streamID, requestID: UUID(), sessionGeneration: 1, participantName: "迅雷",
             cliPath: root.appendingPathComponent("helper").path,
@@ -484,14 +484,14 @@ import KikigakiAIIO
         window.apply(state); content.layoutSubtreeIfNeeded()
         let failed = try #require(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.first)
         // 返送された失敗はCoreが未読にする。印から既読にできる。
-        #expect(failed.isFailure && failed.item.isUnread && failed.pillStyle == .unread)
+        #expect(failed.isFailure && failed.item.isUnread && failed.pillStyle == nil)
         // 送信できなかった失敗とは言い方を分け、本文は画面から全部読める。
         #expect(failed.isReturnedFailure && failed.failureText.hasPrefix("迅雷から失敗の報告"))
         let detail = try #require(descendants(failed).compactMap { $0 as? MarkdownBodyView }.first)
         #expect(!detail.isHidden && detail.string.contains("未更新: B"))
         #expect(failed.height(for: 680) > 34 && detail.frame.maxY <= failed.height(for: 680))
-        #expect(!failed.statusPill.isHidden && failed.statusPill.title == "未読" && failed.statusPill.isEnabled)
-        #expect(state.ai?.badges.contains("未読 1") == true)
+        #expect(failed.statusPill.isHidden && failed.accent == Washi.red)
+        #expect(state.ai?.badges.contains("未読") == false)
         var resent: UUID?
         window.onResendAI = { resent = $0 }
         let retry = try #require(descendants(failed).compactMap { $0 as? NSButton }.first { $0.title == "再送" })
@@ -505,7 +505,7 @@ import KikigakiAIIO
             state.ai?.conversation = conversation; window.apply(state); content.layoutSubtreeIfNeeded()
         }
         failed.statusPill.performClick(nil)
-        #expect(read == [request.id])
+        #expect(read.isEmpty)
         #expect(failed.statusPill.isHidden && state.ai?.badges.contains("未読") != true)
     }
 
@@ -686,7 +686,7 @@ import KikigakiAIIO
         }
         try shoot("timeline-normal-600", width: 600)
         // ピル5種が同時に立つ600幅で、右の時間範囲と接していないかを見る。
-        #expect(state.ai?.badges == "未読 2 · 確認待ち 1 · 返事待ち 1 · 送達不明 1 · 失敗 1")
+        #expect(state.ai?.badges == "要返答 1 · 返事待ち 1 · 送達不明 1 · 失敗 1")
         let footer = window.compactFooter
         try capture("timeline-badges-600", view: footer)
         try shoot("timeline-normal-900", width: 900)
@@ -732,14 +732,14 @@ import KikigakiAIIO
         window.update()
         let content = window.window!.contentView!; content.layoutSubtreeIfNeeded()
         let answer = try #require(descendants(content).compactMap { $0 as? AIReplyRow }.first)
-        #expect(answer.accent == Washi.red && answer.pillStyle == .unread)
+        #expect(answer.accent == nil && answer.pillStyle == nil)
         // 発話を持たないので、声でない送信も日時順の人側の行として並ぶ。
         #expect(descendants(content).compactMap { $0 as? AITypedSendRow }.count == 1)
         // 旧会議も明示クリックだけで既読にする。本番の配線を通す。
         #expect(record.controller.conversation.questions[0].isUnread)
         answer.statusPill.performClick(nil)
         content.layoutSubtreeIfNeeded()
-        #expect(!record.controller.conversation.questions[0].isUnread)
+        #expect(record.controller.conversation.questions[0].isUnread)
         let after = try #require(descendants(content).compactMap { $0 as? AIReplyRow }.first)
         #expect(after.accent == nil && after.pillStyle == nil)
         window.update()

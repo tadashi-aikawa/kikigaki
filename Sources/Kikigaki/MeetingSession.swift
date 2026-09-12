@@ -701,7 +701,10 @@ final class MeetingSession {
         snapshot.handoffPreview = handoff.preview(utterances: snapshot.utterances, names: snapshot.names, timeline: snapshot.timeline)
         snapshot.hasCopied = handoff.lastCopy != nil
         snapshot.previousAIUnread = aiStore?.records.values.filter { $0.manifest.meetingID != handoff.meetingID }
-            .reduce(0) { $0 + $1.controller.conversation.questions.filter(\.isUnread).count } ?? 0
+            .reduce(0) { count, record in
+                let questions = record.controller.conversation.questions
+                return count + questions.filter { AIBadgeKind.confirmation.matches($0, in: questions) }.count
+            } ?? 0
         snapshot.aiRecoveryWarning = aiStore?.warnings.first
         snapshot.aiSchedule = AIScheduleViewState(schedule: aiSchedule, warning: aiScheduleWarning,
             destination: meetingAIProfiles.count > 1 ? aiScheduleConfiguration?.name : nil,

@@ -93,4 +93,16 @@ import KikigakiAIIO
         }
         #expect(try files.read(["ai-roots.json"]) == bytes)
     }
+    @Test func manifest欠損だけは登録を保持して警告を出さない() throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let id = UUID(), files = AIFileStore(root: root)
+        let entries = [AIRegistration(meetingID: id, outputDirectory: root)]
+        try files.write(AIJSON.encode(entries), to: ["ai-roots.json"])
+        let store = AIRecordStore(directory: root); store.recover()
+        #expect(store.warnings.isEmpty && store.records.isEmpty)
+        #expect(try AIJSON.decode([AIRegistration].self, from: files.read(["ai-roots.json"])) == entries)
+        try files.write(Data("broken".utf8), to: [".kikigaki-context", id.uuidString, "ai", "manifest.json"])
+        let corrupted = AIRecordStore(directory: root); corrupted.recover()
+        #expect(!corrupted.warnings.isEmpty)
+    }
 }

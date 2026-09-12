@@ -511,7 +511,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         add("ペインを開く", #selector(panePressed), enabled: snapshot.ai?.canOpenPane == true)
         add("AIセッションを作り直す", #selector(recreatePressed), enabled: snapshot.ai?.canRecreate == true)
         add("保存を再試行", #selector(retrySavePressed), enabled: snapshot.ai?.saveFailed == true)
-        if snapshot.previousAIUnread > 0 || snapshot.aiRecoveryWarning != nil { add("前の会議に返事あり", #selector(previousPressed)) }
+        if snapshot.previousAIUnread > 0 || snapshot.aiRecoveryWarning != nil { add("前の会議に要返答・警告あり", #selector(previousPressed)) }
         return menu
     }
     private func showFooterMenu() {

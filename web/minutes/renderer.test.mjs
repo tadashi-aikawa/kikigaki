@@ -22,10 +22,23 @@ test('脚注とcalloutとチェックボックス', () => {
   assert.match(html, /<\/aside>/); assert.match(html, /type="checkbox"/);
   assert.doesNotMatch(html, /\[!NOTE\]/);
 });
-test('数式と図を処理し任意HTMLは文字で残す', () => {
+test('数式と図を処理しHTMLはsanitizer未指定なら文字で残す', () => {
   const html = render('$x^2$\n\n$$\nx+y\n$$\n\n```mermaid\nflowchart LR\n A-->B\n```\n\n<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>\n\n<script>alert(1)</script>');
   assert.match(html, /katex/); assert.match(html, /mermaid-source/); assert.match(html, /svg-source/);
   assert.doesNotMatch(html, /<script>/); assert.match(html, /&lt;script&gt;/);
+});
+test('MySTの3形式と入れ子を描き通常のコードを保持', () => {
+  for (const [open, close] of [[':::{note}', ':::'], [':::note', ':::'], ['```{warning}', '```']]) {
+    const html = render(open + '\n**中身**\n\n- 項目\n' + close);
+    assert.match(html, /<aside class="callout"/); assert.match(html, /<strong>中身<\/strong>/);
+    assert.match(html, /<li>項目/); assert.doesNotMatch(html, /language-/);
+  }
+  assert.equal((render('::::{note}\n外\n\n:::{tip}\n内\n:::\n::::').match(/<aside/g) || []).length, 2);
+  assert.match(render('```text\n:::{note}\nコード\n:::\n```'), /<code class="language-text">/);
+  assert.doesNotMatch(render(':::{note}\n閉じ忘れ'), /<aside/);
+  const code = render(':::{note}\n```text\n:::\n```\n続き\n:::');
+  assert.match(code, /<code class="language-text">:::/);
+  assert.match(code, /<p>続き<\/p>\n<\/aside>/);
 });
 test('画像の専用URLと不正scheme', () => {
   assert.equal(imageURL('javascript:alert(1)', 'ctx'), '');

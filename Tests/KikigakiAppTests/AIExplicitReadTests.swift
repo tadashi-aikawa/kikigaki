@@ -4,7 +4,7 @@ import KikigakiCore
 @testable import Kikigaki
 
 @Suite @MainActor struct AIExplicitReadTests {
-    @Test func 本文の明示押下で既読になり選択と本文を保持する() throws {
+    @Test func 通常返答に未読表示を出さず本文クリックで保存状態を変えない() throws {
         _ = NSApplication.shared
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         var history = try AIStreamHistory(meetingID: UUID())
@@ -32,14 +32,16 @@ import KikigakiCore
         body.setSelectedRange(NSRange(location: 0, length: 5))
         #expect(row.item.isUnread && callbacks == 0)
         #expect(body.accessibilityPerformPress())
-        #expect(!conversation.questions[0].isUnread && callbacks == 1)
+        #expect(conversation.questions[0].isUnread && callbacks == 0)
+        #expect(row.accent == nil && window.compactFooter.unread.isHidden)
+        #expect(!snapshot.ai!.badges.contains("未読"))
         #expect(row.statusPill.isHidden && body.selectedRange() == NSRange(location: 0, length: 5))
         #expect(body.string == "担当と期限を確認しました。")
         #expect(body.accessibilityPerformPress())
-        #expect(callbacks == 1)
+        #expect(callbacks == 0)
     }
 
-    @Test func 末尾追従で可視になっても明示操作まで未読を保つ() async throws {
+    @Test func 通常返答の追従を保ち未読の管理操作を要求しない() async throws {
         _ = NSApplication.shared
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let started = Date(timeIntervalSince1970: 0)
@@ -89,7 +91,8 @@ import KikigakiCore
             window.compactFooter.unread.performClick(nil)
             #expect(conversation.questions[0].isUnread && callbacks == 0)
             row.statusPill.performClick(nil)
-            #expect(!conversation.questions[0].isUnread && callbacks == 1)
+            #expect(conversation.questions[0].isUnread && callbacks == 0)
+            #expect(window.compactFooter.unread.isHidden && row.statusPill.isHidden && row.accent == nil)
         }
     }
 

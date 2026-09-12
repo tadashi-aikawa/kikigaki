@@ -43,3 +43,21 @@ flowchart LR
 ```
 
 [決定事項へ戻る](#decisions)
+
+## 補足資料
+
+:::{note}
+MySTのコロンフェンス。**注意点**やリストも本文として描画します。
+:::
+
+:::tip
+短いコロン形式にも対応します。
+:::
+
+```{warning}
+コードフェンス形式の注意書きです。
+```
+
+<div style="padding:12px;border:1px solid purple;border-radius:8px;color:purple">HTMLの枠と文字色を描画します。</div>
+
+<details><summary>HTMLの補足を開く</summary><p>文書要素は表示し、スクリプトやイベント属性は除去します。</p></details>

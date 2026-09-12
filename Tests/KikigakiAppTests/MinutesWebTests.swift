@@ -31,6 +31,101 @@ import Testing
         }
         Issue.record("WebKitの表示が完了しません")
     }
+    @Test func HTMLの安全境界と折りたたみ脚注画像目次を組み合わせる() async throws {
+        let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 700, height: 600))
+        let window = NSWindow(contentRect: preview.frame, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.contentView = preview; window.orderFront(nil); preview.layoutSubtreeIfNeeded()
+        defer { preview.stop(); window.orderOut(nil) }
+        let fixture = """
+        # 親
+
+        ## 長い見出しで幅を測る対象
+
+        隠れる本文[^one]。
+
+        <span style="color:red;position:fixed;inset:0;background-image:url(https://example.invalid/evil);margin:-20px" onclick="window.INJECTED=true">赤いHTML</span>
+
+        <div id="toc" class="heading-toggle" style="padding:8px;border:1px solid purple">HTMLの箱</div>
+
+        <script>window.INJECTED=true</script>
+        <iframe src="https://example.invalid"></iframe>
+        <form><input autofocus onfocus="window.INJECTED=true"></form>
+        <style>body{display:none}</style>
+
+        :::{note}
+        MySTの**本文**。
+        :::
+
+        ## 次の節
+
+        次の本文。
+
+        ~~~svg
+        <svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect width="100" height="50" fill="purple"/></svg>
+        ~~~
+
+        [^one]: 着地点の脚注。
+        """
+        preview.document.render(fixture, reset: true)
+        try await wait { preview.document.renderedText.contains("着地点の脚注") }
+        let web = preview.document.webView
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('main script,main iframe,main form,main style,main [onclick]').length === 0 && !window.INJECTED") as? Bool == true)
+        #expect(try await web.evaluateJavaScript("document.querySelector('main span[style]').style.color === 'red' && !document.querySelector('main span[style]').style.position && !document.querySelector('main span[style]').style.backgroundImage && !document.querySelector('main span[style]').style.margin") as? Bool == true)
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('#toc').length === 1 && document.getElementById('html-toc').className === ''") as? Bool == true)
+        #expect(try await web.evaluateJavaScript("document.querySelector('.callout strong').textContent === '本文' && !!document.querySelector('.callout-title svg')") as? Bool == true)
+        let closedWidth = try #require(try await web.evaluateJavaScript("document.getElementById('toc').getBoundingClientRect().width") as? Double)
+        _ = try await web.evaluateJavaScript("document.querySelector('#toc summary').click()")
+        #expect(try await web.evaluateJavaScript("document.getElementById('toc').getBoundingClientRect().width") as? Double == closedWidth)
+        _ = try await web.evaluateJavaScript("document.querySelectorAll('.heading-toggle')[1].click()")
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('.section-body')[1].hidden && document.querySelectorAll('.section-body')[2].hidden === false") as? Bool == true)
+        _ = try await web.evaluateJavaScript("window.minutes.search('隠れる本文')")
+        #expect(try await web.evaluateJavaScript("!document.querySelectorAll('.section-body')[1].hidden") as? Bool == true)
+        _ = try await web.evaluateJavaScript("document.querySelector('.footnote-ref a').click()")
+        #expect(try await web.evaluateJavaScript("document.getElementById('fn1').getAnimations().length === 1") as? Bool == true)
+        _ = try await web.evaluateJavaScript("document.querySelectorAll('.heading-toggle')[1].click(); document.querySelector('.footnote-backref').click()")
+        #expect(try await web.evaluateJavaScript("!document.querySelectorAll('.section-body')[1].hidden && document.querySelector('.footnote-ref').getAnimations().length === 1") as? Bool == true)
+        try await wait { try await web.evaluateJavaScript("document.querySelector('main img').naturalWidth > 0") as? Bool == true }
+        _ = try await web.evaluateJavaScript("document.querySelector('main img').click()")
+        #expect(try await web.evaluateJavaScript("document.getElementById('image-modal').open && document.querySelector('#image-modal img').src === document.querySelector('main img').src") as? Bool == true)
+        _ = try await web.evaluateJavaScript("document.querySelector('#image-modal button').click(); document.querySelectorAll('.heading-toggle')[1].click()")
+        preview.document.render(fixture + "\n\n追記", reset: false)
+        try await wait { preview.document.renderedText.contains("追記") }
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('.section-body')[1].hidden && document.getElementById('toc').open && !document.getElementById('image-modal').open") as? Bool == true)
+        _ = try await web.evaluateJavaScript("document.querySelectorAll('#toc nav a')[1].click()")
+        #expect(try await web.evaluateJavaScript("!document.querySelectorAll('.section-body')[1].hidden || document.querySelectorAll('.heading-toggle')[1].getClientRects().length > 0") as? Bool == true)
+        let paragraphs = (0..<80).map { "段落\($0)の本文" }.joined(separator: "\n\n")
+        preview.document.render("# 更新位置\n\n" + paragraphs, reset: true)
+        try await wait { preview.document.renderedText.contains("段落79") }
+        _ = try await web.evaluateJavaScript("document.querySelectorAll('main p')[60].scrollIntoView({block:'start'})")
+        let position = try #require(try await web.evaluateJavaScript("document.querySelectorAll('main p')[60].getBoundingClientRect().top") as? Double)
+        preview.document.render("# 更新位置\n\n" + String(repeating: "上へ挿入\n\n", count: 10) + paragraphs, reset: false)
+        try await wait { preview.document.renderedText.contains("上へ挿入") }
+        let restored = try #require(try await web.evaluateJavaScript("document.querySelectorAll('main p')[70].getBoundingClientRect().top") as? Double)
+        #expect(abs(position - restored) < 1)
+        if let sample = ProcessInfo.processInfo.environment["KIKIGAKI_MINUTES_SAMPLE"],
+           let capture = ProcessInfo.processInfo.environment["KIKIGAKI_MINUTES_CAPTURE"] {
+            preview.update(path: sample, source: .human, active: true)
+            try await wait { preview.document.renderedText.contains("MyST形式のnote") }
+            #expect(try await web.evaluateJavaScript("document.querySelectorAll('.callout').length >= 6") as? Bool == true)
+            try await wait { try await web.evaluateJavaScript("[...document.querySelectorAll('main img')].every(i => i.complete && i.naturalWidth > 0)") as? Bool == true }
+            _ = try await web.evaluateJavaScript("document.querySelector('.callout').scrollIntoView({block:'start'})")
+            let snapshot = try await web.takeSnapshot(configuration: WKSnapshotConfiguration())
+            let imageData = try #require(snapshot.tiffRepresentation)
+            let bitmap = try #require(NSBitmapImageRep(data: imageData))
+            try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: capture).appendingPathComponent("user-sample-callouts.png"))
+            _ = try await web.evaluateJavaScript("document.querySelector('main img').click()")
+            try await wait { try await web.evaluateJavaScript("document.querySelector('#image-modal img').naturalWidth > 0") as? Bool == true }
+            // 非アクティブなWebKitのアニメーション時計は止まるため、完成状態を撮影する。
+            _ = try await web.evaluateJavaScript("document.getElementById('image-modal').getAnimations().forEach(a => a.finish())")
+            _ = try await web.callAsyncJavaScript("await document.querySelector('#image-modal img').decode(); return true", arguments: [:], in: nil, contentWorld: .page)
+            try await Task.sleep(for: .milliseconds(150))
+            #expect(try await web.evaluateJavaScript("document.querySelector('#image-modal img').getBoundingClientRect().top >= 0 && document.querySelector('#image-modal button').getBoundingClientRect().right <= innerWidth") as? Bool == true)
+            let modal = try await web.takeSnapshot(configuration: WKSnapshotConfiguration())
+            let modalData = try #require(modal.tiffRepresentation)
+            let modalBitmap = try #require(NSBitmapImageRep(data: modalData))
+            try #require(modalBitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: capture).appendingPathComponent("user-sample-image.png"))
+        }
+    }
     @Test func 図と画像と数式を実際のWebKitで描いて検索する() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
@@ -101,7 +196,7 @@ import Testing
         _ = try await web.evaluateJavaScript("document.querySelector('#toc summary').click(); document.querySelectorAll('#toc nav a')[2].click()")
         #expect(try await web.evaluateJavaScript("document.getElementById('toc').open && document.querySelector('#toc a[aria-current]').textContent === '当日の流れ'") as? Bool == true)
         _ = try await web.evaluateJavaScript("document.querySelector('main').dispatchEvent(new PointerEvent('pointerdown', {bubbles:true})); scrollTo(0,0)")
-        #expect(try await web.evaluateJavaScript("!document.getElementById('toc').open") as? Bool == true)
+        #expect(try await web.evaluateJavaScript("document.getElementById('toc').open") as? Bool == true)
         window.setContentSize(NSSize(width: 1200, height: 1500)); preview.layoutSubtreeIfNeeded()
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.diagram svg').length") as? Int == 1)
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.katex').length") as? Int == 1)
@@ -109,7 +204,7 @@ import Testing
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.footnotes').length") as? Int == 1)
         #expect(try await web.evaluateJavaScript("window.INJECTED === undefined") as? Bool == true)
         try await wait {
-            try await web.evaluateJavaScript("[...document.images].length === 3 && [...document.images].every(i => i.complete && i.naturalWidth > 0)") as? Bool == true
+            try await web.evaluateJavaScript("[...document.querySelectorAll('main img')].length === 3 && [...document.querySelectorAll('main img')].every(i => i.complete && i.naturalWidth > 0)") as? Bool == true
         }
         let state = try await web.evaluateJavaScript("window.minutes.state()") as? [String: Any]
         #expect(try #require(state?["width"] as? Double) > 720)

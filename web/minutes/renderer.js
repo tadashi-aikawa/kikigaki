@@ -16,11 +16,63 @@ export function imageURL(path, context) {
 }
 
 export function createRenderer() {
-  const md = new MarkdownIt({ html: false, linkify: true, breaks: true })
+  const md = new MarkdownIt({ html: true, linkify: true, breaks: true })
     .use(footnote).use(tasks, { enabled: false })
     .use(texmath, { engine: katex, delimiters: ['dollars', 'brackets'],
       katexOptions: { trust: false, strict: 'ignore', maxExpand: 1000, maxSize: 20 } });
   const escape = md.utils.escapeHtml;
+  for (const type of ['html_inline', 'html_block']) {
+    md.renderer.rules[type] = (tokens, i, options, env) => {
+      const value = tokens[i].content;
+      // task-listsが生成する固定形の読み取り専用checkboxだけは文書HTMLと区別する。
+      if (/^<input class="task-list-item-checkbox"(?: checked="")? disabled="" type="checkbox">$/.test(value)) return value;
+      return env.cleanHTML ? env.cleanHTML(value, type === 'html_inline', env.context) : escape(value);
+    };
+  }
+  // MySTのコロンフェンスと{directive}コードフェンス。同じトークン列へ展開し、脚注や見出しも共有する。
+  const kinds = /^(note|info|tip|hint|important|warning|attention|caution|danger|error|seealso|admonition)$/i;
+  md.block.ruler.before('fence', 'admonition', (state, start, end, silent) => {
+    const line = n => state.src.slice(state.bMarks[n] + state.tShift[n], state.eMarks[n]);
+    if (state.sCount[start] - state.blkIndent >= 4) return false;
+    const match = /^(:{3,}|`{3,}|~{3,})(?:\{([a-z]+)\}|([a-z]+))(?:[ \t]+(.*))?\s*$/i.exec(line(start));
+    if (!match || !kinds.test(match[2] || match[3]) || (match[1][0] !== ':' && !match[2])) return false;
+    const fence = match[1];
+    let close = start + 1, code = null;
+    for (; close < end; close++) {
+      if (state.sCount[close] < state.blkIndent && line(close).trim()) return false;
+      if (state.sCount[close] - state.blkIndent >= 4) continue;
+      const value = line(close);
+      if (fence[0] === ':') {
+        const marker = /^(`{3,}|~{3,})(.*)$/.exec(value);
+        if (code) {
+          if (marker && marker[1][0] === code[0] && marker[1].length >= code.length && !marker[2].trim()) code = null;
+          continue;
+        }
+        if (marker) { code = marker[1]; continue; }
+      }
+      if (new RegExp('^' + fence[0] + '{' + fence.length + ',}\\s*$').test(value)) break;
+    }
+    if (close === end) return false;
+    if (silent) return true;
+    let kind = (match[2] || match[3]).toLowerCase(), contentStart = start + 1, name;
+    while (contentStart < close) {
+      const option = /^:(class|name):\s*(.*)$/.exec(line(contentStart));
+      if (!option) break;
+      if (option[1] === 'name') name = option[2];
+      if (option[1] === 'class' && kind === 'admonition') kind = option[2].split(/\s+/).find(x => kinds.test(x)) || kind;
+      contentStart++;
+    }
+    const open = state.push('admonition_open', 'aside', 1);
+    open.attrSet('class', 'callout'); open.attrSet('data-kind', kind);
+    if (name) open.attrSet('id', name);
+    const title = state.push('callout_title', '', 0); title.content = match[4] || kind;
+    const oldParent = state.parentType, oldMax = state.lineMax;
+    state.parentType = 'blockquote'; state.lineMax = close;
+    state.md.block.tokenize(state, contentStart, close);
+    state.parentType = oldParent; state.lineMax = oldMax;
+    state.push('admonition_close', 'aside', -1); state.line = close + 1;
+    return true;
+  }, { alt: ['paragraph','reference','blockquote','list'] });
   md.inline.ruler.before('link', 'wiki', (state, silent) => {
     const start = state.pos, embed = state.src.startsWith('![[', start);
     if (!embed && !state.src.startsWith('[[', start)) return false;
@@ -73,7 +125,7 @@ export function createRenderer() {
     }
     return fence(tokens, i, options, env, self);
   };
-  // HTML全体を有効にせず、閉じたSVGブロックだけを画像候補として取り出す。
+  // 閉じたSVGブロックは生のDOMにせず画像として描く。
   md.block.ruler.before('html_block', 'svg_block', (state, start, end, silent) => {
     const at = state.bMarks[start] + state.tShift[start];
     if (!state.src.startsWith('<svg', at)) return false;

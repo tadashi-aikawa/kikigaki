@@ -53,8 +53,8 @@ final class AIFooterCount: AIFooterButton {
     required init?(coder: NSCoder) { fatalError() }
     override func draw(_ dirtyRect: NSRect) {
         drawHoverBackground()
-        let color = kind == .unread ? Washi.red : Washi.color(0xC4801F)
-        if kind == .unread {
+        let color = Washi.red
+        if kind == .unread || kind == .confirmation {
             color.setFill(); NSBezierPath(ovalIn: badgeFrame).fill()
             centered(String(count), y: AIFooterMetrics.iconCenterY - 8, size: 11, color: .white)
         } else {

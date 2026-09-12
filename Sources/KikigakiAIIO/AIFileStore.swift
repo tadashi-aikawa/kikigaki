@@ -95,7 +95,10 @@ public struct AIFileStore: Sendable {
     private func withDirectory<T>(_ parts: [String], create: Bool, body: (Int32) throws -> T) throws -> T {
         guard root.isFileURL else { throw AIError.unsafeFile }
         var fd = open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard fd >= 0 else { throw AIError.unsafeFile }
+        guard fd >= 0 else {
+            if allowsMissingParents, errno == ENOENT { throw AIFileError.missing }
+            throw AIError.unsafeFile
+        }
         defer { close(fd) }
         for part in parts {
             try checkName(part)

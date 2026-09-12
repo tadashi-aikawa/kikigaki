@@ -48,7 +48,7 @@ import KikigakiCore
         state.aiSchedule.active = true; state.aiSchedule.nextFire = Date().addingTimeInterval(180); state.previousAIUnread = 1
         window.apply(state)
         let menu = window.footerMenu()
-        #expect(menu.items.map(\.title) == ["会話をコピー", "今すぐ送る", "AIセッションを準備…", "ペインを開く", "AIセッションを作り直す", "保存を再試行", "前の会議に返事あり"])
+        #expect(menu.items.map(\.title) == ["会話をコピー", "今すぐ送る", "AIセッションを準備…", "ペインを開く", "AIセッションを作り直す", "保存を再試行", "前の会議に要返答・警告あり"])
         var prepared = false
         window.onPrepareAI = { prepared = true }
         for title in ["AIセッションを準備…"] {

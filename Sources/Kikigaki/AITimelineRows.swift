@@ -45,7 +45,7 @@ final class AIStatusPill: HoverButton {
         guard self.style != style || !configured else { return }
         configured = true
         self.style = style
-        title = style == .unread ? "未読" : style == .confirmation ? "確認待ち" : "返事待ち"
+        title = style == .unread ? "未読" : style == .confirmation ? "要返答" : "返事待ち"
         isEnabled = style == .unread
         toolTip = style == .unread ? "押すと既読にします" : nil
         setAccessibilityLabel(title + (style == .unread ? "、押すと既読にします" : ""))
@@ -55,14 +55,14 @@ final class AIStatusPill: HoverButton {
         NSSize(width: ceil((title as NSString).size(withAttributes: [.font: font!]).width) + 16, height: 20)
     }
     override func draw(_ dirtyRect: NSRect) {
-        let color = style == .unread ? (isHovered ? Washi.brightRed : Washi.red) : style == .confirmation ? Washi.gold : Washi.muted
+        let color = style == .unread ? (isHovered ? Washi.brightRed : Washi.red) : style == .confirmation ? Washi.red : Washi.muted
         let filled = style != .waiting
         let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10)
         if filled { color.setFill(); pill.fill() }
         else { color.setStroke(); pill.lineWidth = 1; pill.stroke() }
-        // 金地に白は3.25:1しかない。塗りの色に応じて読める方の文字色を選ぶ。
+        // 朱の塗りには白文字、輪郭だけの状態には同色の文字を使う。
         let attributes: [NSAttributedString.Key: Any] = [.font: font!,
-            .foregroundColor: filled ? (style == .confirmation ? Washi.ink : NSColor.white) : color]
+            .foregroundColor: filled ? NSColor.white : color]
         let size = (title as NSString).size(withAttributes: attributes)
         (title as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2),
                                  withAttributes: attributes)
@@ -302,26 +302,25 @@ final class AIReplyRow: NSView, AITimelineRowView {
     var statusPill: AIStatusPill { pill }
 
     private func markReadIfNeeded() {
-        guard item.isUnread else { return }
-        onRead?()
+        // 通常返答に既読操作を要求しない。保存済み状態もクリックで書き換えない。
     }
 
     var isFailure: Bool { if case .failure = item.kind { return true }; return false }
     /// モデルが返した失敗報告。送信そのものができなかった失敗と区別し、本文を全部見せる。
     var isReturnedFailure: Bool { if case let .failure(_, returned) = item.kind { return returned }; return false }
     var isWaiting: Bool { item.kind == .reply(.waiting) }
-    /// 未読は朱、未返答の確認は金。既読と返答済みは薄墨へ戻す。
+    /// 要返答と失敗だけを朱で強調し、通常返答に未読の強調を置かない。
     var accent: NSColor? {
         if isFailure { return Washi.red }
-        // 確認質問の金の帯は返答するまで残す。既読では消さない。
-        if item.kind == .reply(.needsInput) { return item.needsAnswer ? Washi.gold : nil }
-        return item.isUnread ? Washi.red : nil
+        // 確認質問の帯は返答するまで残す。
+        if item.kind == .reply(.needsInput) { return item.needsAnswer ? Washi.red : nil }
+        return nil
     }
     var pillStyle: AIStatusPill.Style? {
         if isWaiting { return nil }
         if item.kind == .reply(.needsInput) { return item.needsAnswer ? .confirmation : nil }
-        // 返送された失敗も未読になる。送信前の失敗は未読にならないので印も出ない。
-        return item.isUnread ? .unread : nil
+        // 通常返答と失敗には未読の操作を置かない。
+        return nil
     }
 
     init(item: AITimeline.Item, state: AIViewState) {
