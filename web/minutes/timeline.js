@@ -3,10 +3,11 @@
 // 対象は期間と出来事だけ。title・section・accTitle・accDescr・コメント行は変えない。
 const HEADER = /^\s*(?:timeline\b|title\s|section\s|accTitle\s*:|accDescr\s*[:{]|%%|#|\})/i;
 // Mermaidの字句規則では期間に「:」を含められず、「21:39 : 出来事」は図全体が描けない。人の書く時刻はこの形が自然なので、
-// 期間の「:」だけ見た目の近い U+A789 へ置き換えて通す。出来事の「:」は後ろに空白がなければMermaidが受け付ける。
+// 期間の「:」だけMermaid共通のエンティティ記法 #colon; へ置き換えて通す(本物のコロンで描かれる)。
+// 出来事の「:」は後ろに空白がなければMermaidが受け付ける。幅の計測は置換前の文字で行う。
 const PERIOD = /^(\s*)((?:[^#:\n]|:(?!\s))+?)(?=\s*:\s|\s*(?:#|$))/;
 const EVENTS = /(:\s+)((?:[^:\n]|:(?!\s))+)/g;
-const PERIOD_COLON = '꞉';
+const PERIOD_COLON = '#colon;';
 
 // 先頭のfrontmatter・%%コメント・空行を除いた最初の行が timeline なら対象。
 export function isTimeline(source) {
@@ -27,7 +28,7 @@ export function wrapTimeline(source, fits) {
 
 function wrapLine(line, fits) {
   const period = line.match(PERIOD);
-  const head = period ? period[1] + wrapSegment(period[2].replaceAll(':', PERIOD_COLON), fits) : '';
+  const head = period ? period[1] + wrapSegment(period[2], fits).replaceAll(':', PERIOD_COLON) : '';
   const rest = line.slice(period ? period[0].length : 0);
   return head + rest.replace(EVENTS, (_, separator, event) => separator + wrapSegment(event, fits));
 }
