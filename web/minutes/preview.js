@@ -52,7 +52,7 @@ toc.addEventListener('keydown', event => {
 tocNav.addEventListener('click', event => {
   const link = event.target.closest('a'); if (!link) return;
   event.preventDefault(); document.getElementById(link.dataset.target)?.scrollIntoView({ block:'start' });
-  updateTOCPosition(); toc.open = false; toc.querySelector('summary').focus({ preventScroll:true });
+  updateTOCPosition();
 });
 mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'base',
   themeVariables: { primaryColor: '#ede0cd', primaryTextColor: '#221f1c', primaryBorderColor: '#6b6157', lineColor: '#6b6157', fontFamily: '-apple-system, sans-serif' },

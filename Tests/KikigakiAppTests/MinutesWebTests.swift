@@ -99,8 +99,8 @@ import Testing
         window.setContentSize(NSSize(width: 1200, height: 400)); preview.layoutSubtreeIfNeeded()
         try await wait { try await web.evaluateJavaScript("innerHeight < 500") as? Bool == true }
         _ = try await web.evaluateJavaScript("document.querySelector('#toc summary').click(); document.querySelectorAll('#toc nav a')[2].click()")
-        #expect(try await web.evaluateJavaScript("!document.getElementById('toc').open && document.querySelector('#toc a[aria-current]').textContent === '当日の流れ'") as? Bool == true)
-        _ = try await web.evaluateJavaScript("document.querySelector('#toc summary').click(); document.querySelector('main').dispatchEvent(new PointerEvent('pointerdown', {bubbles:true})); scrollTo(0,0)")
+        #expect(try await web.evaluateJavaScript("document.getElementById('toc').open && document.querySelector('#toc a[aria-current]').textContent === '当日の流れ'") as? Bool == true)
+        _ = try await web.evaluateJavaScript("document.querySelector('main').dispatchEvent(new PointerEvent('pointerdown', {bubbles:true})); scrollTo(0,0)")
         #expect(try await web.evaluateJavaScript("!document.getElementById('toc').open") as? Bool == true)
         window.setContentSize(NSSize(width: 1200, height: 1500)); preview.layoutSubtreeIfNeeded()
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.diagram svg').length") as? Int == 1)
