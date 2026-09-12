@@ -2,6 +2,7 @@ import { createRenderer, withoutFrontmatter } from './renderer.js';
 import DOMPurify from 'dompurify';
 import mermaid from 'mermaid';
 import { cleanHTML } from './html.js';
+import { changedEntries, updateEntries, clearUpdates, highlightUpdates } from './updates.js';
 const md = createRenderer(), root = document.getElementById('minutes');
 const toc = document.getElementById('toc'), tocNav = toc.querySelector('nav');
 let headings = [], tocLinks = [], activeTOCLink = null, tocFrame = 0;
@@ -127,6 +128,7 @@ mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'base',
   htmlLabels: false, flowchart: { htmlLabels: false }, maxTextSize: 100000, maxEdges: 1000,
   suppressErrorRendering: true });
 let generation = 0, query = '', hit = -1, ranges = [], source = '', context = '';
+let lastUpdateEntries = null;
 let updateListeners = new AbortController();
 const report = value => window.webkit?.messageHandlers.minutes.postMessage(value);
 const safeHTML = value => DOMPurify.sanitize(value, { ADD_TAGS: ['eq', 'eqn'], ADD_URI_SAFE_ATTR: ['data-wiki'],
@@ -228,6 +230,9 @@ function paint(reveal) {
 window.minutes = {
   async render(text, newContext, reset, ticket) {
     const current = ++generation;
+    if (reset) lastUpdateEntries = null;
+    const previous = lastUpdateEntries;
+    clearUpdates();
     updateListeners.abort(); updateListeners = new AbortController();
     const saved = reset ? null : anchor(), selection = reset ? null : selectionOffsets();
     source = text; context = newContext;
@@ -281,11 +286,15 @@ window.minutes = {
     if (restore) { restoreAnchor(saved); restoreSelection(selection); }
     updateTOCPosition();
     refreshSearch();
+    const entries = updateEntries(root);
+    if (previous) highlightUpdates(changedEntries(previous, entries));
+    // 中断された途中のDOMは比較元にしない。直前に描画を完了した本文だけを保持する。
+    lastUpdateEntries = entries.map(({ key }) => ({ key }));
     report({ kind: 'rendered', ticket, text: root.innerText });
     return true;
   },
-  clear() { generation++; updateListeners.abort(); closeImage(); folded.clear(); source = ''; root.replaceChildren(); rebuildTOC(true); query = ''; refreshSearch(); scrollTo(0, 0); },
-  invalidate() { generation++; updateListeners.abort(); },
+  clear() { generation++; lastUpdateEntries = null; clearUpdates(); updateListeners.abort(); closeImage(); folded.clear(); source = ''; root.replaceChildren(); rebuildTOC(true); query = ''; refreshSearch(); scrollTo(0, 0); },
+  invalidate() { generation++; clearUpdates(); updateListeners.abort(); },
   search(value, direction = 0, reveal = true) {
     if (query !== value) { query = value; hit = 0; return refreshSearch(reveal); }
     if (ranges.length && direction) hit = (hit + direction + ranges.length) % ranges.length;

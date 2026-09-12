@@ -102,6 +102,17 @@ import Testing
         try await wait { preview.document.renderedText.contains("上へ挿入") }
         let restored = try #require(try await web.evaluateJavaScript("document.querySelectorAll('main p')[70].getBoundingClientRect().top") as? Double)
         #expect(abs(position - restored) < 1)
+        #expect(try await web.evaluateJavaScript("CSS.highlights.get('updated').size === 10") as? Bool == true)
+        #expect(try await web.evaluateJavaScript("[...CSS.highlights.get('updated')].every(r => r.toString() === '上へ挿入')") as? Bool == true)
+        if let capture = ProcessInfo.processInfo.environment["KIKIGAKI_MINUTES_CAPTURE"] {
+            _ = try await web.evaluateJavaScript("scrollTo(0,0)")
+            let screenshot = try await web.takeSnapshot(configuration:WKSnapshotConfiguration())
+            let data = try #require(screenshot.tiffRepresentation)
+            let bitmap = try #require(NSBitmapImageRep(data:data))
+            try #require(bitmap.representation(using:.png, properties:[:])).write(to:URL(fileURLWithPath:capture).appendingPathComponent("updated-lines.png"))
+        }
+        try await Task.sleep(for: .milliseconds(4200))
+        #expect(try await web.evaluateJavaScript("!CSS.highlights.has('updated')") as? Bool == true)
         if let sample = ProcessInfo.processInfo.environment["KIKIGAKI_MINUTES_SAMPLE"],
            let capture = ProcessInfo.processInfo.environment["KIKIGAKI_MINUTES_CAPTURE"] {
             preview.update(path: sample, source: .human, active: true)

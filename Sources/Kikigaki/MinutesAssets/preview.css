@@ -41,6 +41,7 @@ mark { background:#e09c3c55; color:inherit; } mark.current { background:#e09c3cb
 ::selection { background:#e09c3c70; }
 ::highlight(matches) { background:#e09c3c55; color:inherit; }
 ::highlight(current) { background:#e09c3cb0; color:inherit; }
+::highlight(updated) { background:#9b72c635; text-decoration:underline; text-decoration-color:#9b72c670; }
 #toc { position:fixed; top:12px; right:16px; z-index:10; max-width:calc(100vw - 32px); border:1px solid var(--rule); border-radius:8px; background:#fffaf2; box-shadow:0 3px 12px #221f1c18; font-size:13px; line-height:1.5; }
 #toc[hidden] { display:none; }
 #toc summary { padding:8px 12px; cursor:pointer; color:var(--accent); font-weight:600; user-select:none; }

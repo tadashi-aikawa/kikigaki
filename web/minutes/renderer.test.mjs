@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRenderer, withoutFrontmatter, imageURL } from './renderer.js';
+import { changedEntries } from './updates.js';
 const render = text => createRenderer().render(withoutFrontmatter(text), { context: 'test' });
+test('変更行は追加と書換えだけで移動と削除は光らせない', () => {
+  const entries = values => values.map(key => ({ key }));
+  assert.deepEqual(changedEntries(entries(['a','b','same','same']), entries(['new','b','a','same','same','same'])).map(e => e.key), ['new','same']);
+  assert.deepEqual(changedEntries(entries(['a','b']), entries(['a'])), []);
+});
 
 test('frontmatterとコード内の記法を保持', () => {
   assert.equal(withoutFrontmatter('\uFEFF---\r\ntitle: a\r\n---\r\n# 本文'), '# 本文');

@@ -19,7 +19,7 @@ struct MinutesFileStamp: Equatable, Sendable {
 }
 
 enum MinutesFileResult: Sendable {
-    case body(String, [MarkdownBlock])
+    case body(String, [MarkdownBlock], modifiedAt: Date? = nil)
     case missing, cloud, changed
     case failure(String)
 
@@ -57,7 +57,8 @@ enum MinutesFileResult: Sendable {
         guard fstat(fd, &after) == 0, MinutesFileStamp(before) == MinutesFileStamp(after),
               MinutesFileStamp.at(path) == MinutesFileStamp(after) else { return .changed }
         guard let text = String(data: bytes, encoding: .utf8) else { return .failure("UTF-8のファイルとして読めません") }
-        return .body(text, parseBlocks ? MarkdownBlocks.parse(text, minutes: true) : [])
+        let modifiedAt = Date(timeIntervalSince1970: Double(after.st_mtimespec.tv_sec) + Double(after.st_mtimespec.tv_nsec) / 1_000_000_000)
+        return .body(text, parseBlocks ? MarkdownBlocks.parse(text, minutes: true) : [], modifiedAt: modifiedAt)
     }
 }
 

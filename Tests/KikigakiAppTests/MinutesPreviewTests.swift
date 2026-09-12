@@ -66,7 +66,7 @@ import KikigakiAIIO
         try Data(markdown.utf8).write(to: path)
         let link = root.appendingPathComponent("link.md")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: path)
-        if case .body(_, let blocks) = MinutesFileResult.read(link.path) {
+        if case .body(_, let blocks, _) = MinutesFileResult.read(link.path) {
             let rendered = MarkdownBodyRenderer.render(blocks).string
             #expect(!rendered.contains("tags:") && rendered.contains("当日の手順"))
             #expect(rendered.contains("[[コード中のリンク]]") && rendered.contains("![[会場図]]"))
@@ -86,7 +86,7 @@ import KikigakiAIIO
         let path = root.appendingPathComponent("minutes.md")
         var bodies: [String] = [], missing = false
         let monitor = MinutesFileMonitor(path: path.path, interval: 0.05) { result in
-            if case .body(let text, _) = result { bodies.append(text) }
+            if case .body(let text, _, _) = result { bodies.append(text) }
             if case .missing = result { missing = true }
         }
         defer { monitor.stop() }

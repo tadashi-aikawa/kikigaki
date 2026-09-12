@@ -57,7 +57,7 @@ import Testing
         try Data("初版".utf8).write(to: path)
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: path)
         var body = ""
-        let monitor = MinutesFileMonitor(path: link.path, interval: 0.05) { if case .body(let text, _) = $0 { body = text } }
+        let monitor = MinutesFileMonitor(path: link.path, interval: 0.05) { if case .body(let text, _, _) = $0 { body = text } }
         defer { monitor.stop() }
         try await eventually { body == "初版" }
         try Data("新版".utf8).write(to: path)

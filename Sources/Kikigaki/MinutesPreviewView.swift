@@ -27,6 +27,9 @@ private final class MinutesPathField: NSTextField {
     let pathField: NSTextField = MinutesPathField(string: "")
     let headerBar = NSView()
     let document = MinutesWebView(frame: .zero)
+    let updateStatus = MinutesUpdateStatus(frame: .zero)
+    private var pendingModifiedAt: Date?
+    private var rendering = false
     let searchField = NSSearchField()
     private let searchBar = NSStackView()
     private let searchCount = Washi.label("", size: 11)
@@ -112,10 +115,12 @@ private final class MinutesPathField: NSTextField {
         searchBar.isHidden = true
         document.onRendered = { [weak self] text in
             guard let self, self.active else { return }
+            self.rendering = false
+            self.updateStatus.setDate(self.pendingModifiedAt)
             if text.isEmpty { self.showMessage("議事録はまだ空です") } else { self.showBody() }
             if !self.searchBar.isHidden { self.search(reveal: false) }
         }
-        document.onError = { [weak self] text in self?.body = nil; self?.showMessage(text, retry: true) }
+        document.onError = { [weak self] text in self?.cancelRender(); self?.showMessage(text, retry: true) }
         message.font = .systemFont(ofSize: 14); message.textColor = Washi.muted; message.alignment = .center
         message.setAccessibilityLabel("議事録の状態")
         retryButton.target = self; retryButton.action = #selector(reload)
@@ -144,7 +149,7 @@ private final class MinutesPathField: NSTextField {
         status.topAnchor.constraint(equalTo: guide.bottomAnchor).isActive = true
         let bodyColumn = column([notice, bodyView], spacing: 0, inset: 0)
         bodyColumn.setContentHuggingPriority(.defaultLow, for: .vertical)
-        let layout = column([headerBar, separator(), searchBar, bodyColumn], spacing: 0, inset: 0)
+        let layout = column([headerBar, separator(), searchBar, bodyColumn, separator(), updateStatus], spacing: 0, inset: 0)
         addSubview(layout); layout.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             layout.leadingAnchor.constraint(equalTo: leadingAnchor), layout.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -179,6 +184,7 @@ private final class MinutesPathField: NSTextField {
         let changed = self.path != path
         let start = active && (!self.active || changed || self.source != source)
         self.path = path; self.source = source; self.active = active
+        updateStatus.active = active
         if changed { document.setFile(path.map { URL(fileURLWithPath: $0) }); resetNextRender = true }
         neovimButton.isEnabled = path != nil && editorTask == nil
         obsidianButton.isEnabled = path != nil
@@ -201,9 +207,14 @@ private final class MinutesPathField: NSTextField {
 
     func receive(_ result: MinutesFileResult) {
         switch result {
-        case .body(let source, _):
-            guard body != source else { showBody(); return }
+        case .body(let source, _, let modifiedAt):
+            pendingModifiedAt = modifiedAt
+            guard body != source else {
+                if !rendering { updateStatus.setDate(modifiedAt); showBody() }
+                return
+            }
             body = source
+            rendering = true
             document.render(source, reset: resetNextRender)
             resetNextRender = false
         case .missing: cancelRender(); showMessage(source == .ai ? "AIが通知したファイルはまだありません。作成されると自動で表示します" : "指定したファイルはまだありません。作成されると自動で表示します", retry: true)
@@ -213,7 +224,7 @@ private final class MinutesPathField: NSTextField {
         }
     }
 
-    private func cancelRender() { body = nil; document.invalidate() }
+    private func cancelRender() { body = nil; rendering = false; pendingModifiedAt = nil; updateStatus.setDate(nil); document.invalidate() }
     private func showBody() {
         message.isHidden = true; emptyChoose.isHidden = true; retryButton.isHidden = true; cancelButton.isHidden = true; document.isHidden = false
     }
@@ -282,7 +293,7 @@ private final class MinutesPathField: NSTextField {
     @objc private func closePreview() { onClose?() }
     @objc private func reload() { body = nil; beginRead(reset: false) }
     @objc private func cancelRead() { cancelRender(); monitor?.stop(); monitor = nil; showMessage("読み込みを取り消しました", retry: true) }
-    func stop() { cancelRender(); active = false; body = nil; monitor?.stop(); monitor = nil; editorTask?.cancel(); editorTask = nil }
+    func stop() { cancelRender(); active = false; updateStatus.active = false; body = nil; monitor?.stop(); monitor = nil; editorTask?.cancel(); editorTask = nil }
     var hasSearchFocus: Bool {
         guard !isHidden, let responder = window?.firstResponder else { return false }
         if responder === searchField.currentEditor() || responder === pathField.currentEditor() { return true }
