@@ -35,6 +35,9 @@ test('timelineの期間と出来事だけを枠幅で改行し他の行は変え
   assert.equal(wrapTimeline(source, fits), 'timeline\n    title 振り返りと展望とその先\n    section 長い区分の名前です\n    %% コメント: 長い長い長い長い\n    1年前 : テーマ「ユー<br>ザーからビル<br>ダーへ」 : 自身は<br>まだビルダー<br>ではなかった\n      : 次の年 : 時刻 12:<br>30 に集合\n    accTitle: 長い長い長い長い長い\n');
   assert.equal(wrapTimeline('timeline\n  2024 : 短い\n', fits), 'timeline\n  2024 : 短い\n');
   assert.equal(wrapTimeline('timeline\n  2025 : エージェントと組織AI : abcdefghij\n', fits), 'timeline\n  2025 : エージェント<br>と組織AI : abcdef<br>ghij\n');
+  // 期間の「:」はMermaidが受け付けないため見た目の近い文字へ置き換える。出来事の「12:30」は変えない
+  assert.equal(wrapTimeline('timeline\n    21:39 : 録音を開始 : 12:30\n    1:2:3 : 相談\n', fits), 'timeline\n    21꞉39 : 録音を開始 : 12:30\n    1꞉2꞉3 : 相談\n');
+  assert.equal(wrapTimeline('timeline\n    2024 # メモ\n', fits), 'timeline\n    2024 # メモ\n');
   assert.ok(isTimeline('%%{init: {}}%%\n\ntimeline\n  a : b'));
   assert.ok(isTimeline('---\ntitle: x\n---\ntimeline LR\n  a : b'));
   assert.ok(!isTimeline('flowchart LR\n  A --> B'));

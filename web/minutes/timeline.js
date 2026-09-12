@@ -2,8 +2,11 @@
 // 描画前に実フォントで幅を測り、収まる位置へ <br> を差し込む。書かれた <br> は残し、<br/> も同じ改行として扱う。
 // 対象は期間と出来事だけ。title・section・accTitle・accDescr・コメント行は変えない。
 const HEADER = /^\s*(?:timeline\b|title\s|section\s|accTitle\s*:|accDescr\s*[:{]|%%|#|\})/i;
-// Mermaidの字句規則に合わせる。期間は行頭から最初の「:」まで(「#」以降はコメント)、出来事は「: 」から次の「: 」の手前まで。
-const SEGMENTS = /(^[^#:\n]+)|(:\s+)((?:[^:\n]|:(?!\s))+)/g;
+// Mermaidの字句規則では期間に「:」を含められず、「21:39 : 出来事」は図全体が描けない。人の書く時刻はこの形が自然なので、
+// 期間の「:」だけ見た目の近い U+A789 へ置き換えて通す。出来事の「:」は後ろに空白がなければMermaidが受け付ける。
+const PERIOD = /^(\s*)((?:[^#:\n]|:(?!\s))+?)(?=\s*:\s|\s*(?:#|$))/;
+const EVENTS = /(:\s+)((?:[^:\n]|:(?!\s))+)/g;
+const PERIOD_COLON = '꞉';
 
 // 先頭のfrontmatter・%%コメント・空行を除いた最初の行が timeline なら対象。
 export function isTimeline(source) {
@@ -19,8 +22,14 @@ export function isTimeline(source) {
 }
 
 export function wrapTimeline(source, fits) {
-  return source.split('\n').map(line => HEADER.test(line) ? line
-    : line.replace(SEGMENTS, (_, period, separator, event) => period ? wrapSegment(period, fits) : separator + wrapSegment(event, fits))).join('\n');
+  return source.split('\n').map(line => HEADER.test(line) ? line : wrapLine(line, fits)).join('\n');
+}
+
+function wrapLine(line, fits) {
+  const period = line.match(PERIOD);
+  const head = period ? period[1] + wrapSegment(period[2].replaceAll(':', PERIOD_COLON), fits) : '';
+  const rest = line.slice(period ? period[0].length : 0);
+  return head + rest.replace(EVENTS, (_, separator, event) => separator + wrapSegment(event, fits));
 }
 
 function wrapSegment(segment, fits) {
