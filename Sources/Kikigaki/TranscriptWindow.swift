@@ -270,7 +270,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
                 let request = question.request
                 nextProgress[request.id] = AIProgress(question: question, connection: ai.connection(for: request),
                     connectionGeneration: ai.generation(for: request), isUnconfirmed: ai.unconfirmed.contains(request.id),
-                    editing: ai.editing[request.id],
+                    report: ai.progressReports[request.id],
                     previous: aiProgress[request.id], isHistorical: ai.readOnly)
             }
         }

@@ -36,7 +36,7 @@ import KikigakiCore
         }
     }
     private func fixture(count: Int, accepted: Bool, deliveryUnknown: Bool = false, crowded: Bool = false,
-                         editingSlots: [Int: AIEditingReport] = [:]) throws -> SessionSnapshot {
+                         reportSlots: [Int: AIProgressReport] = [:]) throws -> SessionSnapshot {
         let meeting = UUID()
         var conversation = AIConversation(meetingID: meeting)
         let lines = ["公開日までに、録音と議事録の動作を確認します。", "受領と作業中を区別できると、待つ理由が分かります。",
@@ -69,10 +69,10 @@ import KikigakiCore
             connections: Dictionary(uniqueKeysWithValues: (1...count).map { ($0, AIConnectionStatus.idle) }),
             generations: Dictionary(uniqueKeysWithValues: (1...count).map { ($0, 1) }))
         if let source = ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_AVATAR"] { ai.avatarSources[1] = source }
-        // 編集の観測は受信箱から来る値。枠ごとに別の段を見せるため、slotで指定する。
+        // 編集・返答の申告は受信箱から来る値。枠ごとに別の段を見せるため、slotで指定する。
         for question in conversation.questions {
-            guard let report = editingSlots[ai.slot(of: question.request)] else { continue }
-            ai.editing[question.request.id] = report
+            guard let report = reportSlots[ai.slot(of: question.request)] else { continue }
+            ai.progressReports[question.request.id] = report
         }
         // 3つの枠で、項目の欠け方を変えて出す。2はmodel未設定でCLI名、3はeffort未設定。
         ai.modelLabels = [1: AIModelLabel(model: "gpt-6-astra", effort: "high", directory: "minutes"),
@@ -126,9 +126,14 @@ import KikigakiCore
         var reading = try fixture(count: 1, accepted: true)
         reading.ai?.connections[1] = .working
         apply(reading); try capture("reading")
-        var state = try fixture(count: 1, accepted: true, editingSlots: [1: AIEditingReport(total: 7)])
+        var state = try fixture(count: 1, accepted: true, reportSlots: [1: .editing(total: 7)])
         state.ai?.connections[1] = .working
         apply(state); try capture("editing")
+        // 編集を終えて返答を書いている最中。総数は消え、現在段は返答へ進む。
+        var writing = try fixture(count: 1, accepted: true,
+            reportSlots: [1: AIProgressReport(isEditing: true, editingTotal: 7, isReplying: true)])
+        writing.ai?.connections[1] = .working
+        apply(writing); try capture("replying")
         try captureArrival()
         state.ai?.connections[1] = .blocked
         apply(state); try capture("blocked")
@@ -139,12 +144,17 @@ import KikigakiCore
         state.ai?.readOnly = true; state.state = .idle; state.saved = true
         apply(state); try capture("historical")
         // 3宛先同時。#1は編集、#2は読込のまま確認待ち、#3は返送未確認。
-        var busy = try fixture(count: 3, accepted: true, crowded: true, editingSlots: [1: AIEditingReport(total: 7)])
+        var busy = try fixture(count: 3, accepted: true, crowded: true, reportSlots: [1: .editing(total: 7)])
         busy.ai?.connections = [1: .working, 2: .blocked, 3: .idle]
         apply(busy); try capture("three-destinations-crowded")
         controller.window?.setContentSize(NSSize(width: 420, height: 740))
         apply(busy); try capture("three-destinations-narrow")
         controller.window?.setContentSize(NSSize(width: 600, height: 740))
+        // 同じ混雑画面で、#2だけが返答を書いている最中。宛先ごとに段が分かれることを見る。
+        var mixed = try fixture(count: 3, accepted: true, crowded: true,
+            reportSlots: [1: .editing(total: 7), 2: .replying])
+        mixed.ai?.connections = [1: .working, 2: .working, 3: .idle]
+        apply(mixed); try capture("three-destinations-replying")
         apply(try fixture(count: 1, accepted: false, deliveryUnknown: true)); try capture("delivery-unknown")
         var unaccepted = try fixture(count: 1, accepted: false)
         unaccepted.ai?.connections[1] = .blocked
@@ -154,7 +164,8 @@ import KikigakiCore
     private func captureArrival() throws {
         reduceMotion = false
         defer { reduceMotion = true }
-        var state = try fixture(count: 1, accepted: true, editingSlots: [1: AIEditingReport(total: 7)])
+        var state = try fixture(count: 1, accepted: true,
+            reportSlots: [1: AIProgressReport(isEditing: true, editingTotal: 7, isReplying: true)])
         state.ai?.connections[1] = .working
         apply(state)
         guard var conversation = state.ai?.conversation,

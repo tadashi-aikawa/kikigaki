@@ -18,8 +18,12 @@ public struct AIInbox: Sendable {
         try Self.decodeMinutes(readBytes(filename: filename, for: request, suffixes: ["minutes"]), filename: filename, for: request)
     }
 
-    public func readProgress(filename: String, for request: AIRequest) throws -> AIProgressEvent {
-        try Self.decodeProgress(readBytes(filename: filename, for: request, suffixes: ["progress"]), filename: filename, for: request)
+    /// 段ごとに別ファイル。名前の段とJSONの段が食い違えば検証で弾く。
+    public func readProgress(_ phase: AIProgressEvent.Phase, for request: AIRequest) throws -> AIProgressEvent {
+        let filename = AIProgressEvent.filename(requestID: request.id, phase: phase)
+        let suffixes = AIProgressEvent.Phase.allCases.map { "progress.\($0.rawValue)" }
+        return try Self.decodeProgress(readBytes(filename: filename, for: request, suffixes: suffixes),
+                                       filename: filename, for: request)
     }
 
     private func readBytes(filename: String, for request: AIRequest, suffixes: [String]) throws -> Data {

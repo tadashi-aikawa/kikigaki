@@ -34,7 +34,7 @@ import KikigakiCore
         _ = NSApplication.shared
         let conversation = try conversation(count: 3)
         var state = SessionSnapshot(ai: AIViewState(conversation: conversation, connection: .blocked,
-            editing: [conversation.questions[0].request.id: AIEditingReport(total: 2)],
+            progressReports: [conversation.questions[0].request.id: .editing(total: 2)],
             selectedSlot: 3, connections: [1: .working, 2: .idle, 3: .blocked], generations: [1: 1, 2: 1, 3: 1]),
             timeline: MeetingTimeline(startedAt: sent))
         let controller = TranscriptWindowController(shouldReduceMotion: { true })
@@ -55,7 +55,7 @@ import KikigakiCore
         controller.apply(state)
         #expect(rows(controller)[1].progressView.progress?.status == .unknown)
         // 申告が読めなくなっても、確認済みの編集は表示用の履歴が保つ。
-        state.ai?.editing = [:]
+        state.ai?.progressReports = [:]
         controller.apply(state)
         #expect(rows(controller)[0].progressView.progress?.currentStage == .editing)
         state.timeline = MeetingTimeline(startedAt: sent.addingTimeInterval(1))
@@ -90,12 +90,35 @@ import KikigakiCore
         #expect(controller.transcriptDocument.rows.compactMap { $0 as? AISendLineRow }.first?.displayText.contains("送達不明") == true)
     }
 
+    @Test func 返答の申告は宛先ごとに返答の段を現在として出す() throws {
+        _ = NSApplication.shared
+        let conversation = try conversation(count: 3)
+        let ids = conversation.questions.map { $0.request.id }
+        var state = SessionSnapshot(ai: AIViewState(conversation: conversation, connection: .working,
+            progressReports: [ids[0]: AIProgressReport(isEditing: true, editingTotal: 2, isReplying: true),
+                              ids[1]: .replying, ids[2]: .editing(total: 4)],
+            connections: [1: .working, 2: .working, 3: .working], generations: [1: 1, 2: 1, 3: 1]),
+            timeline: MeetingTimeline(startedAt: sent))
+        let controller = TranscriptWindowController(shouldReduceMotion: { true })
+        controller.apply(state)
+        #expect(rows(controller).map { $0.progressView.progress?.status } == [.replying, .replying, .editing])
+        #expect(rows(controller)[0].progressView.displayText.hasPrefix("返答を作成中 · "))
+        #expect(rows(controller)[1].progressView.progress?.observedStages == [.sending, .reading, .reply])
+        #expect(rows(controller)[2].progressView.displayText.hasPrefix("編集中(全4か所) · "))
+        #expect(rows(controller).allSatisfy { $0.progressView.progress?.currentStage != nil })
+        // 申告が読めなくなっても、確認済みの返答の位置は表示用の履歴が保つ。
+        state.ai?.progressReports = [:]
+        controller.apply(state)
+        #expect(rows(controller)[0].progressView.progress?.currentStage == .reply)
+        #expect(rows(controller)[0].progressView.displayText.hasPrefix("返答を作成中 · "))
+    }
+
     @Test(arguments: [false, true]) func 返答到着は全段点灯を見せてから本文へ入れ替える(reduceMotion: Bool) throws {
         _ = NSApplication.shared
         var conversation = try conversation()
         let request = conversation.questions[0].request
         var state = SessionSnapshot(ai: AIViewState(conversation: conversation, connection: .working,
-            editing: [request.id: AIEditingReport(total: 2)], connections: [1: .working], generations: [1: 1]),
+            progressReports: [request.id: .editing(total: 2)], connections: [1: .working], generations: [1: 1]),
             timeline: MeetingTimeline(startedAt: sent))
         let controller = TranscriptWindowController(shouldReduceMotion: { reduceMotion })
         controller.apply(state)

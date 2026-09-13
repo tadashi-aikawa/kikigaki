@@ -92,8 +92,8 @@ struct AIViewState {
     /// 確定待ち・起動・接続からCLI入力試行直前まで。単なる準備済みセッションは含めない。
     var isPreparing = false
     var unconfirmed: Set<UUID> = []
-    /// 編集へ入ったと確認できた依頼。自己申告とフック観測をまとめた結果だけを持つ
-    var editing: [UUID: AIEditingReport] = [:]
+    /// 編集・返答へ入ったと確認できた依頼。自己申告とフック観測をまとめた結果だけを持つ
+    var progressReports: [UUID: AIProgressReport] = [:]
     var canSubmit = true
     var submissionID: UUID?
     var draft = ""

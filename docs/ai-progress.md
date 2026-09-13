@@ -6,7 +6,7 @@
 
 ## 観測源と段の対応
 
-`AIQuestion` の保存済み状態・acceptance・result、宛先slotの `AIConnectionStatus`、既存の `AIReturnStatus.isUnconfirmed` の結果、受信箱の編集の観測を使う。接続の観測には宛先の現在の世代も渡す。選択中の別宛先の状態を流用しない。
+`AIQuestion` の保存済み状態・acceptance・result、宛先slotの `AIConnectionStatus`、既存の `AIReturnStatus.isUnconfirmed` の結果、受信箱の編集・返答の観測を使う。接続の観測には宛先の現在の世代も渡す。選択中の別宛先の状態を流用しない。
 
 | 観測 | 確認できた段 | 進行表示の扱い |
 | --- | --- | --- |
@@ -15,6 +15,7 @@
 | acceptanceあり | 読込 | 文脈を読み終えた報告。作業開始や回答の正しさは保証しない |
 | AIの `progress --editing` | 編集 | 総数の申告があれば「編集中(全7か所)」。消化件数は表さない |
 | Claudeの編集系ツールのフック | 編集 | 補助の観測。総数は出ない。受領・返答の根拠にはしない |
+| AIの `progress --replying` | 返答 | 「返答を作成中」。返事はまだ届いておらず、回答の正しさも保証しない |
 | acceptedかつ編集未観測 | 読込のまま | 「読込済み · 作業中」。接続のworkingから編集を推測して塗らない |
 | 返事待ちかつ同世代のblocked | 位置はそのまま | 一時停止の印「‖」と「ペインで確認待ち」。初回信頼確認などを編集と誤認しない |
 | answeredのresult | 返答 | 全段を点灯して1.5秒見せ、その後に従来の回答本文へ |
@@ -29,6 +30,8 @@
 
 編集の観測は自己申告を正、Claudeのフックを補助にする。自己申告は `AIProgressEvent` として受信箱に残るので、過去会議でも同じ位置と総数を再現できる。フックはrequestを名乗らないため、送信試行より後の観測だけを同世代の返事待ちへ付け、自己申告のある依頼は上書きしない。結果より後に保存された申告は無視する。送信していない依頼の申告は成立しない。
 
+返答の段はAIの自己申告だけで塗り、フックでは観測しない。Skillは `reply` の直前に毎回1回呼ぶことを求め、読むだけ・答えるだけの依頼でも呼ばせる。段ごとに受信箱のファイルを分けてあるので、返答の申告が編集の申告と総数を消さない。編集を経ずに返答の申告が来ても編集は塗らない。観測していない中間点を塗らないためである。返答の申告の後に編集の申告が届いても、現在段は返答のまま戻さない。
+
 参照: [AIEvents.swift](../Sources/KikigakiCore/AIEvents.swift)、[AITimeline.swift](../Sources/KikigakiCore/AITimeline.swift)、[AI参加者の設計](ai-participant.md)。workingをaccepted、完了フックをansweredと解釈しない既存契約を維持する。
 
 ## 進行文と不明表示
@@ -40,6 +43,7 @@
 | 送信済み・未読込 | 送信済み · AIが読込中 |
 | 読込済み・編集未観測 | 読込済み · 作業中 |
 | 編集を観測 | 編集中(総数の申告があれば「編集中(全7か所)」) |
+| 返答を観測 | 返答を作成中。編集の総数の表記は消える |
 | 読込済み・blocked | ‖ 読込 → ペインで確認待ち |
 | 未読込・blocked | ‖ 送信済み · ペインで確認待ち |
 | 読込済み・返送未確認 | 読込 → 返送未確認 |
@@ -49,7 +53,7 @@
 | 返答・確認質問の到着 | 返答到着 / 確認質問が到着。点灯の1.5秒だけ出し、経過は付けない |
 | 送達不明 | ? 送達不明。送信行の注記だけに置き、返事行・経過時間を出さない |
 
-状況不明・切断・返送未確認・blockedの行は、読込を観測していれば「読込 → 」、していなければ「送信済み · 」を頭に置く。編集まで進んでいても文頭の語は変えず、位置はバーの塗りで示す。「受領」「承認待ち」「返送中」「回答できた」とは表示しない。
+状況不明・切断・返送未確認・blockedの行は、読込を観測していれば「読込 → 」、していなければ「送信済み · 」を頭に置く。編集・返答まで進んでいても文頭の語は変えず、位置はバーの塗りで示す。「受領」「承認待ち」「返送中」「回答できた」とは表示しない。
 
 不明・切断時は `isUnknown` を立て、前回までの確認位置と塗りを保つ。idleへ戻っても作業完了とみなさず、既に観測した作業位置を残して「返答待ち」または「返送未確認」と表示する。blockedは `isPaused` を立てるが不明とは扱わず、working復帰で一時停止の印を消す。
 
@@ -63,7 +67,7 @@
 
 接続の世代がrequestと異なる、または現在の世代が取得できない場合はunknownに落とす。新世代のworking・blockedを旧requestへ付けず、旧requestで確認済みの位置は保つ。結果・取消・失敗を先に判定するため、古い依頼を接続の変化だけで再開しない。
 
-過去会議ウィンドウでは `isHistorical: true` とする。現在の接続・返送未確認・前回値を使わず、保存された `AIQuestion` と受信箱に残る編集の申告だけから静止状態を導く。経過時間を表示せず、返答到着の点灯もしない。フックの観測履歴は依頼に紐づかないので、再起動後に補助だけで進んだ編集の塗りを再現するとは約束しない。acceptedの保存状態で申告がなければ読込位置に留める。録音停止後でも、現在開いている会議でAIを追跡中ならライブ表示を続ける。
+過去会議ウィンドウでは `isHistorical: true` とする。現在の接続・返送未確認・前回値を使わず、保存された `AIQuestion` と受信箱に残る編集・返答の申告だけから静止状態を導く。経過時間を表示せず、返答到着の点灯もしない。フックの観測履歴は依頼に紐づかないので、再起動後に補助だけで進んだ編集の塗りを再現するとは約束しない。acceptedの保存状態で申告がなければ読込位置に留める。録音停止後でも、現在開いている会議でAIを追跡中ならライブ表示を続ける。
 
 ## 時間と更新規則
 
@@ -77,7 +81,7 @@ UIでは既存の [AICompactFooter](../Sources/Kikigaki/AICompactFooter.swift) �
 
 ## 変更境界と検証
 
-request・envelope・reply・保存JSON・Markdownの形式、読込・返答の意味、送達不明に返事行を作らない契約を変えない。受信箱には `progress` イベントを足すだけで、`schema_version` は据え置く。手入力・音声発話行・話者状態導出にも手を入れない。AIProgressはCodableにせず、表示履歴と編集の観測を既存の保存物へ混ぜない。
+request・envelope・reply・保存JSON・Markdownの形式、読込・返答の意味、送達不明に返事行を作らない契約を変えない。受信箱には段ごとの `progress` イベントを足すだけで、`schema_version` は据え置く。手入力・音声発話行・話者状態導出にも手を入れない。AIProgressはCodableにせず、表示履歴と段の観測を既存の保存物へ混ぜない。
 
 [AI行の設計](ai-timeline.md)、[AI参加者の設計](ai-participant.md) の「画面と記録」、[CLAUDE.md](../CLAUDE.md) からこの文書を参照する。接続状態と接続世代はAIProgressの必須引数とし、渡し忘れをコンパイル時に検出する。
 
@@ -131,8 +135,8 @@ Coreのテストは実際の `AIQuestion` の送信・受領・取消・返答�
 | フックだけ | Editツールで1か所を書き換え、`progress` は呼ばない | 送信済み · AIが読込中 → 読込済み · 作業中 → **編集中** → 返答到着 |
 | 到着の点灯 | 会話が読めずneeds_inputで返った回 | 確認質問が到着。4段すべてが朱、現在の印・経過・取消なし |
 
-- 自己申告の回は受信箱に `<request>.progress.json`(`phase: editing`、`total: 2`)が12:15:17Zに落ち、画面は同じ秒に「編集中(全2か所)」へ進んだ。証跡は `screens-a/`
-- フックだけの回は `progress.json` が無く、`notify-*.json` の `toolName: Edit` が12:18:46.806Zに落ちて、同じ秒に総数なしの「編集中」へ進んだ。証跡は `screens-c/`
+- 自己申告の回は受信箱に編集の申告(`phase: editing`、`total: 2`)が12:15:17Zに落ち、画面は同じ秒に「編集中(全2か所)」へ進んだ。証跡は `screens-a/`
+- フックだけの回は編集の申告が無く、`notify-*.json` の `toolName: Edit` が12:18:46.806Zに落ちて、同じ秒に総数なしの「編集中」へ進んだ。証跡は `screens-c/`
 - 点灯は `ReplayAIProgressVerification` が結果到着の直後に撮ったフレームで、`progress_hidden` がfalseのまま4段が確認済みになっている。証跡は `screens-a2/`
 
 replayの音声は約19秒で、依頼は音声15秒の時点に固定している。確定会話が0行の回はAIが決定事項を読み取れず、依頼文の指定だけで編集した。編集の到達を確かめる検証であり、議事録の中身の正しさは対象外である。
@@ -142,6 +146,22 @@ replayの音声は約19秒で、依頼は音声15秒の時点に固定してい�
 - `progress` を呼ばず**シェルコマンドで**書き換えた回は、フックも鳴らないため編集へ進まなかった。PreToolUseのmatcherは編集系ツールに限るので、`sed` などでの書き換えは補助観測の対象外になる
 - 自己申告のあった回でもPreToolUseのフックは別に届いた。自己申告を優先し、総数は自己申告の値のままだった
 - 新しい検証フォルダの初回起動はClaude Codeの信頼確認で `notReady` となり、送信前に失敗した。フォルダを確認して信頼を与えてから別の会議として実行し直している
+
+## 返答の段を足した後の結合確認
+
+2026-09-13の22:24に、別の合成音声(約19秒の看板制作の打ち合わせ)で1回確認した。実会議の音声は使っていない。宛先は実herdrの新しいペイン `wA9` のClaude Codeで、作業許可あり。編集させた先は検証用のメモ1枚で、確認後にそのフォルダから外した。証跡は `/private/tmp/kikigaki-ai-replying-replay/`。
+
+| 観測時刻(JST) | 保存状態・接続 | 本番画面 |
+| --- | --- | --- |
+| 22:25:03 | submitted・idle | 「送信済み · AIが読込中 · 0:00経過」。確認済みは送信 |
+| 22:25:19 | accepted・working | 「読込済み · 作業中 · 0:16経過」。読込を追加 |
+| 22:25:30 | accepted・working | 「編集中(全2か所) · 0:27経過」。編集を追加 |
+| 22:25:42 | accepted・working | **「返答を作成中 · 0:39経過」**。返答が現在段で、総数の表記は消えた |
+| 22:25:56 | answered・working | 「返答到着」。4段すべてが朱で、現在の印・経過・取消は出ない |
+
+- 受信箱には `<request>.progress.editing.json`(`total: 2`)が13:25:30.127Z、`<request>.progress.replying.json`(`total` なし)が13:25:42.700Zに落ちた。段ごとに別ファイルで、返答の申告が編集の申告と総数を消していない
+- 画面の反映はどちらも申告と同じ秒だった。証跡は `screens/` の `02-accepted-editing.png`・`03-accepted-replying.png`・`04-answered-answered.png` と `evidence.json`。5枚すべてを目視した
+- 依頼文で `progress --editing --total 2` と `progress --replying` の呼び出しを明示した。Skillの参照先 `~/.claude/skills/kikigaki` はmainのリポジトリへのシンボリックリンクで、この枝の `meeting.md` を読ませられないため。CLI・受信箱・段の導出・画面はすべて本番の経路を通っている
 
 証跡は `/private/tmp/kikigaki-ai-stepper-replay/`。`run2.log`、`screens/evidence.json`、同じディレクトリの `00-submitted-awaitingAcceptance.png`・`01-accepted-working.png`・`02-answered-answered.png` を残し、3枚とも目視した。保存Markdownは `output/2026-09-13_1816.md`。meeting IDは `187BB7DC-D3BF-47CD-981A-4905175B116B`、request IDは `2A71B044-EADE-422A-B1A5-631EF4C00259`。
 
@@ -167,13 +187,15 @@ KIKIGAKI_DEBUG_AI_PROGRESS_CAPTURE=/private/tmp/kikigaki-ai-stages-ui \
   .build/KIKIGAKI.app/Contents/MacOS/KIKIGAKI --show-window
 ```
 
-4段への組み直し後の画像の置き場は `/private/tmp/kikigaki-ai-stages-ui/`。
+4段への組み直し後の画像の置き場は `/private/tmp/kikigaki-ai-stages-ui/`。返答の段を足した後の撮り直しは `/private/tmp/kikigaki-ai-replying-ui/`。
 
 | PNG | 確認する状態 |
 | --- | --- |
 | submitted.png | 送信直後。送信までの塗りと「送信済み · AIが読込中」 |
 | reading.png | acceptだけを観測した状態。workingでも現在段は読込 |
 | editing.png | 自己申告による「編集中(全7か所)」 |
+| replying.png | 編集を終えて返答を書いている最中。総数が消え、現在段は返答 |
+| three-destinations-replying.png | 同じ混雑画面で#2だけが返答作成中。宛先ごとに段が分かれる |
 | arrival.png | 返答到着の全段点灯。現在の印・経過・取消を出さない |
 | arrival-body.png | 点灯が終わって本文と所要時間へ入れ替わった同じ行 |
 | blocked.png | 編集位置の一時停止と確認待ちの文言 |
@@ -185,4 +207,4 @@ KIKIGAKI_DEBUG_AI_PROGRESS_CAPTURE=/private/tmp/kikigaki-ai-stages-ui \
 | blocked-before-accept.png | 読込前の確認待ちは送信までしか塗らない |
 | historical.png | 読み取り専用のsnapshotで時間を省いた静止表示 |
 
-画像はcacheDisplayで取得し、13枚すべてを目視確認した。点灯の2枚だけは「視差効果を減らす」を外した本番と同じ更新経路で撮り、その後に点灯を終わらせて撮り直している。過去会議の画像は返事行の静止表示を確認するfixtureであり、過去会議一覧ウィンドウ全体の撮影ではない。
+画像はcacheDisplayで取得し、15枚すべてを目視確認した。点灯の2枚だけは「視差効果を減らす」を外した本番と同じ更新経路で撮り、その後に点灯を終わらせて撮り直している。過去会議の画像は返事行の静止表示を確認するfixtureであり、過去会議一覧ウィンドウ全体の撮影ではない。

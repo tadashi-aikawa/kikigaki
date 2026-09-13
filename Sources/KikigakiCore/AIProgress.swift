@@ -1,11 +1,21 @@
 import Foundation
 
-/// 編集の観測。AIの1回の自己申告を正、Claudeのフックの編集系ツール呼び出しを補助にする。
+/// 受信箱の自己申告とフック観測から集めた、1依頼分の段の到達。
 /// 進捗率ではないので、総数が分かっても消化件数は表さない。
-public struct AIEditingReport: Equatable, Sendable {
+public struct AIProgressReport: Equatable, Sendable {
+    /// 編集の観測。AIの1回の自己申告を正、Claudeのフックの編集系ツール呼び出しを補助にする。
+    public let isEditing: Bool
     /// 分かっている場合の編集箇所の総数。フック観測では出ない。
-    public let total: Int?
-    public init(total: Int? = nil) { self.total = total }
+    public let editingTotal: Int?
+    /// 返答を書き始めたというAIの1回の自己申告。フックでは観測しない。
+    public let isReplying: Bool
+
+    public init(isEditing: Bool = false, editingTotal: Int? = nil, isReplying: Bool = false) {
+        self.isEditing = isEditing; self.editingTotal = editingTotal; self.isReplying = isReplying
+    }
+
+    public static func editing(total: Int? = nil) -> Self { Self(isEditing: true, editingTotal: total) }
+    public static let replying = Self(isReplying: true)
 }
 
 /// 依頼ごとに確認できた段と、現在の補助表示。作業量や残り時間は表さない。
@@ -26,7 +36,7 @@ public struct AIProgress: Equatable, Sendable {
     }
 
     public enum Status: Equatable, Sendable {
-        case preparing, awaitingAcceptance, awaitingReply, editing, blocked, returnUnconfirmed
+        case preparing, awaitingAcceptance, awaitingReply, editing, replying, blocked, returnUnconfirmed
         case unknown, disconnected, deliveryUnknown, answered, needsInput, failed, cancelled
     }
 
@@ -52,17 +62,17 @@ public struct AIProgress: Equatable, Sendable {
 
     /// connectionはこのrequestの宛先slotの観測を渡す。世代が違えば不明として扱い、
     /// 新しい接続のworking/blockedを古い依頼へ付けない。完了フックは入力に取らない。
-    /// editingはAIの自己申告かClaudeのフック観測。接続のworkingから推測しない。
+    /// reportはAIの自己申告とClaudeのフック観測。接続のworkingから推測しない。
     public init(question: AIQuestion, connection: AIConnectionStatus,
                 connectionGeneration: Int?, isUnconfirmed: Bool = false,
-                editing: AIEditingReport? = nil,
+                report: AIProgressReport? = nil,
                 previous: AIProgress? = nil, isHistorical: Bool = false) {
         requestID = question.request.id
         self.isHistorical = isHistorical
         sendAttemptedAt = question.sendAttemptedAt
         isArrival = false
         var observed: Set<Stage> = []
-        var total = editing?.total
+        var total = report?.editingTotal
         if !isHistorical, let previous, previous.requestID == requestID, !previous.isHistorical {
             observed.formUnion(previous.observedStages)
             total = total ?? previous.editingTotal
@@ -73,16 +83,22 @@ public struct AIProgress: Equatable, Sendable {
             observed.insert(.sending)
         }
         if question.acceptance != nil { observed.insert(.reading) }
-        // 送信していない依頼の申告は成立しない。準備中・起動失敗を編集で塗らない。
-        if editing != nil, question.sendAttemptedAt != nil { observed.insert(.editing) }
+        // 送信していない依頼の申告は成立しない。準備中・起動失敗を申告で塗らない。
+        if question.sendAttemptedAt != nil {
+            if report?.isEditing == true { observed.insert(.editing) }
+            // 返答の申告は返答の段だけを塗る。編集を経ていなければ編集は塗らない。
+            if report?.isReplying == true { observed.insert(.reply) }
+        }
         editingTotal = observed.contains(.editing) ? total : nil
 
         let waiting = question.isAwaitingResult && question.state != .deliveryUnknown
         showsReplyProgress = waiting
         let sameGeneration = connectionGeneration == question.request.envelope.participant.sessionGeneration
         let connection: AIConnectionStatus = sameGeneration ? connection : .unknown
-        // 編集は観測できた事実なので、接続がidle・workingのどちらでも現在の位置として扱う。
-        let working: Status = observed.contains(.editing) ? .editing
+        // 編集・返答は観測できた事実なので、接続がidle・workingのどちらでも現在の位置として扱う。
+        // 返答の申告の後に編集の申告が届いても、位置は返答のまま戻さない。
+        let working: Status = observed.contains(.reply) ? .replying
+            : observed.contains(.editing) ? .editing
             : question.acceptance == nil ? .awaitingAcceptance : .awaitingReply
         let next: Status
         // 取消後にも結果が到着する。保存状態がcancelledのままでも、本文・失敗表示を優先する。
@@ -149,6 +165,8 @@ public struct AIProgress: Equatable, Sendable {
         case .awaitingAcceptance: return "送信済み · AIが読込中"
         case .awaitingReply: return "読込済み · 作業中"
         case .editing: return editingTotal.map { "編集中(全\($0)か所)" } ?? "編集中"
+        // 返答を書いている最中は、終わった編集の総数を出さない。
+        case .replying: return "返答を作成中"
         case .blocked: return "‖ " + prefix + "ペインで確認待ち"
         case .returnUnconfirmed: return prefix + "返送未確認"
         case .unknown: return "? " + prefix + "状況を確認できません"

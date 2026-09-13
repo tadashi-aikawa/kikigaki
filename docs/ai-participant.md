@@ -127,7 +127,8 @@ ai/
   requests/<request_id>.json    固定したenvelope、送信時点の問い、返送トークン
   inbox/<request_id>.accept.json
   inbox/<request_id>.result.json
-  inbox/<request_id>.progress.json
+  inbox/<request_id>.progress.editing.json
+  inbox/<request_id>.progress.replying.json
   inbox/notify-<event_id>.json
   state.json                    送信試行、取り込み順、未読、表示状態
   archive.json                  最後に永続化した人間の保存用データ
@@ -135,7 +136,7 @@ ai/
 
 manifestとrequestはアプリが送信前に保存する。sessionの接続情報更新、state、archiveはアプリの会議単位の直列処理で原子的に更新する。requestは作成後に変更しない。返送側は既知sessionからrequestを引き、自由な出力先指定を受け付けない。
 
-acceptとresultはrequest内で各一つ。resultのkindはanswered、needs_input、failedのいずれか。ファイル名を固定することでCLI再実行も同じ論理イベントとして扱う。progressもrequest内で一つで、AIが編集へ入ったことだけを伝える自己申告であり、受領・完了・回答の代わりにはならない。版1の `phase` は `editing` だけで、`total` は1〜999の任意。最初の1件だけが有効で、2回目以降は保存も失敗もせず同じevent IDを返す。結果より後に保存された申告はアプリが無視する。`schema_version` は据え置き、request・envelope・reply・state.jsonの形式は変えない。notifyはプロバイダのイベント識別子を使い、なければ正規化したペイロードのdigestでIDを作る。モデルにevent ID・会議ID・保存時刻を捏造させず、同梱CLIがrequestの固定情報から生成する。
+acceptとresultはrequest内で各一つ。resultのkindはanswered、needs_input、failedのいずれか。ファイル名を固定することでCLI再実行も同じ論理イベントとして扱う。progressはrequest内で段ごとに一つで、AIがその段へ入ったことだけを伝える自己申告であり、受領・完了・回答の代わりにはならない。`phase` は `editing` と `replying` の2つで、event IDは `<request_id>/progress/<phase>`、ファイル名は `<request_id>.progress.<phase>.json`。`total` は1〜999の任意で `editing` にだけ添えられる。段ごとに最初の1件だけが有効で、2回目以降は保存も失敗もせず同じevent IDを返す。結果より後に保存された申告はアプリが無視する。`schema_version` は据え置き、request・envelope・reply・state.jsonの形式は変えない。notifyはプロバイダのイベント識別子を使い、なければ正規化したペイロードのdigestでIDを作る。モデルにevent ID・会議ID・保存時刻を捏造させず、同梱CLIがrequestの固定情報から生成する。
 
 ```json
 {
@@ -179,6 +180,7 @@ archiveは録音停止時と停止後の改名・統合時だけに更新し、�
 | `reply ... --kind needs_input --reason clarification` | stdinを確認質問として保存する。全文要求はreasonをcontext_missingとする。 |
 | `reply ... --kind failed --reason <code>` | stdinの失敗理由を保存する。本文への機密のエラーダンプ混入を避ける。 |
 | `progress --session <path> --request <UUID> --token <token> --editing [--total N]` | 編集へ入ったことだけを1回保存する。本文なし。stdinを読まない。 |
+| `progress --session <path> --request <UUID> --token <token> --replying` | 返答を書き始めたことだけを1回保存する。`--editing` と排他で、`--total` は付かない。 |
 | `notify --provider codex --session <path> --token <session-token> <payload-json>` | Codexの最後のJSON引数を解釈し、フック観測を保存する。 |
 | `notify --provider claude --session <path> --token <session-token>` | Claudeのstdin JSONからフック観測を保存する。 |
 
@@ -240,7 +242,7 @@ Codexの通常起動・準備済み起動では `-c sandbox_workspace_write.writ
 
 ## 画面と記録
 
-返事待ちの行は、宛先ごとの観測に基づく進行文と5分割バーを表示する。確認できた位置だけを示し、blockedは「ペインで確認待ち」、切断・不明は位置を保って「?」を添える。過去会議は保存状態だけで静止する。文言・時間更新・段の意味は [AI依頼の進行表示](ai-progress.md) を正本とする。
+返事待ちの行は、宛先ごとの観測に基づく進行文と4分割バーを表示する。確認できた位置だけを示し、blockedは「ペインで確認待ち」、切断・不明は位置を保って「?」を添える。過去会議は保存状態だけで静止する。文言・時間更新・段の意味は [AI依頼の進行表示](ai-progress.md) を正本とする。
 
 送信の印は `#1 迅雷へ`、返事は `#1 迅雷から`、確認は `#1 迅雷の確認` と表示する。確認への返答は `inReplyToRequestID` で親番号を引き、`#2 #1への返答` とする。入力した送信文と返答には薄墨の抜粋を添える。声からの通常送信は直上の発話を本文とし、抜粋を重ねない。操作ボタンは「AIへ…」、シートは「迅雷へ」または「#1への返答」。保存済みJSONの形式は変更せず、旧Markdownの `### AI Q1` も読み取る。
 

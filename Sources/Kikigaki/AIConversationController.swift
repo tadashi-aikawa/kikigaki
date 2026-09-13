@@ -46,8 +46,8 @@ final class AIConversationController {
     private(set) var conversation: AIConversation
     private var recoveredRangeHistories: [Int: AIStreamHistory] = [:]
     private(set) var invalidInboxFiles: [String] = []
-    /// 編集へ入ったと確認できた依頼。AIの自己申告が正で、Claudeのフック観測が補助
-    private(set) var editing: [UUID: AIEditingReport] = [:]
+    /// 編集・返答へ入ったと確認できた依頼。AIの自己申告が正で、Claudeのフック観測が補助
+    private(set) var progressReports: [UUID: AIProgressReport] = [:]
     private var lastScanReturnStatus: [UUID: Bool] = [:]
     var onChange: (() -> Void)?
     /// 明示的なreplay検証だけで、受信直前に人のパス指定を再現する。
@@ -492,42 +492,53 @@ final class AIConversationController {
                 for slot in notify { onResult?(slot) }
             } catch { scanWarning = "返事の取り込み状態を保存できません" }
         }
-        let oldEditing = editing
+        let oldReports = progressReports
         scanEditing()
         let returns = Dictionary(uniqueKeysWithValues: conversation.questions.map { ($0.request.id, isReturnUnconfirmed($0)) })
         let returnChanged = returns != lastScanReturnStatus
         lastScanReturnStatus = returns
-        if changed || returnChanged || oldEditing != editing || oldWarning != warning || oldInvalid != invalidInboxFiles
+        if changed || returnChanged || oldReports != progressReports || oldWarning != warning || oldInvalid != invalidInboxFiles
             || oldBackground != channels.mapValues({ $0.hookBackgroundRunning }) {
             onChange?()
         }
     }
 
-    /// 自己申告を正、フック観測を補助にして編集の到達だけを集める。
+    /// 自己申告を正、フック観測を補助にして編集・返答の到達だけを集める。
     /// 作業の完了・正しさは意味せず、保存する状態にもしない。
     private func scanEditing() {
-        var reports: [UUID: AIEditingReport] = [:]
+        var reports: [UUID: AIProgressReport] = [:]
         for q in conversation.questions where q.sendAttemptedAt != nil {
-            let name = q.request.id.uuidString + ".progress.json"
-            do {
-                let bytes = try files.read(base + ["inbox", name], limit: AILimits.eventBytes)
-                let event = try AIInbox.decodeProgress(bytes, filename: name, for: q.request)
-                // 結果到着より後の申告は無視する。過去会議でも同じ順序で再現できる。
-                if let result = q.result, event.recordedAt > result.recordedAt { continue }
-                reports[q.request.id] = event.report
-            } catch AIFileError.missing { continue }
-            catch { invalidInboxFiles.append(name); scanWarning = "受信箱のイベントを検証できません" }
+            var isEditing = false, total: Int?, isReplying = false
+            // 段ごとに1ファイル。片方が壊れていても、もう片方の申告は読める。
+            for phase in AIProgressEvent.Phase.allCases {
+                let name = AIProgressEvent.filename(requestID: q.request.id, phase: phase)
+                do {
+                    let bytes = try files.read(base + ["inbox", name], limit: AILimits.eventBytes)
+                    let event = try AIInbox.decodeProgress(bytes, filename: name, for: q.request)
+                    // 結果到着より後の申告は無視する。過去会議でも同じ順序で再現できる。
+                    if let result = q.result, event.recordedAt > result.recordedAt { continue }
+                    switch event.phase {
+                    case .editing: isEditing = true; total = event.total
+                    case .replying: isReplying = true
+                    }
+                } catch AIFileError.missing { continue }
+                catch { invalidInboxFiles.append(name); scanWarning = "受信箱のイベントを検証できません" }
+            }
+            if isEditing || isReplying {
+                reports[q.request.id] = AIProgressReport(isEditing: isEditing, editingTotal: total, isReplying: isReplying)
+            }
         }
         // フックは総数を出せず、どのrequestのものかも名乗らない。返事待ちの依頼へだけ、
         // 送信より後の観測を補助として付ける。自己申告のある依頼は上書きしない。
+        // 返答の段はフックでは観測しない(自己申告だけ)。
         for q in conversation.questions where q.result == nil && reports[q.request.id] == nil {
             guard let sent = q.sendAttemptedAt, q.state != .cancelled, q.state != .failed,
                   let channel = channels[slot(of: q.request)],
                   q.request.envelope.participant.sessionGeneration == channel.generation,
                   let observed = channel.hookEditingAt, observed >= sent else { continue }
-            reports[q.request.id] = AIEditingReport()
+            reports[q.request.id] = .editing()
         }
-        editing = reports
+        progressReports = reports
     }
 
     func isReturnUnconfirmed(_ q: AIQuestion, now: Date = Date(), backgroundRunning: Bool = false) -> Bool {

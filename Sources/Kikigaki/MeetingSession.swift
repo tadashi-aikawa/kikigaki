@@ -836,7 +836,7 @@ final class MeetingSession {
             state.isPreparing = !pendingAIDispatch.isEmpty
             let unconfirmed = controller?.conversation.questions.filter { controller!.isReturnUnconfirmed($0) } ?? []
             state.unconfirmed = Set(unconfirmed.map { $0.request.id })
-            state.editing = controller?.editing ?? [:]
+            state.progressReports = controller?.progressReports ?? [:]
             state.canSubmit = canSubmits[slot] ?? true
             state.submissionID = aiCompleted
             state.draft = aiDraft

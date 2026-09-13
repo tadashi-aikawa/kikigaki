@@ -44,10 +44,10 @@ import KikigakiCore
     }
 
     private func progress(_ question: AIQuestion, _ connection: AIConnectionStatus = .idle,
-                          unconfirmed: Bool = false, editing: AIEditingReport? = nil,
+                          unconfirmed: Bool = false, report: AIProgressReport? = nil,
                           previous: AIProgress? = nil) -> AIProgress {
         AIProgress(question: question, connection: connection, connectionGeneration: 1,
-                   isUnconfirmed: unconfirmed, editing: editing, previous: previous)
+                   isUnconfirmed: unconfirmed, report: report, previous: previous)
     }
 
     @Test func 送信から読込編集返答まで確認した段だけを保持する() throws {
@@ -69,7 +69,7 @@ import KikigakiCore
         // workingだけでは編集へ進めない。現在段は読込に留める。
         current = progress(value, .working, previous: current)
         #expect(current.currentStage == .reading && current.message == "読込済み · 作業中")
-        current = progress(value, .working, editing: AIEditingReport(total: 7), previous: current)
+        current = progress(value, .working, report: .editing(total: 7), previous: current)
         #expect(current.observedStages == [.sending, .reading, .editing])
         #expect(current.text(at: sent.addingTimeInterval(80)) == "編集中(全7か所) · 1:20経過")
         try receive(.answered, into: &value)
@@ -82,9 +82,9 @@ import KikigakiCore
 
     @Test func 総数のない編集は箇所を書かず一度知った総数は保つ() throws {
         let value = try question(.accepted)
-        let plain = progress(value, editing: AIEditingReport())
+        let plain = progress(value, report: .editing())
         #expect(plain.message == "編集中" && plain.currentStage == .editing)
-        let counted = progress(value, editing: AIEditingReport(total: 1), previous: plain)
+        let counted = progress(value, report: .editing(total: 1), previous: plain)
         #expect(counted.message == "編集中(全1か所)")
         // 観測が途切れても前回の位置と総数は残す。塗り直しで段が戻らない。
         let lost = progress(value, .unknown, previous: counted)
@@ -93,9 +93,50 @@ import KikigakiCore
         #expect(again.message == "編集中(全1か所)")
     }
 
+    @Test func 返答の申告で返答が現在段になり総数の表記は消える() throws {
+        let value = try question(.accepted)
+        let editing = progress(value, .working, report: .editing(total: 3))
+        #expect(editing.currentStage == .editing && editing.message == "編集中(全3か所)")
+        let writing = progress(value, .working,
+                               report: AIProgressReport(isEditing: true, editingTotal: 3, isReplying: true),
+                               previous: editing)
+        #expect(writing.observedStages == [.sending, .reading, .editing, .reply])
+        #expect(writing.currentStage == .reply && writing.status == .replying)
+        #expect(writing.text(at: sent.addingTimeInterval(95)) == "返答を作成中 · 1:35経過")
+        #expect(writing.showsReplyProgress && !writing.isArrival && writing.arrival() == nil)
+    }
+
+    @Test func 編集を経ない返答の申告は編集を塗らない() throws {
+        var value = try question(.accepted)
+        let writing = progress(value, .working, report: .replying)
+        #expect(writing.observedStages == [.sending, .reading, .reply])
+        #expect(writing.currentStage == .reply && writing.message == "返答を作成中")
+        // 返答の後に編集の申告が届いても、現在段は返答のまま戻さない。
+        let late = progress(value, .working,
+                            report: AIProgressReport(isEditing: true, isReplying: true), previous: writing)
+        #expect(late.observedStages == Set(AIProgress.Stage.allCases))
+        #expect(late.currentStage == .reply && late.status == .replying)
+        // 結果が届けば従来どおり本文へ進み、点灯の派生も作れる。
+        try receive(.answered, into: &value)
+        let answered = progress(value, .working, previous: late)
+        #expect(answered.status == .answered && !answered.showsReplyProgress)
+        #expect(answered.arrival()?.observedStages == Set(AIProgress.Stage.allCases))
+    }
+
+    @Test func 送信前の返答の申告は成立せず過去会議は保存済みの申告だけで静止する() throws {
+        let prepared = try question()
+        #expect(progress(prepared, report: .replying).observedStages.isEmpty)
+        let value = try question(.accepted)
+        let historical = AIProgress(question: value, connection: .unknown, connectionGeneration: nil,
+                                    report: .replying, isHistorical: true)
+        #expect(historical.currentStage == .reply && historical.status == .replying)
+        #expect(historical.text(at: sent.addingTimeInterval(95)) == "返答を作成中")
+        #expect(historical.arrival() == nil && !historical.updatesElapsedTime(isDisplayed: true, reduceMotion: false))
+    }
+
     @Test func acceptを経ない編集と返答は読込を塗らない() throws {
         var value = try question(.submitted)
-        let editing = progress(value, editing: AIEditingReport(total: 2))
+        let editing = progress(value, report: .editing(total: 2))
         #expect(editing.observedStages == [.sending, .editing])
         #expect(editing.currentStage == .editing && editing.message == "編集中(全2か所)")
         try receive(.answered, into: &value)
@@ -134,11 +175,11 @@ import KikigakiCore
 
     @Test func 確認待ちから再開とidleを経ても位置を巻き戻さない() throws {
         let value = try question(.accepted)
-        let editing = progress(value, .working, editing: AIEditingReport())
+        let editing = progress(value, .working, report: .editing())
         let blocked = progress(value, .blocked, previous: editing)
         #expect(blocked.text(at: sent.addingTimeInterval(80)) == "‖ 読込 → ペインで確認待ち · 1:20経過")
         #expect(blocked.currentStage == .editing)
-        let resumed = progress(value, .working, editing: AIEditingReport(), previous: blocked)
+        let resumed = progress(value, .working, report: .editing(), previous: blocked)
         #expect(!resumed.isPaused && resumed.status == .editing)
         let idle = progress(value, .idle, previous: resumed)
         #expect(idle.currentStage == .editing && idle.message == "編集中")
@@ -148,19 +189,19 @@ import KikigakiCore
     @Test(arguments: [AIConnectionStatus.unknown, .disconnected])
     func 観測不能は最後の位置を残し復帰で疑問符だけを消す(_ connection: AIConnectionStatus) throws {
         let value = try question(.accepted)
-        let editing = progress(value, .working, editing: AIEditingReport())
+        let editing = progress(value, .working, report: .editing())
         let unknown = progress(value, connection, unconfirmed: true, previous: editing)
         #expect(unknown.observedStages == editing.observedStages)
         #expect(unknown.currentStage == .editing && unknown.isUnknown && !unknown.isPaused)
         #expect(unknown.message == (connection == .unknown ? "? 読込 → 状況を確認できません" : "? 読込 → 接続が切れています"))
-        let restored = progress(value, .working, editing: AIEditingReport(), previous: unknown)
+        let restored = progress(value, .working, report: .editing(), previous: unknown)
         #expect(restored.observedStages == editing.observedStages)
         #expect(!restored.isUnknown && restored.status == .editing)
     }
 
     @Test func 返送未確認は既存判定を受け取り完了とみなさない() throws {
         let value = try question(.accepted)
-        let editing = progress(value, .working, editing: AIEditingReport())
+        let editing = progress(value, .working, report: .editing())
         for seconds in [4.99, 5.0] {
             let now = sent.addingTimeInterval(seconds)
             let flag = AIReturnStatus.isUnconfirmed(question: value, connection: .idle, idleSince: sent,
@@ -189,7 +230,7 @@ import KikigakiCore
     @Test(arguments: [AIReceiveEvent.Kind.answered, .needsInput, .failed])
     func 取消後の結果を接続観測より優先する(_ kind: AIReceiveEvent.Kind) throws {
         var value = try question(.accepted)
-        let editing = progress(value, .working, editing: AIEditingReport())
+        let editing = progress(value, .working, report: .editing())
         try value.cancel(at: sent.addingTimeInterval(1))
         let cancelled = progress(value, .blocked, previous: editing)
         #expect(cancelled.status == .cancelled && !cancelled.showsReplyProgress && !cancelled.isPaused)
@@ -230,7 +271,7 @@ import KikigakiCore
 
     @Test func 別requestと別宛先の前回値を混ぜない() throws {
         let first = try question(.accepted, slot: 1)
-        let previous = progress(first, .working, editing: AIEditingReport(total: 3))
+        let previous = progress(first, .working, report: .editing(total: 3))
         for slot in [1, 2, 3] {
             let next = try question(.submitted, slot: slot)
             let result = progress(next, .unknown, previous: previous)
@@ -243,7 +284,7 @@ import KikigakiCore
     @Test(arguments: [AIConnectionStatus.working, .blocked, .idle])
     func 別世代の接続で古いrequestを進めない(_ connection: AIConnectionStatus) throws {
         let value = try question(.accepted)
-        let old = progress(value, .working, editing: AIEditingReport())
+        let old = progress(value, .working, report: .editing())
         let result = AIProgress(question: value, connection: connection, connectionGeneration: 2,
                                 isUnconfirmed: true, previous: old)
         #expect(result.observedStages == old.observedStages)
@@ -254,7 +295,7 @@ import KikigakiCore
 
     @Test(arguments: connections) func 過去会議は保存状態と受信箱だけを静止表示する(_ connection: AIConnectionStatus) throws {
         let value = try question(.accepted)
-        let live = progress(value, .working, editing: AIEditingReport(total: 4))
+        let live = progress(value, .working, report: .editing(total: 4))
         let historical = AIProgress(question: value, connection: connection, connectionGeneration: 1,
                                     isUnconfirmed: true, previous: live, isHistorical: true)
         #expect(historical.observedStages == [.sending, .reading])
@@ -264,13 +305,13 @@ import KikigakiCore
         #expect(!historical.updatesElapsedTime(isDisplayed: true, reduceMotion: false))
         // 受信箱に残る自己申告は、過去会議でも同じ位置と総数で再現する。
         let replayed = AIProgress(question: value, connection: connection, connectionGeneration: 1,
-                                  editing: AIEditingReport(total: 4), isHistorical: true)
+                                  report: .editing(total: 4), isHistorical: true)
         #expect(replayed.currentStage == .editing && replayed.message == "編集中(全4か所)")
     }
 
     @Test func 返答到着の点灯は全段を塗り経過も現在段も出さない() throws {
         var value = try question(.accepted)
-        let editing = progress(value, .working, editing: AIEditingReport(total: 2))
+        let editing = progress(value, .working, report: .editing(total: 2))
         #expect(editing.arrival() == nil)
         try receive(.needsInput, into: &value)
         let arrived = progress(value, .working, previous: editing)
@@ -318,7 +359,7 @@ import KikigakiCore
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let before = try encoder.encode(value)
-        let result = progress(value, connection, unconfirmed: true, editing: AIEditingReport(total: 9))
+        let result = progress(value, connection, unconfirmed: true, report: .editing(total: 9))
         #expect(result.showsReplyProgress == (state == .submitted || state == .accepted))
         #expect(result.observedStages.contains(.reading) == (value.acceptance != nil))
         #expect(result.observedStages.contains(.reply) == (state == .answered || state == .needsInput))

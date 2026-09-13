@@ -62,7 +62,7 @@ import KikigakiAIIO
         #expect(starts.allSatisfy { $0[2].utf8.count <= 32 })
         #expect(await fake.commands.filter { $0.prefix(2) == ["agent", "prompt"] }.count == (cancelled ? 2 : 1))
     }
-    @Test func 編集は自己申告を正としフックを補助にし結果後の申告は無視する() async throws {
+    @Test func 編集と返答は自己申告を正としフックを補助にし結果後の申告は無視する() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr(); await fake.setProvider("claude"); await fake.setSession("main")
         let config = ResolvedAIConfig(config: AIConfig(cli: .claude), home: root)
@@ -81,11 +81,11 @@ import KikigakiAIIO
             return observation
         }
         controller.scan()
-        #expect(controller.editing.isEmpty)
+        #expect(controller.progressReports.isEmpty)
         // 送信より前の観測は今回の依頼の編集ではない。
         _ = try hook("Edit", "/tmp/before.md", at: sent.addingTimeInterval(-1))
         controller.scan()
-        #expect(controller.editing.isEmpty)
+        #expect(controller.progressReports.isEmpty)
         // 編集系以外のツールは段を進めない。
         #expect(throws: (any Error).self) {
             try AIHookObservation(payload: Data("{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"main\",\"tool_name\":\"Bash\"}".utf8),
@@ -94,30 +94,40 @@ import KikigakiAIIO
         let observation = try hook("Write", "/tmp/after.md", at: sent.addingTimeInterval(1))
         #expect(observation.observesEditing && !observation.runningBackgroundTasks)
         controller.scan()
-        #expect(controller.editing[request.id] != nil && controller.editing[request.id]?.total == nil)
+        #expect(controller.progressReports[request.id] == .editing())
         // 編集の観測でStopフックの背景処理判定を塗り替えない。
         #expect(controller.isReturnUnconfirmed(controller.conversation.questions[0], now: sent.addingTimeInterval(10)))
         // 自己申告は総数を添えて補助を上書きする。
-        let report = try AIProgressEvent(request: request, recordedAt: sent.addingTimeInterval(2), total: 5)
+        let report = try AIProgressEvent(request: request, phase: .editing, recordedAt: sent.addingTimeInterval(2), total: 5)
         try files.write(AIJSON.encode(report), to: base + ["inbox", report.filename], replacing: false)
         controller.scan()
-        #expect(controller.editing[request.id]?.total == 5 && controller.editing.count == 1)
-        // 結果より前の申告は、返答が届いた後も編集を通った証拠として残す。
+        #expect(controller.progressReports[request.id] == .editing(total: 5) && controller.progressReports.count == 1)
+        // 返答の申告は別ファイルなので、編集の申告と総数を消さずに重なる。
+        let replying = try AIProgressEvent(request: request, phase: .replying, recordedAt: sent.addingTimeInterval(2.5))
+        try files.write(AIJSON.encode(replying), to: base + ["inbox", replying.filename], replacing: false)
+        controller.scan()
+        #expect(controller.progressReports[request.id]
+                == AIProgressReport(isEditing: true, editingTotal: 5, isReplying: true))
+        // 結果より前の申告は、返答が届いた後も編集・返答を通った証拠として残す。
         let first = try AIReceiveEvent(request: request, kind: .answered, recordedAt: sent.addingTimeInterval(3), body: "回答")
         try files.write(AIJSON.encode(first), to: base + ["inbox", first.filename], replacing: false)
         controller.scan()
         #expect(controller.conversation.questions[0].state == .answered)
-        #expect(controller.editing[request.id]?.total == 5)
+        #expect(controller.progressReports[request.id]?.editingTotal == 5)
+        #expect(controller.progressReports[request.id]?.isReplying == true)
         let second = try prepare(controller, config)
         try await controller.send(second, config: config)
         let answered = try AIReceiveEvent(request: second, kind: .answered, recordedAt: sent.addingTimeInterval(3), body: "回答")
         try files.write(AIJSON.encode(answered), to: base + ["inbox", answered.filename], replacing: false)
-        let late = try AIProgressEvent(request: second, recordedAt: sent.addingTimeInterval(30), total: 3)
+        // 結果より後の申告は、編集・返答のどちらも無視する。
+        let late = try AIProgressEvent(request: second, phase: .editing, recordedAt: sent.addingTimeInterval(30), total: 3)
         try files.write(AIJSON.encode(late), to: base + ["inbox", late.filename], replacing: false)
+        let lateReply = try AIProgressEvent(request: second, phase: .replying, recordedAt: sent.addingTimeInterval(31))
+        try files.write(AIJSON.encode(lateReply), to: base + ["inbox", lateReply.filename], replacing: false)
         controller.scan()
         #expect(controller.conversation.questions[1].state == .answered)
-        #expect(controller.editing[second.id] == nil && controller.editing.count == 1)
-        #expect(controller.editing[request.id]?.total == 5)
+        #expect(controller.progressReports[second.id] == nil && controller.progressReports.count == 1)
+        #expect(controller.progressReports[request.id]?.editingTotal == 5)
         #expect(controller.warning == nil && controller.invalidInboxFiles.isEmpty)
     }
     @Test func Claude背景処理の観測中は返送未確認を出さず別sessionを混ぜない() async throws {

@@ -14,8 +14,8 @@ struct ReturnCommand: Sendable {
         var options: [String: String] = [:], payload: String?, index = 1
         while index < arguments.count {
             let name = arguments[index]
-            // 値を取らない唯一の指定。段の申告先を増やさないため progress だけで認める。
-            if name == "--editing" {
+            // 値を取らない指定。段の申告先を増やさないため progress だけで認める。
+            if name == "--editing" || name == "--replying" {
                 guard action == "progress", options[name] == nil else { throw AIError.invalid("arguments") }
                 options[name] = "true"; index += 1
             } else if name.hasPrefix("--") {
@@ -29,11 +29,13 @@ struct ReturnCommand: Sendable {
         }
         var required: Set<String> = action == "notify" ? ["--session", "--token", "--provider"] : ["--session", "--token", "--request"]
         if action == "minutes" { required.insert("--path") }
-        if action == "progress" { required.insert("--editing") }
         let allowed = action == "reply" ? required.union(["--kind", "--reason"])
-            : action == "progress" ? required.union(["--total"]) : required
+            : action == "progress" ? required.union(["--editing", "--replying", "--total"]) : required
+        // 段はどちらか1つ必須。総数は編集にしか添えられない。
+        let editing = options["--editing"] != nil, replying = options["--replying"] != nil
         guard required.isSubset(of: Set(options.keys)), Set(options.keys).isSubset(of: allowed),
               options.values.allSatisfy({ !$0.isEmpty && !$0.contains("\0") }),
+              action != "progress" || (editing != replying && (options["--total"] == nil || editing)),
               action != "reply" || options["--kind"] != nil,
               payload == nil || options["--provider"] == "codex" else { throw AIError.invalid("arguments") }
         self.options = options; self.payload = payload
@@ -104,6 +106,7 @@ struct ReturnCommand: Sendable {
             return event.eventID
         }
         if action == "progress" {
+            let phase: AIProgressEvent.Phase = options["--editing"] != nil ? .editing : .replying
             var total: Int?
             if let raw = options["--total"] {
                 guard let value = Int(raw), raw == "\(value)", AIProgressEvent.totalRange.contains(value) else {
@@ -111,14 +114,14 @@ struct ReturnCommand: Sendable {
                 }
                 total = value
             }
-            let event = try AIProgressEvent(request: request, recordedAt: now, total: total)
+            let event = try AIProgressEvent(request: request, phase: phase, recordedAt: now, total: total)
             let encoded = try AIJSON.encode(event)
             guard encoded.count <= AILimits.eventBytes else { throw AIError.tooLarge }
             try saveIdentity(session: session, environment: environment, files: files, sessions: sessions, generation: generation)
             let target = base + ["inbox", event.filename]
             do { try files.write(encoded, to: target, replacing: false) }
             catch AIError.conflict {
-                // 有効なのは最初の1回だけ。総数が違う2回目以降も失敗にせず、先の申告を残す。
+                // 段ごとに有効なのは最初の1回だけ。総数が違う2回目以降も失敗にせず、先の申告を残す。
                 let previous = try AIInbox.decodeProgress(files.read(target, limit: AILimits.eventBytes),
                                                           filename: event.filename, for: request)
                 try files.syncDirectory(Array(target.dropLast()))
