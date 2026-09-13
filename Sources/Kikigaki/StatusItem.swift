@@ -56,15 +56,16 @@ final class StatusItem {
         menu.addItem(versionItem)
         menu.addItem(statusMenuItem)
         menu.addItem(.separator())
+        // ウィンドウを開くのが最も多い操作。版数・状態の直下に置き、録音操作より先に手が届くようにする。
+        let showItem = NSMenuItem(title: "開く", action: #selector(showWindow), keyEquivalent: "")
+        showItem.target = self
+        menu.addItem(showItem)
+        menu.addItem(.separator())
         menu.addItem(startStopItem)
         menu.addItem(pauseResumeItem)
         menu.addItem(.separator())
         menu.addItem(prepareAIItem)
         menu.addItem(.separator())
-
-        let showItem = NSMenuItem(title: "書き起こしを表示", action: #selector(showWindow), keyEquivalent: "")
-        showItem.target = self
-        menu.addItem(showItem)
         minutesItem.target = self; minutesItem.action = #selector(toggleMinutes)
         menu.addItem(minutesItem)
         let openItem = NSMenuItem(title: "保存先を開く", action: #selector(openOutputDir), keyEquivalent: "")
