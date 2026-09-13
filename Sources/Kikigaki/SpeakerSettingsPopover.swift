@@ -205,3 +205,14 @@ final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
         onMappingChange?(sender.tag, target == -1 ? nil : target)
     }
 }
+
+#if DEBUG
+extension SpeakerSettingsPopover {
+    /// 保留中のデバウンス。発火予定時刻と登録先を検査するために渡す。
+    var exclusionDebounceForTesting: Timer? { exclusionTimer }
+    /// 保留中のデバウンスを時間を待たずに発火する。テストが0.15秒の発火を壁時計で
+    /// 待つと、並列実行でRunLoop.mainの再開が遅れたときだけ落ちる。発火予定時刻と
+    /// 登録先は exclusionDebounceForTesting で別に検査し、ここでは反映を確かめる。
+    func fireExclusionDebounceForTesting() { exclusionTimer?.fire() }
+}
+#endif

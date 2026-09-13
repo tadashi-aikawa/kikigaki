@@ -63,17 +63,24 @@ import KikigakiCore
         popover.close()
         #expect(received.count == 1 && received[0].thresholdDBFS == -40)
     }
-    @Test func 連続操作は最後の値を時間差で一度だけ反映する() async throws {
+    @Test func 連続操作は最後の値を時間差で一度だけ反映する() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let popover = SpeakerSettingsPopover(snapshot: SessionSnapshot(state: .recording))
         var received: [AudioExclusion] = []
         popover.onAudioExclusionChange = { received.append($0) }
+        let before = Date()
         for value in [-60.0, -50, -40] {
             popover.exclusionSlider.doubleValue = value
             popover.exclusionSlider.sendAction(try #require(popover.exclusionSlider.action), to: popover.exclusionSlider.target)
         }
+        let after = Date()
         #expect(received.isEmpty)
-        try await Task.sleep(for: .milliseconds(250))
+        // 発火を壁時計で待つと並列実行で落ちるため、予定と登録先を検べてから手で発火する。
+        let timer = try #require(popover.exclusionDebounceForTesting)
+        #expect(timer.isValid)
+        #expect(timer.fireDate >= before.addingTimeInterval(0.15) && timer.fireDate <= after.addingTimeInterval(0.15))
+        #expect(CFRunLoopContainsTimer(CFRunLoopGetMain(), timer as CFRunLoopTimer, .commonModes))
+        popover.fireExclusionDebounceForTesting()
         #expect(received.count == 1 && received[0].thresholdDBFS == -40)
         popover.close()
         #expect(received.count == 1)
