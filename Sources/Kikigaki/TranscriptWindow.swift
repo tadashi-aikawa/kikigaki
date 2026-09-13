@@ -416,7 +416,16 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     }
 
     override func cancelOperation(_ sender: Any?) {
-        if searchOpen { closeSearch(sender) } else { super.cancelOperation(sender) }
+        // WKWebViewなどで未処理のEscapeがresponder chainからここへ届く。
+        // NSResponderのキー操作メソッドは宣言だけで、NSWindowControllerにも実装がない。
+        // superへ送るとunrecognized selectorでアプリが落ちるため、検索以外はここで受け止める。
+        // 入力中のIME・検索欄・シート等は先のresponderで処理され、⌘Wや赤ボタンのclose経路には触れない。
+        // 検索欄から本文へ焦点を戻した場合も、検索開始・次の一致と同じペインへ振り分ける。
+        let preview = minutesSplit.preview
+        if minutesSplit.isPreviewVisible && preview.hasSearchFocus && preview.isSearchOpen {
+            preview.closeSearch(); return
+        }
+        if searchOpen { closeSearch(sender) }
     }
     private func symbol(_ button: NSButton, name: String, title: String, showTitle: Bool = false) {
         // Apple CoreGlyphsのname_availability.plistとNSImage APIで存在を確認した名称。

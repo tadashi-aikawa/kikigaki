@@ -307,6 +307,7 @@ private final class MinutesPathField: NSTextField {
     @objc private func reload() { body = nil; beginRead(reset: false) }
     @objc private func cancelRead() { cancelRender(); monitor?.stop(); monitor = nil; showMessage("読み込みを取り消しました", retry: true) }
     func stop() { cancelRender(); active = false; updateStatus.active = false; body = nil; monitor?.stop(); monitor = nil; editorTask?.cancel(); editorTask = nil }
+    var isSearchOpen: Bool { !searchBar.isHidden }
     var hasSearchFocus: Bool {
         guard !isHidden, let responder = window?.firstResponder else { return false }
         if responder === searchField.currentEditor() || responder === pathField.currentEditor() { return true }
