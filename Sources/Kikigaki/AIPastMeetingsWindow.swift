@@ -89,6 +89,10 @@ import KikigakiCore
         state.avatarSources = Dictionary(uniqueKeysWithValues: record.manifest.profiles.compactMap { profile in
             profile.avatar.map { (profile.slot, $0) }
         })
+        // 過去会議も保存済みプロファイルから同じ表記を作る。保存形式は変えない。
+        state.modelLabels = Dictionary(uniqueKeysWithValues: record.manifest.profiles.map {
+            ($0.slot, AIModelLabel(profile: $0))
+        })
         badges.update(state)
         warning.stringValue = (store.warnings + [record.saveWarning].compactMap { $0 }).joined(separator: "\n")
         warning.isHidden = warning.stringValue.isEmpty

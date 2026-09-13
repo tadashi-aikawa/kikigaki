@@ -20,7 +20,8 @@ import KikigakiCore
             controller.window?.setFrameAutosaveName("")
             controller.window?.setContentSize(NSSize(width: 600, height: 740))
             controller.show()
-            if feedback != nil { try await renderFeedback() }
+            if feedback == "model" { try renderModel() }
+            else if feedback != nil { try await renderFeedback() }
             else { try render() }
             controller.window?.orderOut(nil)
             UserDefaults.standard.removePersistentDomain(forName: suite)
@@ -64,6 +65,10 @@ import KikigakiCore
             connections: Dictionary(uniqueKeysWithValues: (1...count).map { ($0, AIConnectionStatus.idle) }),
             generations: Dictionary(uniqueKeysWithValues: (1...count).map { ($0, 1) }))
         if let source = ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_AVATAR"] { ai.avatarSources[1] = source }
+        // 3つの枠で、項目の欠け方を変えて出す。2はmodel未設定でCLI名、3はeffort未設定。
+        ai.modelLabels = [1: AIModelLabel(model: "gpt-6-astra", effort: "high", directory: "minutes"),
+                          2: AIModelLabel(model: "claude", effort: "max", directory: "owlery"),
+                          3: AIModelLabel(model: "gpt-6-astra", directory: "kikigaki")]
         return SessionSnapshot(ai: ai, state: .recording,
             utterances: utterances, timeline: MeetingTimeline(startedAt: start), names: SpeakerNames([0: "田中", 1: "佐藤"]),
             elapsed: 600, markdownURL: output.appendingPathComponent("fixture.md"), detectedSpeakerSlots: [0, 1])
@@ -130,6 +135,30 @@ import KikigakiCore
         var unaccepted = try fixture(count: 1, accepted: false)
         unaccepted.ai?.connections[1] = .blocked
         apply(unaccepted); try capture("blocked-before-accept")
+    }
+    /// 名前行のモデル表記。返事待ち・回答・3宛先同時・420ptの4枚を撮る。
+    private func renderModel() throws {
+        apply(try fixture(count: 1, accepted: true)); try capture("model-waiting")
+        apply(try answering(count: 1)); try capture("model-answered")
+        // 混雑した会議。#1は返事待ちのまま、#2と#3は回答済みで所要時間まで並ぶ。
+        var busy = try answering(count: 3, waitingSlots: [1], crowded: true)
+        busy.ai?.connections = [1: .working, 2: .idle, 3: .idle]
+        apply(busy); try capture("model-three-destinations")
+        controller.window?.setContentSize(NSSize(width: 420, height: 740))
+        apply(busy); try capture("model-three-destinations-narrow")
+        controller.window?.setContentSize(NSSize(width: 600, height: 740))
+    }
+    private func answering(count: Int, waitingSlots: Set<Int> = [], crowded: Bool = false) throws -> SessionSnapshot {
+        var state = try fixture(count: count, accepted: true, crowded: crowded)
+        guard var conversation = state.ai?.conversation else { throw AIError.invalid("answer fixture") }
+        for question in conversation.questions where !waitingSlots.contains(question.request.number) {
+            try conversation.receive(AIReceiveEvent(request: question.request, kind: .answered,
+                recordedAt: now.addingTimeInterval(-3),
+                body: "公開日までに録音と議事録の動作を確認し、残った確認事項は担当者へ伝えます。"),
+                at: now.addingTimeInterval(-3))
+        }
+        state.ai?.conversation = conversation
+        return state
     }
     private func renderFeedback() async throws {
         var state = try fixture(count: 1, accepted: true)

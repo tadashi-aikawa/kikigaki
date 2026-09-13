@@ -274,6 +274,9 @@ final class AIReplyRow: NSView, AITimelineRowView {
     private let nameLabel = Washi.label(size: 12, weight: .semibold)
     private let chip = AITagPill()
     private let timeLabel = Washi.label(color: Washi.muted)
+    /// 「gpt-6-astra · high · minutes」。名前行の一部なので折り返さず、幅が足りなければ段を落とす。
+    private let modelLabel = Washi.label(size: 11, color: Washi.muted)
+    private var modelStages: [String] = []
     private let durationLabel = Washi.label(size: 11, color: Washi.muted)
     private let pill = AIStatusPill()
     private let quote = AIQuoteButton()
@@ -294,6 +297,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
     var chipText: String { chip.text }
     var chipVisible: Bool { !chip.isHidden }
     var timeText: String { timeLabel.isHidden ? "" : timeLabel.stringValue }
+    var modelText: String { modelLabel.isHidden ? "" : modelLabel.stringValue }
     var durationText: String { durationLabel.isHidden ? "" : durationLabel.stringValue }
     var noteText: String { notes.isHidden ? "" : notes.stringValue }
     var failureText: String { failureLabel.stringValue }
@@ -332,14 +336,15 @@ final class AIReplyRow: NSView, AITimelineRowView {
         timeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         durationLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         durationLabel.lineBreakMode = .byTruncatingTail
+        modelLabel.lineBreakMode = .byTruncatingTail
         notes.isSelectable = true; notes.maximumNumberOfLines = 0; notes.lineBreakMode = .byWordWrapping
         failureLabel.lineBreakMode = .byTruncatingTail
         Washi.surface(quoteRule, color: Washi.rule)
         pill.callback = { [weak self] in self?.markReadIfNeeded() }
         markdownBody.onClick = { [weak self] in self?.markReadIfNeeded() }
         quote.onToggle = { [weak self] in self?.onResize?() }
-        for view in [avatar, nameLabel, chip, timeLabel, durationLabel, pill, quoteRule, quote, markdownBody, progressView,
-                     confirmationMark, notes, failureLabel, replyAction, cancelAction, retryAction] { addSubview(view) }
+        for view in [avatar, nameLabel, chip, modelLabel, timeLabel, durationLabel, pill, quoteRule, quote, markdownBody,
+                     progressView, confirmationMark, notes, failureLabel, replyAction, cancelAction, retryAction] { addSubview(view) }
         update(item, state: state)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -355,6 +360,10 @@ final class AIReplyRow: NSView, AITimelineRowView {
         avatar.setAccessibilityLabel(item.participantName)
         avatar.needsDisplay = true
         chip.text = item.automatic ? "自動" : "AI"
+        // 表記の中身は会議開始時に固定した値。幅に応じてどの段を出すかはlayoutで決める。
+        let model = state.modelLabel(for: item.requestID)
+        modelStages = model?.stages ?? []
+        modelLabel.toolTip = model.map(\.text)
         timeLabel.stringValue = item.date.map(AIRowMetrics.clock.string(from:)) ?? ""
         timeLabel.toolTip = item.date.map(AIRowMetrics.clockWithSeconds.string(from:))
         durationLabel.stringValue = item.durationSeconds.map {
@@ -394,6 +403,9 @@ final class AIReplyRow: NSView, AITimelineRowView {
         // 失敗の帯にも確定時刻を出す。返事待ちは到着していないので時刻も種別も出さない。
         timeLabel.isHidden = isWaiting
         durationLabel.isHidden = failure || isWaiting || item.durationSeconds == nil
+        // 返事待ち・失敗でも宛先は確定しているので、どのモデルへ頼んだかは出す。
+        // 実際に収まるかはlayoutが決め、入らなければそこで畳む。
+        modelLabel.isHidden = modelStages.isEmpty
         chip.isHidden = failure || isWaiting
         pill.isHidden = pillStyle == nil
         quote.isHidden = failure || item.question.isEmpty
@@ -406,8 +418,10 @@ final class AIReplyRow: NSView, AITimelineRowView {
         notes.isHidden = failure || notes.stringValue.isEmpty
         replyAction.isHidden = failure || !item.needsAnswer || state.readOnly
         cancelAction.isHidden = failure || !isWaiting || state.readOnly
-        setAccessibilityLabel(failure ? failureLabel.stringValue
-            : item.participantName + "、" + (isWaiting ? "返事待ち" : chip.text) + (pillStyle == .unread ? "、未読" : ""))
+        // 幅で落とした段に関係なく、読み上げには全部入りの表記を渡す。
+        let model = modelStages.first.map { "、" + $0 } ?? ""
+        setAccessibilityLabel(failure ? failureLabel.stringValue + model
+            : item.participantName + "、" + (isWaiting ? "返事待ち" : chip.text) + model + (pillStyle == .unread ? "、未読" : ""))
     }
 
     /// 測る前に表示と同じ幅の枠を与える。幅0のまま測るとTextKitが器の寸法を誤り、
@@ -434,6 +448,21 @@ final class AIReplyRow: NSView, AITimelineRowView {
         return 31 + measuredQuote + max(20, measuredBody) + measuredNotes + actions + 9
     }
 
+    /// 残り幅へ収まる最も広い段を選んで表示し、使う幅を返す。収まる段が無ければ表記ごと畳む。
+    /// 同じ幅なら同じ段に落ち着くので、文字列の入れ替えで再レイアウトが循環することはない。
+    private func layoutModel(available: CGFloat) -> CGFloat {
+        let font = modelLabel.font ?? .systemFont(ofSize: 11)
+        let measure = { (text: String) in Double(ceil((text as NSString).size(withAttributes: [.font: font]).width) + 4) }
+        guard !modelStages.isEmpty,
+              let text = AIModelLabel.fit(modelStages, available: Double(available), measure: measure) else {
+            modelLabel.isHidden = true
+            return 0
+        }
+        modelLabel.isHidden = false
+        if modelLabel.stringValue != text { modelLabel.stringValue = text }
+        return CGFloat(measure(text))
+    }
+
     override func layout() {
         super.layout()
         if isFailure {
@@ -447,7 +476,11 @@ final class AIReplyRow: NSView, AITimelineRowView {
             let pillWidth = pill.isHidden ? 0 : ceil(pill.intrinsicContentSize.width)
             pill.frame = NSRect(x: timeLabel.frame.minX - 8 - pillWidth, y: 5, width: pillWidth, height: 20)
             let end = pill.isHidden ? timeLabel.frame.minX : pill.frame.minX
-            failureLabel.frame = NSRect(x: AIRowMetrics.bodyX, y: 7, width: max(0, end - AIRowMetrics.bodyX - 8), height: 18)
+            // 帯では理由を読めることが先なので、見出しと理由へ180ptを先に残す。
+            let modelWidth = layoutModel(available: end - 8 - (AIRowMetrics.bodyX + 180))
+            modelLabel.frame = NSRect(x: end - 8 - modelWidth, y: 7, width: modelWidth, height: 16)
+            let failureEnd = modelWidth > 0 ? modelLabel.frame.minX : end
+            failureLabel.frame = NSRect(x: AIRowMetrics.bodyX, y: 7, width: max(0, failureEnd - AIRowMetrics.bodyX - 8), height: 18)
             if isReturnedFailure {
                 markdownBody.frame = NSRect(x: AIRowMetrics.bodyX, y: 34, width: AIRowMetrics.bodyWidth(bounds.width),
                                             height: max(20, measuredBody))
@@ -459,14 +492,20 @@ final class AIReplyRow: NSView, AITimelineRowView {
         nameLabel.frame = NSRect(x: AIRowMetrics.bodyX, y: 8, width: nameWidth, height: 18)
         let chipWidth = chip.isHidden ? 0 : chip.measuredWidth
         chip.frame = NSRect(x: nameLabel.frame.maxX + 8, y: 9, width: chipWidth, height: 16)
-        timeLabel.frame = NSRect(x: nameLabel.frame.maxX + (chip.isHidden ? 12 : chipWidth + 16), y: 8,
-                                width: ceil(timeLabel.intrinsicContentSize.width) + 4, height: 18)
         let pillWidth = ceil(pill.intrinsicContentSize.width)
         pill.frame = NSRect(x: bounds.width - 20 - pillWidth, y: 8, width: pillWidth, height: 20)
         let durationRight = pill.isHidden ? bounds.width - 20 : pill.frame.minX - 8
+        // 名前 → チップ → モデル表記 → 時刻 → 所要。時刻と所要の幅を先に取り、
+        // 残りへ収まる段をモデル表記に選ばせる。折り返しも時刻の押し出しもしない。
+        let modelX = nameLabel.frame.maxX + (chip.isHidden ? 12 : chipWidth + 16)
+        let timeWidth = timeLabel.isHidden ? 0 : ceil(timeLabel.intrinsicContentSize.width) + 4
+        let durationWidth = durationLabel.isHidden ? 0 : ceil(durationLabel.intrinsicContentSize.width) + 4
+        let reserved = (timeWidth > 0 ? timeWidth + 8 : 0) + (durationWidth > 0 ? durationWidth + 6 : 0)
+        let modelWidth = layoutModel(available: durationRight - modelX - reserved)
+        modelLabel.frame = NSRect(x: modelX, y: 9, width: modelWidth, height: 16)
+        timeLabel.frame = NSRect(x: modelWidth > 0 ? modelX + modelWidth + 8 : modelX, y: 8, width: timeWidth, height: 18)
         durationLabel.frame = NSRect(x: timeLabel.frame.maxX + 6, y: 9,
-            width: max(0, min(ceil(durationLabel.intrinsicContentSize.width) + 4,
-                             durationRight - timeLabel.frame.maxX - 6)), height: 16)
+            width: max(0, min(durationWidth, durationRight - timeLabel.frame.maxX - 6)), height: 16)
         let bodyWidth = AIRowMetrics.bodyWidth(bounds.width)
         // 引用は本文より12pt字下げし、空いた左へ罫を置く。従属関係を字下げと罫の両方で示す。
         quote.frame = NSRect(x: AIRowMetrics.bodyX + 12, y: 31, width: bodyWidth - 12, height: max(0, measuredQuote - 8))

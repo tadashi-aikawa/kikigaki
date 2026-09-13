@@ -859,6 +859,9 @@ final class MeetingSession {
             state.avatarSources = Dictionary(uniqueKeysWithValues: meetingAIProfiles.compactMap { profile in
                 profile.avatar.map { (profile.slot, $0) }
             })
+            state.modelLabels = Dictionary(uniqueKeysWithValues: meetingAIProfiles.map {
+                ($0.slot, AIModelLabel(profile: $0))
+            })
             snapshot.ai = state
         } else { snapshot.ai = nil }
         onChange?(snapshot)

@@ -119,9 +119,15 @@ struct AIViewState {
     var participants: [Int: String] = [:]
     var openablePanes: Set<Int> = []
     var avatarSources: [Int: String] = [:]
+    /// 枠ごとのモデル・エフォート・末端ディレクトリ。会議開始時に固定した値だけを持つ
+    var modelLabels: [Int: AIModelLabel] = [:]
     func avatarSource(for requestID: UUID) -> String? {
         guard let request = conversation?.questions.first(where: { $0.request.id == requestID })?.request else { return nil }
         return avatarSources[slot(of: request)]
+    }
+    func modelLabel(for requestID: UUID) -> AIModelLabel? {
+        guard let request = conversation?.questions.first(where: { $0.request.id == requestID })?.request else { return nil }
+        return modelLabels[slot(of: request)]
     }
     func canSubmit(slot: Int) -> Bool { canSubmits[slot] ?? canSubmit }
     func progress(slot: Int) -> String? { progresses[slot] ?? (slot == selectedSlot ? progress : nil) }
