@@ -11,12 +11,15 @@ import KikigakiCore
     private var start: Date { now.addingTimeInterval(-600) }
     private let suite = "kikigaki-ai-progress-capture-" + UUID().uuidString
     private let feedback = ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_FEEDBACK"]
+    /// 返答到着の点灯だけ、本番と同じ経路を通すために動きを減らす設定を外す
+    private var reduceMotion = true
     init(output: String) { self.output = URL(fileURLWithPath: output) }
     func applicationDidFinishLaunching(_ notification: Notification) {
         Task { @MainActor in
         do {
             try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-            controller = TranscriptWindowController(shouldReduceMotion: { true }, minutesDefaults: UserDefaults(suiteName: suite)!)
+            controller = TranscriptWindowController(shouldReduceMotion: { [weak self] in self?.reduceMotion ?? true },
+                                                    minutesDefaults: UserDefaults(suiteName: suite)!)
             controller.window?.setFrameAutosaveName("")
             controller.window?.setContentSize(NSSize(width: 600, height: 740))
             controller.show()
@@ -32,7 +35,8 @@ import KikigakiCore
         }
         }
     }
-    private func fixture(count: Int, accepted: Bool, deliveryUnknown: Bool = false, crowded: Bool = false) throws -> SessionSnapshot {
+    private func fixture(count: Int, accepted: Bool, deliveryUnknown: Bool = false, crowded: Bool = false,
+                         editingSlots: [Int: AIEditingReport] = [:]) throws -> SessionSnapshot {
         let meeting = UUID()
         var conversation = AIConversation(meetingID: meeting)
         let lines = ["公開日までに、録音と議事録の動作を確認します。", "受領と作業中を区別できると、待つ理由が分かります。",
@@ -65,6 +69,11 @@ import KikigakiCore
             connections: Dictionary(uniqueKeysWithValues: (1...count).map { ($0, AIConnectionStatus.idle) }),
             generations: Dictionary(uniqueKeysWithValues: (1...count).map { ($0, 1) }))
         if let source = ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_AVATAR"] { ai.avatarSources[1] = source }
+        // 編集の観測は受信箱から来る値。枠ごとに別の段を見せるため、slotで指定する。
+        for question in conversation.questions {
+            guard let report = editingSlots[ai.slot(of: question.request)] else { continue }
+            ai.editing[question.request.id] = report
+        }
         // 3つの枠で、項目の欠け方を変えて出す。2はmodel未設定でCLI名、3はeffort未設定。
         ai.modelLabels = [1: AIModelLabel(model: "gpt-6-astra", effort: "high", directory: "minutes"),
                           2: AIModelLabel(model: "claude", effort: "max", directory: "owlery"),
@@ -114,9 +123,13 @@ import KikigakiCore
     }
     private func render() throws {
         apply(try fixture(count: 1, accepted: false)); try capture("submitted")
-        var state = try fixture(count: 1, accepted: true)
+        var reading = try fixture(count: 1, accepted: true)
+        reading.ai?.connections[1] = .working
+        apply(reading); try capture("reading")
+        var state = try fixture(count: 1, accepted: true, editingSlots: [1: AIEditingReport(total: 7)])
         state.ai?.connections[1] = .working
-        apply(state); try capture("working")
+        apply(state); try capture("editing")
+        try captureArrival()
         state.ai?.connections[1] = .blocked
         apply(state); try capture("blocked")
         state.ai?.connections[1] = .idle
@@ -125,7 +138,8 @@ import KikigakiCore
         apply(state); try capture("disconnected")
         state.ai?.readOnly = true; state.state = .idle; state.saved = true
         apply(state); try capture("historical")
-        var busy = try fixture(count: 3, accepted: true, crowded: true)
+        // 3宛先同時。#1は編集、#2は読込のまま確認待ち、#3は返送未確認。
+        var busy = try fixture(count: 3, accepted: true, crowded: true, editingSlots: [1: AIEditingReport(total: 7)])
         busy.ai?.connections = [1: .working, 2: .blocked, 3: .idle]
         apply(busy); try capture("three-destinations-crowded")
         controller.window?.setContentSize(NSSize(width: 420, height: 740))
@@ -136,6 +150,25 @@ import KikigakiCore
         unaccepted.ai?.connections[1] = .blocked
         apply(unaccepted); try capture("blocked-before-accept")
     }
+    /// 返答が届いた瞬間。本番と同じ更新経路で点灯へ入り、本文へ入れ替わる前に撮る。
+    private func captureArrival() throws {
+        reduceMotion = false
+        defer { reduceMotion = true }
+        var state = try fixture(count: 1, accepted: true, editingSlots: [1: AIEditingReport(total: 7)])
+        state.ai?.connections[1] = .working
+        apply(state)
+        guard var conversation = state.ai?.conversation,
+              let request = conversation.questions.first?.request else { throw AIError.invalid("arrival fixture") }
+        try conversation.receive(AIReceiveEvent(request: request, kind: .answered, recordedAt: now.addingTimeInterval(-1),
+            body: "公開日までに録音と議事録の動作を確認し、残った確認事項は担当者へ伝えます。"), at: now)
+        state.ai?.conversation = conversation
+        apply(state)
+        try capture("arrival")
+        for row in controller.transcriptDocument.rows.compactMap({ $0 as? AIReplyRow }) { row.stopArrival() }
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+        try capture("arrival-body")
+    }
+
     /// 名前行のモデル表記。返事待ち・回答・3宛先同時・420ptの4枚を撮る。
     private func renderModel() throws {
         apply(try fixture(count: 1, accepted: true)); try capture("model-waiting")

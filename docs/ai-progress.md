@@ -91,7 +91,7 @@ Coreのテストは実際の `AIQuestion` の送信・受領・取消・返答�
 
 ## 段2の実装と実画面
 
-返事待ちの本文を13ptの1行とし、取消の幅を確保して末尾を省略する。全文と段名はツールチップでも読める。5分割バーは幅234pt以内、間隔6pt・高さ3pt。各バーの真下に「準備・送信・受領・作業・返答」を9ptで中央揃えする。到達済みの文字は墨、現在は朱、未到達は薄墨。切断・不明と過去会議では現在段の文字も墨とし、文字を半調にしない。blockedの印は進行文の文頭だけに置く。通常の返事待ちは段名のため68ptから82ptへ増やし、3宛先同時でも各行に表示する。引用や結果本文の既存の高さ計測は保つ。段の塗り替えにアニメーションは使わない。VoiceOverには引き続き全段の確認状態を渡す。
+返事待ちの本文を13ptの1行とし、取消の幅を確保して末尾を省略する。全文と段名はツールチップでも読める。4分割バーは幅234pt以内、間隔6pt・高さ3pt。各バーの真下に「送信・読込・編集・返答」を9ptで中央揃えする。到達済みの文字は墨、現在は朱、未到達は薄墨。切断・不明と過去会議では現在段の文字も墨とし、文字を半調にしない。blockedの印は進行文の文頭だけに置く。通常の返事待ちは段名のため68ptから82ptへ増やし、3宛先同時でも各行に表示する。引用や結果本文の既存の高さ計測は保つ。段の塗り替えにアニメーションは使わない。VoiceOverには引き続き全段の確認状態を渡す。
 
 段2レビュー後の配色: 過去会議は現在段も墨に落とし、矢印を出さない。不明・切断の現在段は朱50%にし、既に通った段は墨を保つ。未到達は `#8C8274` の1.5ptの輪郭とし、塗らない。文言の琥珀 `#7E5C22` はblockedだけに使い、不明・切断は墨と「?」で示す。一時停止の印は文頭の「‖」だけにする。
 
@@ -100,6 +100,14 @@ Coreのテストは実際の `AIQuestion` の送信・受領・取消・返答�
 和紙 `#F5EAD9` とのコントラスト比は、未到達段の輪郭が3.17:1、blockedの本文が5.13:1。未到達と到達済みは輪郭と面塗りでも区別する。
 
 段2レビュー修正後はbuild・ad-hoc署名.app生成・全650テストが成功。実ウィンドウの検証は `AIProgressWindowVerification` を別プロセスで起動し、AppKitのイベントループ上で遮蔽・最小化・クローズ・復帰を操作する。可視性を注入せず、`scrolled()` から行への伝播、復帰時の経過再計算、返答後の通知解除も確認する。同じ10枚を撮り直し、全枚を目視した。
+
+## 返答到着の点灯
+
+結果が届いた行は、`AIProgress.arrival()` が作る表示用の派生へ切り替える。全段を朱で塗り、現在の印と経過時間は出さない。進行文は「返答到着」「確認質問が到着」で、1.5秒の間は本文・所要時間・取消・返答導線を出さずに返事待ちと同じ高さを保つ。点灯が終わると同じ行がそのまま本文へ入れ替わる。
+
+点灯に入るのは、同じ行で返事待ちの状態から結果へ変わった瞬間だけ。到着済みの会議を開き直したときと過去会議では点灯しない。「視差効果を減らす」設定では即入れ替える。1.5秒はタイマー1本で、行が別の会議へ移るときと破棄されるときに取り消す。点灯中も周期更新は行わず、`updatesElapsedTime` はfalseを返す。
+
+実画面は `/private/tmp/kikigaki-ai-stages-ui/`。`arrival.png` が点灯、`arrival-body.png` が入れ替え後で、どちらも本番の `TranscriptWindowController.apply` を通した撮影である。
 
 ## 段3: replayと実herdrの結合確認
 
@@ -133,23 +141,26 @@ Coreのテストは実際の `AIQuestion` の送信・受領・取消・返答�
 
 ```sh
 CODESIGN_IDENTITY=none ./scripts/make-app.sh
-KIKIGAKI_DEBUG_AI_PROGRESS_CAPTURE=/private/tmp/kikigaki-ai-stepper-ui \
+KIKIGAKI_DEBUG_AI_PROGRESS_CAPTURE=/private/tmp/kikigaki-ai-stages-ui \
   .build/KIKIGAKI.app/Contents/MacOS/KIKIGAKI --show-window
 ```
 
-画像の置き場は `/private/tmp/kikigaki-ai-stepper-ui/`。索引は同ディレクトリの `index.html`。
+4段への組み直し後の画像の置き場は `/private/tmp/kikigaki-ai-stages-ui/`。
 
 | PNG | 確認する状態 |
 | --- | --- |
-| submitted.png | 送信直後、送信までの塗り |
-| working.png | 受領後の作業位置 |
-| blocked.png | 作業位置の一時停止と確認待ちの文言 |
+| submitted.png | 送信直後。送信までの塗りと「送信済み · AIが読込中」 |
+| reading.png | acceptだけを観測した状態。workingでも現在段は読込 |
+| editing.png | 自己申告による「編集中(全7か所)」 |
+| arrival.png | 返答到着の全段点灯。現在の印・経過・取消を出さない |
+| arrival-body.png | 点灯が終わって本文と所要時間へ入れ替わった同じ行 |
+| blocked.png | 編集位置の一時停止と確認待ちの文言 |
 | return-unconfirmed.png | idle継続による返送未確認 |
-| disconnected.png | 作業までの塗りを保持し、不明の印を表示 |
-| three-destinations-crowded.png | 45発話の会議へ異なる3宛先の待ち行を積んだ600pt幅 |
+| disconnected.png | 編集までの塗りを保持し、不明の印を表示 |
+| three-destinations-crowded.png | 45発話の会議へ編集・確認待ち・返送未確認を積んだ600pt幅 |
 | three-destinations-narrow.png | 同じ混雑画面の420pt幅 |
 | delivery-unknown.png | 送信注記と取消だけで返事行なし |
-| blocked-before-accept.png | 受領前の確認待ちは送信までしか塗らない |
+| blocked-before-accept.png | 読込前の確認待ちは送信までしか塗らない |
 | historical.png | 読み取り専用のsnapshotで時間を省いた静止表示 |
 
-画像はcacheDisplayで取得し、全枚を目視確認した。過去会議の画像は返事行の静止表示を確認するfixtureであり、過去会議一覧ウィンドウ全体の撮影ではない。段2レビューの裁定反映後に同じ10枚を撮り直した。
+画像はcacheDisplayで取得し、13枚すべてを目視確認した。点灯の2枚だけは「視差効果を減らす」を外した本番と同じ更新経路で撮り、その後に点灯を終わらせて撮り直している。過去会議の画像は返事行の静止表示を確認するfixtureであり、過去会議一覧ウィンドウ全体の撮影ではない。

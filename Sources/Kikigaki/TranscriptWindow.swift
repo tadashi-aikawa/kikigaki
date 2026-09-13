@@ -254,6 +254,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         var anchor = transcriptDocument.anchor()
         let sameMeeting = previous.timeline.startedAt == snapshot.timeline.startedAt
         if !sameMeeting {
+            // 別の会議へ移る行に、前の会議の返答到着の点灯を持ち越さない。
+            for row in aiRows.values { (row as? AIReplyRow)?.stopArrival() }
             rows.removeAll(); aiRows.removeAll(); aiProgress.removeAll()
             anchor = .init(candidates: [], y: 0, atBottom: true)
         }

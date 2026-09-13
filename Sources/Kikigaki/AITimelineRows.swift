@@ -284,6 +284,12 @@ final class AIReplyRow: NSView, AITimelineRowView {
     private let quoteRule = NSView()
     private let markdownBody = MarkdownBodyView()
     let progressView = AIProgressView()
+    /// 返答到着の点灯。全段を見せてから本文へ入れ替えるまでの猶予
+    static let arrivalDuration: TimeInterval = 1.5
+    private var arrivalTimer: Timer?
+    private var lastProgress: AIProgress?
+    private var lastStatus: AIProgress.Status?
+    private(set) var isShowingArrival = false
     private let confirmationMark = Washi.label("?", size: 15, color: Washi.muted)
     private let notes = NSTextField(wrappingLabelWithString: "")
     /// 本文15・名前12の間に段を増やさないよう12ptに揃える。
@@ -308,9 +314,36 @@ final class AIReplyRow: NSView, AITimelineRowView {
     var statusPill: AIStatusPill { pill }
 
     /// 進行表示はこの入口だけから更新する。返答到着の見せ方を行が決めるため。
+    /// 返事待ちから結果へ変わった瞬間だけ全段を点灯し、1.5秒後に本文へ入れ替える。
+    /// 到着済みの行を開き直したときは点灯しない。動きを減らす設定では即入れ替える。
     func updateProgress(_ progress: AIProgress?, reduceMotion: Bool, now: Date = Date()) {
-        progressView.update(progress, reduceMotion: reduceMotion, now: now)
+        let previous = lastStatus
+        lastStatus = progress?.status
+        lastProgress = progress
+        if !reduceMotion, !isShowingArrival, let previous, previous != .answered, previous != .needsInput,
+           progress?.arrival() != nil {
+            isShowingArrival = true
+            arrivalTimer?.invalidate()
+            arrivalTimer = Timer.scheduledTimer(withTimeInterval: Self.arrivalDuration, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated { self?.endArrival() }
+            }
+        }
+        progressView.update(isShowingArrival ? progress?.arrival() : progress, reduceMotion: reduceMotion, now: now)
+        if isShowingArrival { updateVisibility(); needsLayout = true }
     }
+
+    private func endArrival() {
+        arrivalTimer?.invalidate(); arrivalTimer = nil
+        guard isShowingArrival else { return }
+        isShowingArrival = false
+        progressView.update(lastProgress, reduceMotion: true)
+        updateVisibility(); needsLayout = true
+        onResize?()
+    }
+
+    /// 表示中の会議が変わる・行が消えるときは点灯を持ち越さない。
+    func stopArrival() { endArrival() }
+    deinit { arrivalTimer?.invalidate() }
 
     private func markReadIfNeeded() {
         // 通常返答に既読操作を要求しない。保存済み状態もクリックで書き換えない。
@@ -319,7 +352,8 @@ final class AIReplyRow: NSView, AITimelineRowView {
     var isFailure: Bool { if case .failure = item.kind { return true }; return false }
     /// モデルが返した失敗報告。送信そのものができなかった失敗と区別し、本文を全部見せる。
     var isReturnedFailure: Bool { if case let .failure(_, returned) = item.kind { return returned }; return false }
-    var isWaiting: Bool { item.kind == .reply(.waiting) }
+    /// 返答到着の点灯中も、本文へ入れ替えるまでは返事待ちと同じ見た目を保つ。
+    var isWaiting: Bool { item.kind == .reply(.waiting) || isShowingArrival }
     /// 要返答と失敗だけを朱で強調し、通常返答に未読の強調を置かない。
     var accent: NSColor? {
         if isFailure { return Washi.red }
@@ -421,8 +455,9 @@ final class AIReplyRow: NSView, AITimelineRowView {
         progressView.updateVisibility()
         confirmationMark.isHidden = failure || item.kind != .reply(.needsInput)
         notes.isHidden = failure || notes.stringValue.isEmpty
-        replyAction.isHidden = failure || !item.needsAnswer || state.readOnly
-        cancelAction.isHidden = failure || !isWaiting || state.readOnly
+        // 点灯の1.5秒は操作を出さない。取り消せない依頼の取消も、本文のない返答導線も置かない。
+        replyAction.isHidden = failure || !item.needsAnswer || state.readOnly || isShowingArrival
+        cancelAction.isHidden = failure || !isWaiting || state.readOnly || isShowingArrival
         // 幅で落とした段に関係なく、読み上げには全部入りの表記を渡す。
         let model = modelStages.first.map { "、" + $0 } ?? ""
         setAccessibilityLabel(failure ? failureLabel.stringValue + model

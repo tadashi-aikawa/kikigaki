@@ -148,6 +148,16 @@ import TOMLKit
         #expect((settings["permissions"] as? [String: [String]])?["allow"] == ["Bash(/bin/echo *)"])
         #expect(!launch.arguments.contains("--permission-mode"))
         #expect(String(decoding: bytes, as: UTF8.self).contains(controller.sessionToken!))
+        // 編集の段を補助する観測。matcherは編集系ツールに限り、Stopの返し忘れ検知は残す。
+        let hooks = try #require(settings["hooks"] as? [String: [[String: Any]]])
+        #expect(hooks["Stop"]?.count == 1 && hooks["Stop"]?[0]["matcher"] == nil)
+        let preToolUse = try #require(hooks["PreToolUse"]?.first)
+        #expect(preToolUse["matcher"] as? String == "Edit|Write|MultiEdit|NotebookEdit")
+        let commands = (hooks["Stop"]! + hooks["PreToolUse"]!).flatMap { entry in
+            (entry["hooks"] as? [[String: Any]] ?? []).compactMap { $0["command"] as? String }
+        }
+        #expect(commands.count == 2 && Set(commands).count == 1)
+        #expect(commands[0].hasPrefix("'/bin/echo' 'notify' '--provider' 'claude'"))
     }
     @Test @MainActor func 監視先を置換しても再走査を続ける() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }

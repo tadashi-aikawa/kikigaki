@@ -107,13 +107,16 @@ final class AIProgressView: NSView {
         for stage in AIProgress.Stage.allCases {
             let observed = progress.observedStages.contains(stage)
             let current = stage == progress.currentStage && !progress.isHistorical
-            let color = current ? Washi.red.withAlphaComponent(progress.isUnknown ? 0.5 : 1)
+            // 返答到着の点灯は全段を朱にし、現在の印は置かない。
+            let color = progress.isArrival ? Washi.red
+                : current ? Washi.red.withAlphaComponent(progress.isUnknown ? 0.5 : 1)
                 : observed ? Washi.muted : Washi.aiProgressPending
             let rect = NSRect(x: 2 + CGFloat(stage.rawValue) * (segment + 6), y: 26, width: segment, height: 3)
             let path = NSBezierPath(roundedRect: rect, xRadius: 1.5, yRadius: 1.5)
             if observed { color.setFill(); path.fill() }
             else { color.setStroke(); path.lineWidth = 1.5; path.stroke() }
-            let textColor = current && !progress.isUnknown ? Washi.red
+            let textColor = progress.isArrival ? Washi.red
+                : current && !progress.isUnknown ? Washi.red
                 : observed ? Washi.ink : Washi.muted
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 9), .foregroundColor: textColor]

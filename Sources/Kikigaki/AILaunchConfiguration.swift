@@ -46,9 +46,14 @@ struct AILaunchConfiguration {
         } else {
             // allow規則の構文として解釈される文字を含む配置先は、権限を広げず拒否する。
             guard !helper.path.contains(where: { "*?()\n\r".contains($0) }) else { throw AIError.invalid("helper permission path") }
+            // PreToolUseは進行表示の編集の段を補助する観測だけに使う。返送の正本はモデルが呼ぶCLI。
+            let hook: [String: Any] = ["type": "command", "command": AIShell.command(notify), "timeout": 10]
             let settings: [String: Any] = [
                 "permissions": ["allow": ["Bash(\(helper.path) *)"]],
-                "hooks": ["Stop": [["hooks": [["type": "command", "command": AIShell.command(notify), "timeout": 10]]]]]
+                "hooks": [
+                    "Stop": [["hooks": [hook]]],
+                    "PreToolUse": [["matcher": AIHookObservation.editingTools.joined(separator: "|"), "hooks": [hook]]],
+                ]
             ]
             // 設定ファイルはsession recordの隣へ置く。プロファイルを分けた会議では枝の中になる。
             let components: [String] = sessionURL.deletingLastPathComponent().pathComponents
