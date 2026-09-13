@@ -279,7 +279,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
     /// 引用の左罫。ボタンの内側へ描くと文字に隠れるので、本文の左端へ別のビューで置く。
     private let quoteRule = NSView()
     private let markdownBody = MarkdownBodyView()
-    private let waitingBody = Washi.label("考え中…", size: 15, color: Washi.muted)
+    let progressView = AIProgressView()
     private let confirmationMark = Washi.label("?", size: 15, color: Washi.muted)
     private let notes = NSTextField(wrappingLabelWithString: "")
     /// 本文15・名前12の間に段を増やさないよう12ptに揃える。
@@ -334,7 +334,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
         pill.callback = { [weak self] in self?.markReadIfNeeded() }
         markdownBody.onClick = { [weak self] in self?.markReadIfNeeded() }
         quote.onToggle = { [weak self] in self?.onResize?() }
-        for view in [avatar, nameLabel, chip, timeLabel, pill, quoteRule, quote, markdownBody, waitingBody,
+        for view in [avatar, nameLabel, chip, timeLabel, pill, quoteRule, quote, markdownBody, progressView,
                      confirmationMark, notes, failureLabel, replyAction, cancelAction, retryAction] { addSubview(view) }
         update(item, state: state)
     }
@@ -365,7 +365,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
             failureLabel.textColor = Washi.red
             failureLabel.toolTip = ([failureLabel.stringValue, returned ? item.body : nil].compactMap { $0 }).joined(separator: "\n")
         }
-        // 注記はCoreが作る。接続の観測もitemsへ渡してあるので描画側で補わない。
+        // 注記はCoreが作る。返事待ちの接続状態は進行文へ一本化する。
         let text = item.notes.joined(separator: " · ")
         if notes.stringValue != text {
             notes.attributedStringValue = NSAttributedString(string: text, attributes: [
@@ -390,7 +390,8 @@ final class AIReplyRow: NSView, AITimelineRowView {
         quoteRule.isHidden = quote.isHidden
         // 返送された失敗の本文は画面から読めるようにする。保存にだけ残る状態にしない。
         markdownBody.isHidden = (failure && !isReturnedFailure) || isWaiting
-        waitingBody.isHidden = failure || !isWaiting
+        progressView.isHidden = failure || !isWaiting
+        progressView.updateVisibility()
         confirmationMark.isHidden = failure || item.kind != .reply(.needsInput)
         notes.isHidden = failure || notes.stringValue.isEmpty
         replyAction.isHidden = failure || !item.needsAnswer || state.readOnly
@@ -416,9 +417,9 @@ final class AIReplyRow: NSView, AITimelineRowView {
         }
         let bodyWidth = AIRowMetrics.bodyWidth(width)
         measuredQuote = item.question.isEmpty ? 0 : quote.height(for: bodyWidth - 12) + 8
-        measuredBody = isWaiting ? 20 : measureMarkdown(bodyWidth)
+        measuredBody = isWaiting ? 28 : measureMarkdown(bodyWidth)
         measuredNotes = notes.isHidden ? 0 : AIRowMetrics.measure(notes, width: bodyWidth) + 6
-        // 返事待ちの「取消」は「考え中…」と同じ行の右端へ寄せる。まだ何も無い行を4段にしない。
+        // 取消は進行文と同じ行の右端へ寄せる。バーの追加高さは8ptだけ。
         let actions = replyAction.isHidden ? 0.0 : 30
         return 31 + measuredQuote + max(20, measuredBody) + measuredNotes + actions + 9
     }
@@ -458,7 +459,9 @@ final class AIReplyRow: NSView, AITimelineRowView {
         quoteRule.frame = NSRect(x: AIRowMetrics.bodyX, y: 32, width: 2, height: max(0, measuredQuote - 10))
         let bodyY = 31 + measuredQuote
         markdownBody.frame = NSRect(x: AIRowMetrics.bodyX, y: bodyY, width: bodyWidth, height: max(20, measuredBody))
-        waitingBody.frame = NSRect(x: AIRowMetrics.bodyX, y: bodyY, width: bodyWidth, height: 20)
+        let progressRight = cancelAction.isHidden ? bounds.width - 20 : bounds.width - 20 - cancelAction.measuredWidth - 8
+        progressView.frame = NSRect(x: AIRowMetrics.bodyX, y: bodyY,
+                                   width: max(0, progressRight - AIRowMetrics.bodyX), height: 30)
         confirmationMark.frame = NSRect(x: AIRowMetrics.bodyX - 14, y: bodyY + 2, width: 12, height: 20)
         notes.frame = NSRect(x: AIRowMetrics.bodyX, y: markdownBody.frame.maxY + 6, width: bodyWidth, height: max(0, measuredNotes - 6))
         if !cancelAction.isHidden {

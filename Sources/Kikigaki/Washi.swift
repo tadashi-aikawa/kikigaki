@@ -7,6 +7,8 @@ enum Washi {
                 blue: CGFloat(hex & 255) / 255, alpha: 1)
     }
     static let paper = color(0xF5EAD9)
+    static let aiProgressPending = color(0x8C8274)
+    static let aiProgressBlocked = color(0x7E5C22)
     static let shade = color(0xEDE0CD)
     static let rule = color(0xD5C6B1)
     static let ink = color(0x221F1C)

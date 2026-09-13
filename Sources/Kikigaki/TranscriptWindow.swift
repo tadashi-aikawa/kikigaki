@@ -28,6 +28,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onRetryAISave: (() -> Void)?
     var onShowPreviousAI: (() -> Void)?
     private var aiRows: [String: any AITimelineRowView] = [:]
+    private var aiProgress: [UUID: AIProgress] = [:]
     private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
     private var speakerSettingsPopover: SpeakerSettingsPopover?
     var onDiarizationChange: ((Bool) -> Void)?
@@ -252,18 +253,29 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private func updateRows(previous: SessionSnapshot) {
         var anchor = transcriptDocument.anchor()
         let sameMeeting = previous.timeline.startedAt == snapshot.timeline.startedAt
-        if !sameMeeting { rows.removeAll(); aiRows.removeAll(); anchor = .init(candidates: [], y: 0, atBottom: true) }
+        if !sameMeeting {
+            rows.removeAll(); aiRows.removeAll(); aiProgress.removeAll()
+            anchor = .init(candidates: [], y: 0, atBottom: true)
+        }
         // AIの追加・状態変化も発話と同じ追従規則にする。上へスクロール中はanchor、
         // 検索中はfollowsBottomが末尾移動を抑え、読んでいる位置を保つ。
         // 位置はCoreの純関数が決める。AIはUtteranceにしないので併合結果へは混ぜない。
         // 世代と接続はその行を送った宛先のものを引く。選択中の宛先には依存させない。
         let ai = snapshot.ai
+        var nextProgress: [UUID: AIProgress] = [:]
+        if let ai {
+            for question in ai.conversation?.questions ?? [] {
+                let request = question.request
+                nextProgress[request.id] = AIProgress(question: question, connection: ai.connection(for: request),
+                    connectionGeneration: ai.generation(for: request), isUnconfirmed: ai.unconfirmed.contains(request.id),
+                    previous: aiProgress[request.id], isHistorical: ai.readOnly)
+            }
+        }
+        aiProgress = nextProgress
         let items = AITimeline.items(conversation: ai?.conversation, utterances: snapshot.utterances,
                                      timeline: snapshot.timeline,
-                                     generation: { ai?.generation(for: $0) ?? 1 },
-                                     endedAt: snapshot.state == .idle ? snapshot.timeline.date(at: snapshot.elapsed) : nil,
-                                     connection: { ai?.connection(for: $0) ?? .unknown },
-                                     unconfirmed: ai?.unconfirmed ?? [])
+                                     generation: { ai?.generation(for: $0) },
+                                     endedAt: snapshot.state == .idle ? snapshot.timeline.date(at: snapshot.elapsed) : nil)
         var attached: [Int: [AITimeline.Item]] = [:]
         for item in items { attached[item.slot, default: []].append(item) }
         let animated = sameMeeting && !shouldReduceMotion()
@@ -489,6 +501,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         (view as? AISendLineRow)?.onCancel = { [weak self] in self?.onCancelAI?(id) }
         (view as? AITypedSendRow)?.onCancel = { [weak self] in self?.onCancelAI?(id) }
         if let reply = view as? AIReplyRow {
+            reply.progressView.update(aiProgress[id], reduceMotion: shouldReduceMotion())
             reply.updateAvatar(store: avatars)
             reply.onRead = { [weak self] in self?.onReadAI?(id) }
             reply.onReply = { [weak self] in self?.onAskAI?(id) }
@@ -622,11 +635,15 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     }
     @objc func scrolled() {
         latestButton.isHidden = transcriptDocument.anchor().atBottom || (snapshot.utterances.isEmpty && snapshot.tentativeText == nil)
+        for row in aiRows.values { (row as? AIReplyRow)?.progressView.updateVisibility() }
     }
     @objc private func motionChanged() {
         if shouldReduceMotion() { rows.values.forEach { $0.stopAnimations() } }
         statusChip.update(snapshot, reduceMotion: shouldReduceMotion())
         compactFooter.update(snapshot, reduceMotion: shouldReduceMotion())
+        for row in aiRows.values {
+            (row as? AIReplyRow)?.progressView.update(aiProgress[row.item.requestID], reduceMotion: shouldReduceMotion())
+        }
     }
     private func showRename(slot: Int, relativeTo view: NSView) {
         guard snapshot.canShare, (0..<SpeakerNames.slotCount).contains(slot) else { return }

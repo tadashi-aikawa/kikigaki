@@ -181,6 +181,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var debugTypedPausing = false
     private var replayHolding = false
     private let minutesVerification = ReplayMinutesVerification()
+    #if DEBUG
+    private let progressVerification = ReplayAIProgressVerification()
+    #endif
     private var debugRenamed = false
     private var performingReplayDebug = false
     /// 宛先の指定を当て終えるまでデバッグ送信を保留する。0秒指定の質問は start 内の
@@ -212,7 +215,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.config = config
         replayURL = Self.argument(after: "--replay").map { URL(fileURLWithPath: $0) }
 
-        let support = replayURL != nil && (replayDebug.verifyTyped || replayDebug.verifyMinutes != nil)
+        let support = replayURL != nil && (replayDebug.verifyTyped || replayDebug.verifyMinutes != nil
+            || ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_PROGRESS_REPLAY"] != nil)
             ? config.outputDir.appendingPathComponent(".typed-test-support")
             : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/KIKIGAKI")
         do { try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true) }
@@ -300,6 +304,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.statusItem?.update(state: snapshot.state, elapsed: snapshot.elapsed)
             self.window?.apply(snapshot)
+            #if DEBUG
+            if self.replayURL != nil, let window = self.window,
+               let directory = ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_PROGRESS_REPLAY"] {
+                do { try self.progressVerification.capture(snapshot: snapshot, window: window, directory: directory) }
+                catch { Self.log("replay AI進行検証失敗: \(error)") }
+            }
+            #endif
             self.window?.connectMinutes(try? session.previewMinutesStore(), waitingPath: session.waitingMinutesPath)
             self.previousAI?.update()
             self.performReplayDebugActions(snapshot)

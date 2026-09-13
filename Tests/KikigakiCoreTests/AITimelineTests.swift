@@ -415,7 +415,7 @@ import KikigakiCore
         #expect(item.slot == 0)
     }
 
-    @Test(arguments: [1, 2]) func 旧接続の注記は現在の世代より小さいときだけ付ける(generation: Int) throws {
+    @Test(arguments: [1, 2, nil] as [Int?]) func 旧接続の注記は現在の世代より小さいときだけ付ける(generation: Int?) throws {
         let meeting = UUID()
         var conversation = AIConversation(meetingID: meeting)
         let value = try request(in: meeting, number: 1, question: "問い", generation: 1)
@@ -426,22 +426,15 @@ import KikigakiCore
         #expect(reply.notes.contains("旧接続からの返事") == (generation == 2))
     }
 
-    @Test func 返事待ちの注記は接続の観測から作り対象範囲も持つ() throws {
+    @Test func 返事待ちの状態注記は進行文へ任せ送信の対象範囲を保つ() throws {
         let meeting = UUID()
         var conversation = AIConversation(meetingID: meeting)
         let value = try request(in: meeting, number: 1, question: "問い",
                                 lines: ["[00:00:10] 話者A: 一行目", "[00:00:20] 話者A: 二行目"])
         try send(&conversation, value, at: 30)
-        func notes(_ connection: AIConnectionStatus, unconfirmed: Set<UUID> = []) throws -> [String] {
-            try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline,
-                                          connection: { _ in connection }, unconfirmed: unconfirmed).first { !$0.isSend }).notes
-        }
-        let blocked = try notes(.blocked), disconnected = try notes(.disconnected)
-        let idle = try notes(.idle), unconfirmed = try notes(.idle, unconfirmed: [value.id])
-        #expect(blocked == ["ペインで確認してください"])
-        #expect(disconnected == ["接続が切れています"])
-        #expect(idle.isEmpty)
-        #expect(unconfirmed == ["返送未確認"])
+        let waiting = try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline,
+                                                    generation: { _ in 2 }).first { !$0.isSend })
+        #expect(waiting.notes.isEmpty)
         let send = try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline).first)
         #expect(send.timeRange?.start == "00:00:10" && send.timeRange?.end == "00:00:20")
     }

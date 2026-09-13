@@ -1,0 +1,147 @@
+# AI依頼の進行表示
+
+返事待ち行の「考え中…」を1行の進行文に置き換え、その下に5分割の細いバーを置く。段は「準備・送信・受領・作業・返答」。バーは確認できた位置を示し、作業量や残り時間を表さない。段名はツールチップで補う。本文下への追加は実寸モックの約8ptを基準にする。
+
+[AIProgress](../Sources/KikigakiCore/AIProgress.swift) で状態を導き、[AIProgressView](../Sources/Kikigaki/AIProgressView.swift) が返事行へ描く。実際のherdrを相手にした結合確認は段3で行う。
+
+## 観測源と段の対応
+
+`AIQuestion` の保存済み状態・acceptance・result、宛先slotの `AIConnectionStatus`、既存の `AIReturnStatus.isUnconfirmed` の結果を使う。接続の観測には宛先の現在の世代も渡す。選択中の別宛先の状態を流用しない。
+
+| 観測 | 確認できた段 | 進行表示の扱い |
+| --- | --- | --- |
+| prepared | 準備 | 送信準備中。既存どおり送信行だけで、返事行を新設しない |
+| submitted | 送信 | 送信済み・受領待ち。workingだけでは受領・作業へ進めない |
+| acceptanceあり | 受領 | 受領済み。作業開始や回答の正しさは保証しない |
+| acceptedかつ同世代のworking | 作業 | 現在の作業位置を表示 |
+| acceptedの返事待ちかつ同世代のblocked | 作業 | 作業位置に一時停止の印「‖」。文言は「ペインで確認待ち」 |
+| submitted・未受領かつ同世代のblocked | 送信のまま | 文言と一時停止は表示するが、作業は塗らない。初回信頼確認などを作業と誤認しない |
+| answeredのresult | 返答 | 進行表示を消して従来の回答本文へ |
+| needs_inputのresult | 返答 | 進行表示を消して従来の確認質問と返答導線へ。blockedとは別 |
+| failed | 新しい成功段を足さない | 従来の失敗表示へ。返送された失敗も成功完了の塗りにしない |
+| cancelled、result未着 | 新しい段を足さない | 追跡終了。返事待ち行を消す。AIの処理停止は意味しない |
+| cancelled、result後着 | resultの種類に従う | 保存状態がcancelledでも、既存の取消後の返事・失敗表示を優先 |
+
+バーを左から連続して塗る仕様にはしない。`observedStages` は確認済みの段の集合で、`currentStage` はその中の最も先の位置。`showsReplyProgress` は既存の返事待ち行を表示できるかを返す。
+
+初期値の準備はrequestの存在から確認できる。送信試行日時 `sendAttemptedAt` だけでは送信成功を確定できない。submitted、accept、resultのいずれかを観測したら送信の段を加える。受領・返答の到着は配達の直接の証拠であり、再読込でも送信を確認済みにできる。作業はそこから推測しない。例えばprepared → 送達不明 → answeredなら、観測済みは準備・送信・返答で、受領・作業は塗らない。後着acceptは受領の事実だけを足し、返答到着を巻き戻さない。
+
+参照: [AIEvents.swift](../Sources/KikigakiCore/AIEvents.swift)、[AITimeline.swift](../Sources/KikigakiCore/AITimeline.swift)、[AI参加者の設計](ai-participant.md)。workingをaccepted、完了フックをansweredと解釈しない既存契約を維持する。
+
+## 進行文と不明表示
+
+以下の末尾には、ライブの返事待ち行だけ送信試行からの経過を ` · 1:20経過` の形で付ける。
+
+| 状態 | 文言 |
+| --- | --- |
+| 送信済み・未受領 | 送信済み · 受領待ち |
+| 受領済み・idle、未確認警告なし | 受領済み · 返答待ち |
+| 受領済み・working | 受領 → AIが作業中 |
+| 受領済み・blocked | ‖ 受領 → ペインで確認待ち |
+| 未受領・blocked | ‖ 送信済み · ペインで確認待ち |
+| 受領済み・返送未確認 | 受領 → 返送未確認 |
+| 未受領・返送未確認 | 送信済み · 返送未確認 |
+| 状況不明 | ? 受領 → 状況を確認できません |
+| 接続の切断 | ? 受領 → 接続が切れています |
+| 送達不明 | ? 送達不明。送信行の注記だけに置き、返事行・経過時間を出さない |
+
+状況不明・切断の行で受領を観測していない場合は「受領 → 」を「送信済み · 」へ変える。「承認待ち」「返送中」「回答できた」とは表示しない。
+
+不明・切断時は `isUnknown` を立て、前回までの確認位置と塗りを保つ。idleへ戻っても作業完了とみなさず、既に観測した作業位置を残して「返答待ち」または「返送未確認」と表示する。blockedは `isPaused` を立てるが不明とは扱わず、working復帰で一時停止の印を消す。
+
+`isUnconfirmed` は同世代のidle時だけ使う。blocked・unknown・disconnectedを優先し、古い警告で現在のworkingを上書きしない。既存の返送未確認判定はidleが5秒継続し、結果未着かつ背景処理なしの場合であり、AIProgress自身はフックを読まずこの判定を再実装しない。
+
+## 履歴と過去会議
+
+現在の接続状態だけでは「workingを観測してから切断した」と「一度もworkingを観測していない」を区別できない。呼び出し側はrequest IDをキーに前回の `AIProgress` を保持し、次回の導出に渡す。保持するのは塗りの根拠だけで、文言・不明・一時停止は毎回現在の観測から導く。別requestの前回値は無視する。
+
+`TranscriptWindow` の行管理へrequest IDをキーにした表示用メモリを置き、会議切替時の `rows.removeAll()` と同時に破棄する。返事待ち行の「ペインで確認してください」「接続が切れています」「返送未確認」の注記は進行文へ一本化し、`AITimeline` で重ねて生成しない。返事待ちの世代不一致の判定もAIProgressに集約する。結果到着後の「旧接続からの返事」は従来どおり注記へ残す。送信行の「送達不明」注記は維持する。
+
+接続の世代がrequestと異なる、または現在の世代が取得できない場合はunknownに落とす。新世代のworking・blockedを旧requestへ付けず、旧requestで確認済みの位置は保つ。結果・取消・失敗を先に判定するため、古い依頼を接続の変化だけで再開しない。
+
+過去会議ウィンドウでは `isHistorical: true` とする。現在の接続・返送未確認・前回値を使わず、保存された `AIQuestion` だけから静止状態を導く。経過時間は表示しない。workingの観測履歴は現行JSONに保存されていないため、再起動後に作業の塗りを再現するとは約束しない。acceptedの保存状態なら受領位置に留める。録音停止後でも、現在開いている会議でAIを追跡中ならライブ表示を続ける。
+
+## 時間と更新規則
+
+- 起点は `sendAttemptedAt`。会議開始・accept・作業開始の時刻を使わない。
+- `text(at:)` に現在日時を渡し、秒未満を切り捨てて分:秒を表示する。1時間を越えても60:00のように分を継続する。時計が戻った場合は0:00、非有限値・整数範囲外は時間を省く。
+- 1秒更新は `updatesElapsedTime(isDisplayed:reduceMotion:)` がtrueの行だけ。画面から外れた行、隠れたビュー、非表示・最小化・遮蔽されたウィンドウは更新しない。再表示時に現在日時から計算し直し、停止したタイマーの回数を足さない。
+- 「視差効果を減らす」では周期更新を止め、状態通知・再表示時だけその時点の時間を描く。バーの塗り替えは常に即時で、アニメーションを使わない。
+- answered・needs_input・failed・cancelledで返事待ちが終わればタイマーを破棄する。過去会議と送達不明にはタイマーを作らない。
+
+UIでは既存の [AICompactFooter](../Sources/Kikigaki/AICompactFooter.swift) の表示監視に加え、スクロールによる行の可視範囲も確認する。`visibleRect` はビュー自身の外へ広がる場合があるため、`bounds` との交差が空でないことを調べる。CoreはAppKitやTimerを持たず、可視性の判定結果だけを受け取る。
+
+## 変更境界と検証
+
+request・envelope・受信箱・保存JSON・Markdownの形式、受領・返答の意味、送達不明に返事行を作らない契約を変えない。手入力・音声発話行・話者状態導出にも手を入れない。AIProgressはCodableにせず、表示履歴を既存の保存物へ混ぜない。
+
+[AI行の設計](ai-timeline.md)、[AI参加者の設計](ai-participant.md) の「画面と記録」、[CLAUDE.md](../CLAUDE.md) からこの文書を参照する。接続状態と接続世代はAIProgressの必須引数とし、渡し忘れをコンパイル時に検出する。
+
+Coreのテストは実際の `AIQuestion` の送信・受領・取消・返答操作から入力を作る。通常経路、受領なしの返答、後着accept、blockedとworkingの往復、不明からの復帰、返送未確認と背景処理、取消後の返答、送信前失敗、別request・別世代・過去会議の混入防止、経過時間と更新可否を検証する。herdr結合は未実施で、次段に含める。
+
+段1の検証結果: 着手前の `swift build` と全628テストが成功。追加した `AIProgressTests` の17テスト、実装後の `swift build` と全645テストが成功。状態8種類と接続5種類の組合せはパラメーター化した1テスト内で検証している。
+
+段1レビュー修正後: `swift build` と `swift test --no-parallel` の全646テストが成功。AIProgressは18テスト。通常の全件実行は既存の250ms待ちテストが2回失敗したため、直列実行で確認した。受領前blocked・受領と返答による送信確認・必須接続引数・不正resultのassertion・過去会議の前回値の排除を反映済み。
+
+## 段2の実装と実画面
+
+返事待ちの本文を13ptの1行とし、取消の幅を確保して末尾を省略する。全文と段名はツールチップで読める。5分割バーは幅234pt以内、間隔6pt・高さ3pt。通常の返事待ちは60ptから68ptへ増える。引用や結果本文の既存の高さ計測は保つ。段の塗り替えにアニメーションは使わない。
+
+段2レビュー後の配色: 過去会議は現在段も墨に落とし、矢印を出さない。不明・切断の現在段は朱50%にし、既に通った段は墨を保つ。未到達は `#8C8274` の1.5ptの輪郭とし、塗らない。文言の琥珀 `#7E5C22` はblockedだけに使い、不明・切断は墨と「?」で示す。一時停止の印は文頭の「‖」だけにする。
+
+接続・世代の参照は `AIViewState.connection(for:)` と `generation(for:)` に揃える。未知の宛先はunknown・世代なしとし、選択中の別宛先の値で補わない。通知の登録は返事待ちの間だけとし、ウィンドウを閉じたときは可視状態の履歴もクリアする。
+
+和紙 `#F5EAD9` とのコントラスト比は、未到達段の輪郭が3.17:1、blockedの本文が5.13:1。未到達と到達済みは輪郭と面塗りでも区別する。
+
+段2レビュー修正後はbuild・ad-hoc署名.app生成・全650テストが成功。実ウィンドウの検証は `AIProgressWindowVerification` を別プロセスで起動し、AppKitのイベントループ上で遮蔽・最小化・クローズ・復帰を操作する。可視性を注入せず、`scrolled()` から行への伝播、復帰時の経過再計算、返答後の通知解除も確認する。同じ10枚を撮り直し、全枚を目視した。
+
+## 段3: replayと実herdrの結合確認
+
+2026-09-13に、架空の看板制作会議を `say -v Kyoko` で19.24秒の音声へ合成して検証した。実会議の音声は使っていない。ad-hoc署名の `.app` を `--show-window --replay` で起動し、音声5秒以降に `KIKIGAKI_DEBUG_AI_ASK` で1件送信、`KIKIGAKI_DEBUG_REPLAY_HOLD=240` で返送を待った。宛先は実herdrペイン `w9Z:p1` のClaude Code、表示モデルはFable 5.1 high。作業許可はなし。
+
+| 観測時刻(JST) | 保存状態・接続 | 本番画面 |
+| --- | --- | --- |
+| 18:17:01 | submitted・idle | 「送信済み · 受領待ち · 0:00経過」。準備と送信が確認済み |
+| 18:17:22 | accepted・working | 「受領 → AIが作業中 · 0:21経過」。受領と作業を追加 |
+| 18:17:30 | answered・working | 進行表示が消え、同じ返事行に回答本文が表示された |
+
+受領イベントは18:17:22.386、返答イベントは18:17:30.842。同梱CLIからの実受信箱イベントと画面の観測が一致した。返答時にも接続はworkingだったが、結果を優先して本文へ切り替わった。受領は同じsnapshotですでにworkingだったため、受領だけの独立した画面は今回観測していない。
+
+証跡は `/private/tmp/kikigaki-ai-stepper-replay/`。`run2.log`、`screens/evidence.json`、同じディレクトリの `00-submitted-awaitingAcceptance.png`・`01-accepted-working.png`・`02-answered-answered.png` を残し、3枚とも目視した。保存Markdownは `output/2026-09-13_1816.md`。meeting IDは `187BB7DC-D3BF-47CD-981A-4905175B116B`、request IDは `2A71B044-EADE-422A-B1A5-631EF4C00259`。
+
+依頼は音声5.5秒時点に固定され、確定会話0行と暫定末尾を送っている。このため回答は「決定事項はまだない」となった。後続の音声を回答対象へ後付けしていない。受領・返答は本番の保存へ反映され、進行のSetや文言は保存JSON・Markdownへ追加されない。
+
+初回試行は新規検証フォルダのClaude Code信頼確認で `agent_not_ready` となり送信前に失敗した。自分で作った架空会話だけのフォルダを確認し、信頼確認後に別の会議として再実行した。初回ログは `run.log` に残し、結合成功には数えていない。
+
+証跡採取はDEBUG専用の `ReplayAIProgressVerification` が `TranscriptWindowController.apply` の直後に実際の行から読む。状態・接続・受信箱を作ったり書き換えたりしない。通常起動では実行しない。設定例は [CLAUDE.md](../CLAUDE.md) のreplay項目を参照する。
+
+段3の採取処理追加後もbuild・ad-hoc署名.app生成・全650テストが成功した。ログは検証ディレクトリの `build.log` と `test.log`。
+
+## 段2の撮影手順と一覧
+
+`AIProgressViewTests` で3宛先の分離、接続欠損・世代不一致、会議切替時の履歴破棄、返答到着での同一行の切替、送達不明の返事行抑止、スクロール外・非表示・動きを減らす設定での時計停止、再表示時の再計算を確認した。過去会議の専用ウィンドウでも静止文言とタイマーなしを検証した。
+
+撮影はDEBUG専用の `AIProgressCaptureHarness` を使う。`AIQuestion` の送信・受領操作、宛先ごとの接続、`AIReturnStatus.isUnconfirmed` からsnapshotを作り、本番の `TranscriptWindowController.apply` を通して描画する。返事の文言や段はfixtureで指定しない。撮影中の時刻だけ固定し、保存やherdr通信は行わない。
+
+```sh
+CODESIGN_IDENTITY=none ./scripts/make-app.sh
+KIKIGAKI_DEBUG_AI_PROGRESS_CAPTURE=/private/tmp/kikigaki-ai-stepper-ui \
+  .build/KIKIGAKI.app/Contents/MacOS/KIKIGAKI --show-window
+```
+
+画像の置き場は `/private/tmp/kikigaki-ai-stepper-ui/`。索引は同ディレクトリの `index.html`。
+
+| PNG | 確認する状態 |
+| --- | --- |
+| submitted.png | 送信直後、送信までの塗り |
+| working.png | 受領後の作業位置 |
+| blocked.png | 作業位置の一時停止と確認待ちの文言 |
+| return-unconfirmed.png | idle継続による返送未確認 |
+| disconnected.png | 作業までの塗りを保持し、不明の印を表示 |
+| three-destinations-crowded.png | 45発話の会議へ異なる3宛先の待ち行を積んだ600pt幅 |
+| three-destinations-narrow.png | 同じ混雑画面の420pt幅 |
+| delivery-unknown.png | 送信注記と取消だけで返事行なし |
+| blocked-before-accept.png | 受領前の確認待ちは送信までしか塗らない |
+| historical.png | 読み取り専用のsnapshotで時間を省いた静止表示 |
+
+画像はcacheDisplayで取得し、全枚を目視確認した。過去会議の画像は返事行の静止表示を確認するfixtureであり、過去会議一覧ウィンドウ全体の撮影ではない。段2レビューの裁定反映後に同じ10枚を撮り直した。

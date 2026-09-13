@@ -128,8 +128,14 @@ struct AIViewState {
     func participant(slot: Int) -> String { participants[slot] ?? participant }
     func canOpenPane(slot: Int) -> Bool { participants[slot] == nil ? canOpenPane : openablePanes.contains(slot) }
     func slot(of request: AIRequest) -> Int { request.envelope.participant.profileSlot ?? defaultSlot }
-    func connection(for request: AIRequest) -> AIConnectionStatus { connections[slot(of: request)] ?? connection }
-    func generation(for request: AIRequest) -> Int { generations[slot(of: request)] ?? generation }
+    func connection(for request: AIRequest) -> AIConnectionStatus {
+        let slot = slot(of: request)
+        return connections[slot] ?? (slot == selectedSlot ? connection : .unknown)
+    }
+    func generation(for request: AIRequest) -> Int? {
+        let slot = slot(of: request)
+        return generations[slot] ?? (slot == selectedSlot ? generation : nil)
+    }
     var noticeTone: AINoticeTone { warning == nil ? .normal : .warning }
     var badges: String {
         let questions = conversation?.questions ?? []

@@ -199,7 +199,8 @@ import KikigakiAIIO
         #expect(state.connection(for: a) == .disconnected && state.connection(for: b) == .idle)
         // Bの世代1は現世代なので「旧接続からの返事」にならない。
         #expect(b.envelope.participant.sessionGeneration == state.generation(for: b))
-        #expect(a.envelope.participant.sessionGeneration < state.generation(for: a))
+        let currentGeneration = try #require(state.generation(for: a))
+        #expect(a.envelope.participant.sessionGeneration < currentGeneration)
     }
 
     /// 【中】旧manifestの長い宛名で回収できなくなっていた。

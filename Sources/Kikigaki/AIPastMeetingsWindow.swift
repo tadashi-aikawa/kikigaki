@@ -103,9 +103,7 @@ import KikigakiCore
         let timeline = meeting?.timeline ?? MeetingTimeline(startedAt: Date(timeIntervalSince1970: 0))
         let items = AITimeline.items(conversation: state.conversation, utterances: utterances,
                                     timeline: timeline,
-                                    generation: { state.generation(for: $0) },
-                                    connection: { state.connection(for: $0) },
-                                    unconfirmed: state.unconfirmed)
+                                    generation: { state.generation(for: $0) })
         let aiRows = items.map { item -> any DocumentRow in
             let row: any AITimelineRowView
             if let existing = marks[item.rowID] { existing.update(item, state: state); row = existing }
@@ -117,6 +115,10 @@ import KikigakiCore
                 }
             }
             if let reply = row as? AIReplyRow {
+                let question = state.conversation?.questions.first { $0.request.id == item.requestID }
+                reply.progressView.update(question.map {
+                    AIProgress(question: $0, connection: .unknown, connectionGeneration: nil, isHistorical: true)
+                }, reduceMotion: true)
                 reply.updateAvatar(store: avatars)
                 reply.onRead = { [weak self, weak record] in
                     try? record?.controller.markRead(item.requestID)

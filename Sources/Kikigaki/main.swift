@@ -33,6 +33,16 @@ MainActor.assumeIsolated {
         let delegate = UtteranceGaugeHarness(output: CommandLine.arguments[index + 1])
         app.delegate = delegate; app.run(); return
     }
+    if CommandLine.arguments.contains("--show-window"),
+       ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_PROGRESS_VERIFY"] == "1" {
+        let delegate = AIProgressWindowVerification()
+        app.delegate = delegate; app.run(); return
+    }
+    if CommandLine.arguments.contains("--show-window"),
+       let output = ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_PROGRESS_CAPTURE"] {
+        let delegate = AIProgressCaptureHarness(output: output)
+        app.delegate = delegate; app.run(); return
+    }
     if let index = CommandLine.arguments.firstIndex(of: "--preview-minutes"), index + 1 < CommandLine.arguments.count {
         let delegate = MinutesPreviewHarness(path: CommandLine.arguments[index + 1])
         app.delegate = delegate; app.run(); return

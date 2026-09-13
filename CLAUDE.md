@@ -163,6 +163,8 @@ Codexは通常起動・準備済み起動とも、議事録を書けるよう保
 - 会議参加モードの契約: [AI参加者の設計](docs/ai-participant.md)
 - 複数プロファイルと準備済みセッション: [AI設定の複数プロファイル](docs/ai-profiles.md)
 
+返事待ちは進行文と5分割バーで確認できた位置を示します。経過時間は表示中だけ更新し、過去会議は静止します。詳細は [AI依頼の進行表示](docs/ai-progress.md) を参照してください。
+
 - `KikigakiCore`: AI設定、独立stream履歴、envelope、質問と受信イベント、Markdown。herdr・AppKit・Processを置かない
 - `KikigakiAIIO`: アプリと返送CLIが共有するfd検証、原子的な保存、sessionとフック観測の型
 - `KikigakiCLI`: `accept`・`reply`・`notify`・`minutes`。reply本文はstdinから読み、固定requestの受信箱へ排他公開する。minutesは議事録の絶対パスを独立イベントとして同じ検証で保存する。会議Markdownへ直接書かない
@@ -224,6 +226,7 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - 環境変数 `KIKIGAKI_DEBUG_AI_ATTACH="1=oldest;2=new"`: 枠ごとの紐づけの選択。`oldest` は最も古い準備済み、`new` は新規に起動する。紐づけシートを出さずに本番の選択経路を通す。紐づけに失敗したら止まる
 - 環境変数 `KIKIGAKI_DEBUG_AI_ATTACH_CANCEL=1`: 紐づけシートの「取消(録音を始めない)」と同じ経路で録音を取り止め、保存も置き場も残さずに終了する
 - 環境変数 `KIKIGAKI_DEBUG_REPLAY_HOLD=180`: replayの停止・保存後に指定秒だけ終了を遅らせる。0〜86400秒、既定0。到達済みの送信待ちと回答回収を継続する
+- DEBUGビルドで `KIKIGAKI_DEBUG_AI_PROGRESS_REPLAY=/path/to/evidence` を指定すると、replayの本番画面更新直後にAI進行の変化をPNGと `evidence.json` へ記録する。AI登録簿は保存先の `.typed-test-support/` へ隔離し、request・受信箱・保存形式は変更しない。実herdrを使うため同梱CLIのある `.app` から起動する
 - 環境変数 `KIKIGAKI_DEBUG_AI_RENAME="0=田中"`: HOLD中に結果が届いた時点で0始まりの枡を一度改名する。結果がなければHOLD終了直前に行う。この3変数は通常起動では無視し、`--smoke --replay <wav>` で入力形式だけ検証できる
 - 環境変数 `KIKIGAKI_DEBUG_TYPED_ENTRIES='[{"seconds":20,"text":"https://example.com:8080/a;b"}]'`: replayの処理済み音声秒が指定位置に達したら本番のsubmitTypedで投稿する。startは実際の受付時点の収録位置で、処理が遅れていれば指定秒より後になる。JSON配列なのでURL中のコロン・セミコロンを保持し、同じ指定秒では配列順を保つ
   - 投稿に `"pauseSeconds":2` を足すと、その位置で一時停止し、実時間2秒後に投稿して再開する。0秒超・60秒以下だけを受け付ける。一時停止中の音声は通常の録音と同じく取り込まない。検証フラグ併用時は一時停止中・再開直後の会話、timelineと実ウィンドウも保存する

@@ -62,14 +62,9 @@ public enum AITimeline {
     /// 表示順に並べた要素を返す。`slot` の昇順で、同じslotの中もこの順で置ける。
     /// - generation: そのrequestを送った宛先の現在の世代。旧接続からの返事の注記に使う。
     /// - endedAt: 録音を停止した日時。これ以後に届いた返事は末尾へ置く。
-    /// - connection・unconfirmed: 返事待ちの注記を作るための接続の観測。描画側で補わない。
-    ///
-    /// 宛先が複数あるので、世代と接続はrequestごとに引く。選択中の宛先の値を使うと、
-    /// 別の宛先へ送った行に関係のない「接続が切れています」や「旧接続からの返事」が付く。
+    /// 返事待ちの接続状態はAIProgressへ一本化する。世代はrequestの宛先ごとに引く。
     public static func items(conversation: AIConversation?, utterances: [Utterance], timeline: MeetingTimeline,
-                             generation: (AIRequest) -> Int = { _ in 1 }, endedAt: Date? = nil,
-                             connection: (AIRequest) -> AIConnectionStatus = { _ in .unknown },
-                             unconfirmed: Set<UUID> = []) -> [Item] {
+                             generation: (AIRequest) -> Int? = { _ in 1 }, endedAt: Date? = nil) -> [Item] {
         guard let conversation else { return [] }
         let dates = utterances.map { TranscriptRenderer.date(for: $0, timeline: timeline) }
         var built: [(item: Item, rank: Int, sortDate: Date, side: Int, order: Int)] = []
@@ -111,19 +106,14 @@ public enum AITimeline {
             let anchor: Anchor = waiting ? .tail : .at(arrival)
             var notes: [String] = []
             if question.cancelledAt != nil { notes.append("取消後の返事") }
-            if participant.sessionGeneration < generation(request) { notes.append("旧接続からの返事") }
+            if !waiting, let generation = generation(request), participant.sessionGeneration < generation {
+                notes.append("旧接続からの返事")
+            }
             // どの依頼で返したかを番号で結ぶ。「返答済み」だけでは往復を追えない。
             // 失敗・取消で終わった返答は返答済みと数えないので注記も出さない。
             if AIQuestion.isAnswered(question, in: conversation.questions), let child = question.answeredByRequestID,
                let number = conversation.questions.first(where: { $0.request.id == child })?.request.number {
                 notes.append("#\(number)で返答")
-            }
-            if waiting {
-                switch connection(request) {
-                case .blocked: notes.append("ペインで確認してください")
-                case .disconnected: notes.append("接続が切れています")
-                default: if unconfirmed.contains(request.id) { notes.append("返送未確認") }
-                }
             }
             // 引用は手動typedの送信だけに添える。声は発話そのものが送信文で、自動は毎回同じ定型文になる。
             let quote = sendKind == .sendRow ? request.displayQuestion : ""
