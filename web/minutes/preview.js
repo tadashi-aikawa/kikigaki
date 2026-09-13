@@ -58,18 +58,53 @@ function revealElement(element) {
     if (parent.tagName === 'DETAILS') parent.open = true;
   }
 }
-let landingAnimation;
-function jumpTo(element) {
-  if (!element || !root.contains(element)) return;
-  revealElement(element);
-  element.scrollIntoView({ block:'center' });
+let landingAnimation, navigationFrame = null, landedTOC = null;
+function cancelNavigation() {
+  if (navigationFrame !== null) cancelAnimationFrame(navigationFrame);
+  navigationFrame = null; landedTOC = null;
   landingAnimation?.cancel();
-  const target = element.closest('.footnote-ref') || element;
+}
+function highlightLanding(target, duration) {
+  landingAnimation?.cancel();
   landingAnimation = target.animate([
     { backgroundColor:'#9b72c650', boxShadow:'0 0 0 3px #9b72c630' },
     { backgroundColor:'#9b72c650', boxShadow:'0 0 0 3px #9b72c630', offset:0.5 },
     { backgroundColor:'transparent', boxShadow:'0 0 0 3px transparent' },
-  ], { duration:2000 });
+  ], { duration });
+}
+function jumpTo(element) {
+  if (!element || !root.contains(element)) return;
+  cancelNavigation();
+  revealElement(element);
+  element.scrollIntoView({ block:'center' });
+  highlightLanding(element.closest('.footnote-ref') || element, 2000);
+}
+function navigateTOC(target) {
+  cancelNavigation();
+  revealElement(target);
+  const start = scrollY;
+  const end = Math.max(0, Math.min(start + target.getBoundingClientRect().top,
+    document.scrollingElement.scrollHeight - innerHeight));
+  const finish = () => {
+    navigationFrame = null;
+    landedTOC = { target, y:scrollY };
+    updateTOCPosition();
+    highlightLanding(target, 1000);
+  };
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    scrollTo(0, end); finish(); return;
+  }
+  // ブラウザ任せのsmoothでは移動距離で所要時間が変わる。経過時間で0.5秒のease-outに揃える。
+  let started;
+  const step = timestamp => {
+    if (!root.contains(target)) { cancelNavigation(); return; }
+    started ??= timestamp;
+    const progress = Math.min(1, Math.max(0, (timestamp - started) / 500));
+    scrollTo(0, start + (end - start) * (1 - (1 - progress) ** 3));
+    if (progress < 1) navigationFrame = requestAnimationFrame(step);
+    else finish();
+  };
+  navigationFrame = requestAnimationFrame(step);
 }
 function updateTOCPosition() {
   tocFrame = 0;
@@ -81,6 +116,12 @@ function updateTOCPosition() {
     if (headings[i].getBoundingClientRect().top > 80) break;
     current = tocLinks[i];
   }
+  // 文末など上端に揃えられない見出しも着地先を示す。スクロールやレイアウト変更で外れたら位置追従へ戻す。
+  const landedTop = landedTOC?.target.getBoundingClientRect().top;
+  if (landedTOC && Math.abs(scrollY - landedTOC.y) < 1 && landedTOC.target.getClientRects().length &&
+      landedTop >= 0 && landedTop < innerHeight) {
+    current = tocLinks[headings.indexOf(landedTOC.target)];
+  } else landedTOC = null;
   if (current === activeTOCLink) return;
   activeTOCLink?.removeAttribute('aria-current');
   current?.setAttribute('aria-current', 'location'); activeTOCLink = current;
@@ -115,14 +156,16 @@ function rebuildTOC(reset) {
 }
 addEventListener('scroll', () => { if (!tocFrame) tocFrame = requestAnimationFrame(updateTOCPosition); }, { passive:true });
 addEventListener('resize', () => { if (!tocFrame) tocFrame = requestAnimationFrame(updateTOCPosition); });
+for (const type of ['wheel', 'keydown', 'touchstart']) {
+  addEventListener(type, cancelNavigation, { passive:true });
+}
 toc.addEventListener('pointerdown', () => report({ kind: 'focus' }));
 toc.addEventListener('toggle', () => { if (toc.open) updateTOCPosition(); });
 tocNav.addEventListener('click', event => {
   const link = event.target.closest('a'); if (!link) return;
   event.preventDefault();
   const target = document.getElementById(link.dataset.target);
-  if (target) { revealElement(target); target.scrollIntoView({ block:'start' }); }
-  updateTOCPosition();
+  if (target) navigateTOC(target);
 });
 mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'base', fontFamily: '-apple-system, sans-serif',
   themeVariables: { primaryColor: '#ede0cd', primaryTextColor: '#221f1c', primaryBorderColor: '#6b6157', lineColor: '#6b6157', fontFamily: '-apple-system, sans-serif' },
@@ -225,6 +268,7 @@ function refreshSearch(reveal = false) {
   paint(reveal); return { count: ranges.length, current: hit + 1 };
 }
 function paint(reveal) {
+  cancelNavigation();
   CSS.highlights.set('matches', new Highlight(...ranges));
   CSS.highlights.set('current', new Highlight(...(hit >= 0 ? [ranges[hit]] : [])));
   if (reveal && hit >= 0) {
@@ -236,6 +280,7 @@ function paint(reveal) {
 }
 window.minutes = {
   async render(text, newContext, reset, ticket) {
+    cancelNavigation();
     const current = ++generation;
     if (reset) lastUpdateEntries = null;
     const previous = lastUpdateEntries;
@@ -301,8 +346,8 @@ window.minutes = {
     report({ kind: 'rendered', ticket, text: root.innerText });
     return true;
   },
-  clear() { generation++; lastUpdateEntries = null; clearUpdates(); updateListeners.abort(); closeImage(); folded.clear(); source = ''; root.replaceChildren(); rebuildTOC(true); query = ''; refreshSearch(); scrollTo(0, 0); },
-  invalidate() { generation++; clearUpdates(); updateListeners.abort(); },
+  clear() { cancelNavigation(); generation++; lastUpdateEntries = null; clearUpdates(); updateListeners.abort(); closeImage(); folded.clear(); source = ''; root.replaceChildren(); rebuildTOC(true); query = ''; refreshSearch(); scrollTo(0, 0); },
+  invalidate() { cancelNavigation(); generation++; clearUpdates(); updateListeners.abort(); },
   search(value, direction = 0, reveal = true) {
     if (query !== value) { query = value; hit = 0; return refreshSearch(reveal); }
     if (ranges.length && direction) hit = (hit + direction + ranges.length) % ranges.length;

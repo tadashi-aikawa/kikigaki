@@ -31,6 +31,81 @@ import Testing
         }
         Issue.record("WebKitの表示が完了しません")
     }
+    @Test func 目次の移動と中断と着地後の位置追従を扱う() async throws {
+        let document = MinutesWebView(frame: NSRect(x: 0, y: 0, width: 700, height: 500))
+        let window = NSWindow(contentRect: document.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = document; window.orderFront(nil)
+        defer { document.invalidate(); window.orderOut(nil) }
+        let source = "# 親\n\n" + (1...35).map { "## 項目\($0)\n\n" + String(repeating: "会議の決定事項と担当者を確認します。\n\n", count: 3) }.joined()
+        document.render(source, reset: true)
+        try await wait { document.renderedText.contains("項目35") }
+        let web = document.webView
+        // 描画自体は実WebKit。フレームの時計だけを固定し、端末負荷で半秒の検証が揺れないようにする。
+        _ = try await web.evaluateJavaScript("""
+        window.testFrames = new Map(); window.testFrameID = 0;
+        window.requestAnimationFrame = callback => { const id = ++testFrameID; testFrames.set(id, callback); return id; };
+        window.cancelAnimationFrame = id => testFrames.delete(id);
+        window.tick = elapsed => { const callbacks = [...testFrames.values()]; testFrames.clear(); callbacks.forEach(f => f(testStart + elapsed)); };
+        window.testStart = 10000;
+        window.navigate = index => { testStart += 1000; links[index].click(); tick(0); };
+        window.matchMedia = () => ({ matches:false });
+        document.querySelector('#toc summary').click();
+        window.links = document.querySelectorAll('#toc nav a');
+        window.target = document.querySelectorAll('main h2')[24];
+        navigate(25);
+        window.destination = target.getBoundingClientRect().top + scrollY;
+        tick(250);
+        """)
+        #expect(try await web.evaluateJavaScript("scrollY > destination * 0.8 && scrollY < destination && target.getAnimations().length === 0") as? Bool == true)
+        _ = try await web.evaluateJavaScript("tick(500)")
+        #expect(try await web.evaluateJavaScript("Math.abs(target.getBoundingClientRect().top) < 2 && target.getAnimations()[0].effect.getTiming().duration === 1000 && links[25].getAttribute('aria-current') === 'location'") as? Bool == true)
+        _ = try await web.evaluateJavaScript("navigate(10); tick(250); navigate(35); tick(500)")
+        #expect(try await web.evaluateJavaScript("links[35].getAttribute('aria-current') === 'location' && document.querySelectorAll('main h2')[9].getAnimations().length === 0 && target.getAnimations().length === 0") as? Bool == true)
+        _ = try await web.evaluateJavaScript("window.dispatchEvent(new Event('scroll')); tick(600)")
+        #expect(try await web.evaluateJavaScript("links[35].getAttribute('aria-current') === 'location'") as? Bool == true)
+        // scrollイベントを送るだけでは位置は変わらない。実スクロールで解除後、元の位置へ戻しても復活しないこと。
+        _ = try await web.evaluateJavaScript("window.landedY = scrollY; scrollTo(0,0); window.dispatchEvent(new Event('scroll')); tick(600)")
+        #expect(try await web.evaluateJavaScript("links[0].getAttribute('aria-current') === 'location'") as? Bool == true)
+        _ = try await web.evaluateJavaScript("scrollTo(0,landedY); window.dispatchEvent(new Event('scroll')); tick(600)")
+        #expect(try await web.evaluateJavaScript("document.querySelector('#toc [aria-current]') !== null && !links[35].hasAttribute('aria-current')") as? Bool == true)
+        // スクロール量を変えずに遅延レイアウトで見出しが上下へ外れても、着地先を選択し続けない。
+        for direction in [-1, 1] {
+            _ = try await web.evaluateJavaScript("navigate(35); tick(500); window.lastHeading = document.querySelectorAll('main h2')[34]; lastHeading.style.transform = 'translateY(' + innerHeight * \(direction * 2) + 'px)'; window.dispatchEvent(new Event('resize')); tick(600)")
+            #expect(try await web.evaluateJavaScript("scrollY === landedY && !links[35].hasAttribute('aria-current')") as? Bool == true)
+            _ = try await web.evaluateJavaScript("lastHeading.style.transform = ''")
+        }
+        for event in ["wheel", "keydown", "touchstart"] {
+            _ = try await web.evaluateJavaScript("navigate(10); tick(250); window.interruptedY = scrollY; window.dispatchEvent(new Event('\(event)')); tick(500)")
+            #expect(try await web.evaluateJavaScript("scrollY === interruptedY && document.querySelectorAll('main h2')[9].getAnimations().length === 0") as? Bool == true)
+        }
+        // ヒットなし・表示位置を変えない検索も、残った移動が検索操作を打ち消さないこと。
+        for search in ["window.minutes.search('存在しない語')", "window.minutes.search('決定事項', 0, false)"] {
+            _ = try await web.evaluateJavaScript("navigate(10); tick(250); window.interruptedY = scrollY; \(search); tick(500)")
+            #expect(try await web.evaluateJavaScript("scrollY === interruptedY && document.querySelectorAll('main h2')[9].getAnimations().length === 0") as? Bool == true)
+        }
+        _ = try await web.evaluateJavaScript("""
+        window.matchMedia = () => ({ matches:true });
+        document.querySelector('.heading-toggle').click(); links[25].click();
+        """)
+        #expect(try await web.evaluateJavaScript("!document.querySelector('.section-body').hidden && Math.abs(target.getBoundingClientRect().top) < 2 && target.getAnimations()[0].effect.getTiming().duration === 1000 && links[25].getAttribute('aria-current') === 'location'") as? Bool == true)
+        // root.containsのフレーム時ガードやrender後半の検索更新では遅い。DOMを入れ替える前に取消済みかを記録する。
+        _ = try await web.evaluateJavaScript("""
+        window.matchMedia = () => ({ matches:false }); navigate(10);
+        window.pendingNavigation = testFrameID;
+        const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+        Object.defineProperty(document.querySelector('main'), 'innerHTML', {
+          configurable:true,
+          get() { return descriptor.get.call(this); },
+          set(value) { window.cancelledBeforeReplacement = !testFrames.has(pendingNavigation); descriptor.set.call(this, value); }
+        });
+        void 0;
+        """)
+        document.render("# 新しい議事録", reset: true)
+        try await wait { document.renderedText.contains("新しい議事録") }
+        #expect(try await web.evaluateJavaScript("cancelledBeforeReplacement") as? Bool == true)
+        _ = try await web.evaluateJavaScript("tick(600)")
+        #expect(try await web.evaluateJavaScript("scrollY === 0 && document.querySelector('main h1').getAnimations().length === 0") as? Bool == true)
+    }
     @Test func HTMLの安全境界と折りたたみ脚注画像目次を組み合わせる() async throws {
         let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 700, height: 600))
         let window = NSWindow(contentRect: preview.frame, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
@@ -80,10 +155,11 @@ import Testing
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.section-body')[1].hidden && document.querySelectorAll('.section-body')[2].hidden === false") as? Bool == true)
         _ = try await web.evaluateJavaScript("window.minutes.search('隠れる本文')")
         #expect(try await web.evaluateJavaScript("!document.querySelectorAll('.section-body')[1].hidden") as? Bool == true)
-        _ = try await web.evaluateJavaScript("document.querySelector('.footnote-ref a').click()")
+        _ = try await web.evaluateJavaScript("window.originalMatchMedia = window.matchMedia; window.matchMedia = () => ({ matches:true }); document.querySelector('.footnote-ref a').click()")
         #expect(try await web.evaluateJavaScript("document.getElementById('fn1').getAnimations().length === 1") as? Bool == true)
         _ = try await web.evaluateJavaScript("document.querySelectorAll('.heading-toggle')[1].click(); document.querySelector('.footnote-backref').click()")
         #expect(try await web.evaluateJavaScript("!document.querySelectorAll('.section-body')[1].hidden && document.querySelector('.footnote-ref').getAnimations().length === 1") as? Bool == true)
+        _ = try await web.evaluateJavaScript("window.matchMedia = window.originalMatchMedia; void 0;")
         try await wait { try await web.evaluateJavaScript("document.querySelector('main img').naturalWidth > 0") as? Bool == true }
         _ = try await web.evaluateJavaScript("document.querySelector('main img').click()")
         #expect(try await web.evaluateJavaScript("document.getElementById('image-modal').open && document.querySelector('#image-modal img').src === document.querySelector('main img').src") as? Bool == true)
@@ -204,7 +280,9 @@ import Testing
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('#toc nav a').length") as? Int == 3)
         window.setContentSize(NSSize(width: 1200, height: 400)); preview.layoutSubtreeIfNeeded()
         try await wait { try await web.evaluateJavaScript("innerHeight < 500") as? Bool == true }
-        _ = try await web.evaluateJavaScript("document.querySelector('#toc summary').click(); document.querySelectorAll('#toc nav a')[2].click()")
+        // 非アクティブなテスト窓ではrAFが抑止されるため、ここで調べる目次・検索の連携は縮退経路を使う。
+        _ = try await web.evaluateJavaScript("window.originalMatchMedia = window.matchMedia; window.matchMedia = () => ({ matches:true }); document.querySelector('#toc summary').click(); document.querySelectorAll('#toc nav a')[2].click(); window.matchMedia = window.originalMatchMedia; void 0;")
+        try await wait { try await web.evaluateJavaScript("document.querySelector('#toc a[aria-current]')?.textContent === '当日の流れ'") as? Bool == true }
         #expect(try await web.evaluateJavaScript("document.getElementById('toc').open && document.querySelector('#toc a[aria-current]').textContent === '当日の流れ'") as? Bool == true)
         _ = try await web.evaluateJavaScript("document.querySelector('main').dispatchEvent(new PointerEvent('pointerdown', {bubbles:true})); scrollTo(0,0)")
         #expect(try await web.evaluateJavaScript("document.getElementById('toc').open") as? Bool == true)
