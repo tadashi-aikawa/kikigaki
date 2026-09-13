@@ -61,7 +61,8 @@ import KikigakiCore
     }
     @Test func フォーカスだけでドラフトを守り確定エラーを次の更新でも残す() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
-        let view = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let preferences = MinutesTestDefaults()
+        let view = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), defaults: preferences.value)
         let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = view; window.orderFront(nil)
         defer { window.orderOut(nil); view.stop() }

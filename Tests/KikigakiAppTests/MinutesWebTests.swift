@@ -107,7 +107,8 @@ import Testing
         #expect(try await web.evaluateJavaScript("scrollY === 0 && document.querySelector('main h1').getAnimations().length === 0") as? Bool == true)
     }
     @Test func HTMLの安全境界と折りたたみ脚注画像目次を組み合わせる() async throws {
-        let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 700, height: 600))
+        let preferences = MinutesTestDefaults()
+        let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 700, height: 600), defaults: preferences.value)
         let window = NSWindow(contentRect: preview.frame, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.contentView = preview; window.orderFront(nil); preview.layoutSubtreeIfNeeded()
         defer { preview.stop(); window.orderOut(nil) }
@@ -263,7 +264,8 @@ import Testing
         <script>window.INJECTED = true</script>
         """
         try Data(fixture.utf8).write(to: file)
-        let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 1200, height: 1500))
+        let preferences = MinutesTestDefaults()
+        let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 1200, height: 1500), defaults: preferences.value)
         let window = NSWindow(contentRect: preview.frame, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.contentView = preview; window.orderFront(nil); preview.layoutSubtreeIfNeeded()
         defer { preview.stop(); window.orderOut(nil) }
@@ -340,7 +342,8 @@ import Testing
         #expect(try await web.evaluateJavaScript("document.getElementById('toc').hidden") as? Bool == true)
     }
     @Test func 画像取得は通常ファイルと上限を守り非画像やFIFOを拒否する() throws {
-        let preview = MinutesPreviewView(frame: .zero)
+        let preferences = MinutesTestDefaults()
+        let preview = MinutesPreviewView(frame: .zero, defaults: preferences.value)
         preview.resetContext(); preview.stop()
         #expect(!preview.document.hasLoadedWebView)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }

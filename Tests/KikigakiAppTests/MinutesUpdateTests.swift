@@ -25,7 +25,8 @@ import Testing
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let file = root.appendingPathComponent("minutes.md")
         try Data("# 議事録\n\n変更前の本文".utf8).write(to: file)
-        let view = MinutesPreviewView(frame: NSRect(x:0,y:0,width:700,height:500))
+        let preferences = MinutesTestDefaults()
+        let view = MinutesPreviewView(frame: NSRect(x:0,y:0,width:700,height:500), defaults: preferences.value)
         let window = NSWindow(contentRect:view.frame, styleMask:[.titled], backing:.buffered, defer:false)
         window.contentView = view; window.orderFront(nil); view.layoutSubtreeIfNeeded()
         defer { view.stop(); window.orderOut(nil) }

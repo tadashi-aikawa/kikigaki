@@ -176,6 +176,8 @@ Claudeのフック設定はセッション専用の `--settings` JSONへ生成�
 
 議事録本文は専用WebKitでペイン幅に追従し、脚注・callout・画像・Mermaid・数式・SVGを描画します。⌘Fは焦点のあるペインを検索します。パス欄の右にNeovim・Obsidianで開くアイコンボタンがあります。対応記法と配布資産の再生成は [議事録の描画と検索](docs/minutes-rendering.md) を参照してください。
 
+議事録のパス欄へフォーカスすると、最近表示できたファイルを最大10件表示します。人の指定とAIの通知を区別せず、描画に成功したパスだけをアプリ全体のUserDefaultsへ保存し、別会議や再起動後も利用できます。先頭行を初期選択し、クリックまたは上下キーとReturnで開きます。Escapeは一覧を閉じる操作を下書き取消より先に行います。存在しない履歴も墨のファイル名で残し、薄墨の「見つかりません」を添えます。同じ親ディレクトリが続く行では従段を省略します。
+
 ## コミットメッセージ
 
 Conventional Commits 形式で日本語で書く。
@@ -215,6 +217,7 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - `--config <path>`: 設定ファイルを差し替える (保存先を作業用ディレクトリにするため)
 - `--replay <wav>`: マイクの代わりに音声ファイルを実時間より速く流す
 - `--show-window`: 起動直後に書き起こしウィンドウを表示する (見た目の確認用)
+- DEBUGの `--minutes-history-ui <出力先>` は専用UserDefaultsで議事録履歴の実操作と600pt・1800ptの撮影を行います。同じ引数に `--history-restart` を足して別プロセスで復元と再表示を検証し、専用設定を消します。通常の `--preview-minutes` も既存の隔離設定を使います。
 - DEBUGビルドの `KIKIGAKI_DEBUG_REPLAY_REALTIME=1` はreplayを等倍で入力する。省略時は従来の約10倍速。
 - 環境変数 `KIKIGAKI_DEBUG_DIARIZATION=off` または `on`: replayで話者判別を指定する。通常起動では無視し、replayではUserDefaultsを読み書きしない。LIVE_TRACE併用時は、無効会議のASR確定受信と表示反映の単調時計を同じトークン数で照合できる。
 - `--smoke`: UI を起動せず設定の読み込みだけ確認して終了する (CI 用)

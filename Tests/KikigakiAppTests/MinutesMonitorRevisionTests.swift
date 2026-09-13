@@ -76,7 +76,8 @@ import Testing
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let a = root.appendingPathComponent("a.md"), b = root.appendingPathComponent("b.md")
         try Data("前会議".utf8).write(to: a); try Data("次会議".utf8).write(to: b)
-        let view = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let preferences = MinutesTestDefaults()
+        let view = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), defaults: preferences.value)
         defer { view.stop() }
         view.update(path: a.path, source: .human, active: true)
         view.resetContext()

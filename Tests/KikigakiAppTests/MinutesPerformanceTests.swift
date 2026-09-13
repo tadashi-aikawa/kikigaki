@@ -7,7 +7,8 @@ import KikigakiCore
     @Test func 四MiBの描画更新と検索を測る() async throws {
         guard ProcessInfo.processInfo.environment["KIKIGAKI_MINUTES_PERF"] == "1" else { return }
         NSApplication.shared.setActivationPolicy(.prohibited)
-        let view = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        let preferences = MinutesTestDefaults()
+        let view = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800), defaults: preferences.value)
         let window = NSWindow(contentRect: view.frame, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.contentView = view; window.orderFront(nil)
         defer { view.stop(); window.orderOut(nil) }

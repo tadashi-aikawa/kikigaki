@@ -25,6 +25,16 @@ private final class MinutesPathCell: NSTextFieldCell {
 }
 
 private final class MinutesPathField: NSTextField {
+    var onFocus: ((Bool) -> Void)?
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocus?(true) }
+        return accepted
+    }
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        if currentEditor() != nil { onFocus?(true) }
+    }
     var focused = false { didSet { needsDisplay = true } }
     override func draw(_ dirtyRect: NSRect) {
         Washi.paper.setFill(); bounds.fill()
@@ -67,7 +77,12 @@ private final class MinutesPathField: NSTextField {
     private var active = false
     private var monitor: MinutesFileMonitor?
     private var body: String?
-    override init(frame: NSRect) {
+    let history: MinutesHistoryStore
+    let historyPopup = MinutesHistoryPopup(frame: .zero)
+    private var historyFocusGeneration = 0
+    private var resignObserver: NSObjectProtocol?
+    init(frame: NSRect, defaults: UserDefaults) {
+        history = MinutesHistoryStore(defaults: defaults)
         super.init(frame: frame)
         Washi.surface(self, color: Washi.paper)
         pathField.cell = MinutesPathCell(textCell: "")
@@ -78,6 +93,19 @@ private final class MinutesPathField: NSTextField {
         pathField.isBezeled = false; pathField.isBordered = false; pathField.drawsBackground = false
         pathField.focusRingType = .none; pathField.textColor = Washi.ink
         pathField.delegate = self
+        (pathField as? MinutesPathField)?.onFocus = { [weak self] focused in
+            guard let self else { return }
+            (self.pathField as? MinutesPathField)?.focused = focused
+            if focused {
+                self.editing = true
+                self.historyFocusGeneration += 1
+                let generation = self.historyFocusGeneration
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.historyFocusGeneration == generation else { return }
+                    self.showHistory()
+                }
+            } else { self.closeHistory() }
+        }
         pathField.target = self; pathField.action = #selector(commitPath)
         pathField.setAccessibilityLabel("議事録のパス")
         pathField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -131,6 +159,7 @@ private final class MinutesPathField: NSTextField {
             self.rendering = false
             self.updateStatus.setDate(self.pendingModifiedAt)
             if text.isEmpty { self.showMessage("議事録はまだ空です") } else { self.showBody() }
+            if let path = self.path { self.history.record(path) }
             if !self.searchBar.isHidden { self.search(reveal: false) }
         }
         document.onError = { [weak self] text in self?.cancelRender(); self?.showMessage(text, retry: true) }
@@ -169,8 +198,45 @@ private final class MinutesPathField: NSTextField {
             layout.topAnchor.constraint(equalTo: topAnchor), layout.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
         showMessage("議事録のファイルを指定するか、AIに書かせると表示します")
+        historyPopup.isHidden = true
+        historyPopup.onDismiss = { [weak self] in self?.closeHistory() }
+        historyPopup.onChoose = { [weak self] path in
+            guard let self else { return }
+            self.pathField.stringValue = path; self.commitPath()
+        }
+        addSubview(historyPopup, positioned: .above, relativeTo: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
+    deinit { if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) } }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver); self.resignObserver = nil }
+        closeHistory()
+        if let window {
+            resignObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.closeHistory() }
+            }
+        }
+    }
+    func showHistory() {
+        guard !isHiddenOrHasHiddenAncestor, pathField.currentEditor() != nil else { return }
+        let paths = history.paths
+        historyPopup.setPaths(paths)
+        historyPopup.isHidden = paths.isEmpty
+        layoutHistory()
+    }
+    func closeHistory() { historyFocusGeneration += 1; historyPopup.isHidden = true; historyPopup.clearSelection() }
+    override func layout() { super.layout(); layoutHistory() }
+    private func layoutHistory() {
+        guard !historyPopup.isHidden else { return }
+        let field = convert(pathField.bounds, from: pathField)
+        let width = min(max(320, min(600, field.width)), max(0, bounds.width - 48))
+        let top = field.minY - 4
+        let height = min(historyPopup.desiredHeight, max(0, top - 12))
+        guard height >= 44 else { closeHistory(); return }
+        historyPopup.frame = NSRect(x: min(field.minX, bounds.width - width - 24), y: top - height, width: width, height: height)
+        historyPopup.needsLayout = true
+    }
     func resetContext() {
         stop(); path = nil; body = nil; editing = false; commitError = nil; contextGeneration += 1
         window?.makeFirstResponder(nil)
@@ -205,7 +271,7 @@ private final class MinutesPathField: NSTextField {
             if changed { notice.stringValue = "表示対象が変わりました。編集中のパスは保持しています"; notice.isHidden = false }
         } else { pathField.stringValue = path ?? ""; pathField.toolTip = path; notice.isHidden = warning == nil; notice.stringValue = warning ?? "" }
         if let commitError { notice.stringValue = commitError; notice.isHidden = false }
-        if !active { cancelRender(); monitor?.stop(); monitor = nil; return }
+        if !active { closeHistory(); cancelRender(); monitor?.stop(); monitor = nil; return }
         if start { beginRead(reset: changed) }
     }
 
@@ -254,6 +320,7 @@ private final class MinutesPathField: NSTextField {
     func controlTextDidEndEditing(_ obj: Notification) {
         guard obj.object as? NSTextField === pathField else { return }
         editing = false; pathField.stringValue = path ?? ""; notice.isHidden = commitError == nil
+        closeHistory()
         (pathField as? MinutesPathField)?.focused = false
     }
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -264,6 +331,16 @@ private final class MinutesPathField: NSTextField {
             }
             return false
         }
+        guard control === pathField else { return false }
+        if textView.hasMarkedText() { return false }
+        if !historyPopup.isHidden {
+            if commandSelector == #selector(NSResponder.moveDown(_:)) { historyPopup.moveSelection(1); return true }
+            if commandSelector == #selector(NSResponder.moveUp(_:)) { historyPopup.moveSelection(-1); return true }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) { closeHistory(); return true }
+            if commandSelector == #selector(NSResponder.insertNewline(_:)), let selected = historyPopup.selectedPath {
+                pathField.stringValue = selected; commitPath(); return true
+            }
+        }
         if commandSelector == #selector(NSResponder.insertNewline(_:)) { commitPath(); return true }
         if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
             editing = false; commitError = nil; window?.makeFirstResponder(nil); pathField.stringValue = path ?? ""; notice.isHidden = true
@@ -273,6 +350,7 @@ private final class MinutesPathField: NSTextField {
         return false
     }
     @objc func commitPath() {
+        closeHistory()
         do {
             let input = pathField.stringValue
             let path: String? = input.isEmpty ? nil : (input as NSString).expandingTildeInPath
@@ -306,7 +384,7 @@ private final class MinutesPathField: NSTextField {
     @objc private func closePreview() { onClose?() }
     @objc private func reload() { body = nil; beginRead(reset: false) }
     @objc private func cancelRead() { cancelRender(); monitor?.stop(); monitor = nil; showMessage("読み込みを取り消しました", retry: true) }
-    func stop() { cancelRender(); active = false; updateStatus.active = false; body = nil; monitor?.stop(); monitor = nil; editorTask?.cancel(); editorTask = nil }
+    func stop() { closeHistory(); cancelRender(); active = false; updateStatus.active = false; body = nil; monitor?.stop(); monitor = nil; editorTask?.cancel(); editorTask = nil }
     var isSearchOpen: Bool { !searchBar.isHidden }
     var hasSearchFocus: Bool {
         guard !isHidden, let responder = window?.firstResponder else { return false }
@@ -327,6 +405,7 @@ private final class MinutesPathField: NSTextField {
     }
     func controlTextDidChange(_ notification: Notification) {
         if notification.object as? NSSearchField === searchField { search() }
+        if notification.object as? NSTextField === pathField { historyPopup.clearSelection() }
     }
     func search(direction: Int = 0, reveal: Bool = true) {
         if searchBar.isHidden { showSearch(); return }

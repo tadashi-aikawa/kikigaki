@@ -32,7 +32,7 @@ struct MinutesLayout: Codable, Equatable {
 /// 分割幅の正本は1キーだけ。画面制約やプログラムによるresizeを希望幅に保存しない。
 @MainActor final class MinutesSplitView: NSSplitView, NSSplitViewDelegate {
     let left: NSView
-    let preview = MinutesPreviewView(frame: .zero)
+    let preview: MinutesPreviewView
     private(set) var preference: MinutesLayout
     private let defaults: UserDefaults
     private var adjusting = false
@@ -42,6 +42,7 @@ struct MinutesLayout: Codable, Equatable {
 
     init(left: NSView, defaults: UserDefaults = .standard) {
         self.left = left; self.defaults = defaults; preference = .load(defaults)
+        preview = MinutesPreviewView(frame: .zero, defaults: defaults)
         super.init(frame: .zero)
         isVertical = true; dividerStyle = .thin; delegate = self
         addSubview(left); addSubview(preview)
