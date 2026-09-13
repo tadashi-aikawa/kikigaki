@@ -87,7 +87,6 @@ final class TranscriptRow: NSView, DocumentRow {
     private let progressGauge = UtteranceGaugeView()
     private let nameLabel = Washi.label(size: 12, weight: .semibold)
     private let timeLabel = Washi.label(color: Washi.muted)
-    private let hint = Washi.label("コピーには含めません", size: 11, color: Washi.muted)
     private let levelLabel = Washi.label(size: 11, color: Washi.muted)
     private var audioLevel: AudioLevelAssessment?
     private var excluded = false
@@ -108,7 +107,6 @@ final class TranscriptRow: NSView, DocumentRow {
         let currentName: NSRange?; let currentText: NSRange?
     }
     private let tentative: Bool
-    private var speakerPending = false
 
     init(tentative: Bool = false) {
         self.tentative = tentative
@@ -122,7 +120,6 @@ final class TranscriptRow: NSView, DocumentRow {
             content.addSubview(view)
         }
         shade.isHidden = !tentative
-        if !tentative { Washi.surface(shade, color: Washi.shade.withAlphaComponent(0.45)) }
         flash.layer?.opacity = 0
         avatar.tentative = tentative
         body.font = .systemFont(ofSize: 15)
@@ -134,12 +131,10 @@ final class TranscriptRow: NSView, DocumentRow {
         nameLabel.textColor = tentative ? Washi.muted : Washi.ink
         nameLabel.lineBreakMode = .byTruncatingTail
         if tentative { nameLabel.font = .systemFont(ofSize: 12) }
-        hint.isHidden = !tentative
-        hint.alignment = .right
         levelLabel.isHidden = true
         levelLabel.lineBreakMode = .byTruncatingTail
         typedBody.isHidden = true
-        for view in [avatar, nameLabel, timeLabel, hint, levelLabel, body, typedBody] { content.addSubview(view) }
+        for view in [avatar, nameLabel, timeLabel, levelLabel, body, typedBody] { content.addSubview(view) }
         speakerButton.isBordered = false
         speakerButton.title = ""
         speakerButton.target = self
@@ -167,16 +162,7 @@ final class TranscriptRow: NSView, DocumentRow {
 
     /// 本文・話者変更だけを点灯対象とする。時刻や話者固定待ちの変化では点灯しない。
     @discardableResult
-    func update(_ value: Utterance, names: SpeakerNames, timeline: MeetingTimeline, speakerPending: Bool = false) -> Bool {
-        let speakerPending = value.kind == .voice && speakerPending
-        if !tentative && self.speakerPending != speakerPending {
-            self.speakerPending = speakerPending
-            shade.isHidden = !speakerPending
-            hint.stringValue = "話者未確定"
-            hint.toolTip = "文字起こしは確定していますが、話者の割り当てはまだ固定していません。"
-            hint.isHidden = !speakerPending
-            needsLayout = true
-        }
+    func update(_ value: Utterance, names: SpeakerNames, timeline: MeetingTimeline) -> Bool {
         let name = names.displayName(for: value)
         guard utterance != value || displayedName != name || displayedTimeline != timeline else { return false }
         let changed = utterance != nil && (utterance?.text != value.text || utterance?.speaker != value.speaker || displayedName != name)
@@ -286,11 +272,10 @@ final class TranscriptRow: NSView, DocumentRow {
         progressGauge.frame = NSRect(x: 3, y: min(5, max(0, bounds.height - 46)), width: 10, height: 46)
         // 太字の字形が計測幅の右端へ届くため、端数の丸めと描画の余白を確保する。
         let nameWidth = min(ceil(nameLabel.intrinsicContentSize.width) + 4,
-                            max(70, bounds.width - (hint.isHidden ? 220 : 300)))
+                            max(70, bounds.width - 220))
         nameLabel.frame = NSRect(x: 54, y: 8, width: nameWidth, height: 18)
         speakerButton.frame = NSRect(x: 18, y: 5, width: nameWidth + 40, height: 29)
         timeLabel.frame = NSRect(x: 54 + nameWidth + 12, y: 8, width: 62, height: 18)
-        hint.frame = NSRect(x: bounds.width - 150, y: 8, width: 130, height: 18)
         let levelHeight: CGFloat = hasLevelNote ? 20 : 0
         body.frame = NSRect(x: 54, y: 31, width: max(44, bounds.width - 74), height: max(20, bounds.height - 36 - levelHeight))
         typedBody.frame = body.frame

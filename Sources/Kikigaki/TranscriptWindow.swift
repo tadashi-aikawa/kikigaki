@@ -282,8 +282,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             let id = RowID(kind: utterance.kind, start: utterance.start, occurrence: occurrence)
             let row = rows[id] ?? TranscriptRow()
             if rows[id] == nil { inserted.append(row) }
-            if row.update(utterance, names: snapshot.names, timeline: snapshot.timeline,
-                          speakerPending: snapshot.pendingSpeakerRows.contains(index)) { changed.append(row) }
+            if row.update(utterance, names: snapshot.names, timeline: snapshot.timeline) { changed.append(row) }
             let progress = snapshot.utteranceProgress
             row.updateProgress(progress?.rows.indices.contains(index) == true ? progress?.rows[index] : nil,
                                steps: progress?.steps ?? [])

@@ -42,7 +42,7 @@ MeetingSessionの発話用スナップショットにaccurateFinalCountを引き
 
 オフの `AppleTranscriber.onResult` は保持済みの `TranscriptMerge.Snapshot` 全体を渡す。`publishUndiarized` はそのaccurateFinalCountも `SpeakerTranscript` に保持する。オンのpublish経路でも同じ値を保持し、手入力・一時停止・統合からの非publish経路の `refreshLive` は保持値を再利用する。改名によるemitでも保持済みの表示情報を使う。高精度境界を既定値0に戻して速報段へ落とさない。オフで高精度境界が進んだ通知は、表示用確定数が増えなくても即時に反映する。
 
-「話者未確定」の薄い地と注記は別属性として維持する。小音量除外による薄表示にも独立してゲージを出す。ゲージだけの変化は `TranscriptRow.update` の点灯を起こさない。Markdown、archive、AI文脈、コピー範囲、保存JSON、文字起こし・凍結条件を変更しない。
+2026-09-13の動作確認で方針を変更し、状態はゲージで示す。「話者未確定」と「コピーには含めません」の右上注記、および話者未確定の薄い地は表示しない。暫定末尾の破線アバター・「聞き取り中…」・薄い本文と地は行の種類を示すため維持する。小音量除外の注記と薄表示は別機能として維持し、独立してゲージを出す。段名と停止時再判定の説明はゲージのツールチップに残す。ゲージだけの変化は `TranscriptRow.update` の点灯を起こさない。Markdown、archive、AI文脈、コピー範囲、保存JSON、文字起こし・凍結条件を変更しない。
 
 話者判別オンの一時停止中は音声チャンクが来ずpublishLiveが走らないため、段の更新は再開まで止まる。オフは結果通知のpublishUndiarizedで一時停止中も反映する。
 

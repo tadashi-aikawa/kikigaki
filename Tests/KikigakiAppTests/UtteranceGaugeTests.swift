@@ -59,12 +59,12 @@ import KikigakiCore
         let live = LiveTranscript(tokens: tokens, speakers: [0, 1, 1], finalCount: 2)
         let row = TranscriptRow()
         let timeline = MeetingTimeline(startedAt: Date())
-        row.update(live.utterances[0], names: SpeakerNames(), timeline: timeline, speakerPending: true)
+        row.update(live.utterances[0], names: SpeakerNames(), timeline: timeline)
         let height = row.height(for: 600)
         let steps = live.progress(accurateFinalCount: 0).steps
         row.updateProgress(.fastFinal, steps: steps)
         row.updateProgress(.accurateFinal, steps: steps)
-        #expect(!row.update(live.utterances[0], names: SpeakerNames(), timeline: timeline, speakerPending: true))
+        #expect(!row.update(live.utterances[0], names: SpeakerNames(), timeline: timeline))
         #expect(row.height(for: 600) == height)
         let gauge = try #require(row.subviews.compactMap { $0 as? UtteranceGaugeView }.first)
         #expect(gauge.stage == .accurateFinal && !gauge.isHidden)
@@ -74,6 +74,14 @@ import KikigakiCore
         row.updateExclusion(true)
         #expect(!gauge.isHidden && gauge.stage == .accurateFinal)
         #expect(row.layer?.opacity == 1 && row.content.layer?.opacity == 0.4)
+        let labels = row.content.subviews.compactMap { $0 as? NSTextField }
+        #expect(!labels.contains { $0.stringValue == "話者未確定" })
+        #expect(labels.contains { !$0.isHidden && $0.stringValue == "小音量のため除外" })
+        let tentative = TranscriptRow(tentative: true)
+        tentative.updateTentative("まだ聞き取っています")
+        let tentativeLabels = tentative.content.subviews.compactMap { $0 as? NSTextField }
+        #expect(!tentativeLabels.contains { $0.stringValue == "コピーには含めません" })
+        #expect(tentativeLabels.contains { !$0.isHidden && $0.stringValue == "聞き取り中…" })
         row.frame = NSRect(x: 0, y: 0, width: 600, height: height)
         row.layoutSubtreeIfNeeded()
         #expect(gauge.frame.maxY <= row.bounds.height)
@@ -85,6 +93,6 @@ import KikigakiCore
         #expect(gauge.accessibilityValue() as? String == "速報の確定(3段中2段目)")
         row.updateProgress(nil, steps: steps)
         #expect(gauge.isHidden)
-        #expect(!row.update(live.utterances[0], names: SpeakerNames(), timeline: timeline, speakerPending: false))
+        #expect(!row.update(live.utterances[0], names: SpeakerNames(), timeline: timeline))
     }
 }
