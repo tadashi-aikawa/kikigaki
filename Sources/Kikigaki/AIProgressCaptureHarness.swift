@@ -180,7 +180,7 @@ import KikigakiCore
         try capture("arrival-body")
     }
 
-    /// 名前行のモデル表記。返事待ち・回答・3宛先同時・420ptの4枚を撮る。
+    /// 本文の下のモデル表記。返事待ち・回答・3宛先同時・420ptの4枚を撮る。
     private func renderModel() throws {
         apply(try fixture(count: 1, accepted: true)); try capture("model-waiting")
         apply(try answering(count: 1)); try capture("model-answered")

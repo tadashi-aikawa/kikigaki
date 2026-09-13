@@ -8,8 +8,11 @@ import Testing
     private func label(_ config: AIConfig) -> AIModelLabel {
         AIModelLabel(profile: ResolvedAIConfig(config: config, home: home))
     }
+    private func stage(_ model: String, _ directory: String? = nil) -> AIModelLabel.Stage {
+        AIModelLabel.Stage(model: model, directory: directory)
+    }
     /// 文字数だけで測る物差し。フォントに依存させずに段の落ち方を確かめる。
-    private func measure(_ text: String) -> Double { Double(text.count) * 6 }
+    private func measure(_ stage: AIModelLabel.Stage) -> Double { Double(stage.text.count) * 6 }
 
     @Test func modelとeffortとcwdの末端を中黒で結ぶ() {
         let value = label(AIConfig(cli: .codex, model: "gpt-6-astra", effort: "high", cwd: "~/work/minutes"))
@@ -27,22 +30,26 @@ import Testing
         let value = label(AIConfig(cli: .codex, model: "gpt-6-astra"))
         #expect(value.effort == nil && value.directory == "ai-work")
         #expect(value.text == "gpt-6-astra · ai-work")
-        #expect(value.stages == ["gpt-6-astra · ai-work", "gpt-6-astra"])
+        #expect(value.stages == [stage("gpt-6-astra", "ai-work"), stage("gpt-6-astra")])
     }
 
     @Test func ルート直下のcwdは末端ディレクトリとして出さない() {
         let value = label(AIConfig(cli: .claude, model: "sonnet-5", cwd: "/"))
-        #expect(value.directory == nil && value.stages == ["sonnet-5"])
+        #expect(value.directory == nil && value.stages == [stage("sonnet-5")])
     }
 
-    @Test func 段は末端ディレクトリからエフォートの順に落ちる() {
+    /// モデルとエフォートは前の塊、末端ディレクトリは後ろの塊。落ちるのは後ろの塊から。
+    @Test func 段は作業場所の塊からエフォートの順に落ちる() {
         let value = AIModelLabel(model: "gpt-6-astra", effort: "high", directory: "minutes")
-        #expect(value.stages == ["gpt-6-astra · high · minutes", "gpt-6-astra · high", "gpt-6-astra"])
+        #expect(value.stages == [stage("gpt-6-astra · high", "minutes"), stage("gpt-6-astra · high"), stage("gpt-6-astra")])
+        #expect(value.stages.first?.text == "gpt-6-astra · high · minutes")
     }
 
     @Test func 幅に収まる最も広い段を選ぶ() {
         let stages = AIModelLabel(model: "gpt-6-astra", effort: "high", directory: "minutes").stages
-        func fit(_ available: Double) -> String? { AIModelLabel.fit(stages, available: available, measure: measure) }
+        func fit(_ available: Double) -> AIModelLabel.Stage? {
+            AIModelLabel.fit(stages, available: available, measure: measure)
+        }
         #expect(fit(measure(stages[0])) == stages[0])
         #expect(fit(measure(stages[0]) - 1) == stages[1])
         #expect(fit(measure(stages[1]) - 1) == stages[2])
@@ -65,6 +72,6 @@ import Testing
 
     @Test func 空白だけの値は項目として出さない() {
         let value = AIModelLabel(model: "gpt-6-astra", effort: "  ", directory: "")
-        #expect(value.effort == nil && value.directory == nil && value.stages == ["gpt-6-astra"])
+        #expect(value.effort == nil && value.directory == nil && value.stages == [stage("gpt-6-astra")])
     }
 }

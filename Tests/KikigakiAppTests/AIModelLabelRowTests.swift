@@ -3,7 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
-/// AIの返事行の名前行へ出すモデル表記。並びは 名前 → AIチップ → モデル表記 → 時刻 → 所要。
+/// AIの返事行のモデル表記。名前行には出さず、本文の下のフッターへ2つの塊で置く。
 @Suite @MainActor struct AIModelLabelRowTests {
     private let started = Date(timeIntervalSince1970: 1_788_759_600)
     private let label = AIModelLabel(model: "gpt-6-astra", effort: "high", directory: "minutes")
@@ -47,69 +47,88 @@ import KikigakiCore
         try #require(labels(row).first { !$0.isHidden && $0.stringValue == text })
     }
 
-    @Test func 名前とチップの右かつ時刻の左へ薄墨11ptで出す() throws {
+    @Test func 名前行から外して本文の下へ2つの塊で置く() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let row = try row(root: root)
         #expect(row.modelText == "gpt-6-astra · high · minutes")
-        let model = try field(row, row.modelText)
+        // 名前行には出さない。名前・時刻・所要のどれもモデル名を含まない。
+        #expect(!labels(row).contains { $0.stringValue.contains("gpt-6-astra") })
+        let footer = row.modelFooter
         let name = try field(row, "迅雷")
-        let time = try field(row, row.timeText)
-        let duration = try field(row, row.durationText)
-        #expect(model.frame.minX > name.frame.maxX)
-        #expect(model.frame.maxX <= time.frame.minX)
-        #expect(time.frame.maxX <= duration.frame.minX)
-        #expect(model.font?.pointSize == 11 && model.textColor == Washi.muted)
-        // 幅で落とした段に関係なく、全部入りはtooltipと読み上げから読める。
-        #expect(model.toolTip == "gpt-6-astra · high · minutes")
+        #expect(!footer.isHidden && footer.frame.minY > name.frame.maxY)
+        // 本文と同じ左端に揃え、1行ぶんの高さだけ使う。折り返さない。
+        #expect(footer.frame.minX == AIRowMetrics.bodyX && footer.frame.height == AIModelFooter.height)
+        let stage = try #require(footer.stage)
+        #expect(stage.model == "gpt-6-astra · high" && stage.directory == "minutes")
+        // 全部入りは名前とフッターのtooltip、読み上げから読める。
+        #expect(name.toolTip == "gpt-6-astra · high · minutes" && footer.toolTip == "gpt-6-astra · high · minutes")
         #expect((row.accessibilityLabel() ?? "").contains("gpt-6-astra · high · minutes"))
     }
 
-    @Test func 返事待ちでも宛先のモデルを出す() throws {
+    /// 2つの塊はそれぞれアイコンを持ち、間を12pt空ける。中黒1つぶんより広い。
+    @Test func 塊ごとにアイコンを付けて12pt離す() {
+        let full = AIModelLabel.Stage(model: "gpt-6-astra · high", directory: "minutes")
+        let dropped = AIModelLabel.Stage(model: "gpt-6-astra · high")
+        #expect(AIModelFooter.gap == 12)
+        #expect(AIModelFooter.width(of: full)
+                == AIModelFooter.modelWidth(full.model) + 12 + AIModelFooter.placeWidth("minutes"))
+        #expect(AIModelFooter.width(of: dropped) == AIModelFooter.modelWidth(dropped.model))
+        // 塊ごとにアイコンぶんの場所を先頭へ確保する。どちらも文字だけの幅より広い。
+        func text(_ value: String) -> CGFloat {
+            ceil((value as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11)]).width)
+        }
+        #expect(AIModelFooter.placeWidth("minutes") >= text("minutes") + 11)
+        #expect(AIModelFooter.modelWidth("gpt-6-astra") >= text("gpt-6-astra") + 11)
+    }
+
+    @Test func 返事待ちでは進行文とバーの下へ出す() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let row = try row(root: root, answered: false)
         #expect(row.isWaiting && row.timeText.isEmpty)
         #expect(row.modelText == "gpt-6-astra · high · minutes")
-        let model = try field(row, row.modelText)
-        let name = try field(row, "迅雷")
-        #expect(model.frame.minX > name.frame.maxX)
+        #expect(row.modelFooter.frame.minY >= row.progressView.frame.maxY)
+        #expect(row.modelFooter.frame.maxY <= row.frame.height)
     }
 
-    @Test func プロファイルに値が無ければ表記ごと出さない() throws {
+    @Test func プロファイルに値が無ければ表記ごと出さず行も高くしない() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let missing = try row(root: root, labels: [:])
-        #expect(missing.modelText.isEmpty)
+        #expect(missing.modelText.isEmpty && missing.modelFooter.isHidden)
         // 枠違いの表記は引かない。会議で固定した自分の枠のものだけを読む。
         let otherSlot = try row(root: root, labels: [2: label])
         #expect(otherSlot.modelText.isEmpty)
+        // 行が高くなるのはフッターを出す行だけで、その分はちょうど1段。
+        let shown = try row(root: root)
+        #expect(shown.height(for: 600) == missing.height(for: 600) + AIModelFooter.height)
     }
 
-    /// 幅を削ると 末端ディレクトリ → エフォート の順に落ち、時刻と所要は最後まで残る。
-    @Test func 幅が足りなければ末端ディレクトリからエフォートの順に落とす() throws {
+    /// 幅を削ると 作業場所の塊 → エフォート の順に落ちる。行の高さは変わらない。
+    @Test func 幅が足りなければ作業場所の塊からエフォートの順に落とす() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let row = try row(root: root)
+        let height = row.height(for: 600)
         var seen: [String] = []
         for width in stride(from: CGFloat(600), through: 200, by: -1) {
             row.frame = NSRect(x: 0, y: 0, width: width, height: row.height(for: width))
             row.layoutSubtreeIfNeeded()
             if seen.last != row.modelText { seen.append(row.modelText) }
-            // 時刻と所要を押し出さない。折り返しもしない。
-            let time = try field(row, row.timeText)
-            let duration = try field(row, row.durationText)
-            #expect(time.frame.maxX <= duration.frame.minX)
-            // 420ptが利用者に出せる下限。それより狭い枠では時刻の幅そのものが入らない。
-            if width >= 420 { #expect(duration.frame.maxX <= width - 20) }
-            if !row.modelText.isEmpty {
-                let model = try field(row, row.modelText)
-                #expect(model.frame.maxX <= time.frame.minX)
-                #expect(model.frame.minY == time.frame.minY + 1)
+            let footer = row.modelFooter
+            // 折り返さず、本文の幅に収める。段を落としても行の高さは動かない。
+            #expect(footer.frame.height == AIModelFooter.height && row.height(for: width) == height)
+            if let stage = footer.stage {
+                #expect(AIModelFooter.width(of: stage) <= AIRowMetrics.bodyWidth(width))
             }
         }
-        // 落ちる順は末端ディレクトリ→エフォート→表記ごと。飛ばしも戻りもしない。
-        #expect(seen == label.stages + [""])
+        // 420ptは利用者に出せる下限。そこでは全部入りが残る。
+        row.frame = NSRect(x: 0, y: 0, width: 420, height: row.height(for: 420))
+        row.layoutSubtreeIfNeeded()
+        #expect(row.modelText == "gpt-6-astra · high · minutes")
+        // 落ちる順は作業場所の塊→エフォート。飛ばしも戻りもしない。
+        #expect(seen == label.stages.map(\.text))
     }
 
-    /// 失敗の帯にも宛先のモデルを出す。ただし見出しと理由の場所を先に残す。
-    @Test func 失敗の帯では見出しと理由の右へ出す() throws {
+    /// 失敗の帯は見出しだけの1行なので、段を足さない。
+    @Test func 失敗の帯には出さない() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
         let value = try request(1, slot: 1, history: &history, root: root)
@@ -125,17 +144,17 @@ import KikigakiCore
         let row = AIReplyRow(item: item, state: state)
         row.frame = NSRect(x: 0, y: 0, width: 600, height: row.height(for: 600))
         row.layoutSubtreeIfNeeded()
-        #expect(row.isFailure && row.modelText == "gpt-6-astra · high · minutes")
-        let model = try field(row, row.modelText)
+        #expect(row.isFailure && row.modelText.isEmpty && row.modelFooter.isHidden)
+        // 帯は見出しと理由へ幅を全部使える。
         let failure = try field(row, row.failureText)
         let time = try field(row, row.timeText)
-        #expect(failure.frame.maxX <= model.frame.minX && model.frame.maxX <= time.frame.minX)
-        // 理由を読めることが先。見出しと理由の場所は表記に譲らない。
-        #expect(failure.frame.width >= 180)
+        #expect(failure.frame.maxX <= time.frame.minX && failure.frame.width >= 180)
+        // 読み上げには全部入りを残す。
+        #expect((row.accessibilityLabel() ?? "").contains("gpt-6-astra · high · minutes"))
     }
 
-    /// 3宛先が同時に並ぶ混雑した会議を420ptで開いても、名前行は1行に収まる。
-    @Test func 三宛先の混雑画面を420ptで開いても名前行が重ならない() throws {
+    /// 3宛先が同時に並ぶ混雑した会議を420ptで開いても、行ごとに自分の宛先の表記を出す。
+    @Test func 三宛先の混雑画面を420ptで開いても行ごとに自分の宛先を出す() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID()
         var conversation = AIConversation(meetingID: meeting)
@@ -153,18 +172,16 @@ import KikigakiCore
         let items = AITimeline.items(conversation: conversation, utterances: [], timeline: .init(startedAt: started))
             .filter { !$0.isSend }
         #expect(items.count == 3)
+        var seen: [String] = []
         for item in items {
             let row = AIReplyRow(item: item, state: state)
             row.frame = NSRect(x: 0, y: 0, width: 420, height: row.height(for: 420))
             row.layoutSubtreeIfNeeded()
-            let time = try field(row, row.timeText)
             #expect(!row.timeText.isEmpty && !row.durationText.isEmpty)
-            guard !row.modelText.isEmpty else { continue }
-            let model = try field(row, row.modelText)
-            // 名前行は1行。段を増やさず、時刻の手前で必ず終わる。
-            #expect(model.frame.maxX <= time.frame.minX && model.frame.height == 16)
-            #expect(label.stages.contains(row.modelText) || row.modelText == state.modelLabels[2]?.text
-                    || row.modelText == state.modelLabels[3]?.text)
+            // 名前行は宛先が増えても変わらない。表記は各行のフッターが持つ。
+            #expect(!labels(row).contains { $0.stringValue.contains("gpt-6-astra") })
+            seen.append(row.modelText)
         }
+        #expect(seen == ["gpt-6-astra · high · minutes", "claude · max · owlery", "gpt-6-astra · kikigaki"])
     }
 }
