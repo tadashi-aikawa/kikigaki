@@ -20,9 +20,12 @@ class HoverButton: NSButton {
 
     override var isEnabled: Bool {
         didSet {
+            guard oldValue != isEnabled else { return }
             needsDisplay = true
             window?.invalidateCursorRects(for: self)
-            if pointerInside { interactionCursor.set() }
+            // NSMenuの追跡中は退出イベントが届かず、開く前のホバー状態が残る。
+            // 定期更新でメニュー上のカーソルを手形へ戻さず、今もボタン上にある場合だけ更新する。
+            if pointerInside && pointerIsInVisibleRect { interactionCursor.set() }
         }
     }
     override func updateTrackingAreas() {
@@ -65,6 +68,21 @@ class HoverButton: NSButton {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         pointerInside = false; needsDisplay = true
+    }
+    func popUpMenu(_ menu: NSMenu, at point: NSPoint) {
+        let cursorWindow = window
+        let restoreCursorRects = cursorWindow?.areCursorRectsEnabled == true
+        // メニュー追跡中も会議の表示更新は続く。背後のNSTextViewがIビームを再設定しないよう、
+        // このウィンドウのカーソル管理だけを止め、終了後は元の管理状態と矩形を復元する。
+        if restoreCursorRects { cursorWindow?.disableCursorRects() }
+        defer {
+            if restoreCursorRects {
+                cursorWindow?.enableCursorRects()
+                cursorWindow?.resetCursorRects()
+            }
+        }
+        NSCursor.arrow.set()
+        menu.popUp(positioning: nil, at: point, in: self)
     }
     func drawHoverBackground() {
         guard isEnabled && (isHovered || isHighlighted) else { return }

@@ -533,7 +533,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     }
     private func showFooterMenu() {
         let menu = footerMenu()
-        menu.popUp(positioning: nil, at: footerMenuPosition(menu), in: compactFooter.more)
+        compactFooter.more.popUpMenu(menu, at: footerMenuPosition(menu))
     }
     func footerMenuPosition(_ menu: NSMenu) -> NSPoint {
         NSPoint(x: compactFooter.more.bounds.maxX - menu.size.width,
@@ -565,7 +565,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     }
     private func showRobotMenu() {
         let menu = robotMenu()
-        menu.popUp(positioning: nil, at: robotMenuPosition(menu), in: compactFooter.robot)
+        compactFooter.robot.popUpMenu(menu, at: robotMenuPosition(menu))
     }
     @objc private func configureAutomaticPressed() { onScheduleAI?() }
     @objc private func stopAutomaticPressed() { onStopScheduleAI?() }

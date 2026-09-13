@@ -151,6 +151,59 @@ import KikigakiCore
         }
     }
 
+    @Test func 状態の再代入や退出前の古いホバーで別のカーソルを上書きしない() throws {
+        _ = NSApplication.shared
+        let previous = NSCursor.current
+        defer { previous.set() }
+        let button = HoverButton(frame: NSRect(x: 0, y: 0, width: 40, height: 40))
+        let event = try #require(NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
+                                                       windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil))
+        button.mouseEntered(with: event)
+        #expect(NSCursor.current == .pointingHand)
+        // メニュー追跡中のように退出イベントが届かず、別の部品がカーソルを設定した状態。
+        NSCursor.iBeam.set()
+        button.isEnabled = true
+        #expect(NSCursor.current == .iBeam)
+        // 値が変わっても、表示中のボタン上にないポインターを古いフラグだけで書き換えない。
+        button.isEnabled = false
+        #expect(NSCursor.current == .iBeam)
+        button.isEnabled = true
+        #expect(NSCursor.current == .iBeam)
+    }
+
+    @Test func メニュー中だけ背後のカーソル管理を止め終了時に元の状態へ戻す() {
+        final class ObservedMenu: NSMenu {
+            var inspect: (() -> Void)?
+            var selected = false
+            override func popUp(positioning item: NSMenuItem?, at location: NSPoint, in view: NSView?) -> Bool {
+                inspect?()
+                return selected
+            }
+        }
+        _ = NSApplication.shared
+        let previous = NSCursor.current
+        defer { previous.set() }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let button = HoverButton(frame: window.contentView!.bounds)
+        window.contentView!.addSubview(button)
+        for initiallyEnabled in [true, false] {
+            if initiallyEnabled { window.enableCursorRects() } else { window.disableCursorRects() }
+            for selected in [false, true] {
+                let menu = ObservedMenu(); menu.selected = selected
+                menu.inspect = {
+                    #expect(!window.areCursorRectsEnabled && NSCursor.current == .arrow)
+                    // 入れ子のメニューを閉じても、外側の追跡が終わるまで管理を再開しない。
+                    button.popUpMenu(ObservedMenu(), at: .zero)
+                    #expect(!window.areCursorRectsEnabled)
+                }
+                NSCursor.iBeam.set()
+                button.popUpMenu(menu, at: .zero)
+                #expect(window.areCursorRectsEnabled == initiallyEnabled)
+            }
+        }
+    }
+
     @Test func リサイズ後も可視範囲を追跡しカーソル矩形を登録し直す() throws {
         final class ObservedButton: HoverButton {
             var registered: [NSRect] = []
