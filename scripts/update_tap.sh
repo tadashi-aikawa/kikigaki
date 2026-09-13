@@ -25,16 +25,16 @@ mkdir -p Casks
 
 # Cask を毎回丸ごと書き出す。初回リリースで Cask が無くても作成でき、
 # 文面の変更もこのリポジトリ側の修正だけで tap へ反映される。
-# GitHub のリポジトリ名は kikigaku(アプリ名・Cask 名の kikigaki と異なる)
+# GitHub のリポジトリは kikigaku から kikigaki へ改名済み。旧名はリダイレクトで通るが、新名で書く
 cat > Casks/kikigaki.rb <<EOF
 cask "kikigaki" do
   version "$VERSION"
   sha256 "$SHA256"
 
-  url "https://github.com/tadashi-aikawa/kikigaku/releases/download/v#{version}/KIKIGAKI-#{version}.zip"
+  url "https://github.com/tadashi-aikawa/kikigaki/releases/download/v#{version}/KIKIGAKI-#{version}.zip"
   name "KIKIGAKI"
   desc "会議の発話を話者付きでリアルタイムに文字起こしする macOS 用ツール"
-  homepage "https://github.com/tadashi-aikawa/kikigaku"
+  homepage "https://github.com/tadashi-aikawa/kikigaki"
 
   # SpeechTranscriber が macOS 26 以降のため
   depends_on macos: :tahoe
