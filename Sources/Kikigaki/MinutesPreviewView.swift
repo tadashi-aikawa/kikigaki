@@ -67,7 +67,7 @@ private final class MinutesPathField: NSTextField {
     private let cancelButton = HoverButton(title: "読込を取り消す", target: nil, action: nil)
     private let emptyChoose = HoverButton(title: "ファイルを選ぶ…", target: nil, action: nil)
     var onSelect: ((String?) throws -> Void)?
-    var onClose: (() -> Void)?
+    let closeButton = HoverButton(title: "", target: nil, action: nil)
     var herdrCommand: () -> String? = { nil }
     private var path: String?
     private var source: MinutesState.Source?
@@ -111,9 +111,11 @@ private final class MinutesPathField: NSTextField {
         pathField.setAccessibilityLabel("議事録のパス")
         pathField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let choose = HoverButton(title: "ファイルを選ぶ…", target: self, action: #selector(chooseFile))
-        let close = HoverButton(title: "", target: self, action: #selector(closePreview))
-        close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "議事録を隠す")
-        close.toolTip = "議事録を隠す"; close.setAccessibilityLabel("議事録を隠す")
+        // ×はペインを隠す操作ではなく、表示中の議事録を閉じて対象を解除する(起動直後と同じ空の状態へ戻す)。
+        // ペインの表示切替はヘッダーの「議事録」ボタンとメニューが担う。
+        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "議事録を閉じる")
+        closeButton.toolTip = "表示中の議事録を閉じる"; closeButton.setAccessibilityLabel("議事録を閉じる")
+        closeButton.target = self; closeButton.action = #selector(closeMinutes); closeButton.isEnabled = false
         neovimButton.target = self; neovimButton.action = #selector(openNeovim)
         obsidianButton.target = self; obsidianButton.action = #selector(openObsidian)
         for (button, asset, label) in [(neovimButton, "neovim", "Neovimで開く"), (obsidianButton, "obsidian", "Obsidianで開く")] {
@@ -128,7 +130,7 @@ private final class MinutesPathField: NSTextField {
         neovimButton.toolTip = "Neovimで開く — herdrの新しいタブ"
         obsidianButton.toolTip = "議事録をObsidianで開く"
         neovimButton.isEnabled = false; obsidianButton.isEnabled = false
-        let top = row([pathField, neovimButton, obsidianButton, choose, close], spacing: 8)
+        let top = row([pathField, neovimButton, obsidianButton, choose, closeButton], spacing: 8)
         headerBar.addSubview(top); top.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             headerBar.heightAnchor.constraint(equalToConstant: 56),
@@ -297,6 +299,7 @@ private final class MinutesPathField: NSTextField {
         if changed { document.setFile(path.map { URL(fileURLWithPath: $0) }); resetNextRender = true }
         neovimButton.isEnabled = path != nil && editorTask == nil
         obsidianButton.isEnabled = path != nil
+        closeButton.isEnabled = path != nil
         if editing || pathField.currentEditor() != nil {
             if changed { notice.stringValue = "表示対象が変わりました。編集中のパスは保持しています"; notice.isHidden = false }
         } else { pathField.stringValue = path ?? ""; pathField.toolTip = path; notice.isHidden = warning == nil; notice.stringValue = warning ?? "" }
@@ -411,7 +414,8 @@ private final class MinutesPathField: NSTextField {
             self.pathField.stringValue = url.path; self.commitPath()
         }
     }
-    @objc private func closePreview() { onClose?() }
+    /// 空欄の確定と同じ経路で対象を解除する。パス欄の下書きは捨てる。
+    @objc func closeMinutes() { pathField.stringValue = ""; commitPath() }
     @objc private func reload() { body = nil; beginRead(reset: false) }
     @objc private func cancelRead() { cancelRender(); monitor?.stop(); monitor = nil; showMessage("読み込みを取り消しました", retry: true) }
     func stop() { closeHistory(); cancelRender(); active = false; updateStatus.active = false; body = nil; monitor?.stop(); monitor = nil; editorTask?.cancel(); editorTask = nil }

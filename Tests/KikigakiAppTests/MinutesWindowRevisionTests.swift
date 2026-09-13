@@ -123,6 +123,14 @@ import KikigakiCore
         view.update(path: "/tmp/none.md", source: .ai, active: false)
         view.receive(.missing)
         #expect(view.message.stringValue.hasPrefix("AIが通知したファイル"))
+        // ×はペインを隠さず、表示中の議事録を閉じて対象を解除する。表示対象が無ければ押せない。
+        #expect(view.closeButton.isEnabled && view.closeButton.toolTip == "表示中の議事録を閉じる")
+        selected = "unchanged"; view.pathField.stringValue = "/tmp/draft.md"
+        view.closeMinutes()
+        #expect(selected == nil && view.notice.isHidden)
+        // 解除はstoreの通知でupdateへ戻り、そこで欄が空になりボタンも押せなくなる。
+        view.update(path: nil, source: nil, active: false)
+        #expect(!view.closeButton.isEnabled && view.pathField.stringValue.isEmpty && !view.isHidden)
     }
     @Test func 待機指定は開始取消再開始と二回目の準備でも一度だけ適用する() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }

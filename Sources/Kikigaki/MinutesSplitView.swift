@@ -47,7 +47,6 @@ struct MinutesLayout: Codable, Equatable {
         isVertical = true; dividerStyle = .thin; delegate = self
         addSubview(left); addSubview(preview)
         preview.isHidden = !preference.visible
-        preview.onClose = { [weak self] in self?.setVisible(false) }
     }
     required init?(coder: NSCoder) { fatalError() }
     override func drawDivider(in rect: NSRect) { Washi.rule.setFill(); rect.fill() }
