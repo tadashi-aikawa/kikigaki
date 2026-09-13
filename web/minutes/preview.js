@@ -94,12 +94,12 @@ function navigateTOC(target) {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
     scrollTo(0, end); finish(); return;
   }
-  // ブラウザ任せのsmoothでは移動距離で所要時間が変わる。経過時間で0.5秒のease-outに揃える。
+  // ブラウザ任せのsmoothでは移動距離で所要時間が変わる。経過時間で0.25秒のease-outに揃える。
   let started;
   const step = timestamp => {
     if (!root.contains(target)) { cancelNavigation(); return; }
     started ??= timestamp;
-    const progress = Math.min(1, Math.max(0, (timestamp - started) / 500));
+    const progress = Math.min(1, Math.max(0, (timestamp - started) / 250));
     scrollTo(0, start + (end - start) * (1 - (1 - progress) ** 3));
     if (progress < 1) navigationFrame = requestAnimationFrame(step);
     else finish();

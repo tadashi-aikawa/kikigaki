@@ -40,7 +40,7 @@ import Testing
         document.render(source, reset: true)
         try await wait { document.renderedText.contains("項目35") }
         let web = document.webView
-        // 描画自体は実WebKit。フレームの時計だけを固定し、端末負荷で半秒の検証が揺れないようにする。
+        // 描画自体は実WebKit。フレームの時計だけを固定し、端末負荷で0.25秒の検証が揺れないようにする。
         _ = try await web.evaluateJavaScript("""
         window.testFrames = new Map(); window.testFrameID = 0;
         window.requestAnimationFrame = callback => { const id = ++testFrameID; testFrames.set(id, callback); return id; };
@@ -54,12 +54,12 @@ import Testing
         window.target = document.querySelectorAll('main h2')[24];
         navigate(25);
         window.destination = target.getBoundingClientRect().top + scrollY;
-        tick(250);
+        tick(125);
         """)
         #expect(try await web.evaluateJavaScript("scrollY > destination * 0.8 && scrollY < destination && target.getAnimations().length === 0") as? Bool == true)
-        _ = try await web.evaluateJavaScript("tick(500)")
+        _ = try await web.evaluateJavaScript("tick(250)")
         #expect(try await web.evaluateJavaScript("Math.abs(target.getBoundingClientRect().top) < 2 && target.getAnimations()[0].effect.getTiming().duration === 1000 && links[25].getAttribute('aria-current') === 'location'") as? Bool == true)
-        _ = try await web.evaluateJavaScript("navigate(10); tick(250); navigate(35); tick(500)")
+        _ = try await web.evaluateJavaScript("navigate(10); tick(125); navigate(35); tick(250)")
         #expect(try await web.evaluateJavaScript("links[35].getAttribute('aria-current') === 'location' && document.querySelectorAll('main h2')[9].getAnimations().length === 0 && target.getAnimations().length === 0") as? Bool == true)
         _ = try await web.evaluateJavaScript("window.dispatchEvent(new Event('scroll')); tick(600)")
         #expect(try await web.evaluateJavaScript("links[35].getAttribute('aria-current') === 'location'") as? Bool == true)
@@ -70,17 +70,17 @@ import Testing
         #expect(try await web.evaluateJavaScript("document.querySelector('#toc [aria-current]') !== null && !links[35].hasAttribute('aria-current')") as? Bool == true)
         // スクロール量を変えずに遅延レイアウトで見出しが上下へ外れても、着地先を選択し続けない。
         for direction in [-1, 1] {
-            _ = try await web.evaluateJavaScript("navigate(35); tick(500); window.lastHeading = document.querySelectorAll('main h2')[34]; lastHeading.style.transform = 'translateY(' + innerHeight * \(direction * 2) + 'px)'; window.dispatchEvent(new Event('resize')); tick(600)")
+            _ = try await web.evaluateJavaScript("navigate(35); tick(250); window.lastHeading = document.querySelectorAll('main h2')[34]; lastHeading.style.transform = 'translateY(' + innerHeight * \(direction * 2) + 'px)'; window.dispatchEvent(new Event('resize')); tick(600)")
             #expect(try await web.evaluateJavaScript("scrollY === landedY && !links[35].hasAttribute('aria-current')") as? Bool == true)
             _ = try await web.evaluateJavaScript("lastHeading.style.transform = ''")
         }
         for event in ["wheel", "keydown", "touchstart"] {
-            _ = try await web.evaluateJavaScript("navigate(10); tick(250); window.interruptedY = scrollY; window.dispatchEvent(new Event('\(event)')); tick(500)")
+            _ = try await web.evaluateJavaScript("navigate(10); tick(125); window.interruptedY = scrollY; window.dispatchEvent(new Event('\(event)')); tick(250)")
             #expect(try await web.evaluateJavaScript("scrollY === interruptedY && document.querySelectorAll('main h2')[9].getAnimations().length === 0") as? Bool == true)
         }
         // ヒットなし・表示位置を変えない検索も、残った移動が検索操作を打ち消さないこと。
         for search in ["window.minutes.search('存在しない語')", "window.minutes.search('決定事項', 0, false)"] {
-            _ = try await web.evaluateJavaScript("navigate(10); tick(250); window.interruptedY = scrollY; \(search); tick(500)")
+            _ = try await web.evaluateJavaScript("navigate(10); tick(125); window.interruptedY = scrollY; \(search); tick(250)")
             #expect(try await web.evaluateJavaScript("scrollY === interruptedY && document.querySelectorAll('main h2')[9].getAnimations().length === 0") as? Bool == true)
         }
         _ = try await web.evaluateJavaScript("""
