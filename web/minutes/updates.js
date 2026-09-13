@@ -54,15 +54,53 @@ export function updateEntries(root) {
   }
   return [...groups.values()];
 }
-let expiry, animations = [], marked = [];
+// 変更のあった要素を含む見出しを、内側から順に並べて返す。
+// 見出し自身が変わった場合はその見出しが先頭に来る (見出しも .heading-section の中にある)。
+export function updatedHeadings(entries) {
+  return entries.map(entry => {
+    const chain = [];
+    for (let section = entry.element.closest('.heading-section'); section;
+         section = section.parentElement?.closest('.heading-section')) {
+      const heading = section.querySelector(':scope > :is(h1,h2,h3,h4,h5,h6)');
+      if (heading) chain.push(heading);
+    }
+    return chain;
+  });
+}
+// 内側から順の見出しの連なりを畳み、見出しごとの印を決める。
+// 直接その見出しの中身が変わったものは 'self'、配下の見出しだけが変わったものは 'descendant'。
+// 同じ見出しに両方当たれば 'self' を優先する。要素でも添字でも同じように使える。
+export function foldUpdateMarks(chains) {
+  const marks = new Map();
+  for (const chain of chains) {
+    for (let depth = 0; depth < chain.length; depth++) {
+      const key = chain[depth];
+      if (key == null) continue;
+      if (depth === 0) marks.set(key, 'self');
+      else if (!marks.has(key)) marks.set(key, 'descendant');
+    }
+  }
+  return marks;
+}
+let expiry, animations = [], marked = [], markedLinks = [];
 export function clearUpdates() {
   clearTimeout(expiry); CSS.highlights.delete('updated');
   animations.forEach(animation => animation.cancel()); animations = [];
   marked.forEach(element => element.classList.remove('updated-block')); marked = [];
+  markedLinks.forEach(link => delete link.dataset.updated); markedLinks = [];
 }
-export function highlightUpdates(entries, persist = false) {
+// tocLinkFor は見出しから目次のリンクを引く。目次に無い見出しでは undefined を返してよい。
+export function highlightUpdates(entries, persist = false, tocLinkFor = null) {
   clearUpdates();
   if (!entries.length) return;
+  if (tocLinkFor) {
+    for (const [heading, mark] of foldUpdateMarks(updatedHeadings(entries))) {
+      // 目次は先頭300見出しまで。そこから外れた見出しには印を持てない。
+      const link = tocLinkFor(heading);
+      if (!link) continue;
+      link.dataset.updated = mark; markedLinks.push(link);
+    }
+  }
   const ranges = [];
   for (const entry of entries.slice(0, 1000)) {
     if (entry.nodes.length) {

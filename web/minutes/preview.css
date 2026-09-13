@@ -47,7 +47,11 @@ mark { background:#e09c3c55; color:inherit; } mark.current { background:#e09c3cb
 #toc[hidden] { display:none; }
 #toc summary { padding:8px 12px; cursor:pointer; color:var(--accent); font-weight:600; user-select:none; }
 #toc nav { max-height:40vh; overflow:auto; padding:0 6px 6px; }
-#toc a { display:block; padding:6px 8px; padding-left:calc(8px + var(--depth) * 12px); border-radius:4px; text-decoration:none; overflow-wrap:anywhere; }
+#toc a { display:block; position:relative; padding:6px 8px; padding-left:calc(8px + var(--depth) * 12px); border-radius:4px; text-decoration:none; overflow-wrap:anywhere; }
+/* 変更を含む見出しの印。字下げ(--depth)を崩さないよう絶対配置で左端へ置く。 */
+#toc a[data-updated]::before { content:''; position:absolute; left:1px; top:50%; box-sizing:border-box; width:5px; height:5px; margin-top:-2.5px; border-radius:50%; }
+#toc a[data-updated="self"]::before { background:#9b72c6; }
+#toc a[data-updated="descendant"]::before { border:1px solid #9b72c6; }
 #toc a:hover,#toc a:focus-visible { background:var(--shade); }
 #toc a[aria-current] { background:#5b3e7a15; font-weight:650; }
 .toc-measure { position:fixed; visibility:hidden; pointer-events:none; width:max-content; font:650 13px/1.5 -apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif; }

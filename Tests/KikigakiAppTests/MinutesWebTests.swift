@@ -84,7 +84,8 @@ import Testing
         """)
         #expect(try await web.evaluateJavaScript("scrollY > destination * 0.8 && scrollY < destination && target.getAnimations().length === 0") as? Bool == true)
         _ = try await web.evaluateJavaScript("tick(250)")
-        #expect(try await web.evaluateJavaScript("Math.abs(target.getBoundingClientRect().top) < 2 && target.getAnimations()[0].effect.getTiming().duration === 1000 && links[25].getAttribute('aria-current') === 'location'") as? Bool == true)
+        // 着地は上端ぴったりではなく、5文字分の75pxを上に残す。
+        #expect(try await web.evaluateJavaScript("Math.abs(target.getBoundingClientRect().top - 75) < 2 && target.getAnimations()[0].effect.getTiming().duration === 1000 && links[25].getAttribute('aria-current') === 'location'") as? Bool == true)
         _ = try await web.evaluateJavaScript("navigate(10); tick(125); navigate(35); tick(250)")
         #expect(try await web.evaluateJavaScript("links[35].getAttribute('aria-current') === 'location' && document.querySelectorAll('main h2')[9].getAnimations().length === 0 && target.getAnimations().length === 0") as? Bool == true)
         _ = try await web.evaluateJavaScript("window.dispatchEvent(new Event('scroll')); tick(600)")
@@ -113,7 +114,7 @@ import Testing
         window.matchMedia = () => ({ matches:true });
         document.querySelector('.heading-toggle').click(); links[25].click();
         """)
-        #expect(try await web.evaluateJavaScript("!document.querySelector('.section-body').hidden && Math.abs(target.getBoundingClientRect().top) < 2 && target.getAnimations()[0].effect.getTiming().duration === 1000 && links[25].getAttribute('aria-current') === 'location'") as? Bool == true)
+        #expect(try await web.evaluateJavaScript("!document.querySelector('.section-body').hidden && Math.abs(target.getBoundingClientRect().top - 75) < 2 && target.getAnimations()[0].effect.getTiming().duration === 1000 && links[25].getAttribute('aria-current') === 'location'") as? Bool == true)
         // root.containsのフレーム時ガードやrender後半の検索更新では遅い。DOMを入れ替える前に取消済みかを記録する。
         _ = try await web.evaluateJavaScript("""
         window.matchMedia = () => ({ matches:false }); navigate(10);
@@ -168,11 +169,14 @@ import Testing
             #expect(try await web.evaluateJavaScript("CSS.highlights.get('updated').size") as? Int == index + 1)
         }
         try await capture("baseline-accumulated", web)
+        // 変更を含む見出しは目次にも印が出る。直下が変わった「決定事項」は塗り、上位は輪郭。
+        #expect(try await web.evaluateJavaScript("[...document.querySelectorAll('#toc nav a')].map(a => a.dataset.updated || '').join(',')") as? String == "descendant,self")
         try await Task.sleep(for: .milliseconds(4200))
         #expect(try await web.evaluateJavaScript("CSS.highlights.get('updated').size") as? Int == 3)
         // 次の依頼の送信か編集の開始で、それまでの強調を消して基準を置き直す
         preview.markUpdateBaseline()
         #expect(try await web.evaluateJavaScript("!CSS.highlights.has('updated')") as? Bool == true)
+        #expect(try await web.evaluateJavaScript("document.querySelector('#toc nav a[data-updated]') === null") as? Bool == true)
         try await capture("baseline-remarked", web)
         text += "- 会場は第2会議室\n"
         preview.document.render(text, reset: false)

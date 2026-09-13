@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRenderer, withoutFrontmatter, imageURL } from './renderer.js';
-import { changedEntries, UpdateHighlighter } from './updates.js';
+import { changedEntries, UpdateHighlighter, foldUpdateMarks } from './updates.js';
 import { isTimeline, wrapTimeline } from './timeline.js';
 const render = text => createRenderer().render(withoutFrontmatter(text), { context: 'test' });
 test('変更行は追加と書換えだけで移動と削除は光らせない', () => {
@@ -38,6 +38,19 @@ test('本文が無いうちに置いた基準は最初の描画を基準にす�
   updates.mark();
   assert.deepEqual(updates.plan(entries(['a','b'])), { entries: [], persist: true });
   assert.deepEqual(updates.plan(entries(['a','b','c'])).entries.map(e => e.key), ['c']);
+});
+test('変更を含む見出しは直接が塗り、上位は輪郭の印になる', () => {
+  // 連なりは内側の見出しから順。[2,1,0] は見出し2の中身が変わり、1と0はその上位。
+  assert.deepEqual([...foldUpdateMarks([[2, 1, 0]])], [[2, 'self'], [1, 'descendant'], [0, 'descendant']]);
+  // 上位として印が付いたあとに自身の変更が来れば塗りへ上げる
+  assert.deepEqual(foldUpdateMarks([[2, 1, 0], [1, 0]]).get(1), 'self');
+  // 逆順でも塗りは輪郭に落ちない
+  assert.deepEqual(foldUpdateMarks([[1, 0], [2, 1, 0]]).get(1), 'self');
+  assert.deepEqual(foldUpdateMarks([[1, 0], [2, 1, 0]]).get(0), 'descendant');
+  // 見出しの外にある本文は連なりを持たず、印も作らない
+  assert.deepEqual([...foldUpdateMarks([[]])], []);
+  // 目次に無い見出しは null で来る。飛ばして上位だけへ付ける
+  assert.deepEqual([...foldUpdateMarks([[null, 0]])], [[0, 'descendant']]);
 });
 
 test('frontmatterとコード内の記法を保持', () => {

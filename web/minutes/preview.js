@@ -79,11 +79,15 @@ function jumpTo(element) {
   element.scrollIntoView({ block:'center' });
   highlightLanding(element.closest('.footnote-ref') || element, 2000);
 }
+// 着地した見出しを上端へぴったり付けず、本文15pt×5文字分の余白を上に残す。
+// updateTOCPosition の現在位置は上端から80px以内の見出しを指すため、この余白はそれより小さく保つ。
+// どちらかを変えると着地した見出しを現在位置が指さなくなるので、必ず両方を見直す。
+const TOC_LANDING_MARGIN = 75;
 function navigateTOC(target) {
   cancelNavigation();
   revealElement(target);
   const start = scrollY;
-  const end = Math.max(0, Math.min(start + target.getBoundingClientRect().top,
+  const end = Math.max(0, Math.min(start + target.getBoundingClientRect().top - TOC_LANDING_MARGIN,
     document.scrollingElement.scrollHeight - innerHeight));
   const finish = () => {
     navigationFrame = null;
@@ -111,6 +115,7 @@ function updateTOCPosition() {
   if (!toc.open) return;
   let current = null;
   // 折りたたまれた見出しは位置を持たない。上限300件の表示中の見出しだけを調べる。
+  // 80pxのしきい値は TOC_LANDING_MARGIN より大きい。目次からの着地位置を内側に収めるため。
   for (let i = 0; i < headings.length; i++) {
     if (!headings[i].getClientRects().length) continue;
     if (headings[i].getBoundingClientRect().top > 80) break;
@@ -340,7 +345,8 @@ window.minutes = {
     refreshSearch();
     // 中断された途中のDOMは比較元にしない。直前に描画を完了した本文だけを保持する。
     const plan = updates.plan(updateEntries(root));
-    highlightUpdates(plan.entries, plan.persist);
+    // rebuildTOC はこの前に走るため、目次の印は描画のたびに今のリンクへ付け直す。
+    highlightUpdates(plan.entries, plan.persist, heading => tocLinks[headings.indexOf(heading)]);
     report({ kind: 'rendered', ticket, text: root.innerText });
     return true;
   },
