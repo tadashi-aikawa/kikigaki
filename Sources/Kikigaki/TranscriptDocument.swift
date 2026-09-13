@@ -42,6 +42,8 @@ final class CopyBoundary: NSView, DocumentRow {
 
 /// 行ビューを再利用する。再配置は高さの加算だけで、本文の計測は変更行だけに限る。
 final class TranscriptDocument: NSView {
+    /// 発話・手入力・AIを同じ量だけ右へ寄せる。各行の内部レイアウトは共通の原点を保つ。
+    static let leadingInset: CGFloat = 4
     override var isFlipped: Bool { true }
     var followsBottom = true
     var rows: [any DocumentRow] = []
@@ -64,7 +66,8 @@ final class TranscriptDocument: NSView {
     private func positionRangeMarkers() {
         for marker in rangeMarkers {
             addSubview(marker.view, positioned: .above, relativeTo: nil)
-            marker.view.frame = NSRect(x: 0, y: marker.row.frame.maxY - 5, width: bounds.width, height: 12)
+            marker.view.frame = NSRect(x: Self.leadingInset, y: marker.row.frame.maxY - 5,
+                                       width: max(0, bounds.width - Self.leadingInset), height: 12)
             marker.view.needsDisplay = true
         }
     }
@@ -98,10 +101,11 @@ final class TranscriptDocument: NSView {
         defer { layingOut = false }
         guard let scroll = enclosingScrollView else { return }
         let width = scroll.contentSize.width
+        let rowWidth = max(0, width - Self.leadingInset)
         var y: CGFloat = 8
         for row in rows {
-            let height = row.height(for: width)
-            row.frame = NSRect(x: 0, y: y, width: width, height: height)
+            let height = row.height(for: rowWidth)
+            row.frame = NSRect(x: Self.leadingInset, y: y, width: rowWidth, height: height)
             row.needsLayout = true
             y += height
         }

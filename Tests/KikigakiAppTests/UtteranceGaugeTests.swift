@@ -77,7 +77,10 @@ import KikigakiCore
         row.frame = NSRect(x: 0, y: 0, width: 600, height: height)
         row.layoutSubtreeIfNeeded()
         #expect(gauge.frame.maxY <= row.bounds.height)
-        #expect(gauge.frame.minX + 1 == 2)
+        let gaugeLeft = TranscriptDocument.leadingInset + gauge.frame.minX + 1
+        let avatar = try #require(row.content.subviews.compactMap { $0 as? AvatarView }.first)
+        #expect(gaugeLeft == 8)
+        #expect(TranscriptDocument.leadingInset + avatar.frame.minX - (gaugeLeft + 8) == 8)
         row.updateProgress(.fastFinal, steps: [.tentative, .fastFinal, .accurateFinal])
         #expect(gauge.accessibilityValue() as? String == "速報の確定(3段中2段目)")
         row.updateProgress(nil, steps: steps)

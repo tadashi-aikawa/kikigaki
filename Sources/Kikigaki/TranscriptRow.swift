@@ -282,7 +282,8 @@ final class TranscriptRow: NSView, DocumentRow {
         shade.frame = NSRect(x: 12, y: 2, width: max(0, bounds.width - 24), height: bounds.height - 4)
         flash.frame = shade.frame
         avatar.frame = NSRect(x: 20, y: 8, width: 25, height: 26)
-        progressGauge.frame = NSRect(x: 1, y: min(5, max(0, bounds.height - 46)), width: 10, height: 46)
+        // documentの4pt + 行内4ptで、点の左端8pt・径8pt・アバターまで8pt。
+        progressGauge.frame = NSRect(x: 3, y: min(5, max(0, bounds.height - 46)), width: 10, height: 46)
         // 太字の字形が計測幅の右端へ届くため、端数の丸めと描画の余白を確保する。
         let nameWidth = min(ceil(nameLabel.intrinsicContentSize.width) + 4,
                             max(70, bounds.width - (hint.isHidden ? 220 : 300)))
