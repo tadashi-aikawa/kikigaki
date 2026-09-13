@@ -134,6 +134,22 @@ import KikigakiCore
         var busy = try fixture(count: 3, accepted: true, crowded: true)
         busy.ai?.connections = [1: .working, 2: .blocked, 3: .idle]
         apply(busy); try capture("three-destinations-crowded")
+        try renderFeedbackReplies()
+    }
+    private func renderFeedbackReplies() throws {
+        for kind in [AIReceiveEvent.Kind.answered, .needsInput] {
+            var answered = try fixture(count: 1, accepted: true)
+            guard var conversation = answered.ai?.conversation, let request = conversation.questions.first?.request else { throw AIError.invalid("reply fixture") }
+            try conversation.receive(AIReceiveEvent(request: request, kind: kind, recordedAt: now.addingTimeInterval(-1),
+                body: kind == .answered ? "公開日までに録音と議事録の動作を確認し、残った確認事項は担当者へ伝えます。" : "動作確認の担当者は田中さんでよいですか？",
+                reason: kind == .needsInput ? "clarification" : nil), at: now)
+            answered.ai?.conversation = conversation
+            apply(answered); try capture(kind == .answered ? "answered" : "needs-input")
+            if kind == .answered {
+                answered.ai?.readOnly = true; answered.state = .idle; answered.saved = true
+                apply(answered); try capture("historical")
+            }
+        }
     }
 }
 #endif

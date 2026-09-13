@@ -35,6 +35,8 @@ public enum AITimeline {
         public let slot: Int
         /// 送信は送信時刻、返事と失敗は到着時刻。到着が無ければ送信時刻。返事待ちだけnil。
         public let date: Date?
+        /// 送信試行から結果到着までの秒数。表示専用で、失敗・取消・時刻欠損ではnil。
+        public let durationSeconds: Int?
         /// 送信の行では送信文そのもの。返事の行では上へ添える1行引用で、手動typedのときだけ非空。
         /// 送信の行と返事の行が隣り合うときは、同じ文が2回続くので引用を空にする。
         public fileprivate(set) var question: String
@@ -93,7 +95,7 @@ public enum AITimeline {
             }
             built.append((Item(requestID: request.id, number: request.number, participantName: participant.participantName,
                                automatic: automatic, kind: sendKind, anchor: sendAnchor,
-                               slot: slot(for: sendAnchor, dates: dates, endedAt: endedAt), date: sendDate,
+                               slot: slot(for: sendAnchor, dates: dates, endedAt: endedAt), date: sendDate, durationSeconds: nil,
                                question: request.displayQuestion, parentNumber: parentNumber, body: "",
                                notes: sendNotes, timeRange: request.timeRange, isUnread: false, needsAnswer: false,
                                // 送達不明は「考え中…」を出さないので、取消はこの行に置くしかない。
@@ -120,7 +122,7 @@ public enum AITimeline {
             built.append((Item(requestID: request.id, number: request.number, participantName: participant.participantName,
                                automatic: automatic, kind: reply, anchor: anchor,
                                slot: slot(for: anchor, dates: dates, endedAt: endedAt),
-                               date: waiting ? nil : arrival,
+                               date: waiting ? nil : arrival, durationSeconds: durationSeconds(for: question),
                                question: quote, parentNumber: parentNumber, body: question.result?.body ?? "",
                                notes: notes, timeRange: request.timeRange, isUnread: question.isUnread,
                                needsAnswer: question.state == .needsInput
@@ -152,6 +154,15 @@ public enum AITimeline {
             }
         }
         return ordered
+    }
+
+    private static func durationSeconds(for question: AIQuestion) -> Int? {
+        guard question.state == .answered || question.state == .needsInput,
+              let sent = question.sendAttemptedAt, let arrived = question.resultReceivedAt else { return nil }
+        let interval = arrived.timeIntervalSince(sent)
+        guard interval.isFinite, interval < Double(Int.max) else { return nil }
+        // 進行文の経過と同じく小数秒を切り捨て、時計の巻き戻りは0秒にする。
+        return Int(max(0, interval))
     }
 
     private static func replyKind(_ question: AIQuestion) -> Kind? {

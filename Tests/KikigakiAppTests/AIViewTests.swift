@@ -556,6 +556,33 @@ import KikigakiAIIO
         #expect(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.allSatisfy { $0.isWaiting })
     }
 
+    @Test(arguments: [42, 80, 3665]) func 所要時間は通常回答と確認質問の時刻右へ静止表示する(seconds: Int) throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
+        for kind in [AIReceiveEvent.Kind.answered, .needsInput] {
+            let value = try request(1, history: &history, root: root, trigger: .scheduled)
+            var conversation = AIConversation(meetingID: meeting)
+            try conversation.append(value)
+            try conversation.update(value.id) { try $0.beginSending(at: started); try $0.submitted() }
+            try conversation.receive(AIReceiveEvent(request: value, kind: kind, recordedAt: started,
+                body: "確認", reason: kind == .needsInput ? "clarification" : nil), at: started.addingTimeInterval(Double(seconds)))
+            let item = try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: .init(startedAt: started)).first { !$0.isSend })
+            var state = AIViewState(conversation: conversation)
+            let row = AIReplyRow(item: item, state: state)
+            row.frame = NSRect(x: 0, y: 0, width: 600, height: row.height(for: 600)); row.layoutSubtreeIfNeeded()
+            let expected = "· 所要 \(seconds / 60):\(seconds % 60 < 10 ? "0" : "")\(seconds % 60)"
+            #expect(row.durationText == expected && row.chipText == "自動")
+            let labels = row.subviews.compactMap { $0 as? NSTextField }
+            let duration = try #require(labels.first { $0.stringValue == expected })
+            let time = try #require(labels.first { $0.stringValue == row.timeText })
+            #expect(duration.frame.minX > time.frame.maxX)
+            #expect(duration.frame.width >= duration.intrinsicContentSize.width)
+            #expect(duration.font?.pointSize == 11 && duration.textColor == Washi.muted)
+            state.readOnly = true; row.update(item, state: state)
+            #expect(row.durationText == expected)
+        }
+    }
+
     @Test func 引用は押して全文へ伸び待機から返事へ同じビューで変わる() throws {
         _ = NSApplication.shared
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
@@ -577,6 +604,7 @@ import KikigakiAIIO
         window.apply(state); content.layoutSubtreeIfNeeded()
         let row = try #require(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.first)
         #expect(row.isWaiting && !row.quoteButton.isHidden && row.quoteButton.text == long)
+        #expect(row.durationText.isEmpty)
         let collapsed = row.frame.height
         row.quoteButton.performClick(nil); content.layoutSubtreeIfNeeded()
         #expect(row.quoteButton.expanded && row.frame.height > collapsed)
@@ -588,6 +616,7 @@ import KikigakiAIIO
         #expect(after === row && !after.isWaiting && after.quoteButton.expanded)
         #expect(descendants(row).compactMap { $0 as? MarkdownBodyView }.contains { !$0.isHidden && $0.string.hasPrefix("確認しました。") })
         #expect(after.chipVisible && !after.timeText.isEmpty)
+        #expect(after.durationText == "· 所要 0:31")
         row.quoteButton.performClick(nil); content.layoutSubtreeIfNeeded()
         #expect(!row.quoteButton.expanded)
     }

@@ -42,6 +42,34 @@ import KikigakiCore
         Utterance(speaker: 0, start: start, end: start + 2, text: text)
     }
 
+    @Test(arguments: [42.9, 80, 3665, -5]) func 所要時間は送信試行から結果到着までを保存状態から導く(seconds: Double) throws {
+        for kind in [AIReceiveEvent.Kind.answered, .needsInput] {
+            let meeting = UUID(); var conversation = AIConversation(meetingID: meeting)
+            let value = try request(in: meeting, number: 1)
+            try send(&conversation, value, at: 30)
+            let event = try AIReceiveEvent(request: value, kind: kind, recordedAt: Date(timeIntervalSince1970: 31),
+                body: "返事", reason: kind == .needsInput ? "clarification" : nil)
+            try conversation.receive(event, at: Date(timeIntervalSince1970: 30 + seconds))
+            let restored = try AIJSON.decode(AIConversation.self, from: AIJSON.encode(conversation))
+            let items = AITimeline.items(conversation: restored, utterances: [], timeline: timeline)
+            #expect(items.first(where: { !$0.isSend })?.durationSeconds == Int(max(0, seconds)))
+            #expect(items.filter(\.isSend).allSatisfy { $0.durationSeconds == nil })
+        }
+    }
+
+    @Test func 失敗と取消と結果未到着では所要時間を出さない() throws {
+        let meeting = UUID(); var conversation = AIConversation(meetingID: meeting)
+        let value = try request(in: meeting, number: 1)
+        try send(&conversation, value, at: 30)
+        #expect(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline).allSatisfy { $0.durationSeconds == nil })
+        var failed = conversation
+        try answer(&failed, value, at: 80, kind: .failed, reason: "work_failed")
+        #expect(AITimeline.items(conversation: failed, utterances: [], timeline: timeline).allSatisfy { $0.durationSeconds == nil })
+        try conversation.update(value.id) { try $0.cancel(at: Date(timeIntervalSince1970: 40)) }
+        try answer(&conversation, value, at: 80)
+        #expect(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline).allSatisfy { $0.durationSeconds == nil })
+    }
+
     @Test func 送信の形は声と手動入力と自動で分かれ引用は手動入力だけに付く() throws {
         let meeting = UUID()
         var conversation = AIConversation(meetingID: meeting)

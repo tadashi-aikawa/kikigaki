@@ -274,6 +274,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
     private let nameLabel = Washi.label(size: 12, weight: .semibold)
     private let chip = AITagPill()
     private let timeLabel = Washi.label(color: Washi.muted)
+    private let durationLabel = Washi.label(size: 11, color: Washi.muted)
     private let pill = AIStatusPill()
     private let quote = AIQuoteButton()
     /// 引用の左罫。ボタンの内側へ描くと文字に隠れるので、本文の左端へ別のビューで置く。
@@ -293,6 +294,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
     var chipText: String { chip.text }
     var chipVisible: Bool { !chip.isHidden }
     var timeText: String { timeLabel.isHidden ? "" : timeLabel.stringValue }
+    var durationText: String { durationLabel.isHidden ? "" : durationLabel.stringValue }
     var noteText: String { notes.isHidden ? "" : notes.stringValue }
     var failureText: String { failureLabel.stringValue }
     var quoteButton: AIQuoteButton { quote }
@@ -328,13 +330,15 @@ final class AIReplyRow: NSView, AITimelineRowView {
         super.init(frame: .zero)
         avatar.accent = Washi.ai
         timeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        durationLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        durationLabel.lineBreakMode = .byTruncatingTail
         notes.isSelectable = true; notes.maximumNumberOfLines = 0; notes.lineBreakMode = .byWordWrapping
         failureLabel.lineBreakMode = .byTruncatingTail
         Washi.surface(quoteRule, color: Washi.rule)
         pill.callback = { [weak self] in self?.markReadIfNeeded() }
         markdownBody.onClick = { [weak self] in self?.markReadIfNeeded() }
         quote.onToggle = { [weak self] in self?.onResize?() }
-        for view in [avatar, nameLabel, chip, timeLabel, pill, quoteRule, quote, markdownBody, progressView,
+        for view in [avatar, nameLabel, chip, timeLabel, durationLabel, pill, quoteRule, quote, markdownBody, progressView,
                      confirmationMark, notes, failureLabel, replyAction, cancelAction, retryAction] { addSubview(view) }
         update(item, state: state)
     }
@@ -353,6 +357,10 @@ final class AIReplyRow: NSView, AITimelineRowView {
         chip.text = item.automatic ? "自動" : "AI"
         timeLabel.stringValue = item.date.map(AIRowMetrics.clock.string(from:)) ?? ""
         timeLabel.toolTip = item.date.map(AIRowMetrics.clockWithSeconds.string(from:))
+        durationLabel.stringValue = item.durationSeconds.map {
+            "· 所要 \($0 / 60):\($0 % 60 < 10 ? "0" : "")\($0 % 60)"
+        } ?? ""
+        durationLabel.toolTip = durationLabel.stringValue.isEmpty ? nil : durationLabel.stringValue
         // 返答したあとも本文が問いであることの印は残す。状態ではないので色だけ落とす。
         confirmationMark.textColor = item.needsAnswer ? Washi.muted : Washi.rule
         if let style = pillStyle { pill.update(style) }
@@ -385,6 +393,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
         for view in [avatar, nameLabel] { view.isHidden = failure }
         // 失敗の帯にも確定時刻を出す。返事待ちは到着していないので時刻も種別も出さない。
         timeLabel.isHidden = isWaiting
+        durationLabel.isHidden = failure || isWaiting || item.durationSeconds == nil
         chip.isHidden = failure || isWaiting
         pill.isHidden = pillStyle == nil
         quote.isHidden = failure || item.question.isEmpty
@@ -454,6 +463,10 @@ final class AIReplyRow: NSView, AITimelineRowView {
                                 width: ceil(timeLabel.intrinsicContentSize.width) + 4, height: 18)
         let pillWidth = ceil(pill.intrinsicContentSize.width)
         pill.frame = NSRect(x: bounds.width - 20 - pillWidth, y: 8, width: pillWidth, height: 20)
+        let durationRight = pill.isHidden ? bounds.width - 20 : pill.frame.minX - 8
+        durationLabel.frame = NSRect(x: timeLabel.frame.maxX + 6, y: 9,
+            width: max(0, min(ceil(durationLabel.intrinsicContentSize.width) + 4,
+                             durationRight - timeLabel.frame.maxX - 6)), height: 16)
         let bodyWidth = AIRowMetrics.bodyWidth(bounds.width)
         // 引用は本文より12pt字下げし、空いた左へ罫を置く。従属関係を字下げと罫の両方で示す。
         quote.frame = NSRect(x: AIRowMetrics.bodyX + 12, y: 31, width: bodyWidth - 12, height: max(0, measuredQuote - 8))
