@@ -345,7 +345,8 @@ final class AIReplyRow: NSView, AITimelineRowView {
         self.item = item; self.state = state
         nameLabel.stringValue = item.participantName
         nameLabel.textColor = isWaiting ? Washi.muted : Washi.ink
-        avatar.tentative = isWaiting
+        // 返事待ちでも宛先は確定済み。画像の取得中・失敗時もAIのイニシャルを使う。
+        avatar.tentative = false
         avatar.initial = String(item.participantName.prefix(1))
         avatar.setAccessibilityLabel(item.participantName)
         avatar.needsDisplay = true

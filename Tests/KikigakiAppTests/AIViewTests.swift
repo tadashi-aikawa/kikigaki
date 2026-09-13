@@ -112,7 +112,7 @@ import KikigakiAIIO
         try data.write(to: root.appendingPathComponent(key))
         #expect(try await AvatarStore.load(source, cacheDirectory: root) == data)
     }
-    @Test func AIの画像は非同期で反映され未指定や取得失敗は紫のイニシャルになる() async throws {
+    @Test(arguments: [false, true]) func AIの画像は非同期で反映され未指定や取得失敗は紫のイニシャルになる(waiting: Bool) async throws {
         _ = NSApplication.shared
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
@@ -120,8 +120,10 @@ import KikigakiAIIO
         var conversation = AIConversation(meetingID: meeting)
         try conversation.append(first)
         try conversation.update(first.id) { try $0.beginSending(at: started.addingTimeInterval(330)); try $0.submitted() }
-        _ = try conversation.receive(AIReceiveEvent(request: first, kind: .answered, recordedAt: started.addingTimeInterval(331),
-            body: "確認しました。\n\n- 会場は本社会議室です\n- 受付は9時30分に始めます"), at: started.addingTimeInterval(332))
+        if !waiting {
+            _ = try conversation.receive(AIReceiveEvent(request: first, kind: .answered, recordedAt: started.addingTimeInterval(331),
+                body: "確認しました。\n\n- 会場は本社会議室です\n- 受付は9時30分に始めます"), at: started.addingTimeInterval(332))
+        }
         let imagePath = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Resources/kikigaki.icns").path
         var ai = AIViewState(conversation: conversation)
@@ -140,11 +142,11 @@ import KikigakiAIIO
         let row = try #require(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.first)
         let avatar = try #require(descendants(row).compactMap { $0 as? AvatarView }.first)
         for _ in 0..<100 where avatar.image == nil { try await Task.sleep(for: .milliseconds(20)) }
-        #expect(avatar.image != nil)
+        #expect(avatar.image != nil && !avatar.tentative)
         content.layoutSubtreeIfNeeded()
         let clocks = window.transcriptDocument.rows.flatMap { descendants($0).compactMap { $0 as? NSTextField } }
             .filter { $0.stringValue.range(of: "^\\d{2}:\\d{2}:\\d{2}$", options: .regularExpression) != nil }
-        #expect(clocks.count == 4) // 発話・手入力・人側の送信・AIの返事
+        #expect(clocks.count == (waiting ? 3 : 4)) // 発話・手入力・人側の送信・到着後だけAIの返事
         #expect(clocks.allSatisfy { $0.frame.width >= $0.intrinsicContentSize.width })
         try capture("feedback-avatar-900", view: content.superview!)
         state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
@@ -154,13 +156,16 @@ import KikigakiAIIO
         window.window!.setContentSize(NSSize(width: 900, height: 750))
         state.ai?.avatarSources[1] = nil
         window.apply(state)
-        #expect(avatar.image == nil && avatar.initial == "会")
+        #expect(avatar.image == nil && avatar.initial == "会" && !avatar.tentative)
         #expect(avatar.accent?.background == Washi.ai.background)
         try capture("feedback-initial-900", view: content.superview!)
         state.ai?.avatarSources[1] = root.appendingPathComponent("missing.png").path
         window.apply(state)
         try await Task.sleep(for: .milliseconds(50))
-        #expect(avatar.image == nil && avatar.initial == "会")
+        #expect(avatar.image == nil && avatar.initial == "会" && !avatar.tentative)
+        state.ai?.readOnly = true; state.ai?.connections[1] = .disconnected
+        window.apply(state)
+        #expect(!avatar.tentative)
     }
     private func request(_ number: Int, history: inout AIStreamHistory, root: URL, question: String = "抜けている観点はありますか",
                          voiceStart: Double? = nil, parent: UUID? = nil, name: String = "迅雷",

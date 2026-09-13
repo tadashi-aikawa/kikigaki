@@ -10,21 +10,25 @@ import KikigakiCore
     private let now = Date()
     private var start: Date { now.addingTimeInterval(-600) }
     private let suite = "kikigaki-ai-progress-capture-" + UUID().uuidString
+    private let feedback = ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_FEEDBACK"]
     init(output: String) { self.output = URL(fileURLWithPath: output) }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Task { @MainActor in
         do {
             try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
             controller = TranscriptWindowController(shouldReduceMotion: { true }, minutesDefaults: UserDefaults(suiteName: suite)!)
             controller.window?.setFrameAutosaveName("")
             controller.window?.setContentSize(NSSize(width: 600, height: 740))
             controller.show()
-            try render()
+            if feedback != nil { try await renderFeedback() }
+            else { try render() }
             controller.window?.orderOut(nil)
             UserDefaults.standard.removePersistentDomain(forName: suite)
             NSApp.terminate(nil)
         } catch {
             FileHandle.standardError.write(Data("AI progress capture failed: \(error)\n".utf8))
             exit(1)
+        }
         }
     }
     private func fixture(count: Int, accepted: Bool, deliveryUnknown: Bool = false, crowded: Bool = false) throws -> SessionSnapshot {
@@ -39,7 +43,7 @@ import KikigakiCore
             var history = try AIStreamHistory(meetingID: meeting)
             let snapshot = try history.prepare(lines: ["[00:00:01] 田中: " + lines[0]], outputDirectory: output)
             let participant = AIParticipantContext(streamID: snapshot.streamID, requestID: UUID(), sessionGeneration: 1,
-                participantName: ["迅雷", "ミネルヴァ", "クロディーヌ"][(slot - 1) % 3], cliPath: "/tmp/capture-helper",
+                participantName: [feedback == nil ? "迅雷" : "オブシディア", "ミネルヴァ", "クロディーヌ"][(slot - 1) % 3], cliPath: "/tmp/capture-helper",
                 sessionPath: output.appendingPathComponent(".kikigaki-context/\(meeting)/"
                     + AIEnvelope.sessionPath(slot: slot, generation: 1)).path,
                 requestToken: "capture", question: "", capturedAt: now.addingTimeInterval(-85),
@@ -56,9 +60,11 @@ import KikigakiCore
                                          at: now.addingTimeInterval(-78))
             }
         }
-        return SessionSnapshot(ai: AIViewState(conversation: conversation, connection: .idle,
+        var ai = AIViewState(conversation: conversation, connection: .idle,
             connections: Dictionary(uniqueKeysWithValues: (1...count).map { ($0, AIConnectionStatus.idle) }),
-            generations: Dictionary(uniqueKeysWithValues: (1...count).map { ($0, 1) })), state: .recording,
+            generations: Dictionary(uniqueKeysWithValues: (1...count).map { ($0, 1) }))
+        if let source = ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_AVATAR"] { ai.avatarSources[1] = source }
+        return SessionSnapshot(ai: ai, state: .recording,
             utterances: utterances, timeline: MeetingTimeline(startedAt: start), names: SpeakerNames([0: "田中", 1: "佐藤"]),
             elapsed: 600, markdownURL: output.appendingPathComponent("fixture.md"), detectedSpeakerSlots: [0, 1])
     }
@@ -110,6 +116,24 @@ import KikigakiCore
         var unaccepted = try fixture(count: 1, accepted: false)
         unaccepted.ai?.connections[1] = .blocked
         apply(unaccepted); try capture("blocked-before-accept")
+    }
+    private func renderFeedback() async throws {
+        var state = try fixture(count: 1, accepted: true)
+        state.ai?.connections[1] = .working
+        apply(state)
+        guard let row = controller.transcriptDocument.rows.compactMap({ $0 as? AIReplyRow }).first,
+              let avatar = row.subviews.compactMap({ $0 as? AvatarView }).first else { throw AIError.invalid("avatar row") }
+        for _ in 0..<100 where avatar.image == nil { try await Task.sleep(for: .milliseconds(20)) }
+        guard avatar.image != nil else { throw AIError.invalid("avatar load") }
+        apply(state); try capture(feedback == "before" ? "before-working" : "working")
+        if feedback == "before" { return }
+        state.ai?.connections[1] = .disconnected
+        apply(state); try capture("disconnected")
+        state.ai?.readOnly = true; state.state = .idle; state.saved = true
+        apply(state); try capture("historical-waiting")
+        var busy = try fixture(count: 3, accepted: true, crowded: true)
+        busy.ai?.connections = [1: .working, 2: .blocked, 3: .idle]
+        apply(busy); try capture("three-destinations-crowded")
     }
 }
 #endif
