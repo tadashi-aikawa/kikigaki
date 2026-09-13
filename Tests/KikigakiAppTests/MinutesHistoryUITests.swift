@@ -106,6 +106,49 @@ import Testing
         #expect(view.historyPopup.isHidden)
     }
 
+    @Test func 一覧の外をクリックすれば閉じ行のクリックでは閉じない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let preferences = MinutesTestDefaults()
+        preferences.value.set(["/tmp/会議A.md", "/tmp/会議B.md"], forKey: MinutesHistoryStore.key)
+        let view = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 600, height: 740), defaults: preferences.value)
+        let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = view; window.orderFront(nil); view.layoutSubtreeIfNeeded()
+        defer { view.stop(); window.orderOut(nil) }
+        var chosen: String?
+        view.onSelect = { chosen = $0 }
+        func focus() async throws {
+            window.makeFirstResponder(nil)
+            #expect(window.makeFirstResponder(view.pathField))
+            try await eventually { !view.historyPopup.isHidden }
+        }
+        func middle(_ rect: NSRect) -> NSPoint { NSPoint(x: rect.midX, y: rect.midY) }
+        func event(at point: NSPoint, in target: NSWindow? = nil) throws -> NSEvent {
+            let location = target == nil ? view.convert(point, to: nil) : point
+            return try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: location, modifierFlags: [], timestamp: 0,
+                windowNumber: (target ?? window).windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        }
+        try await focus()
+        // first responderを取らない余白のクリックでも閉じ、編集も終える。実際の配送経路で確かめる。
+        NSApp.sendEvent(try event(at: NSPoint(x: 12, y: 12)))
+        #expect(view.historyPopup.isHidden && view.pathField.currentEditor() == nil)
+        // 行とパス欄はNSButton・NSTextFieldのマウス追跡へ入るため、判定だけを直接通す。
+        try await focus()
+        let row = try #require(view.historyPopup.rows.first)
+        let onRow = try event(at: middle(view.convert(row.bounds, from: row)))
+        #expect(view.handleOutsideClick(onRow) === onRow)
+        #expect(!view.historyPopup.isHidden)
+        #expect(NSApp.sendAction(try #require(row.action), to: row.target, from: row))
+        #expect(chosen == "/tmp/会議A.md" && view.historyPopup.isHidden)
+        try await focus()
+        #expect(view.handleOutsideClick(try event(at: middle(view.convert(view.pathField.bounds, from: view.pathField)))) != nil)
+        #expect(!view.historyPopup.isHidden && view.pathField.currentEditor() != nil)
+        // 別ウィンドウのクリックは対象外。
+        let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        defer { sheet.orderOut(nil) }
+        #expect(view.handleOutsideClick(try event(at: NSPoint(x: 10, y: 10), in: sheet)) != nil)
+        #expect(!view.historyPopup.isHidden)
+    }
+
     @Test func 行クリックと不存在の表示と余白と非キー化と高さ不足() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let preferences = MinutesTestDefaults()

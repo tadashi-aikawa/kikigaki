@@ -81,6 +81,7 @@ private final class MinutesPathField: NSTextField {
     let historyPopup = MinutesHistoryPopup(frame: .zero)
     private var historyFocusGeneration = 0
     private var resignObserver: NSObjectProtocol?
+    private var historyClickMonitor: Any?
     init(frame: NSRect, defaults: UserDefaults) {
         history = MinutesHistoryStore(defaults: defaults)
         super.init(frame: frame)
@@ -207,7 +208,10 @@ private final class MinutesPathField: NSTextField {
         addSubview(historyPopup, positioned: .above, relativeTo: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
-    deinit { if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) } }
+    deinit {
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        if let historyClickMonitor { NSEvent.removeMonitor(historyClickMonitor) }
+    }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if let resignObserver { NotificationCenter.default.removeObserver(resignObserver); self.resignObserver = nil }
@@ -223,9 +227,34 @@ private final class MinutesPathField: NSTextField {
         let paths = history.paths
         historyPopup.setPaths(paths)
         historyPopup.isHidden = paths.isEmpty
+        if !historyPopup.isHidden { watchOutsideClicks() }
         layoutHistory()
     }
-    func closeHistory() { historyFocusGeneration += 1; historyPopup.isHidden = true; historyPopup.clearSelection() }
+    func closeHistory() {
+        historyFocusGeneration += 1; historyPopup.isHidden = true; historyPopup.clearSelection()
+        if let historyClickMonitor { NSEvent.removeMonitor(historyClickMonitor); self.historyClickMonitor = nil }
+    }
+    /// 一覧を出している間だけ、first responderを取らないヘッダーや会話のクリックでも閉じる。
+    /// イベントは飲み込まず、クリック先の操作はそのまま行わせる。
+    private func watchOutsideClicks() {
+        guard historyClickMonitor == nil else { return }
+        historyClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            MainActor.assumeIsolated {
+                guard let self else { return event }
+                return self.handleOutsideClick(event)
+            }
+        }
+    }
+    /// テストはNSButtonのマウス追跡ループへ入らないよう、この判定を直接呼ぶ。
+    func handleOutsideClick(_ event: NSEvent) -> NSEvent {
+        guard !historyPopup.isHidden, let window, event.window === window else { return event }
+        let point = convert(event.locationInWindow, from: nil)
+        let insideField = convert(pathField.bounds, from: pathField).insetBy(dx: -2, dy: -2).contains(point)
+        guard !historyPopup.frame.contains(point), !insideField else { return event }
+        closeHistory()
+        window.makeFirstResponder(nil)
+        return event
+    }
     override func layout() { super.layout(); layoutHistory() }
     private func layoutHistory() {
         guard !historyPopup.isHidden else { return }
