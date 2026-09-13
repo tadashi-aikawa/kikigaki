@@ -127,6 +127,7 @@ ai/
   requests/<request_id>.json    固定したenvelope、送信時点の問い、返送トークン
   inbox/<request_id>.accept.json
   inbox/<request_id>.result.json
+  inbox/<request_id>.progress.json
   inbox/notify-<event_id>.json
   state.json                    送信試行、取り込み順、未読、表示状態
   archive.json                  最後に永続化した人間の保存用データ
@@ -134,7 +135,7 @@ ai/
 
 manifestとrequestはアプリが送信前に保存する。sessionの接続情報更新、state、archiveはアプリの会議単位の直列処理で原子的に更新する。requestは作成後に変更しない。返送側は既知sessionからrequestを引き、自由な出力先指定を受け付けない。
 
-acceptとresultはrequest内で各一つ。resultのkindはanswered、needs_input、failedのいずれか。ファイル名を固定することでCLI再実行も同じ論理イベントとして扱う。notifyはプロバイダのイベント識別子を使い、なければ正規化したペイロードのdigestでIDを作る。モデルにevent ID・会議ID・保存時刻を捏造させず、同梱CLIがrequestの固定情報から生成する。
+acceptとresultはrequest内で各一つ。resultのkindはanswered、needs_input、failedのいずれか。ファイル名を固定することでCLI再実行も同じ論理イベントとして扱う。progressもrequest内で一つで、AIが編集へ入ったことだけを伝える自己申告であり、受領・完了・回答の代わりにはならない。版1の `phase` は `editing` だけで、`total` は1〜999の任意。最初の1件だけが有効で、2回目以降は保存も失敗もせず同じevent IDを返す。結果より後に保存された申告はアプリが無視する。`schema_version` は据え置き、request・envelope・reply・state.jsonの形式は変えない。notifyはプロバイダのイベント識別子を使い、なければ正規化したペイロードのdigestでIDを作る。モデルにevent ID・会議ID・保存時刻を捏造させず、同梱CLIがrequestの固定情報から生成する。
 
 ```json
 {
@@ -177,6 +178,7 @@ archiveは録音停止時と停止後の改名・統合時だけに更新し、�
 | `reply --session <path> --request <UUID> --token <token> --kind answered` | stdinのMarkdownを最終回答として保存する。 |
 | `reply ... --kind needs_input --reason clarification` | stdinを確認質問として保存する。全文要求はreasonをcontext_missingとする。 |
 | `reply ... --kind failed --reason <code>` | stdinの失敗理由を保存する。本文への機密のエラーダンプ混入を避ける。 |
+| `progress --session <path> --request <UUID> --token <token> --editing [--total N]` | 編集へ入ったことだけを1回保存する。本文なし。stdinを読まない。 |
 | `notify --provider codex --session <path> --token <session-token> <payload-json>` | Codexの最後のJSON引数を解釈し、フック観測を保存する。 |
 | `notify --provider claude --session <path> --token <session-token>` | Claudeのstdin JSONからフック観測を保存する。 |
 
@@ -190,7 +192,7 @@ replyは通常 `context_received: true`。文脈を読めなかったcontext_mis
 
 Codexには引数配列で `-c` と、TOMLとして正しくエンコードした `notify=["<同梱CLI>","notify","--provider","codex","--session","<path>","--token","<token>"]` を渡す。引用符やバッククォートをシェルへ解釈させない。当該会議セッションの既存notifyを差し替え、元の通知スクリプトは連鎖して呼ばない。既存の通知音・本文通知が会議用途の既定無効を破るため。グローバル設定ファイルは変更せず、通常のCodexセッションには影響させない。
 
-Claudeには専用の0600のJSON設定ファイルを作り、`--settings <絶対パス>` を渡す。Stopのcommandフックが同梱CLIのnotifyを呼ぶ。commandフックは、固定コマンドと引用済みのパス・トークンだけで組み立てる。会話・回答本文はコマンド文字列へ埋めず、stdinで受け取る。Claude Code 2.1.263では生成JSONのSessionStartと既存のherdr SessionStartが両方動き、同じイベントのhooksが併合された。既存フックをコピーしたり置換したりしない。詳細は [段2の実測](ai-participant-spike.md)。
+Claudeには専用の0600のJSON設定ファイルを作り、`--settings <絶対パス>` を渡す。StopとPreToolUseのcommandフックが同梱CLIのnotifyを呼ぶ。PreToolUseのmatcherは `Edit|Write|MultiEdit|NotebookEdit` に限り、進行表示の編集の段を補助するためだけに使う。フックを受領・返答の根拠にしない既存の契約は変えない。Codexにはツール単位のフックが無いので、Codexの編集は自己申告だけで観測する。commandフックは、固定コマンドと引用済みのパス・トークンだけで組み立てる。会話・回答本文はコマンド文字列へ埋めず、stdinで受け取る。Claude Code 2.1.263では生成JSONのSessionStartと既存のherdr SessionStartが両方動き、同じイベントのhooksが併合された。既存フックをコピーしたり置換したりしない。詳細は [段2の実測](ai-participant-spike.md)。
 
 同じ生成JSONの `permissions.allow` に `Bash(<同梱CLIの絶対パス> *)` だけを追加する。既定autoでは未知のMach-Oとして拒否されたが、このルールを渡したセッションではautoのまま返送できた。`--permission-mode` は追加せず、利用者の設定を保つ。これは本番の返送経路にも必要な設定で、検証専用の緩和ではない。グローバルのsettingsは変更しない。ask・denyや組織ポリシーが優先して返送できない場合はペインで確認してもらい、自動で権限を拡大しない。[^permissions]
 
@@ -198,6 +200,7 @@ Claudeには専用の0600のJSON設定ファイルを作り、`--settings <絶�
 | --- | --- |
 | Codex | typeがagent-turn-completeか確認し、thread-id・turn-idを保存する。本文は保存しない。 |
 | Claude | hook_event_nameがStopか確認し、session_id・prompt_id・背景処理の実行中フラグを保存する。本文は保存しない。 |
+| Claude | hook_event_nameがPreToolUseなら、tool_nameがEdit・Write・MultiEdit・NotebookEditのいずれかであることを確認し、session_idとツール名だけを保存する。tool_inputの中身は保存しない。 |
 
 フックは応答の区切りの観測であり、質問への回答や作業完了の正本ではない。Codex 0.153.4では本回答に加えてタイトル生成の別thread・別turnからもnotifyが届いた。タイトル側のinput-messagesにも元入力の一部が入り、通常の後続turnでは過去入力が累積した。envelopeやrequest IDの存在だけで当該質問の完了へ結び付けない。
 

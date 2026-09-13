@@ -268,6 +268,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
                 let request = question.request
                 nextProgress[request.id] = AIProgress(question: question, connection: ai.connection(for: request),
                     connectionGeneration: ai.generation(for: request), isUnconfirmed: ai.unconfirmed.contains(request.id),
+                    editing: ai.editing[request.id],
                     previous: aiProgress[request.id], isHistorical: ai.readOnly)
             }
         }
@@ -501,7 +502,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         (view as? AISendLineRow)?.onCancel = { [weak self] in self?.onCancelAI?(id) }
         (view as? AITypedSendRow)?.onCancel = { [weak self] in self?.onCancelAI?(id) }
         if let reply = view as? AIReplyRow {
-            reply.progressView.update(aiProgress[id], reduceMotion: shouldReduceMotion())
+            reply.updateProgress(aiProgress[id], reduceMotion: shouldReduceMotion())
             reply.updateAvatar(store: avatars)
             reply.onRead = { [weak self] in self?.onReadAI?(id) }
             reply.onReply = { [weak self] in self?.onAskAI?(id) }
@@ -642,7 +643,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         statusChip.update(snapshot, reduceMotion: shouldReduceMotion())
         compactFooter.update(snapshot, reduceMotion: shouldReduceMotion())
         for row in aiRows.values {
-            (row as? AIReplyRow)?.progressView.update(aiProgress[row.item.requestID], reduceMotion: shouldReduceMotion())
+            (row as? AIReplyRow)?.updateProgress(aiProgress[row.item.requestID], reduceMotion: shouldReduceMotion())
         }
     }
     private func showRename(slot: Int, relativeTo view: NSView) {

@@ -86,6 +86,8 @@ import KikigakiCore
             saveFailed: record.saveWarning != nil, generation: controller.generation,
             defaultSlot: controller.defaultSlot, connections: connections, generations: generations,
             participants: participants, openablePanes: openablePanes)
+        // 過去会議でも編集の申告は受信箱に残っているので、保存済みイベントから静止で再現する。
+        state.editing = controller.editing
         state.avatarSources = Dictionary(uniqueKeysWithValues: record.manifest.profiles.compactMap { profile in
             profile.avatar.map { (profile.slot, $0) }
         })
@@ -120,8 +122,9 @@ import KikigakiCore
             }
             if let reply = row as? AIReplyRow {
                 let question = state.conversation?.questions.first { $0.request.id == item.requestID }
-                reply.progressView.update(question.map {
-                    AIProgress(question: $0, connection: .unknown, connectionGeneration: nil, isHistorical: true)
+                reply.updateProgress(question.map {
+                    AIProgress(question: $0, connection: .unknown, connectionGeneration: nil,
+                               editing: state.editing[item.requestID], isHistorical: true)
                 }, reduceMotion: true)
                 reply.updateAvatar(store: avatars)
                 reply.onRead = { [weak self, weak record] in

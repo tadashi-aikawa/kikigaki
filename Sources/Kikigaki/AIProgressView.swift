@@ -102,7 +102,8 @@ final class AIProgressView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let progress else { return }
         let width = min(234, bounds.width - 2)
-        let segment = max(0, (width - 24) / 5)
+        let count = CGFloat(AIProgress.Stage.allCases.count)
+        let segment = max(0, (width - (count - 1) * 6) / count)
         for stage in AIProgress.Stage.allCases {
             let observed = progress.observedStages.contains(stage)
             let current = stage == progress.currentStage && !progress.isHistorical

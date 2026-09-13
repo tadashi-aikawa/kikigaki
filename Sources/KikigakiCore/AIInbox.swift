@@ -18,6 +18,10 @@ public struct AIInbox: Sendable {
         try Self.decodeMinutes(readBytes(filename: filename, for: request, suffixes: ["minutes"]), filename: filename, for: request)
     }
 
+    public func readProgress(filename: String, for request: AIRequest) throws -> AIProgressEvent {
+        try Self.decodeProgress(readBytes(filename: filename, for: request, suffixes: ["progress"]), filename: filename, for: request)
+    }
+
     private func readBytes(filename: String, for request: AIRequest, suffixes: [String]) throws -> Data {
         try request.validate()
         try request.envelope.validatePaths(outputDirectory: outputDirectory)
@@ -68,6 +72,14 @@ public struct AIInbox: Sendable {
     public static func decodeMinutes(_ data: Data, filename: String, for request: AIRequest) throws -> AIMinutesEvent {
         guard data.count <= AILimits.eventBytes else { throw AIError.tooLarge }
         let event = try AIJSON.decode(AIMinutesEvent.self, from: data)
+        try event.validate(for: request)
+        guard filename == event.filename else { throw AIError.mismatch }
+        return event
+    }
+
+    public static func decodeProgress(_ data: Data, filename: String, for request: AIRequest) throws -> AIProgressEvent {
+        guard data.count <= AILimits.eventBytes else { throw AIError.tooLarge }
+        let event = try AIJSON.decode(AIProgressEvent.self, from: data)
         try event.validate(for: request)
         guard filename == event.filename else { throw AIError.mismatch }
         return event

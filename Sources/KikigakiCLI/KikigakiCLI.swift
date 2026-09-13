@@ -7,6 +7,7 @@ import KikigakiCore
         if CommandLine.arguments.dropFirst() == ["--help"] {
             print("kikigaki-cli accept|reply|notify --session <path> --token <token> [--request <UUID>] [--kind answered|needs_input|failed] [--reason <code>] [--provider codex|claude] [payload-json]")
             print("kikigaki-cli minutes --session <session_path> --request <request_id> --token <request_token> --path <absolute.md>")
+            print("kikigaki-cli progress --session <session_path> --request <request_id> --token <request_token> --editing [--total <1-999>]")
             return
         }
         do {

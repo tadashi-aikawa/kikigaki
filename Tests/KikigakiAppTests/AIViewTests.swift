@@ -761,7 +761,7 @@ import KikigakiAIIO
         window.update()
         let pending = try #require(descendants(window.window!.contentView!).compactMap { $0 as? AIReplyRow }.first)
         #expect(pending.progressView.progress?.isHistorical == true)
-        #expect(pending.progressView.displayText == "送信済み · 受領待ち")
+        #expect(pending.progressView.displayText == "送信済み · AIが読込中")
         #expect(!pending.progressView.timerRunning && pending.noteText.isEmpty)
         let event = try AIReceiveEvent(request: request, kind: .answered, recordedAt: Date(), body: "停止後の回答です。")
         try AIFileStore(root: root).write(AIJSON.encode(event), to: [".kikigaki-context", record.manifest.meetingID.uuidString, "ai", "inbox", request.id.uuidString + ".result.json"], replacing: false)

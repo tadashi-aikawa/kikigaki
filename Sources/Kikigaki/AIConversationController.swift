@@ -26,6 +26,8 @@ final class AIConversationController {
         var isSending = false
         var idleSince: Date?
         var hookBackgroundRunning = false
+        /// 最後に観測した編集系ツールの呼び出し時刻。補助の観測で、受領・返答の根拠にしない
+        var hookEditingAt: Date?
         var warning: String?
         var preparedSessionName: String?
         /// フック観測の置き場と、その通知が名乗る世代。準備済みセッションを引き継いだ枠は、
@@ -44,6 +46,8 @@ final class AIConversationController {
     private(set) var conversation: AIConversation
     private var recoveredRangeHistories: [Int: AIStreamHistory] = [:]
     private(set) var invalidInboxFiles: [String] = []
+    /// 編集へ入ったと確認できた依頼。AIの自己申告が正で、Claudeのフック観測が補助
+    private(set) var editing: [UUID: AIEditingReport] = [:]
     private var lastScanReturnStatus: [UUID: Bool] = [:]
     var onChange: (() -> Void)?
     /// 明示的なreplay検証だけで、受信直前に人のパス指定を再現する。
@@ -488,12 +492,42 @@ final class AIConversationController {
                 for slot in notify { onResult?(slot) }
             } catch { scanWarning = "返事の取り込み状態を保存できません" }
         }
+        let oldEditing = editing
+        scanEditing()
         let returns = Dictionary(uniqueKeysWithValues: conversation.questions.map { ($0.request.id, isReturnUnconfirmed($0)) })
         let returnChanged = returns != lastScanReturnStatus
         lastScanReturnStatus = returns
-        if changed || returnChanged || oldWarning != warning || oldInvalid != invalidInboxFiles || oldBackground != channels.mapValues({ $0.hookBackgroundRunning }) {
+        if changed || returnChanged || oldEditing != editing || oldWarning != warning || oldInvalid != invalidInboxFiles
+            || oldBackground != channels.mapValues({ $0.hookBackgroundRunning }) {
             onChange?()
         }
+    }
+
+    /// 自己申告を正、フック観測を補助にして編集の到達だけを集める。
+    /// 作業の完了・正しさは意味せず、保存する状態にもしない。
+    private func scanEditing() {
+        var reports: [UUID: AIEditingReport] = [:]
+        for q in conversation.questions where q.sendAttemptedAt != nil {
+            let name = q.request.id.uuidString + ".progress.json"
+            do {
+                let bytes = try files.read(base + ["inbox", name], limit: AILimits.eventBytes)
+                let event = try AIInbox.decodeProgress(bytes, filename: name, for: q.request)
+                // 結果到着より後の申告は無視する。過去会議でも同じ順序で再現できる。
+                if let result = q.result, event.recordedAt > result.recordedAt { continue }
+                reports[q.request.id] = event.report
+            } catch AIFileError.missing { continue }
+            catch { invalidInboxFiles.append(name); scanWarning = "受信箱のイベントを検証できません" }
+        }
+        // フックは総数を出せず、どのrequestのものかも名乗らない。返事待ちの依頼へだけ、
+        // 送信より後の観測を補助として付ける。自己申告のある依頼は上書きしない。
+        for q in conversation.questions where q.result == nil && reports[q.request.id] == nil {
+            guard let sent = q.sendAttemptedAt, q.state != .cancelled, q.state != .failed,
+                  let channel = channels[slot(of: q.request)],
+                  q.request.envelope.participant.sessionGeneration == channel.generation,
+                  let observed = channel.hookEditingAt, observed >= sent else { continue }
+            reports[q.request.id] = AIEditingReport()
+        }
+        editing = reports
     }
 
     func isReturnUnconfirmed(_ q: AIQuestion, now: Date = Date(), backgroundRunning: Bool = false) -> Bool {
@@ -507,7 +541,7 @@ final class AIConversationController {
     /// **どのチャネルのものかを先に決めてから検証する。** チャネルごとに走査して自分のproviderで
     /// 検証すると、相手側CLIの正常なフックが不正イベントに化ける(世代番号が並ぶと必ず起きる)。
     private func scanHooks() {
-        for channel in channels.values { channel.hookBackgroundRunning = false }
+        for channel in channels.values { channel.hookBackgroundRunning = false; channel.hookEditingAt = nil }
         let owners = channels.values.compactMap { channel in channel.session.map { (channel, $0) } }
         guard !owners.isEmpty else { return }
         // 受信箱は基本ひとつだが、準備済みセッションを引き継いだ枠だけは起動時の置き場に落ちる。
@@ -532,7 +566,8 @@ final class AIConversationController {
                         identities[channel.slot] = identity
                     }
                 }
-                var latest: [Int: AIHookObservation] = [:]
+                // 完了フックと編集フックは別に束ねる。編集の観測で背景処理の有無を塗り替えない。
+                var latest: [Int: AIHookObservation] = [:], latestEdit: [Int: AIHookObservation] = [:]
                 for name in names where name.hasPrefix("notify-") && name.hasSuffix(".json") {
                     do {
                         let event = try AIJSON.decode(AIHookObservation.self,
@@ -551,10 +586,17 @@ final class AIConversationController {
                             return (try? event.validate(session: expected)) != nil
                                 && identities[channel.slot] == event.sessionID
                         })?.0 else { continue }
-                        if latest[owner.slot] == nil || event.recordedAt > latest[owner.slot]!.recordedAt { latest[owner.slot] = event }
+                        if event.observesEditing {
+                            if latestEdit[owner.slot] == nil || event.recordedAt > latestEdit[owner.slot]!.recordedAt {
+                                latestEdit[owner.slot] = event
+                            }
+                        } else if latest[owner.slot] == nil || event.recordedAt > latest[owner.slot]!.recordedAt {
+                            latest[owner.slot] = event
+                        }
                     } catch { invalidInboxFiles.append(name) }
                 }
                 for (slot, event) in latest { channels[slot]?.hookBackgroundRunning = event.runningBackgroundTasks }
+                for (slot, event) in latestEdit { channels[slot]?.hookEditingAt = event.recordedAt }
             } catch { for (channel, _) in group.owners { channel.warning = "フック観測を確認できません" } }
         }
     }

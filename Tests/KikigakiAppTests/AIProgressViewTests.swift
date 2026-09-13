@@ -34,16 +34,18 @@ import KikigakiCore
         _ = NSApplication.shared
         let conversation = try conversation(count: 3)
         var state = SessionSnapshot(ai: AIViewState(conversation: conversation, connection: .blocked,
+            editing: [conversation.questions[0].request.id: AIEditingReport(total: 2)],
             selectedSlot: 3, connections: [1: .working, 2: .idle, 3: .blocked], generations: [1: 1, 2: 1, 3: 1]),
             timeline: MeetingTimeline(startedAt: sent))
         let controller = TranscriptWindowController(shouldReduceMotion: { true })
         controller.apply(state)
-        #expect(rows(controller).map { $0.progressView.progress?.status } == [.working, .awaitingReply, .blocked])
+        #expect(rows(controller).map { $0.progressView.progress?.status } == [.editing, .awaitingReply, .blocked])
+        #expect(rows(controller)[0].progressView.displayText.hasPrefix("編集中(全2か所) · "))
         #expect(rows(controller).allSatisfy { $0.noteText.isEmpty && $0.height(for: 600) == 82 })
         state.ai?.connections[1] = .disconnected
         state.ai?.generations[3] = 2
         controller.apply(state)
-        #expect(rows(controller)[0].progressView.progress?.currentStage == .working)
+        #expect(rows(controller)[0].progressView.progress?.currentStage == .editing)
         #expect(rows(controller)[0].progressView.progress?.status == .disconnected)
         #expect(rows(controller)[2].progressView.progress?.status == .unknown)
         state.ai?.connections.removeValue(forKey: 2)
@@ -52,12 +54,17 @@ import KikigakiCore
         #expect(state.ai?.connection(for: conversation.questions[1].request) == .unknown)
         controller.apply(state)
         #expect(rows(controller)[1].progressView.progress?.status == .unknown)
+        // 申告が読めなくなっても、確認済みの編集は表示用の履歴が保つ。
+        state.ai?.editing = [:]
+        controller.apply(state)
+        #expect(rows(controller)[0].progressView.progress?.currentStage == .editing)
         state.timeline = MeetingTimeline(startedAt: sent.addingTimeInterval(1))
         controller.apply(state)
-        #expect(rows(controller)[0].progressView.progress?.currentStage == .acceptance)
+        // 会議を切り替えたら表示用の履歴も捨てる。前の会議の編集を新しい行へ持ち越さない。
+        #expect(rows(controller)[0].progressView.progress?.currentStage == .reading)
         state.ai?.readOnly = true; state.ai?.connections[1] = .working
         controller.apply(state)
-        #expect(rows(controller).allSatisfy { $0.progressView.displayText == "受領済み · 返答待ち" && !$0.progressView.timerRunning })
+        #expect(rows(controller).allSatisfy { $0.progressView.displayText == "読込済み · 作業中" && !$0.progressView.timerRunning })
     }
 
     @Test func 返答で同じ行の進行表示を終了し送達不明には返事行を作らない() throws {

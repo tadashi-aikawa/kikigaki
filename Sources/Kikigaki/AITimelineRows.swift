@@ -307,6 +307,11 @@ final class AIReplyRow: NSView, AITimelineRowView {
     }
     var statusPill: AIStatusPill { pill }
 
+    /// 進行表示はこの入口だけから更新する。返答到着の見せ方を行が決めるため。
+    func updateProgress(_ progress: AIProgress?, reduceMotion: Bool, now: Date = Date()) {
+        progressView.update(progress, reduceMotion: reduceMotion, now: now)
+    }
+
     private func markReadIfNeeded() {
         // 通常返答に既読操作を要求しない。保存済み状態もクリックで書き換えない。
     }
