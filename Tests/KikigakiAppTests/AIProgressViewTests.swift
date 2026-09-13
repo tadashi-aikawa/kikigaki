@@ -39,7 +39,7 @@ import KikigakiCore
         let controller = TranscriptWindowController(shouldReduceMotion: { true })
         controller.apply(state)
         #expect(rows(controller).map { $0.progressView.progress?.status } == [.working, .awaitingReply, .blocked])
-        #expect(rows(controller).allSatisfy { $0.noteText.isEmpty && $0.height(for: 600) == 68 })
+        #expect(rows(controller).allSatisfy { $0.noteText.isEmpty && $0.height(for: 600) == 82 })
         state.ai?.connections[1] = .disconnected
         state.ai?.generations[3] = 2
         controller.apply(state)
@@ -89,7 +89,7 @@ import KikigakiCore
         window.contentView = scroll
         let document = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 1000))
         document.addSubview(view); scroll.documentView = document
-        view.frame = NSRect(x: 0, y: 0, width: 300, height: 30)
+        view.frame = NSRect(x: 0, y: 0, width: 300, height: 44)
         let question = try conversation().questions[0]
         let progress = AIProgress(question: question, connection: .working, connectionGeneration: 1)
         view.update(progress, reduceMotion: false, now: sent.addingTimeInterval(42))

@@ -88,6 +88,20 @@ import KikigakiCore
         view.cacheDisplay(in: view.bounds, to: bitmap)
         guard let data = bitmap.representation(using: .png, properties: [:]) else { throw AIError.invalid("capture bitmap") }
         try data.write(to: output.appendingPathComponent(name + ".png"))
+        if feedback == "labels" {
+            guard let small = NSBitmapImageRep(bitmapDataPlanes: nil,
+                pixelsWide: Int(view.bounds.width), pixelsHigh: Int(view.bounds.height),
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+                let context = NSGraphicsContext(bitmapImageRep: small) else { throw AIError.invalid("capture 1x") }
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            context.imageInterpolation = .high
+            bitmap.draw(in: NSRect(origin: .zero, size: view.bounds.size))
+            NSGraphicsContext.restoreGraphicsState()
+            guard let data = small.representation(using: .png, properties: [:]) else { throw AIError.invalid("capture 1x bitmap") }
+            try data.write(to: output.appendingPathComponent(name + "-1x.png"))
+        }
         let rows = controller.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }
         print("\(name): \(Int(view.bounds.width))×\(Int(view.bounds.height))pt; " + rows.map {
             "\($0.item.participantName) \($0.progressView.displayText), height=\($0.frame.height)"
@@ -125,6 +139,19 @@ import KikigakiCore
               let avatar = row.subviews.compactMap({ $0 as? AvatarView }).first else { throw AIError.invalid("avatar row") }
         for _ in 0..<100 where avatar.image == nil { try await Task.sleep(for: .milliseconds(20)) }
         guard avatar.image != nil else { throw AIError.invalid("avatar load") }
+        if feedback == "labels" {
+            apply(state); try capture("labels-working")
+            state.ai?.connections[1] = .blocked
+            apply(state); try capture("labels-blocked")
+            state.ai?.connections[1] = .disconnected
+            apply(state); try capture("labels-disconnected")
+            state.ai?.readOnly = true; state.state = .idle; state.saved = true
+            apply(state); try capture("labels-historical")
+            var busy = try fixture(count: 3, accepted: true, crowded: true)
+            busy.ai?.connections = [1: .working, 2: .blocked, 3: .idle]
+            apply(busy); try capture("labels-three-destinations")
+            return
+        }
         apply(state); try capture(feedback == "before" ? "before-working" : "working")
         if feedback == "before" { return }
         state.ai?.connections[1] = .disconnected

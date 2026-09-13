@@ -427,9 +427,9 @@ final class AIReplyRow: NSView, AITimelineRowView {
         }
         let bodyWidth = AIRowMetrics.bodyWidth(width)
         measuredQuote = item.question.isEmpty ? 0 : quote.height(for: bodyWidth - 12) + 8
-        measuredBody = isWaiting ? 28 : measureMarkdown(bodyWidth)
+        measuredBody = isWaiting ? 42 : measureMarkdown(bodyWidth)
         measuredNotes = notes.isHidden ? 0 : AIRowMetrics.measure(notes, width: bodyWidth) + 6
-        // 取消は進行文と同じ行の右端へ寄せる。バーの追加高さは8ptだけ。
+        // 取消は進行文と同じ行の右端へ寄せる。バーの8ptと段名の14ptを確保する。
         let actions = replyAction.isHidden ? 0.0 : 30
         return 31 + measuredQuote + max(20, measuredBody) + measuredNotes + actions + 9
     }
@@ -475,7 +475,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
         markdownBody.frame = NSRect(x: AIRowMetrics.bodyX, y: bodyY, width: bodyWidth, height: max(20, measuredBody))
         let progressRight = cancelAction.isHidden ? bounds.width - 20 : bounds.width - 20 - cancelAction.measuredWidth - 8
         progressView.frame = NSRect(x: AIRowMetrics.bodyX, y: bodyY,
-                                   width: max(0, progressRight - AIRowMetrics.bodyX), height: 30)
+                                   width: max(0, progressRight - AIRowMetrics.bodyX), height: 44)
         confirmationMark.frame = NSRect(x: AIRowMetrics.bodyX - 14, y: bodyY + 2, width: 12, height: 20)
         notes.frame = NSRect(x: AIRowMetrics.bodyX, y: markdownBody.frame.maxY + 6, width: bodyWidth, height: max(0, measuredNotes - 6))
         if !cancelAction.isHidden {

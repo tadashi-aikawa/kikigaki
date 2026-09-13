@@ -163,7 +163,7 @@ Codexは通常起動・準備済み起動とも、議事録を書けるよう保
 - 会議参加モードの契約: [AI参加者の設計](docs/ai-participant.md)
 - 複数プロファイルと準備済みセッション: [AI設定の複数プロファイル](docs/ai-profiles.md)
 
-返事待ちは進行文と5分割バーで確認できた位置を示します。経過時間は表示中だけ更新し、過去会議は静止します。詳細は [AI依頼の進行表示](docs/ai-progress.md) を参照してください。
+返事待ちは進行文と5分割バーで確認できた位置を示します。バーの下に9ptの段名を表示します。経過時間は表示中だけ更新し、過去会議は静止します。詳細は [AI依頼の進行表示](docs/ai-progress.md) を参照してください。
 
 - `KikigakiCore`: AI設定、独立stream履歴、envelope、質問と受信イベント、Markdown。herdr・AppKit・Processを置かない
 - `KikigakiAIIO`: アプリと返送CLIが共有するfd検証、原子的な保存、sessionとフック観測の型

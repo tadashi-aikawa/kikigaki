@@ -112,6 +112,13 @@ final class AIProgressView: NSView {
             let path = NSBezierPath(roundedRect: rect, xRadius: 1.5, yRadius: 1.5)
             if observed { color.setFill(); path.fill() }
             else { color.setStroke(); path.lineWidth = 1.5; path.stroke() }
+            let textColor = current && !progress.isUnknown ? Washi.red
+                : observed ? Washi.ink : Washi.muted
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 9), .foregroundColor: textColor]
+            let title = stage.title as NSString
+            let size = title.size(withAttributes: attributes)
+            title.draw(at: NSPoint(x: rect.midX - size.width / 2, y: 31), withAttributes: attributes)
             if current && !progress.isUnknown && !progress.isPaused {
                 ("▾" as NSString).draw(at: NSPoint(x: rect.midX - 3, y: 17), withAttributes: [
                     .font: NSFont.systemFont(ofSize: 9), .foregroundColor: color])
