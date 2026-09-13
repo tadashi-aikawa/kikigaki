@@ -1,13 +1,43 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRenderer, withoutFrontmatter, imageURL } from './renderer.js';
-import { changedEntries } from './updates.js';
+import { changedEntries, UpdateHighlighter } from './updates.js';
 import { isTimeline, wrapTimeline } from './timeline.js';
 const render = text => createRenderer().render(withoutFrontmatter(text), { context: 'test' });
 test('変更行は追加と書換えだけで移動と削除は光らせない', () => {
   const entries = values => values.map(key => ({ key }));
   assert.deepEqual(changedEntries(entries(['a','b','same','same']), entries(['new','b','a','same','same','same'])).map(e => e.key), ['new','same']);
   assert.deepEqual(changedEntries(entries(['a','b']), entries(['a'])), []);
+});
+test('基準がある間は依頼中の編集を累積で強調し、置き直しと切替で捨てる', () => {
+  const entries = values => values.map(key => ({ key }));
+  const keys = plan => plan.entries.map(e => e.key);
+  const updates = new UpdateHighlighter();
+  // 基準が無ければ従来どおり直前の描画との差分。初回は光らせない
+  assert.deepEqual(updates.plan(entries(['a'])), { entries: [], persist: false });
+  assert.deepEqual(keys(updates.plan(entries(['a','b']))), ['b']);
+  assert.deepEqual(keys(updates.plan(entries(['a','b','c']))), ['c']);
+  // 依頼の送信で基準を置く。以後は基準との差分を累積し、時間で消さない
+  updates.mark();
+  const first = updates.plan(entries(['a','b2','c']));
+  assert.deepEqual([keys(first), first.persist], [['b2'], true]);
+  assert.deepEqual(keys(updates.plan(entries(['a','b2','c2']))), ['b2','c2']);
+  assert.deepEqual(keys(updates.plan(entries(['a2','b2','c2']))), ['a2','b2','c2']);
+  // 編集の開始で置き直すと、それまでの強調は消える
+  updates.mark();
+  assert.deepEqual(updates.plan(entries(['a2','b2','c2'])), { entries: [], persist: true });
+  assert.deepEqual(keys(updates.plan(entries(['a2','b3','c2']))), ['b3']);
+  // 表示対象の切替で基準を捨て、次の描画は初回として扱う
+  updates.reset();
+  assert.deepEqual(updates.plan(entries(['x','y'])), { entries: [], persist: false });
+  assert.deepEqual(keys(updates.plan(entries(['x','y','z']))), ['z']);
+});
+test('本文が無いうちに置いた基準は最初の描画を基準にする', () => {
+  const entries = values => values.map(key => ({ key }));
+  const updates = new UpdateHighlighter();
+  updates.mark();
+  assert.deepEqual(updates.plan(entries(['a','b'])), { entries: [], persist: true });
+  assert.deepEqual(updates.plan(entries(['a','b','c'])).entries.map(e => e.key), ['c']);
 });
 
 test('frontmatterとコード内の記法を保持', () => {

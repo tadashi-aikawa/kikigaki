@@ -143,6 +143,8 @@ actor MinutesImageReader {
     private let relay = MinutesMessageRelay()
     private var ready = false
     private var pending: (String, Bool, Int)?
+    /// WebKitは最初の本文描画まで作らない。描ける前の基準の置き直しは、次に描き終えた本文へ送る。
+    private(set) var pendingBaseline = false
     private var ticket = 0
     private(set) var renderedText = ""
     var onRendered: ((String) -> Void)?
@@ -177,6 +179,12 @@ actor MinutesImageReader {
         _ = webView
         sendPending()
     }
+    /// 強調の基準を今の本文へ置き直し、それまでの強調を消す。AIへの送信と編集の観測から呼ぶ。
+    func markUpdateBaseline() {
+        guard hasLoadedWebView, ready else { pendingBaseline = true; return }
+        pendingBaseline = false
+        webView.evaluateJavaScript("window.minutes.markBaseline()")
+    }
     private func sendPending() {
         guard ready, let (source, reset, current) = pending else { return }
         pending = nil
@@ -186,6 +194,9 @@ actor MinutesImageReader {
             in: nil, in: .page) { [weak self] result in
                 guard let self, self.ticket == current else { return }
                 if case .failure = result { self.onError?("議事録を描画できません。再読込してください") }
+                // 持ち越した基準は描き終えてから置く。描く前に置くと、対象切替の描画が基準を捨てる。
+                // 中断された描画では消費せず、次に描き終えた描画で1回だけ置く。
+                else if self.pendingBaseline { self.markUpdateBaseline() }
             }
     }
     fileprivate func receive(_ body: Any) {
@@ -210,7 +221,7 @@ actor MinutesImageReader {
         resources.stop()
     }
     func clear() {
-        invalidate(); renderedText = ""
+        invalidate(); renderedText = ""; pendingBaseline = false
         if ready { webView.evaluateJavaScript("window.minutes.clear()") }
     }
     func search(_ query: String, direction: Int = 0, reveal: Bool = true, completion: @escaping (Int, Int) -> Void) {

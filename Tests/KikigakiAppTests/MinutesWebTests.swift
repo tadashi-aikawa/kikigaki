@@ -132,6 +132,89 @@ import Testing
         _ = try await web.evaluateJavaScript("tick(600)")
         #expect(try await web.evaluateJavaScript("scrollY === 0 && document.querySelector('main h1').getAnimations().length === 0") as? Bool == true)
     }
+    @Test func AI依頼中の編集は基準との差分を累積で強調し置き直しと切替で消える() async throws {
+        let preferences = MinutesTestDefaults()
+        let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 700, height: 600), defaults: preferences.value)
+        let window = NSWindow(contentRect: preview.frame, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.contentView = preview; window.orderFront(nil); preview.layoutSubtreeIfNeeded()
+        defer { preview.stop(); window.orderOut(nil) }
+        func capture(_ name: String, _ web: WKWebView) async throws {
+            guard let output = ProcessInfo.processInfo.environment["KIKIGAKI_MINUTES_CAPTURE"] else { return }
+            let snapshot = try await web.takeSnapshot(configuration: WKSnapshotConfiguration())
+            let data = try #require(snapshot.tiffRepresentation)
+            let bitmap = try #require(NSBitmapImageRep(data: data))
+            try #require(bitmap.representation(using: .png, properties: [:]))
+                .write(to: URL(fileURLWithPath: output).appendingPathComponent(name + ".png"))
+        }
+        let base = """
+        # 体験会の議事録
+
+        ## 決定事項
+
+        - 開催日は9月18日
+        """
+        var text = base + "\n"
+        preview.document.render(text, reset: true)
+        try await wait { preview.document.renderedText.contains("開催日") }
+        let web = preview.document.webView
+        #expect(try await web.evaluateJavaScript("!CSS.highlights.has('updated')") as? Bool == true)
+        // AIへ依頼を送った時点の本文を基準にする
+        preview.markUpdateBaseline()
+        for (index, line) in ["参加者は社内10名", "受付は佐藤さんが担当", "次回は10月2日"].enumerated() {
+            text += "- " + line + "\n"
+            preview.document.render(text, reset: false)
+            try await wait { preview.document.renderedText.contains(line) }
+            // 1依頼の中の編集は消えずに積み上がる
+            #expect(try await web.evaluateJavaScript("CSS.highlights.get('updated').size") as? Int == index + 1)
+        }
+        try await capture("baseline-accumulated", web)
+        try await Task.sleep(for: .milliseconds(4200))
+        #expect(try await web.evaluateJavaScript("CSS.highlights.get('updated').size") as? Int == 3)
+        // 次の依頼の送信か編集の開始で、それまでの強調を消して基準を置き直す
+        preview.markUpdateBaseline()
+        #expect(try await web.evaluateJavaScript("!CSS.highlights.has('updated')") as? Bool == true)
+        try await capture("baseline-remarked", web)
+        text += "- 会場は第2会議室\n"
+        preview.document.render(text, reset: false)
+        try await wait { preview.document.renderedText.contains("第2会議室") }
+        #expect(try await web.evaluateJavaScript("CSS.highlights.get('updated').size") as? Int == 1)
+        #expect(try await web.evaluateJavaScript("[...CSS.highlights.get('updated')].every(r => r.toString() === '会場は第2会議室')") as? Bool == true)
+        // 表示対象の切替で基準を捨て、AI依頼のない更新は従来どおり4秒で消える
+        preview.document.render(base + "\n- 別の議事録\n", reset: true)
+        try await wait { preview.document.renderedText.contains("別の議事録") }
+        #expect(try await web.evaluateJavaScript("!CSS.highlights.has('updated')") as? Bool == true)
+        preview.document.render(base + "\n- 別の議事録\n- 人が足した行\n", reset: false)
+        try await wait { preview.document.renderedText.contains("人が足した行") }
+        #expect(try await web.evaluateJavaScript("CSS.highlights.get('updated').size") as? Int == 1)
+        try await Task.sleep(for: .milliseconds(4200))
+        #expect(try await web.evaluateJavaScript("!CSS.highlights.has('updated')") as? Bool == true)
+    }
+    @Test func 描く前に送った依頼の基準は最初の描画の後に効いて累積する() async throws {
+        let preferences = MinutesTestDefaults()
+        let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 700, height: 600), defaults: preferences.value)
+        let window = NSWindow(contentRect: preview.frame, styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.contentView = preview; window.orderFront(nil); preview.layoutSubtreeIfNeeded()
+        defer { preview.stop(); window.orderOut(nil) }
+        // 依頼を送った時点ではまだ議事録を描いていない。WebKitも作らない
+        preview.markUpdateBaseline()
+        #expect(preview.document.pendingBaseline && !preview.document.hasLoadedWebView)
+        let base = "# 体験会の議事録\n\n- 開催日は9月18日\n"
+        // AIが作った議事録の初回表示。対象切替の描画で基準を捨てず、描き終えた本文を基準にする
+        preview.document.render(base, reset: true)
+        try await wait { preview.document.renderedText.contains("開催日") }
+        let web = preview.document.webView
+        try await wait { !preview.document.pendingBaseline }
+        #expect(try await web.evaluateJavaScript("!CSS.highlights.has('updated')") as? Bool == true)
+        var text = base
+        for (index, line) in ["参加者は社内10名", "受付は佐藤さんが担当"].enumerated() {
+            text += "- " + line + "\n"
+            preview.document.render(text, reset: false)
+            try await wait { preview.document.renderedText.contains(line) }
+            #expect(try await web.evaluateJavaScript("CSS.highlights.get('updated').size") as? Int == index + 1)
+        }
+        try await Task.sleep(for: .milliseconds(4200))
+        #expect(try await web.evaluateJavaScript("CSS.highlights.get('updated').size") as? Int == 2)
+    }
     @Test func HTMLの安全境界と折りたたみ脚注画像目次を組み合わせる() async throws {
         let preferences = MinutesTestDefaults()
         let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 700, height: 600), defaults: preferences.value)

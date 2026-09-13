@@ -156,6 +156,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         typedEntry.update(enabled: value.canSubmitTyped,
                           resetDraft: value.state == .preparing && previous.state != .preparing)
         transcriptBottom?.constant = value.ai == nil ? 0 : -34
+        // 依頼の送信と編集の開始でだけ、議事録の更新強調の基準を今の本文へ置き直す。
+        let highlightBaseline = value.ai?.minutesHighlightRevision ?? 0
+        if highlightBaseline > 0, highlightBaseline != (previous.ai?.minutesHighlightRevision ?? 0) {
+            minutesSplit?.preview.markUpdateBaseline()
+        }
         if previous.state != value.state || previous.timeline.startedAt != value.timeline.startedAt { clearHandoffNotice() }
         if copyRequested || previous.handoffMessage != value.handoffMessage || previous.handoffFailed != value.handoffFailed {
             clearHandoffNotice()

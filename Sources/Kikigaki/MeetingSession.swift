@@ -155,6 +155,8 @@ final class MeetingSession {
     /// requestの取消対象を、その送信を始めた所有者へ結び付ける。
     private var aiRequestOwners: [UUID: UUID] = [:]
     private var aiProgresses: [Int: String] = [:]
+    /// 議事録プレビューの強調の基準。依頼の送信と編集の観測でだけ置き直す。
+    private var minutesHighlight = MinutesHighlightBaseline()
     private var aiWarning: String?
     private(set) var aiDraft = ""
     /// 通常の手動依頼は自動と独立して宛先ごとに保持する。空文字も編集済みとして扱う。
@@ -233,6 +235,7 @@ final class MeetingSession {
         aiDraft = ""; aiWarning = nil; aiCompleted = nil
         pendingAIDispatch = [:]
         aiRequestOwners = [:]
+        minutesHighlight = MinutesHighlightBaseline()
         aiWorkAllowed = meetingConfig.ai?.allowWork ?? true
     }
 
@@ -837,6 +840,9 @@ final class MeetingSession {
             let unconfirmed = controller?.conversation.questions.filter { controller!.isReturnUnconfirmed($0) } ?? []
             state.unconfirmed = Set(unconfirmed.map { $0.request.id })
             state.progressReports = controller?.progressReports ?? [:]
+            // 編集の直前で基準を置き直し、送信後・編集前に人が触った分を強調へ混ぜない。
+            minutesHighlight.observe(state.progressReports)
+            state.minutesHighlightRevision = minutesHighlight.revision
             state.canSubmit = canSubmits[slot] ?? true
             state.submissionID = aiCompleted
             state.draft = aiDraft
@@ -1075,6 +1081,8 @@ final class MeetingSession {
                 }, didBeginSending: { [self] sentAt in
                     guard self.handoff.meetingID == meetingID, self.aiSubmissionOwners[slot] == owner else { return }
                     if self.pendingAIDispatch[slot] == owner { self.pendingAIDispatch[slot] = nil }
+                    // 議事録の強調は、この依頼で編集された箇所だけを残す。送った時点の本文を基準にする。
+                    self.minutesHighlight.didSend(fixed.id)
                     if trigger == .scheduled, let scheduleRun {
                         self.aiSchedule?.didBeginSending(requestID: fixed.id, meetingID: meetingID, runID: scheduleRun, at: sentAt)
                         if CommandLine.arguments.contains("--replay"), ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_AUTO"] != nil {

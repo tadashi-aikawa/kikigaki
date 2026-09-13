@@ -94,6 +94,8 @@ struct AIViewState {
     var unconfirmed: Set<UUID> = []
     /// 編集・返答へ入ったと確認できた依頼。自己申告とフック観測をまとめた結果だけを持つ
     var progressReports: [UUID: AIProgressReport] = [:]
+    /// 議事録の強調の基準を置き直した回数。増えたときだけプレビューの基準を置き直す
+    var minutesHighlightRevision = 0
     var canSubmit = true
     var submissionID: UUID?
     var draft = ""

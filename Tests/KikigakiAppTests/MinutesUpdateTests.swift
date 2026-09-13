@@ -9,6 +9,36 @@ import Testing
             #expect(MinutesUpdateStatus.relative(date, now: date.addingTimeInterval(seconds)) == text)
         }
     }
+    @Test func AIの送信と編集の観測だけが強調の基準を置き直し切替で捨てる() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let preferences = MinutesTestDefaults()
+        let controller = TranscriptWindowController(shouldReduceMotion: { true }, minutesDefaults: preferences.value)
+        let window = try #require(controller.window); window.setFrameAutosaveName("")
+        defer { controller.minutesSplit.preview.stop(); window.orderOut(nil) }
+        let document = controller.minutesSplit.preview.document
+        var snapshot = SessionSnapshot()
+        controller.apply(snapshot)
+        #expect(!document.pendingBaseline)
+        var ai = AIViewState()
+        snapshot.ai = ai
+        controller.apply(snapshot)
+        // AIを設定しただけでは置き直さない。依頼を送るまでは直前の描画との差分を4秒で消す
+        #expect(!document.pendingBaseline)
+        ai.minutesHighlightRevision = 1
+        snapshot.ai = ai
+        controller.apply(snapshot)
+        // WebKitは最初の描画まで作らないため、置き直しは次に描き終えた本文へ持ち越す
+        #expect(document.pendingBaseline)
+        controller.minutesSplit.preview.resetContext()
+        #expect(!document.pendingBaseline)
+        // 同じ回数のまま別の更新が届いても置き直さない
+        controller.apply(snapshot)
+        #expect(!document.pendingBaseline)
+        ai.minutesHighlightRevision = 2
+        snapshot.ai = ai
+        controller.apply(snapshot)
+        #expect(document.pendingBaseline)
+    }
     @Test func 本文と一緒にmtimeを取得し読み直しても受信時刻にしない() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let file = root.appendingPathComponent("minutes.md"), date = Date(timeIntervalSince1970: 1000)

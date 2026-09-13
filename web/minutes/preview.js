@@ -2,7 +2,7 @@ import { createRenderer, withoutFrontmatter } from './renderer.js';
 import DOMPurify from 'dompurify';
 import mermaid from 'mermaid';
 import { cleanHTML } from './html.js';
-import { changedEntries, updateEntries, clearUpdates, highlightUpdates } from './updates.js';
+import { UpdateHighlighter, updateEntries, clearUpdates, highlightUpdates } from './updates.js';
 import { isTimeline, wrapTimeline } from './timeline.js';
 const md = createRenderer(), root = document.getElementById('minutes');
 const toc = document.getElementById('toc'), tocNav = toc.querySelector('nav');
@@ -178,7 +178,7 @@ const fitsTimelineNode = text => {
   return timelineMeasure.measureText(text).width <= 144;
 };
 let generation = 0, query = '', hit = -1, ranges = [], source = '', context = '';
-let lastUpdateEntries = null;
+const updates = new UpdateHighlighter();
 let updateListeners = new AbortController();
 const report = value => window.webkit?.messageHandlers.minutes.postMessage(value);
 const safeHTML = value => DOMPurify.sanitize(value, { ADD_TAGS: ['eq', 'eqn'], ADD_URI_SAFE_ATTR: ['data-wiki'],
@@ -282,8 +282,7 @@ window.minutes = {
   async render(text, newContext, reset, ticket) {
     cancelNavigation();
     const current = ++generation;
-    if (reset) lastUpdateEntries = null;
-    const previous = lastUpdateEntries;
+    if (reset) updates.reset();
     clearUpdates();
     updateListeners.abort(); updateListeners = new AbortController();
     const saved = reset ? null : anchor(), selection = reset ? null : selectionOffsets();
@@ -339,14 +338,15 @@ window.minutes = {
     if (restore) { restoreAnchor(saved); restoreSelection(selection); }
     updateTOCPosition();
     refreshSearch();
-    const entries = updateEntries(root);
-    if (previous) highlightUpdates(changedEntries(previous, entries));
     // 中断された途中のDOMは比較元にしない。直前に描画を完了した本文だけを保持する。
-    lastUpdateEntries = entries.map(({ key }) => ({ key }));
+    const plan = updates.plan(updateEntries(root));
+    highlightUpdates(plan.entries, plan.persist);
     report({ kind: 'rendered', ticket, text: root.innerText });
     return true;
   },
-  clear() { cancelNavigation(); generation++; lastUpdateEntries = null; clearUpdates(); updateListeners.abort(); closeImage(); folded.clear(); source = ''; root.replaceChildren(); rebuildTOC(true); query = ''; refreshSearch(); scrollTo(0, 0); },
+  // AIへの依頼の送信と編集の開始で呼ぶ。今の本文を基準にし、その依頼の編集をすべて強調へ残す。
+  markBaseline() { updates.mark(); clearUpdates(); },
+  clear() { cancelNavigation(); generation++; updates.reset(); clearUpdates(); updateListeners.abort(); closeImage(); folded.clear(); source = ''; root.replaceChildren(); rebuildTOC(true); query = ''; refreshSearch(); scrollTo(0, 0); },
   invalidate() { cancelNavigation(); generation++; clearUpdates(); updateListeners.abort(); },
   search(value, direction = 0, reveal = true) {
     if (query !== value) { query = value; hit = 0; return refreshSearch(reveal); }

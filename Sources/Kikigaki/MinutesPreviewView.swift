@@ -237,6 +237,8 @@ private final class MinutesPathField: NSTextField {
         historyPopup.frame = NSRect(x: min(field.minX, bounds.width - width - 24), y: top - height, width: width, height: height)
         historyPopup.needsLayout = true
     }
+    /// AIの依頼が編集を始める直前に、更新強調の基準を今の本文へ置き直す。
+    func markUpdateBaseline() { document.markUpdateBaseline() }
     func resetContext() {
         stop(); path = nil; body = nil; editing = false; commitError = nil; contextGeneration += 1
         window?.makeFirstResponder(nil)
