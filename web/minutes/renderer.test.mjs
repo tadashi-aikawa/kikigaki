@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createRenderer, withoutFrontmatter, imageURL } from './renderer.js';
 import { changedEntries, UpdateHighlighter, foldUpdateMarks } from './updates.js';
 import { isTimeline, wrapTimeline } from './timeline.js';
@@ -64,6 +65,24 @@ test('見出しIDの重複と表内wikilink', () => {
   assert.match(html, /id="heading-同じ"/); assert.match(html, /id="heading-同じ-1"/);
   assert.match(html, /id="heading-jump"/); assert.match(html, /\*\*別名\*\*/);
   assert.match(html, /<td>名前<\/td>/);
+});
+test('Vault内だけwikilinkをリンクにする', () => {
+  const inVault = text => createRenderer().render(text, { context: 'test', vault: '仕事' });
+  const html = inVault('[[議事/定例.md|**別名**]]\n\n[[ノート#見出し]]\n\n[[#章]]\n\n![[a.png]]\n\n![[ノート]]');
+  // 宛先は加工せずObsidianへ渡す。ラベルは再解釈しない。
+  assert.match(html, /<a class="wiki" data-wiki="議事\/定例\.md">\*\*別名\*\*<\/a>/);
+  assert.match(html, /<a class="wiki" data-wiki="ノート#見出し">ノート#見出し<\/a>/);
+  // 文書内アンカーと画像埋め込みは従来どおり。画像以外の埋め込みは記法のまま。
+  assert.match(html, /<a href="#章">#章<\/a>/);
+  assert.match(html, /<img referrerpolicy="no-referrer" src="minutes-image:/);
+  assert.match(html, /!\[\[ノート\]\]/);
+  // Vault外は押せない顔をさせない。
+  assert.equal(/data-wiki/.test(render('[[ノート]]')), false);
+  assert.match(render('[[ノート|別名]]'), /別名/);
+  // 描画後のDOMPurifyがdata-wikiを落とさない設定であること。
+  const preview = readFileSync(new URL('./preview.js', import.meta.url), 'utf8');
+  assert.match(preview, /ADD_URI_SAFE_ATTR: \['data-wiki'\]/);
+  assert.equal(/ALLOW_DATA_ATTR:\s*false/.test(preview), false);
 });
 test('脚注とcalloutとチェックボックス', () => {
   const html = render('本文[^a]\n\n[^a]: 補足\n\n> [!NOTE] 注意\n> **本文**\n>\n> - 内側\n\n- [x] 済\n  - 子\n- [ ] 未');

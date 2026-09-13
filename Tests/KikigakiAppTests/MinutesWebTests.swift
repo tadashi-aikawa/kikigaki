@@ -471,6 +471,78 @@ import Testing
         let image = root.appendingPathComponent("x.png"); try Data(repeating: 1, count: 100).write(to: image)
         #expect(throws: (any Error).self) { try MinutesResourceHandler.bytes(image, limit: 99) }
     }
+    @Test func Vault内のwikilinkを実WebKitでリンクとして描く() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let vault = root.appendingPathComponent("Vault")
+        try FileManager.default.createDirectory(at: vault.appendingPathComponent(".obsidian"), withIntermediateDirectories: true)
+        let preferences = MinutesTestDefaults()
+        let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 700, height: 600), defaults: preferences.value)
+        let window = NSWindow(contentRect: preview.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = preview; window.orderFront(nil); preview.layoutSubtreeIfNeeded()
+        defer { preview.stop(); window.orderOut(nil) }
+        preview.document.setFile(vault.appendingPathComponent("定例.md"))
+        #expect(preview.document.vault == "Vault")
+        final class Opened { var urls: [URL] = [] }
+        let opened = Opened()
+        preview.document.openURL = { opened.urls.append($0) }
+        preview.document.render("[[議事/前回.md|前回]]の続き。\n", reset: true)
+        try await wait { preview.document.renderedText.contains("前回の続き") }
+        let web = preview.document.webView
+        // DOMPurifyがdata-wikiを落とさず、hrefを持たないので勝手に遷移もしない。
+        #expect(try await web.evaluateJavaScript(
+            "document.querySelector('main a.wiki')?.dataset.wiki === '議事/前回.md' && !document.querySelector('main a.wiki').hasAttribute('href')") as? Bool == true)
+        // 実クリックがObsidianのURIまで届く。末尾の `.md` は落ち、`/` も符号化する。
+        _ = try await web.evaluateJavaScript("document.querySelector('main a.wiki').click()")
+        try await wait { !opened.urls.isEmpty }
+        #expect(opened.urls.map(\.absoluteString) == ["obsidian://open?vault=Vault&file=%E8%AD%B0%E4%BA%8B%2F%E5%89%8D%E5%9B%9E"])
+        // Vault外へ切り替えると平文へ戻る。
+        preview.document.setFile(root.appendingPathComponent("外.md"))
+        #expect(preview.document.vault == nil)
+        preview.document.render("[[議事/前回.md|前回]]だけ。\n", reset: true)
+        try await wait { preview.document.renderedText.contains("前回だけ") }
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('main a.wiki').length === 0") as? Bool == true)
+    }
+    @Test func Vaultの判定とwikilinkのObsidianURI() throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let manager = FileManager.default
+        let vault = root.appendingPathComponent("仕事 Vault")
+        let notes = vault.appendingPathComponent("議事/定例")
+        try manager.createDirectory(at: notes, withIntermediateDirectories: true)
+        let outside = root.appendingPathComponent("外")
+        try manager.createDirectory(at: outside, withIntermediateDirectories: true)
+        // `.obsidian` が無いうちはVault外。
+        #expect(MinutesVault.name(forFile: notes.appendingPathComponent("a.md")) == nil)
+        try manager.createDirectory(at: vault.appendingPathComponent(".obsidian"), withIntermediateDirectories: true)
+        #expect(MinutesVault.name(forFile: notes.appendingPathComponent("a.md")) == "仕事 Vault")
+        #expect(MinutesVault.name(forFile: vault.appendingPathComponent("a.md")) == "仕事 Vault")
+        #expect(MinutesVault.name(forFile: outside.appendingPathComponent("a.md")) == nil)
+        // 最も近い `.obsidian` を採る。
+        let inner = notes.appendingPathComponent(".obsidian")
+        try manager.createDirectory(at: inner, withIntermediateDirectories: true)
+        #expect(MinutesVault.name(forFile: notes.appendingPathComponent("a.md")) == "定例")
+        try manager.removeItem(at: inner)
+        // `.obsidian` がファイル・シンボリックリンクのときは採らない。
+        let fake = outside.appendingPathComponent(".obsidian")
+        try Data().write(to: fake)
+        #expect(MinutesVault.name(forFile: outside.appendingPathComponent("a.md")) == nil)
+        try manager.removeItem(at: fake)
+        try manager.createSymbolicLink(at: fake, withDestinationURL: vault.appendingPathComponent(".obsidian"))
+        #expect(MinutesVault.name(forFile: outside.appendingPathComponent("a.md")) == nil)
+        // 予約文字はすべて符号化する。`/` を素通しするとVault相対パスが壊れる。
+        let url = try #require(MinutesVault.openURL(vault: "仕事 Vault", target: "議事/定例.md"))
+        #expect(url.absoluteString == "obsidian://open?vault=%E4%BB%95%E4%BA%8B%20Vault&file=%E8%AD%B0%E4%BA%8B%2F%E5%AE%9A%E4%BE%8B")
+        // 末尾の `.md` だけ落とし、見出し・ブロックは残して符号化する。
+        #expect(MinutesVault.noteReference("ノート.md") == "ノート")
+        #expect(MinutesVault.noteReference("ノート.MD#見出し") == "ノート#見出し")
+        #expect(MinutesVault.noteReference("ノート#^abc") == "ノート#^abc")
+        #expect(MinutesVault.noteReference("md") == "md")
+        #expect(MinutesVault.openURL(vault: "v", target: "a#b")?.absoluteString == "obsidian://open?vault=v&file=a%23b")
+        #expect(MinutesVault.openURL(vault: "v", target: "a#^b")?.absoluteString == "obsidian://open?vault=v&file=a%23%5Eb")
+        #expect(MinutesVault.openURL(vault: "v", target: "#章") == nil)
+        #expect(MinutesVault.openURL(vault: "v", target: "  ") == nil)
+        #expect(MinutesVault.openURL(vault: "", target: "a") == nil)
+        #expect(MinutesVault.openURL(vault: "v", target: "a\nb") == nil)
+    }
     @Test func 外部エディタのパス引用とワークスペース選択() async throws {
         let path = "/tmp/日本語 ' $(touch nope) \u{0060}echo x\u{0060}.md"
         #expect(try MinutesExternalEditor.command(path: path, executable: "/bin/nvim") == "'/bin/nvim' -- '/tmp/日本語 '\\'' $(touch nope) \u{0060}echo x\u{0060}.md'")

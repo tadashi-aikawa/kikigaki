@@ -182,7 +182,7 @@ const fitsTimelineNode = text => {
   timelineMeasure.font = '16px -apple-system, sans-serif';
   return timelineMeasure.measureText(text).width <= 144;
 };
-let generation = 0, query = '', hit = -1, ranges = [], source = '', context = '';
+let generation = 0, query = '', hit = -1, ranges = [], source = '', context = '', vault = '';
 const updates = new UpdateHighlighter();
 let updateListeners = new AbortController();
 const report = value => window.webkit?.messageHandlers.minutes.postMessage(value);
@@ -284,16 +284,16 @@ function paint(reveal) {
   }
 }
 window.minutes = {
-  async render(text, newContext, reset, ticket) {
+  async render(text, newContext, reset, ticket, newVault) {
     cancelNavigation();
     const current = ++generation;
     if (reset) updates.reset();
     clearUpdates();
     updateListeners.abort(); updateListeners = new AbortController();
     const saved = reset ? null : anchor(), selection = reset ? null : selectionOffsets();
-    source = text; context = newContext;
+    source = text; context = newContext; vault = newVault || '';
     closeImage();
-    root.innerHTML = safeHTML(md.render(withoutFrontmatter(text), { context, cleanHTML }));
+    root.innerHTML = safeHTML(md.render(withoutFrontmatter(text), { context, vault, cleanHTML }));
     prepareSections(reset);
     decorateCallouts();
     rebuildTOC(reset);
@@ -373,6 +373,9 @@ root.addEventListener('click', event => {
   if (image && image.naturalWidth) { event.preventDefault(); openImage(image); return; }
   const link = event.target.closest('a'); if (!link) return;
   event.preventDefault();
+  // wikilinkはhrefを持たない。Vault名はSwift側が保持しているので宛先だけ渡す。
+  const wiki = link.getAttribute('data-wiki');
+  if (wiki) { report({ kind: 'wiki', target: wiki }); return; }
   const href = link.getAttribute('href') || '';
   if (href.startsWith('#')) {
     let name; try { name = decodeURIComponent(href.slice(1)); } catch { return; }

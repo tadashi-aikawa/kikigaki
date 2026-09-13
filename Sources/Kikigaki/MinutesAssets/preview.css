@@ -13,6 +13,8 @@ h4 { font-size:15px; } h5,h6 { font-size:14px; color:var(--muted); }
 main > :first-child { margin-top:0; }
 main > .heading-section:first-child > :is(h1,h2,h3,h4,h5,h6) { margin-top:0; }
 a { color:var(--accent); text-underline-offset:3px; }
+/* wikilinkはhrefを持たないため、UAの:link装飾が付かない。通常リンクと同じ顔にする。 */
+a.wiki { text-decoration:underline; cursor:pointer; }
 ul,ol { padding-left:26px; margin:8px 0; } li > ul,li > ol { margin:4px 0; }
 li > p { margin:4px 0; } .task-list-item { list-style:none; }
 .task-list-item-checkbox { appearance:none; display:inline-block; position:relative; width:18px; height:18px; margin:0 8px 0 -26px; border:2px solid var(--accent); border-radius:50%; background:var(--paper); vertical-align:-3px; opacity:1; }

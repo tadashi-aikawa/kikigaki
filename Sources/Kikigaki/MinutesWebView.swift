@@ -149,6 +149,8 @@ actor MinutesImageReader {
     private(set) var renderedText = ""
     var onRendered: ((String) -> Void)?
     var onError: ((String) -> Void)?
+    /// 本文のリンクとwikilinkの開き先。既定はシステム。テストが実クリックの行き先を確かめるために差し替える。
+    var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
     override init(frame: NSRect) {
         super.init(frame: frame)
         relay.owner = self
@@ -173,7 +175,12 @@ actor MinutesImageReader {
         return webView
     }
     required init?(coder: NSCoder) { fatalError() }
-    func setFile(_ url: URL?) { resources.setFile(url) }
+    /// 議事録の切替ごとにVaultを判定し直す。Vault外はnilで、本文のwikilinkを平文のままにする。
+    private(set) var vault: String?
+    func setFile(_ url: URL?) {
+        resources.setFile(url)
+        vault = url.flatMap(MinutesVault.name(forFile:))
+    }
     func render(_ source: String, reset: Bool) {
         ticket += 1; pending = (source, reset, ticket)
         _ = webView
@@ -189,8 +196,9 @@ actor MinutesImageReader {
         guard ready, let (source, reset, current) = pending else { return }
         pending = nil
         resources.beginImages()
-        webView.callAsyncJavaScript("return await window.minutes.render(source, context, reset, ticket);",
-            arguments: ["source": source, "context": resources.context, "reset": reset, "ticket": current],
+        webView.callAsyncJavaScript("return await window.minutes.render(source, context, reset, ticket, vault);",
+            arguments: ["source": source, "context": resources.context, "reset": reset, "ticket": current,
+                        "vault": vault ?? NSNull()],
             in: nil, in: .page) { [weak self] result in
                 guard let self, self.ticket == current else { return }
                 if case .failure = result { self.onError?("議事録を描画できません。再読込してください") }
@@ -211,7 +219,12 @@ actor MinutesImageReader {
         case "link":
             guard let href = value["href"] as? String, let url = URL(string: href),
                   ["https", "http", "mailto"].contains(url.scheme?.lowercased() ?? "") else { return }
-            NSWorkspace.shared.open(url)
+            openURL(url)
+        case "wiki":
+            // Vault内の議事録だけがwikilinkを描く。判定前の後着クリックは開かない。
+            guard let vault, let target = value["target"] as? String,
+                  let url = MinutesVault.openURL(vault: vault, target: target) else { return }
+            openURL(url)
         default: break
         }
     }

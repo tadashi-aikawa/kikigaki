@@ -98,7 +98,10 @@ export function createRenderer() {
       return '<img referrerpolicy="no-referrer" src="' + escape(imageURL(target, env.context)) + '" alt="' + escape(target) + '"' + width + '>';
     }
     if (target.startsWith('#')) return '<a href="#' + escape(target.slice(1)) + '">' + escape(label) + '</a>';
-    return escape(label);
+    // Vault内の議事録だけリンクにする。Vault外では開き先を決められないため、
+    // 押せない顔をさせず従来どおり平文へ畳む。宛先はObsidian側が解釈するので加工しない。
+    if (!env.vault) return escape(label);
+    return '<a class="wiki" data-wiki="' + escape(target) + '">' + escape(label) + '</a>';
   };
   md.renderer.rules.image = (tokens, i, options, env, self) => {
     const token = tokens[i], original = token.attrGet('src') || '';
