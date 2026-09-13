@@ -410,7 +410,8 @@ final class MeetingSession {
         cachedAudioLevels = [:]
         showAudioLevels = meetingConfig.measureAudioLevels
         recopyInvalidated = false
-        snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers, message: "エンジンを準備中...")
+        // 開始・停止の進捗は状態チップに任せ、短時間のメッセージでヘッダーを伸縮させない。
+        snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers)
         snapshot.names.diarizationEnabled = diarizationEnabled
         speakerMapping = SpeakerMapping()
         liveSource = SpeakerTranscript()
@@ -494,7 +495,7 @@ final class MeetingSession {
         for (slot, phase) in aiPhases where phase == .confirmationWait { cancelAIPreparation(slot: slot) }
         snapshot.state = .finishing
         pendingUndiarizedDraw?.cancel(); pendingUndiarizedDraw = nil
-        snapshot.message = snapshot.names.diarizationEnabled ? "最終判定と保存中..." : "文字起こしの確定と保存中..."
+        snapshot.message = nil
         emit()
 
         source?.stop()
