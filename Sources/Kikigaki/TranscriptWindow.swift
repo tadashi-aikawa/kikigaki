@@ -117,7 +117,19 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     }
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
-    func show() { window?.makeKeyAndOrderFront(nil); refreshMinutes(); NSApp.activate(ignoringOtherApps: true) }
+    func show() {
+        // 初回表示でAppKitは初期first responder(既定はcontentView)からキービューループの先頭を選ぶ。
+        // 待機中は手入力欄が無効なため、議事録のパス欄が先頭になり、ただ開いただけでカーソルが入る。
+        // initialFirstResponderの差し替えではなく、この表示で移った場合だけ外す。すでに利用者が
+        // どこかへ置いていた焦点は動かさない。
+        let previous = window?.firstResponder
+        window?.makeKeyAndOrderFront(nil)
+        if let window, window.firstResponder !== previous,
+           let editor = minutesSplit.preview.pathField.currentEditor(), window.firstResponder === editor {
+            window.makeFirstResponder(nil)
+        }
+        refreshMinutes(); NSApp.activate(ignoringOtherApps: true)
+    }
 
     func connectMinutes(_ store: MinutesStore?, waitingPath: String? = nil) {
         if minutesStore !== store {

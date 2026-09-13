@@ -59,6 +59,28 @@ import KikigakiCore
             #expect(restored.preference == before)
         }
     }
+    @Test func 開いただけではパス欄へカーソルを入れず既存の焦点は奪わない() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let suite = UUID().uuidString, defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = TranscriptWindowController(minutesDefaults: defaults)
+        let window = try #require(controller.window)
+        window.setFrameAutosaveName("")
+        defer { window.orderOut(nil); controller.minutesSplit.preview.stop() }
+        controller.minutesSplit.setVisible(true)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let pathField = controller.minutesSplit.preview.pathField
+        controller.show()
+        // 待機中は手入力欄が無効で、パス欄がキービューループの先頭になる。
+        #expect(window.contentView?.nextValidKeyView === pathField)
+        #expect(pathField.currentEditor() == nil)
+        #expect(window.firstResponder !== pathField)
+        // 利用者が置いた焦点は、開く操作を重ねても動かさない。
+        #expect(window.makeFirstResponder(pathField))
+        let editor = try #require(pathField.currentEditor())
+        controller.show()
+        #expect(window.firstResponder === editor)
+    }
     @Test func フォーカスだけでドラフトを守り確定エラーを次の更新でも残す() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let preferences = MinutesTestDefaults()
