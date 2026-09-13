@@ -238,11 +238,10 @@ private final class MinutesPathField: NSTextField {
     /// イベントは飲み込まず、クリック先の操作はそのまま行わせる。
     private func watchOutsideClicks() {
         guard historyClickMonitor == nil else { return }
+        // ローカル監視はメインスレッドで呼ばれる。AIQuestionSheetと同じ書き方で、NSEventをassumeIsolatedへ通さない。
         historyClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
-            MainActor.assumeIsolated {
-                guard let self else { return event }
-                return self.handleOutsideClick(event)
-            }
+            guard let self else { return event }
+            return self.handleOutsideClick(event)
         }
     }
     /// テストはNSButtonのマウス追跡ループへ入らないよう、この判定を直接呼ぶ。

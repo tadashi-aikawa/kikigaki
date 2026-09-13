@@ -737,7 +737,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 手入力の保存検証では最終会話を送る。停止による確定待ち取消を避ける。
         if replayDebug.verifyTyped && !replayHolding { return }
         // 録音中の準備。次の会議のぶんを会議の最中に用意する。
-        if let session, nextDebugPrepare < replayDebug.prepareDuring.count,
+        if session != nil, nextDebugPrepare < replayDebug.prepareDuring.count,
            snapshot.state == .recording, !preparingDuringRecording {
             let target = replayDebug.prepareDuring[nextDebugPrepare]
             if snapshot.elapsed >= target.seconds, let preparedStore, let config,
