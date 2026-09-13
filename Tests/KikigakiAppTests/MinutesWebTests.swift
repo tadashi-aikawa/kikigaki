@@ -5,6 +5,32 @@ import Testing
 @testable import Kikigaki
 
 @Suite(.serialized) @MainActor struct MinutesWebTests {
+    @Test func WebKitのカーソル更新を親の矢印で上書きしない() throws {
+        final class Parent: NSView {
+            var updates = 0
+            override func cursorUpdate(with event: NSEvent) {
+                updates += 1
+                NSCursor.arrow.set()
+            }
+        }
+        let parent = Parent(frame: NSRect(x: 0, y: 0, width: 700, height: 500))
+        let document = MinutesWebView(frame: parent.bounds)
+        parent.addSubview(document)
+        defer { document.invalidate() }
+        let previous = NSCursor.current
+        defer { previous.set() }
+        let event = try #require(NSEvent.enterExitEvent(with: .cursorUpdate, location: NSPoint(x: 50, y: 50),
+            modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+            eventNumber: 0, trackingNumber: 0, userData: nil))
+        // 本文・リンク・余白をWebKitが設定した後のAppKit更新を再現する。
+        for cursor in [NSCursor.iBeam, .pointingHand, .arrow] {
+            cursor.set()
+            document.webView.cursorUpdate(with: event)
+            #expect(NSCursor.current == cursor)
+        }
+        #expect(parent.updates == 0)
+    }
+
     @Test func 検索メニューはWebKit本文から議事録ペインへ届く() async throws {
         let suite = UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))

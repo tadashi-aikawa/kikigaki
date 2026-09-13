@@ -135,6 +135,10 @@ actor MinutesImageReader {
     private var loadedWebView: WKWebView?
     var hasLoadedWebView: Bool { loadedWebView != nil }
     var webView: WKWebView { loadWebView() }
+    // WebKitは本文・リンク・余白のカーソルを自身で設定する。
+    // 表示更新時のcursorUpdateを親へ渡すと、NSSplitViewの矢印で上書きされるため、
+    // WebKitを包むここで伝播だけを止める。カーソルの形はアプリ側で設定しない。
+    override func cursorUpdate(with event: NSEvent) {}
     private let resources = MinutesResourceHandler()
     private let relay = MinutesMessageRelay()
     private var ready = false
