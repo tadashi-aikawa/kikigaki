@@ -7,6 +7,7 @@ public struct AICapture: Equatable, Sendable {
     public let voiceUtteranceStart: Double?
     public let tail: AITentativeTail?
     public let needsConfirmation: Bool
+    public let needsAudioProcessing: Bool
     public let voiceExcluded: Bool
 
     public init(tokens: [TimedToken], speakers: [Int?], finalCount: Int, processedUntil: Double,
@@ -35,6 +36,7 @@ public struct AICapture: Equatable, Sendable {
             tail = AITentativeTail(text: text, startSeconds: first.start, endSeconds: min(cutoff, last.end))
         } else { tail = nil }
         needsConfirmation = !pending.isEmpty || processedUntil < cutoff
+        needsAudioProcessing = processedUntil < cutoff
         let last = utterances.last.flatMap { audioExclusion.excludes($0, track: audioLevels) ? nil : $0 }
         voiceExcluded = pendingExcluded || (pending.isEmpty && utterances.last != nil && last == nil)
         // 除外された末尾の代わりに古い発話を質問にしない。

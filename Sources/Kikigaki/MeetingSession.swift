@@ -431,7 +431,7 @@ final class MeetingSession {
             let onResult: (([TimedToken], Int) async -> Void)? = diarizationEnabled ? nil : { [weak self] tokens, count in
                 await self?.publishUndiarized(tokens: tokens, finalCount: count, generation: preparation)
             }
-            let transcriber = try await AppleTranscriber(log: log, onResult: onResult)
+            let transcriber = try await AppleTranscriber(log: log, usesFastResults: true, onResult: onResult)
             let diarizer = loaded.map { SpeakerDiarizer(models: $0) }
             guard snapshot.state == .preparing, preparationID == preparation else { return false }
 
@@ -1009,10 +1009,11 @@ final class MeetingSession {
                     let saved = aiStore.save(&archive, for: meetingID); self.archive = archive
                     guard saved.succeeded else { throw AIError.unsafeFile }
                 }
-                let capture = try await AIConfirmationWait.capture(latest: {
+                let capture = try await AIConfirmationWait.capture(waitForFinalResults: !(transcriber?.hasFastResults ?? false), latest: {
                     guard self.handoff.meetingID == meetingID, self.snapshot.canShare else { throw CancellationError() }
                     if let transcriber = self.transcriber {
-                        let (tokens, count) = await transcriber.snapshot()
+                        let latest = await transcriber.snapshot()
+                        let tokens = latest.tokens, count = latest.finalCount
                         let speakers = names.diarizationEnabled
                             ? self.speakerMapping.apply(Aligner.speakers(for: tokens, segments: self.diarizer?.segments() ?? []))
                             : Array<Int?>(repeating: nil, count: tokens.count)
@@ -1191,12 +1192,13 @@ final class MeetingSession {
                     }
                     continue
                 }
-                let (tokens, finalCount) = await transcriber.snapshot()
+                let latest = await transcriber.snapshot()
+                let tokens = latest.tokens, finalCount = latest.finalCount
                 let segments = diarizer.segments()
                 let elapsed = Double(result.fedSamples) / 16000
                 let speakers = Aligner.speakers(for: tokens, segments: segments, frozen: result.frozen)
                 result.frozen = SpeakerFreeze.advance(
-                    frozen: result.frozen, speakers: speakers, tokens: tokens, elapsed: elapsed, finalCount: finalCount,
+                    frozen: result.frozen, speakers: speakers, tokens: tokens, elapsed: elapsed, finalCount: latest.accurateFinalCount,
                     judgedUntil: diarizer.finalizedDuration)
                 let live = SpeakerTranscript(tokens: tokens, speakers: speakers, finalCount: finalCount, frozenCount: result.frozen.count)
                 await MainActor.run {

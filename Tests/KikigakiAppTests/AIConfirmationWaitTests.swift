@@ -25,4 +25,24 @@ import KikigakiCore
         await #expect(throws: CancellationError.self) { try await task.value }
         #expect(!sent)
     }
+
+    @Test func 速報送信では文字の確定を待たず最新の暫定を返す() async throws {
+        var polls = 0
+        let capture = try await AIConfirmationWait.capture(waitForFinalResults: false,
+            latest: { polls += 1; return try value(final: false) },
+            progress: { _ in Issue.record("文字の確定待ちに入ってはいけない") })
+        #expect(polls == 1)
+        #expect(capture.tail?.text == "質問")
+    }
+
+    @Test func 速報送信でも操作時点までの音声取り込みは待つ() async throws {
+        var polls = 0
+        let capture = try await AIConfirmationWait.capture(waitForFinalResults: false, latest: {
+            polls += 1
+            return try AICapture(tokens: [], speakers: [], finalCount: 0, processedUntil: polls == 1 ? 0 : 1,
+                cutoff: 1, names: SpeakerNames(), timeline: .init(startedAt: Date()))
+        }, progress: { _ in })
+        #expect(polls == 2)
+        #expect(!capture.needsAudioProcessing)
+    }
 }
