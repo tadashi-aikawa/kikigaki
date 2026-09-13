@@ -16,7 +16,7 @@ import KikigakiCore
         #expect(row.height(for: 360) == originalHeight + 20)
         row.frame = NSRect(x: 0, y: 0, width: 360, height: row.height(for: 360))
         row.layoutSubtreeIfNeeded()
-        let labels = row.subviews.compactMap { $0 as? NSTextField }
+        let labels = row.content.subviews.compactMap { $0 as? NSTextField }
         let label = try #require(labels.first { $0.stringValue.contains("小音量候補") })
         let body = try #require(labels.first { $0.stringValue == voice.text })
         #expect(!label.isHidden && !body.isHidden && label.frame.minY >= body.frame.maxY)

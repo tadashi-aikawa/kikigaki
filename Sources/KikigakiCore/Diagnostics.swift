@@ -26,6 +26,19 @@ public struct Diagnostics: Sendable {
         return [String(format: "[live at=%.2f]\n", elapsed) + TranscriptRenderer.text(utterances, names: names)]
     }
 
+    /// 画面へ渡した段を記録する。既存の本文traceは維持し、停止後の全消去も同じ形式で確認する。
+    public func utteranceProgressLines(_ progress: UtteranceProgress?, utterances: [Utterance], elapsed: Double,
+                                       diarizationEnabled: Bool, finalized: Bool) -> [String] {
+        guard showsLiveTrace else { return [] }
+        let stages = utterances.enumerated().map { index, value in
+            let stage = progress?.rows.indices.contains(index) == true ? progress?.rows[index] : nil
+            return String(format: "%.2f:", value.start) + (stage?.label ?? "非表示")
+        }.joined(separator: ",")
+        return [String(format: "[utterance-progress at=%.2f mode=%@ finalized=%@] rows=%@ tentative=%@",
+                       elapsed, diarizationEnabled ? "on" : "off", finalized ? "true" : "false", stages,
+                       progress?.tentative?.label ?? "非表示")]
+    }
+
     /// 省略候補の通知。環境変数によらず出す(省略は原文と突き合わせて確かめるものなので、
     /// 何を落としたかは常に残す)
     public func backchannelLines(tokens: [TimedToken], candidates: [Range<Int>]) -> [String] {

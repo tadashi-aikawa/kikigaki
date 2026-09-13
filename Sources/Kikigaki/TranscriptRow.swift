@@ -73,11 +73,18 @@ final class SpeakerButton: HoverButton {
     override var drawsHoverBackground: Bool { false }
 }
 
+final class TranscriptContentView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 final class TranscriptRow: NSView, DocumentRow {
     override var isFlipped: Bool { true }
+    /// 除外の薄化は本文側の合成レイヤーだけに適用し、進捗は独立して読める濃さを保つ。
+    let content = TranscriptContentView()
     private let shade = NSView()
     private let flash = NSView()
     private let avatar = AvatarView()
+    private let progressGauge = UtteranceGaugeView()
     private let nameLabel = Washi.label(size: 12, weight: .semibold)
     private let timeLabel = Washi.label(color: Washi.muted)
     private let hint = Washi.label("コピーには含めません", size: 11, color: Washi.muted)
@@ -107,10 +114,12 @@ final class TranscriptRow: NSView, DocumentRow {
         self.tentative = tentative
         super.init(frame: .zero)
         wantsLayer = true
+        content.wantsLayer = true
+        addSubview(content)
         for view in [shade, flash] {
             Washi.surface(view)
             view.layer?.cornerRadius = 5
-            addSubview(view)
+            content.addSubview(view)
         }
         shade.isHidden = !tentative
         if !tentative { Washi.surface(shade, color: Washi.shade.withAlphaComponent(0.45)) }
@@ -130,15 +139,20 @@ final class TranscriptRow: NSView, DocumentRow {
         levelLabel.isHidden = true
         levelLabel.lineBreakMode = .byTruncatingTail
         typedBody.isHidden = true
-        for view in [avatar, nameLabel, timeLabel, hint, levelLabel, body, typedBody] { addSubview(view) }
+        for view in [avatar, nameLabel, timeLabel, hint, levelLabel, body, typedBody] { content.addSubview(view) }
         speakerButton.isBordered = false
         speakerButton.title = ""
         speakerButton.target = self
         speakerButton.action = #selector(renamePressed)
         speakerButton.isHidden = true
-        addSubview(speakerButton)
+        content.addSubview(speakerButton)
+        addSubview(progressGauge)
     }
     required init?(coder: NSCoder) { fatalError() }
+    /// 本文の更新と分離し、段だけの変更では点灯も再計測も起こさない。
+    func updateProgress(_ stage: UtteranceProgress.Stage?, steps: [UtteranceProgress.Stage]) {
+        progressGauge.update(utterance?.kind == .typed ? nil : stage, steps: steps)
+    }
     @objc private func renamePressed() {
         if let slot = utterance?.speaker { onRename?(slot, speakerButton) }
     }
@@ -264,9 +278,11 @@ final class TranscriptRow: NSView, DocumentRow {
     }
     override func layout() {
         super.layout()
+        content.frame = bounds
         shade.frame = NSRect(x: 12, y: 2, width: max(0, bounds.width - 24), height: bounds.height - 4)
         flash.frame = shade.frame
         avatar.frame = NSRect(x: 20, y: 8, width: 25, height: 26)
+        progressGauge.frame = NSRect(x: 1, y: min(5, max(0, bounds.height - 46)), width: 10, height: 46)
         // 太字の字形が計測幅の右端へ届くため、端数の丸めと描画の余白を確保する。
         let nameWidth = min(ceil(nameLabel.intrinsicContentSize.width) + 4,
                             max(70, bounds.width - (hint.isHidden ? 220 : 300)))
@@ -281,7 +297,7 @@ final class TranscriptRow: NSView, DocumentRow {
     }
     func appear(animated: Bool) {
         guard animated else { stopAnimations(); return }
-        animateOpacity(layer, from: 0, to: excluded ? 0.4 : 1, duration: 0.25)
+        animateOpacity(layer, from: 0, to: 1, duration: 0.25)
     }
     func highlight(animated: Bool) {
         guard animated else { stopAnimations(); return }
@@ -305,7 +321,8 @@ final class TranscriptRow: NSView, DocumentRow {
     func stopAnimations() {
         layer?.removeAllAnimations()
         flash.layer?.removeAllAnimations()
-        layer?.opacity = excluded ? 0.4 : 1
+        layer?.opacity = 1
+        content.layer?.opacity = excluded ? 0.4 : 1
         flash.layer?.opacity = 0
     }
 }

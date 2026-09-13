@@ -11,6 +11,8 @@ enum Washi {
     static let rule = color(0xD5C6B1)
     static let ink = color(0x221F1C)
     static let muted = color(0x6B6157)
+    // ゲージの現在段は朱、到達済みは輝度を約2倍にし、和紙との3:1も保つ。
+    static let gaugeReached = color(0x918477)
     static let tentative = color(0x4A443D)
     static let red = color(0xAA1405)
     static let brightRed = color(0xCF321F)

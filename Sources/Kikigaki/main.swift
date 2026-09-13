@@ -29,6 +29,10 @@ MainActor.assumeIsolated {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     #if DEBUG
+    if let index = CommandLine.arguments.firstIndex(of: "--utterance-gauge"), index + 1 < CommandLine.arguments.count {
+        let delegate = UtteranceGaugeHarness(output: CommandLine.arguments[index + 1])
+        app.delegate = delegate; app.run(); return
+    }
     if let index = CommandLine.arguments.firstIndex(of: "--preview-minutes"), index + 1 < CommandLine.arguments.count {
         let delegate = MinutesPreviewHarness(path: CommandLine.arguments[index + 1])
         app.delegate = delegate; app.run(); return

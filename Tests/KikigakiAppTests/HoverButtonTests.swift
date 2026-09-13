@@ -62,7 +62,7 @@ import KikigakiCore
         window.setFrameOrigin(NSPoint(x: 20000, y: 20000)); window.orderFront(nil)
         defer { window.orderOut(nil) }
         content.layoutSubtreeIfNeeded()
-        let button = try #require(row.subviews.compactMap { $0 as? SpeakerButton }.first)
+        let button = try #require(row.content.subviews.compactMap { $0 as? SpeakerButton }.first)
         func pixels(_ name: String) throws -> Data {
             let bitmap = try #require(content.bitmapImageRepForCachingDisplay(in: content.bounds))
             content.cacheDisplay(in: content.bounds, to: bitmap)

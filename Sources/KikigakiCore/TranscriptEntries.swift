@@ -5,10 +5,11 @@ public enum TranscriptEntries {
     public struct Merged: Equatable, Sendable {
         public let utterances: [Utterance]
         public let pendingSpeakerRows: Set<Int>
+        public let progress: UtteranceProgress?
     }
 
     public static func merge(voice: [Utterance], typed: [Utterance], timeline: MeetingTimeline,
-                             pendingVoiceRows: Set<Int> = []) -> Merged {
+                             pendingVoiceRows: Set<Int> = [], voiceProgress: UtteranceProgress? = nil) -> Merged {
         // 呼び出し側に併合済みの行が混ざっても落とさず、由来で正しい列へ戻す。
         // offsetは元のvoice配列の添字を保ち、typed列由来の声にはpendingを付けない。
         let all = voice + typed
@@ -21,6 +22,7 @@ public enum TranscriptEntries {
         var result: [Utterance] = []
         result.reserveCapacity(voice.count + typed.count)
         var pending: Set<Int> = []
+        var stages: [UtteranceProgress.Stage?] = []
         var v = 0, t = 0
         // 2列を併合してtypedの投稿順を守る。壁時計が戻ってもtyped同士を並べ替えない。
         while v < voices.count || t < entries.count {
@@ -35,13 +37,18 @@ public enum TranscriptEntries {
             }
             if takeVoice {
                 if voices[v].offset < voice.count, pendingVoiceRows.contains(voices[v].offset) { pending.insert(result.count) }
+                let index = voices[v].offset
+                stages.append(index < voice.count && voiceProgress?.rows.indices.contains(index) == true
+                    ? voiceProgress?.rows[index] : nil)
                 result.append(voices[v].element)
                 v += 1
             } else {
+                stages.append(nil)
                 result.append(entries[t].element)
                 t += 1
             }
         }
-        return Merged(utterances: result, pendingSpeakerRows: pending)
+        return Merged(utterances: result, pendingSpeakerRows: pending,
+                      progress: voiceProgress.map { UtteranceProgress(steps: $0.steps, rows: stages, tentative: $0.tentative) })
     }
 }

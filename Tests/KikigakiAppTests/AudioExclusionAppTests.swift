@@ -99,10 +99,10 @@ import KikigakiCore
         let height = row.height(for: 400)
         row.updateExclusion(true)
         row.appear(animated: false); row.highlight(animated: false)
-        #expect(row.layer?.opacity == 0.4 && row.height(for: 400) == height + 20)
-        #expect(row.subviews.compactMap { $0 as? NSTextField }.contains { !$0.isHidden && $0.stringValue == "小音量のため除外" })
+        #expect(row.content.layer?.opacity == 0.4 && row.layer?.opacity == 1 && row.height(for: 400) == height + 20)
+        #expect(row.content.subviews.compactMap { $0 as? NSTextField }.contains { !$0.isHidden && $0.stringValue == "小音量のため除外" })
         row.updateExclusion(false)
-        #expect(row.layer?.opacity == 1 && row.height(for: 400) == height)
+        #expect(row.content.layer?.opacity == 1 && row.height(for: 400) == height)
     }
 
     @Test func 計測OFFの除外を実画面へ描く() throws {

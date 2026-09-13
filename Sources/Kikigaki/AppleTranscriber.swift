@@ -105,7 +105,7 @@ final class AppleTranscriber {
 
         func apply(_ tokens: [TimedToken], isFinal: Bool, isFast: Bool,
                    receivedAt: Double, trace: Bool, log: (String) -> Void,
-                   onResult: (([TimedToken], Int) async -> Void)?) async {
+                   onResult: ((TranscriptMerge.Snapshot) async -> Void)?) async {
             if isFast { fast.apply(tokens, isFinal: isFinal) }
             else { accurate.apply(tokens, isFinal: isFinal) }
             let value = snapshot()
@@ -113,7 +113,7 @@ final class AppleTranscriber {
                 log(String(format: "[asr-final engine=%@ count=%d received=%.6f]",
                            isFast ? "fast" : "accurate", value.finalCount, receivedAt))
             }
-            await onResult?(value.tokens, value.finalCount)
+            await onResult?(value)
         }
 
         func snapshot() -> TranscriptMerge.Snapshot {
@@ -138,7 +138,7 @@ final class AppleTranscriber {
 
     init(locale: Locale = Locale(identifier: "ja-JP"), log: @escaping (String) -> Void,
          usesFastResults: Bool = false,
-         onResult: (([TimedToken], Int) async -> Void)? = nil) async throws {
+         onResult: ((TranscriptMerge.Snapshot) async -> Void)? = nil) async throws {
         guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else {
             throw NSError(domain: "kikigaki", code: 1, userInfo: [NSLocalizedDescriptionKey: "SpeechTranscriber は \(locale.identifier) に未対応"])
         }

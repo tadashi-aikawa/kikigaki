@@ -3,6 +3,13 @@ import Foundation
 /// 話者を区別しない会議の行境界。確定トークンの接頭辞だけで決め、後続文脈で閉じた行を動かさない。
 public enum UndiarizedTranscript {
     public static func utterances(tokens: [TimedToken]) -> [Utterance] {
+        utteranceTokenRanges(tokens: tokens).map { range in
+            Utterance(speaker: nil, start: tokens[range.lowerBound].start, end: tokens[range.upperBound - 1].end,
+                      text: tokens[range].map(\.text).joined().trimmingCharacters(in: .whitespaces))
+        }
+    }
+
+    static func utteranceTokenRanges(tokens: [TimedToken]) -> [Range<Int>] {
         guard !tokens.isEmpty else { return [] }
         var ranges: [Range<Int>] = []
         var start = 0
@@ -20,9 +27,6 @@ public enum UndiarizedTranscript {
             }
         }
         ranges.append(start..<tokens.count)
-        return ranges.map { range in
-            Utterance(speaker: nil, start: tokens[range.lowerBound].start, end: tokens[range.upperBound - 1].end,
-                      text: tokens[range].map(\.text).joined().trimmingCharacters(in: .whitespaces))
-        }
+        return ranges
     }
 }

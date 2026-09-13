@@ -61,6 +61,11 @@ final class FileSource: AudioSource {
     func start(onSamples: @escaping ([Float]) -> Void) throws {
         let samples = self.samples
         let onEnd = self.onEnd
+        #if DEBUG
+        let realtime = ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_REPLAY_REALTIME"] == "1"
+        #else
+        let realtime = false
+        #endif
         task = Task.detached {
             let step = 8000  // 0.5秒
             var i = 0
@@ -69,7 +74,7 @@ final class FileSource: AudioSource {
                 i += step
                 // 消費側(Sortformer + SpeechTranscriber)に追いつかれないよう軽く間を置く。
                 // 実時間の 1/10 程度で、10分の音声なら1分で流し終える
-                try? await Task.sleep(for: .milliseconds(50))
+                try? await Task.sleep(for: .milliseconds(realtime ? 500 : 50))
             }
             if !Task.isCancelled { onEnd?() }
         }

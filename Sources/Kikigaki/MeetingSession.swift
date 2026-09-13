@@ -31,6 +31,7 @@ private struct SpeakerTranscript {
     var tokens: [TimedToken] = []
     var speakers: [Int?] = []
     var finalCount = 0
+    var accurateFinalCount: Int
     var frozenCount = 0
 }
 
@@ -69,7 +70,7 @@ final class MeetingSession {
     private(set) var audioLevelCalculationCount = 0
 #endif
     private var speakerMapping = SpeakerMapping()
-    private var liveSource = SpeakerTranscript()
+    private var liveSource = SpeakerTranscript(accurateFinalCount: 0)
     private var lastUndiarizedDraw = -Double.infinity
     private var lastUndiarizedFinalCount = 0
     private var pendingUndiarizedDraw: Task<Void, Never>?
@@ -414,7 +415,7 @@ final class MeetingSession {
         snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers)
         snapshot.names.diarizationEnabled = diarizationEnabled
         speakerMapping = SpeakerMapping()
-        liveSource = SpeakerTranscript()
+        liveSource = SpeakerTranscript(accurateFinalCount: 0)
         pendingUndiarizedDraw?.cancel(); pendingUndiarizedDraw = nil
         lastUndiarizedDraw = -Double.infinity; lastUndiarizedFinalCount = 0
         typedEntries = []
@@ -429,8 +430,8 @@ final class MeetingSession {
                 throw NSError(domain: "kikigaki", code: 3, userInfo: [NSLocalizedDescriptionKey: "マイクの使用が許可されていない。システム設定 > プライバシーとセキュリティ > マイク で KIKIGAKI を許可する"])
             }
             let loaded = diarizationEnabled ? try await models() : nil
-            let onResult: (([TimedToken], Int) async -> Void)? = diarizationEnabled ? nil : { [weak self] tokens, count in
-                await self?.publishUndiarized(tokens: tokens, finalCount: count, generation: preparation)
+            let onResult: ((TranscriptMerge.Snapshot) async -> Void)? = diarizationEnabled ? nil : { [weak self] value in
+                await self?.publishUndiarized(value, generation: preparation)
             }
             let transcriber = try await AppleTranscriber(log: log, usesFastResults: true, onResult: onResult)
             let diarizer = loaded.map { SpeakerDiarizer(models: $0) }
@@ -558,8 +559,10 @@ final class MeetingSession {
         snapshot.utterances = merged
         snapshot.tentativeText = nil
         snapshot.pendingSpeakerRows = []
+        snapshot.utteranceProgress = nil
         snapshot.elapsed = duration
         consumedAudioTime = duration
+        traceUtteranceProgress(finalized: true)
         save()
         if aiSchedule?.finalSaveCompleted(succeeded: finalizationSucceeded && snapshot.saved) == .skipped(.saveFailed) {
             aiScheduleWarning = "保存が完了していないため最後の1回を中止しました"
@@ -1126,20 +1129,26 @@ final class MeetingSession {
     var undiarizedResultHandlerForTesting: ([TimedToken], Int) -> Void {
         let generation = preparationID
         return { [weak self] tokens, count in
-            self?.publishUndiarized(tokens: tokens, finalCount: count, generation: generation)
+            self?.publishUndiarized(.init(tokens: tokens, finalCount: count, accurateFinalCount: count), generation: generation)
         }
+    }
+    var undiarizedSnapshotHandlerForTesting: (TranscriptMerge.Snapshot) -> Void {
+        let generation = preparationID
+        return { [weak self] value in self?.publishUndiarized(value, generation: generation) }
     }
     var pendingUndiarizedDrawForTesting: Task<Void, Never>? { pendingUndiarizedDraw }
     var submissionTaskForTesting: Task<Void, Never>? { aiTasks[meetingAI?.slot ?? 1] ?? aiTasks.values.first }
     func submissionTaskForTesting(slot: Int) -> Task<Void, Never>? { aiTasks[slot] }
-    func publishForTesting(tokens: [TimedToken], speakers: [Int?], elapsed: Double) {
+    func publishForTesting(tokens: [TimedToken], speakers: [Int?], elapsed: Double,
+                           finalCount: Int? = nil, accurateFinalCount: Int? = nil, frozenCount: Int = 0) {
         finalTokens = tokens
         finalSegments = zip(tokens, speakers).compactMap { token, slot in
             slot.map { SpeakerSegment(speaker: $0, start: token.start, end: token.end) }
         }
         receiveSpeakerState(segments: finalSegments)
         consumedAudioTime = elapsed
-        publishLive(SpeakerTranscript(tokens: tokens, speakers: speakers, finalCount: tokens.count), elapsed: elapsed)
+        publishLive(SpeakerTranscript(tokens: tokens, speakers: speakers, finalCount: finalCount ?? tokens.count,
+                                     accurateFinalCount: accurateFinalCount ?? tokens.count, frozenCount: frozenCount), elapsed: elapsed)
     }
 #endif
 
@@ -1201,7 +1210,8 @@ final class MeetingSession {
                 result.frozen = SpeakerFreeze.advance(
                     frozen: result.frozen, speakers: speakers, tokens: tokens, elapsed: elapsed, finalCount: latest.accurateFinalCount,
                     judgedUntil: diarizer.finalizedDuration)
-                let live = SpeakerTranscript(tokens: tokens, speakers: speakers, finalCount: finalCount, frozenCount: result.frozen.count)
+                let live = SpeakerTranscript(tokens: tokens, speakers: speakers, finalCount: finalCount,
+                                             accurateFinalCount: latest.accurateFinalCount, frozenCount: result.frozen.count)
                 await MainActor.run {
                     self.receiveSpeakerState(segments: segments)
                     self.publishLive(live, elapsed: elapsed)
@@ -1212,12 +1222,14 @@ final class MeetingSession {
     }
 
     /// 入力が止まった一時停止中にも確定を反映する。有効時の凍結列には触れない。
-    private func publishUndiarized(tokens: [TimedToken], finalCount: Int, generation: UUID) {
+    private func publishUndiarized(_ value: TranscriptMerge.Snapshot, generation: UUID) {
         guard preparationID == generation, !snapshot.names.diarizationEnabled,
               snapshot.state == .recording || snapshot.state == .paused else { return }
-        let newlyFinalized = finalCount > liveSource.finalCount
-        liveSource.tokens = tokens
-        liveSource.finalCount = finalCount
+        let newlyFinalized = value.finalCount > liveSource.finalCount
+            || value.accurateFinalCount > liveSource.accurateFinalCount
+        liveSource.tokens = value.tokens
+        liveSource.finalCount = value.finalCount
+        liveSource.accurateFinalCount = value.accurateFinalCount
         let remaining = 0.5 - (ProcessInfo.processInfo.systemUptime - lastUndiarizedDraw)
         if newlyFinalized || remaining <= 0 {
             pendingUndiarizedDraw?.cancel(); pendingUndiarizedDraw = nil
@@ -1271,10 +1283,18 @@ final class MeetingSession {
                                   finalCount: liveSource.finalCount, frozenCount: liveSource.frozenCount,
                                   diarizationEnabled: snapshot.names.diarizationEnabled)
         let merged = TranscriptEntries.merge(voice: live.utterances, typed: typedEntries, timeline: pause.timeline,
-                                             pendingVoiceRows: live.pendingSpeakerRows)
+                                             pendingVoiceRows: live.pendingSpeakerRows,
+                                             voiceProgress: live.progress(accurateFinalCount: liveSource.accurateFinalCount))
         snapshot.utterances = merged.utterances
         snapshot.tentativeText = live.tentativeText
         snapshot.pendingSpeakerRows = merged.pendingSpeakerRows
+        snapshot.utteranceProgress = merged.progress
+        traceUtteranceProgress(finalized: false)
+    }
+
+    private func traceUtteranceProgress(finalized: Bool) {
+        diagnostics.utteranceProgressLines(snapshot.utteranceProgress, utterances: snapshot.utterances,
+            elapsed: consumedAudioTime, diarizationEnabled: snapshot.names.diarizationEnabled, finalized: finalized).forEach(log)
     }
 
     private func publishLive(_ live: SpeakerTranscript, elapsed: Double) {
