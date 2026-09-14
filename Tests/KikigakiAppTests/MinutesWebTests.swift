@@ -66,6 +66,26 @@ import Testing
         document.render(source, reset: true)
         try await wait { document.renderedText.contains("項目35") }
         let web = document.webView
+        // WebKitは描画の依頼で作られ、制約で窓の大きさへ広がる。途中で幅が変わると見出しの位置がずれるため、窓の大きさに揃うまで待つ。
+        try await wait { try await web.evaluateJavaScript("innerWidth === 700 && innerHeight === 500") as? Bool == true }
+        // 手元のテストプロセスでは実フレームが進まない。CIで進むかどうかは失敗時の状態に添えて見分ける。
+        let frames = try await web.callAsyncJavaScript("""
+        return await Promise.race([new Promise(done => requestAnimationFrame(() => done('進む'))),
+          new Promise(done => setTimeout(() => done('進まない'), 300))]);
+        """, contentWorld: .page) as? String ?? "?"
+        // CIでだけ落ちるときに原因を追えるよう、条件が成り立たなければ位置と目次の状態を添える。
+        func check(_ condition: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+            let result = try await web.evaluateJavaScript("(() => { try { return \(condition); } catch (error) { return String(error); } })()")
+            guard result as? Bool != true else { return }
+            let state = try await web.evaluateJavaScript("""
+            JSON.stringify({ result: \(String(describing: result).debugDescription), realFrames: \(frames.debugDescription), size: [innerWidth, innerHeight, devicePixelRatio],
+              scrollY, scrollHeight: document.scrollingElement.scrollHeight, destination: window.destination,
+              top: window.target?.getBoundingClientRect().top, animations: window.target?.getAnimations().length,
+              current: [...(window.links ?? [])].findIndex(link => link.hasAttribute('aria-current')),
+              frames: window.testFrames?.size })
+            """) as? String ?? "?"
+            Issue.record("\(condition)\n状態: \(state)", sourceLocation: sourceLocation)
+        }
         // 描画自体は実WebKit。フレームの時計だけを固定し、端末負荷で0.25秒の検証が揺れないようにする。
         _ = try await web.evaluateJavaScript("""
         window.testFrames = new Map(); window.testFrameID = 0;
@@ -82,39 +102,39 @@ import Testing
         window.destination = target.getBoundingClientRect().top + scrollY;
         tick(125);
         """)
-        #expect(try await web.evaluateJavaScript("scrollY > destination * 0.8 && scrollY < destination && target.getAnimations().length === 0") as? Bool == true)
+        try await check("scrollY > destination * 0.8 && scrollY < destination && target.getAnimations().length === 0")
         _ = try await web.evaluateJavaScript("tick(250)")
         // 着地は上端ぴったりではなく、5文字分の75pxを上に残す。
-        #expect(try await web.evaluateJavaScript("Math.abs(target.getBoundingClientRect().top - 75) < 2 && target.getAnimations()[0].effect.getTiming().duration === 1000 && links[25].getAttribute('aria-current') === 'location'") as? Bool == true)
+        try await check("Math.abs(target.getBoundingClientRect().top - 75) < 2 && target.getAnimations()[0].effect.getTiming().duration === 1000 && links[25].getAttribute('aria-current') === 'location'")
         _ = try await web.evaluateJavaScript("navigate(10); tick(125); navigate(35); tick(250)")
-        #expect(try await web.evaluateJavaScript("links[35].getAttribute('aria-current') === 'location' && document.querySelectorAll('main h2')[9].getAnimations().length === 0 && target.getAnimations().length === 0") as? Bool == true)
+        try await check("links[35].getAttribute('aria-current') === 'location' && document.querySelectorAll('main h2')[9].getAnimations().length === 0 && target.getAnimations().length === 0")
         _ = try await web.evaluateJavaScript("window.dispatchEvent(new Event('scroll')); tick(600)")
-        #expect(try await web.evaluateJavaScript("links[35].getAttribute('aria-current') === 'location'") as? Bool == true)
+        try await check("links[35].getAttribute('aria-current') === 'location'")
         // scrollイベントを送るだけでは位置は変わらない。実スクロールで解除後、元の位置へ戻しても復活しないこと。
         _ = try await web.evaluateJavaScript("window.landedY = scrollY; scrollTo(0,0); window.dispatchEvent(new Event('scroll')); tick(600)")
-        #expect(try await web.evaluateJavaScript("links[0].getAttribute('aria-current') === 'location'") as? Bool == true)
+        try await check("links[0].getAttribute('aria-current') === 'location'")
         _ = try await web.evaluateJavaScript("scrollTo(0,landedY); window.dispatchEvent(new Event('scroll')); tick(600)")
-        #expect(try await web.evaluateJavaScript("document.querySelector('#toc [aria-current]') !== null && !links[35].hasAttribute('aria-current')") as? Bool == true)
+        try await check("document.querySelector('#toc [aria-current]') !== null && !links[35].hasAttribute('aria-current')")
         // スクロール量を変えずに遅延レイアウトで見出しが上下へ外れても、着地先を選択し続けない。
         for direction in [-1, 1] {
             _ = try await web.evaluateJavaScript("navigate(35); tick(250); window.lastHeading = document.querySelectorAll('main h2')[34]; lastHeading.style.transform = 'translateY(' + innerHeight * \(direction * 2) + 'px)'; window.dispatchEvent(new Event('resize')); tick(600)")
-            #expect(try await web.evaluateJavaScript("scrollY === landedY && !links[35].hasAttribute('aria-current')") as? Bool == true)
+            try await check("scrollY === landedY && !links[35].hasAttribute('aria-current')")
             _ = try await web.evaluateJavaScript("lastHeading.style.transform = ''")
         }
         for event in ["wheel", "keydown", "touchstart"] {
             _ = try await web.evaluateJavaScript("navigate(10); tick(125); window.interruptedY = scrollY; window.dispatchEvent(new Event('\(event)')); tick(250)")
-            #expect(try await web.evaluateJavaScript("scrollY === interruptedY && document.querySelectorAll('main h2')[9].getAnimations().length === 0") as? Bool == true)
+            try await check("scrollY === interruptedY && document.querySelectorAll('main h2')[9].getAnimations().length === 0")
         }
         // ヒットなし・表示位置を変えない検索も、残った移動が検索操作を打ち消さないこと。
         for search in ["window.minutes.search('存在しない語')", "window.minutes.search('決定事項', 0, false)"] {
             _ = try await web.evaluateJavaScript("navigate(10); tick(125); window.interruptedY = scrollY; \(search); tick(250)")
-            #expect(try await web.evaluateJavaScript("scrollY === interruptedY && document.querySelectorAll('main h2')[9].getAnimations().length === 0") as? Bool == true)
+            try await check("scrollY === interruptedY && document.querySelectorAll('main h2')[9].getAnimations().length === 0")
         }
         _ = try await web.evaluateJavaScript("""
         window.matchMedia = () => ({ matches:true });
         document.querySelector('.heading-toggle').click(); links[25].click();
         """)
-        #expect(try await web.evaluateJavaScript("!document.querySelector('.section-body').hidden && Math.abs(target.getBoundingClientRect().top - 75) < 2 && target.getAnimations()[0].effect.getTiming().duration === 1000 && links[25].getAttribute('aria-current') === 'location'") as? Bool == true)
+        try await check("!document.querySelector('.section-body').hidden && Math.abs(target.getBoundingClientRect().top - 75) < 2 && target.getAnimations()[0].effect.getTiming().duration === 1000 && links[25].getAttribute('aria-current') === 'location'")
         // root.containsのフレーム時ガードやrender後半の検索更新では遅い。DOMを入れ替える前に取消済みかを記録する。
         _ = try await web.evaluateJavaScript("""
         window.matchMedia = () => ({ matches:false }); navigate(10);
@@ -129,9 +149,9 @@ import Testing
         """)
         document.render("# 新しい議事録", reset: true)
         try await wait { document.renderedText.contains("新しい議事録") }
-        #expect(try await web.evaluateJavaScript("cancelledBeforeReplacement") as? Bool == true)
+        try await check("cancelledBeforeReplacement")
         _ = try await web.evaluateJavaScript("tick(600)")
-        #expect(try await web.evaluateJavaScript("scrollY === 0 && document.querySelector('main h1').getAnimations().length === 0") as? Bool == true)
+        try await check("scrollY === 0 && document.querySelector('main h1').getAnimations().length === 0")
     }
     @Test func AI依頼中の編集は基準との差分を累積で強調し置き直しと切替で消える() async throws {
         let preferences = MinutesTestDefaults()
