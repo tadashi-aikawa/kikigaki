@@ -149,6 +149,8 @@ final class MarkdownBodyView: NSTextView {
 
 /// フォント・色・段落はここでだけ決める。保存する返事本文とCoreのトークンは変更しない。
 enum MarkdownBodyRenderer {
+    /// 表の文字。本文15ptより1段小さく、列幅の計測にも同じ値を使う。
+    static let tableFontSize: CGFloat = 14
     static func render(_ blocks: [MarkdownBlock]) -> NSAttributedString {
         let result = NSMutableAttributedString(string: "")
         render(blocks, into: result, enclosing: [])
@@ -287,7 +289,7 @@ enum MarkdownBodyRenderer {
                 // 上限は長いセル1つが他の列を押し潰さないため。
                 let widths = model.header.indices.map { column -> CGFloat in
                     let natural = rows.enumerated().map { row, cells in
-                        let font = NSFont.systemFont(ofSize: 13, weight: row == 0 ? .semibold : .regular)
+                        let font = NSFont.systemFont(ofSize: tableFontSize, weight: row == 0 ? .semibold : .regular)
                         return (cells[column].map(\.text).joined() as NSString).size(withAttributes: [.font: font]).width
                     }.max() ?? 0
                     // +1は測定と組版の丸め差で最後の1文字が折り返さないための余裕。
@@ -313,7 +315,7 @@ enum MarkdownBodyRenderer {
                         case .center: style.alignment = .center
                         case .right: style.alignment = .right
                         }
-                        append(content, paragraph: style, size: 13, weight: row == 0 ? .semibold : .regular)
+                        append(content, paragraph: style, size: tableFontSize, weight: row == 0 ? .semibold : .regular)
                     }
                 }
             case .rule:

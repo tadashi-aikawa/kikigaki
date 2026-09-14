@@ -45,7 +45,7 @@ hash・wikilink・Vault相対パス・画像・HTMLは専用解釈しない。HT
 | 行内コード | 等幅、`shade` の地。本文内では幅に応じて表示を折り返す |
 | 太字・斜体・取り消し | semibold・`obliqueness = 0.15`・薄墨の取り消し線。引用内の太字は引用の色を保つ。日本語も傾け、併用時に片方を落とさない |
 | リンク・裸URL | `Washi.red` と下線。選択・コピーを保ち、クリックでhttp(s) URLを開く |
-| 区切り行付きテーブル | `NSTextTable` と `NSTextTableBlock` を段落の `textBlocks` に設定。`rule` の罫、見出しセルは `shade` とsemibold。セル内は折り返し、区切り行の左右中央寄せを反映。幅は内容ぶんだけ使い左へ寄せる |
+| 区切り行付きテーブル | `NSTextTable` と `NSTextTableBlock` を段落の `textBlocks` に設定。文字は本文より1段小さい14pt。`rule` の罫、見出しセルは `shade` とsemibold。セル内は折り返し、区切り行の左右中央寄せを反映。幅は内容ぶんだけ使い左へ寄せる |
 | admonition・callout | 1列の `NSTextTable` で題の帯と本文を上下に置き、左に3ptの罫を通す。帯は `shade` の地とsemiboldの題、本文は通常の墨。罫と題の色は種別ごとに `muted`(note・info・abstract・summary・seealso・example・question・quote)、`goldInk`(warning・attention・caution)、`red`(danger・error・bug・failure)、紫の `ai`(tip・hint・important・success)。本文の器は外側の器と重ねて持ち、枠の中の箇条書き・コード・表も同じtextStorageに置く |
 | 水平線 | `rule` の1pt線と前後余白。文字を長く並べて線に見せない |
 | `<br>` | 段落・見出し・箇条書き・引用・表のセルの中で行だけ折る。段落の余白は最後の行にだけ付け、折り返した行は本文の開始位置へ揃える。textStorageには通常の改行を入れ、コピーした文字列も通常の改行にする |
