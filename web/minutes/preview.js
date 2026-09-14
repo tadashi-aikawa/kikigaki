@@ -4,6 +4,7 @@ import mermaid from 'mermaid';
 import { cleanHTML } from './html.js';
 import { UpdateHighlighter, updateEntries, clearUpdates, highlightUpdates } from './updates.js';
 import { isTimeline, wrapTimeline } from './timeline.js';
+import { layoutTables } from './tables.js';
 const md = createRenderer(), root = document.getElementById('minutes');
 const toc = document.getElementById('toc'), tocNav = toc.querySelector('nav');
 let headings = [], tocLinks = [], activeTOCLink = null, tocFrame = 0;
@@ -39,7 +40,7 @@ function prepareSections(reset) {
         button.addEventListener('click', () => {
           body.hidden = !body.hidden;
           button.setAttribute('aria-expanded', String(!body.hidden));
-          if (body.hidden) folded.add(child.id); else folded.delete(child.id);
+          if (body.hidden) folded.add(child.id); else { folded.delete(child.id); layoutTables(body); }
           updateTOCPosition();
         });
         stack.push({ level, body });
@@ -47,6 +48,10 @@ function prepareSections(reset) {
     }
   }
 }
+// ペイン幅を超える表だけ列幅を配る。幅が変わらない通知 (本文の高さの変化) では測り直さない。
+let fittedWidth = -1;
+function fitTables() { fittedWidth = root.clientWidth; layoutTables(root); }
+new ResizeObserver(() => { if (root.clientWidth !== fittedWidth) fitTables(); }).observe(root);
 function revealElement(element) {
   for (let parent = element; parent && parent !== root; parent = parent.parentElement) {
     if (parent.classList.contains('section-body') && parent.hidden) {
@@ -296,6 +301,7 @@ window.minutes = {
     root.innerHTML = safeHTML(md.render(withoutFrontmatter(text), { context, vault, cleanHTML }));
     prepareSections(reset);
     decorateCallouts();
+    fitTables();
     rebuildTOC(reset);
     for (const pre of [...root.querySelectorAll('.svg-source')]) {
       const clean = DOMPurify.sanitize(pre.textContent, { USE_PROFILES: { svg: true, svgFilters: true },

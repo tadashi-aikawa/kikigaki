@@ -545,6 +545,88 @@ import Testing
         try await wait { preview.document.renderedText.contains("前回だけ") }
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('main a.wiki').length === 0") as? Bool == true)
     }
+    @Test func 表の列を内容幅に収めて短い表は狭く広い表は折り返す() async throws {
+        let document = MinutesWebView(frame: NSRect(x: 0, y: 0, width: 700, height: 600))
+        let window = NSWindow(contentRect: document.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = document; window.orderFront(nil)
+        defer { document.invalidate(); window.orderOut(nil) }
+        let wide = String(repeating: "案内文の作成と会場の確認を担当します。", count: 4)
+        let task = String(repeating: "案内文を作成して会場を確認する。", count: 2)
+        let items = String(repeating: "会場の鍵と配布資料一式、受付の名簿。", count: 2)
+        document.render("""
+        | 担当 | 期限 |
+        | --- | --- |
+        | 佐藤 | 9/10 |
+
+        | 担当 | 作業 |
+        | --- | --- |
+        | 佐藤 | \(wide) |
+
+        | 担当 | 次回までに行うこと | 準備物 |
+        | --- | --- | --- |
+        | 佐藤 | \(task) | \(items) |
+
+        """, reset: true)
+        try await wait { document.renderedText.contains("9/10") }
+        let web = document.webView
+        let measured = try await web.evaluateJavaScript("""
+        const wraps = [...document.querySelectorAll('.table-wrap')];
+        const tables = wraps.map(wrap => wrap.querySelector('table'));
+        const cells = tables.map(table => [...table.querySelectorAll('td')]);
+        ({ pane: document.querySelector('main').clientWidth,
+           tables: tables.map(table => table.getBoundingClientRect().width),
+           first: cells.map(row => row[0].getBoundingClientRect().width),
+           firstHeight: cells.map(row => row[0].getBoundingClientRect().height),
+           wrapped: cells[1][1].getBoundingClientRect().height,
+           overflow: wraps.map(wrap => wrap.scrollWidth - wrap.clientWidth),
+           fitted: tables.map(table => table.querySelectorAll(':scope > colgroup[data-fit]').length) })
+        """) as? [String: Any]
+        let sizes = try #require(measured)
+        let pane = try #require(sizes["pane"] as? Double)
+        let widths = try #require(sizes["tables"] as? [Double])
+        let first = try #require(sizes["first"] as? [Double])
+        let firstHeight = try #require(sizes["firstHeight"] as? [Double])
+        let overflow = try #require(sizes["overflow"] as? [Double])
+        let fitted = try #require(sizes["fitted"] as? [Double])
+        // 短い表はペイン幅の半分未満に収まり、列幅を配らない。
+        #expect(widths[0] < pane / 2)
+        #expect(fitted[0] == 0)
+        // 2文字の列は旧来の下限80ptまで広がらず、広い表でも内容の幅に留まる。
+        #expect(first[0] < 60 && first[1] < 60)
+        // 長い本文の表はペイン幅までで、超えた分はセル内で折り返す(1行では収まらない高さ)。
+        #expect(widths[1] <= pane + 0.5)
+        #expect(widths[1] > pane / 2)
+        // 同じ1行の枡どうしを比べる: 折り返した本文の枡は、折り返さない短い表の枡より高い。
+        let wrapped = try #require(sizes["wrapped"] as? Double)
+        #expect(wrapped > firstHeight[0] * 1.5)
+        // 長い列が2つある表は配分を置く。「担当」列は1文字ずつ折り返す幅まで潰れない。
+        #expect(fitted[2] == 1)
+        #expect(first[2] >= 36)
+        #expect(widths[2] <= pane + 0.5)
+        // 折り返し・配分で収まる表は横スクロールしない。
+        #expect(overflow.allSatisfy { $0 <= 0.5 })
+        // ペイン幅を狭めると配分をやり直す。
+        document.setFrameSize(NSSize(width: 420, height: 600))
+        document.layoutSubtreeIfNeeded()
+        // 同じ頁で繰り返し測るため、変数を残さないよう即時関数で包む。
+        let narrow = """
+        (() => {
+          const wrap = [...document.querySelectorAll('.table-wrap')][2], table = wrap.querySelector('table');
+          return { pane: document.querySelector('main').clientWidth, table: table.getBoundingClientRect().width,
+                   first: table.querySelector('td').getBoundingClientRect().width,
+                   overflow: wrap.scrollWidth - wrap.clientWidth };
+        })()
+        """
+        try await wait {
+            guard let after = try await web.evaluateJavaScript(narrow) as? [String: Any] else { return false }
+            return (after["pane"] as? Double ?? 700) < 420 && (after["table"] as? Double ?? 700) < 420
+        }
+        let after = try #require(try await web.evaluateJavaScript(narrow) as? [String: Any])
+        let narrowPane = try #require(after["pane"] as? Double)
+        #expect(try #require(after["table"] as? Double) <= narrowPane + 0.5)
+        #expect(try #require(after["first"] as? Double) >= 36)
+        #expect(try #require(after["overflow"] as? Double) <= 0.5)
+    }
     @Test func Vaultの判定とwikilinkのObsidianURI() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let manager = FileManager.default

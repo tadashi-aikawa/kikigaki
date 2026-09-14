@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRenderer, withoutFrontmatter, imageURL } from './renderer.js';
 import { changedEntries, UpdateHighlighter, foldUpdateMarks } from './updates.js';
 import { isTimeline, wrapTimeline } from './timeline.js';
+import { fitColumns } from './tables.js';
 const render = text => createRenderer().render(withoutFrontmatter(text), { context: 'test' });
 test('変更行は追加と書換えだけで移動と削除は光らせない', () => {
   const entries = values => values.map(key => ({ key }));
@@ -155,4 +156,21 @@ test('画像の専用URLと不正scheme', () => {
   assert.match(render('![[画像 a.png|200]]'), /width="200"/);
   assert.match(render('![図](<画像 a.png>)'), /minutes-image:\/\/test/);
   assert.match(render('![[別ノート]]'), /!\[\[別ノート\]\]/);
+});
+test('収まらない表だけ広い列から等しく詰め、狭い列は自然幅で残す', () => {
+  // 合計が予算内の表には何も置かない。
+  assert.equal(fitColumns([60, 100], 400), null);
+  assert.equal(fitColumns([200, 200], 400), null);
+  assert.equal(fitColumns([], 400), null);
+  // 予算が無い (折りたたみ・未表示) 表も触らない。
+  assert.equal(fitColumns([300, 300], 0), null);
+  // 狭い列は自然幅のまま。余りを広い2列で等分する。
+  assert.deepEqual(fitColumns([80, 400, 400], 680), [80, 300, 300]);
+  // 下限を割る列は下限で止める。全体は予算を超え、従来どおり横スクロールになる。
+  assert.deepEqual(fitColumns([300, 300, 300], 90, 62), [62, 62, 62]);
+  // 比例配分と違い、短い日本語の見出しの列は潰れない。
+  const widths = fitColumns([70, 900, 900], 700);
+  assert.equal(widths[0], 70);
+  assert.ok(widths[1] === widths[2] && widths[1] > 300);
+  assert.ok(widths.reduce((sum, width) => sum + width, 0) <= 700);
 });

@@ -28,8 +28,14 @@ blockquote { margin:14px 0; border-left:3px solid var(--rule); padding:2px 14px;
 .callout[data-face="warning"] { --callout-ink:#8a5a12; }
 .callout[data-face="caution"] { --callout-ink:#aa1405; }
 .table-wrap { width:100%; overflow-x:auto; margin:14px 0; }
-table { border-collapse:collapse; width:100%; font-size:13px; }
-td,th { padding:8px 10px; border:1px solid var(--rule); vertical-align:top; min-width:80px; }
+/* 表の幅は指定せず、列を内容幅で決める既定のtable layoutへ任せる。短い表は左へ寄って
+   ペイン幅より狭くなる。合計が超える表だけ tables.js が列幅を配り(ブラウザ任せの配分は
+   日本語の短い見出しを1文字幅まで潰す)、下限でも収まらない表は.table-wrapが横スクロールする。 */
+table { border-collapse:collapse; max-width:100%; font-size:13px; }
+/* 列の自然幅(max-content)を測る間だけ折り返しを止める。 */
+table.measuring :is(td,th) { white-space:nowrap; }
+/* 下限は空セルが潰れない幅だけ。80ptにすると短い列が内容より広がる。 */
+td,th { padding:8px 10px; border:1px solid var(--rule); vertical-align:top; min-width:32px; }
 th { background:var(--shade); font-weight:650; } tr:nth-child(even) td { background:#ede0cd55; }
 code { font:12.5px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--shade); border-radius:3px; padding:2px 4px; }
 pre { overflow-x:auto; padding:12px 14px; background:var(--shade); border:1px solid var(--rule); border-radius:6px; white-space:pre; overflow-wrap:normal; }
