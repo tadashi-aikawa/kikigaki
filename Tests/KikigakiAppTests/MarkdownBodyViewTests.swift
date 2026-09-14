@@ -181,6 +181,90 @@ import KikigakiCore
         }
     }
 
+    @Test func 表は列の自然幅に収まり本文幅を超えるときだけ詰めて折り返す() throws {
+        _ = NSApplication.shared
+        // 短い表: 3列とも数文字。本文幅が広くても伸びてほしくない。
+        let narrow = MarkdownBodyView()
+        narrow.update("|担当|期限|\n| --- | --- |\n|佐藤|9/10|\n|鈴木|9/11|")
+        // 広い表: 自然幅の合計が本文幅を超える。本文幅に収め、セル内で折り返す。
+        let long = String(repeating: "案内文を作成し、参加方法と持ち物を明記する。", count: 3)
+        let wide = MarkdownBodyView()
+        wide.update("|担当|次回までに行うこと|準備物|連絡先|\n| --- | --- | --- | --- |\n|佐藤|"
+                    + long + "|" + long + "|" + long + "|")
+        var narrowRights: [CGFloat] = [], heights: [CGFloat: [CGFloat]] = [:]
+        for width in [CGFloat(510), 810, 510] {
+            var measured: [CGFloat] = []
+            for body in [narrow, wide] {
+                // 行と同じ順序で、表示する幅の枠を与えてから測る。
+                body.setFrameSize(NSSize(width: width, height: body.frame.height))
+                let height = body.height(for: width)
+                body.frame = NSRect(x: 0, y: 0, width: width, height: height)
+                try assertFits(body)
+                measured.append(height)
+            }
+            let inner = width - narrow.textContainerInset.width * 2
+            let narrowRight = try tableRight(narrow), wideRight = try tableRight(wide)
+            // 短い表は本文幅の半分にも満たず、左に寄ったまま幅に追従しない。
+            #expect(narrowRight < inner / 2)
+            narrowRights.append(narrowRight)
+            // 「担当」「期限」の列は自然幅どまり。どの列も60ptを超えて広がらない。
+            #expect(try fragments(narrow).map(\.width).max() ?? 0 < 60)
+            print("TABLE \(Int(width)) narrow=\(Int(narrowRight)) wide=\(Int(wideRight)) columns=\(try fragments(narrow).map { Int($0.width) })")
+            // 広い表は本文幅いっぱいまで使い、はみ出さない。
+            #expect(wideRight > inner * 0.9 && wideRight <= inner + 1)
+            // 詰めるのは長い列だけ。「担当」はほぼ自然幅を保ち、1文字ずつ折り返さない。
+            // 比例配分なら本文幅の1/4以下まで潰れるところを、24pt台で残す。
+            #expect(try fragments(wide).map(\.width).min() ?? 0 >= 24)
+            if let previous = heights[width] { #expect(previous == measured) }
+            heights[width] = measured
+            try capture("table-\(Int(width))", view: canvas(narrow, wide, width: width))
+        }
+        // 幅の往復で短い表の幅は変わらない。
+        #expect(Set(narrowRights.map { Int($0) }).count == 1)
+        #expect(try #require(heights[510]).last! > #require(heights[810]).last!)
+        // 短い表は折り返さないので、本文幅が変わっても高さが変わらない。
+        #expect(try #require(heights[510]).first! == #require(heights[810]).first!)
+    }
+
+    @Test func 列幅の配分は収まる表を変えず超える表だけ広い列から詰める() {
+        // 収まるなら自然幅のまま。
+        #expect(MarkdownBodyView.fit([24, 120, 40], into: 300) == [24, 120, 40])
+        // 超えるときは広い列から均す。狭い列は自然幅のまま残る。
+        #expect(MarkdownBodyView.fit([24, 300, 40], into: 200) == [24, 136, 40])
+        // どの列も均した幅を超えるなら等分になる。
+        #expect(MarkdownBodyView.fit([300, 300], into: 200) == [100, 100])
+        // 下限24ptを割る予算では下限で置き、残りはTextKitが器の幅まで詰める。
+        #expect(MarkdownBodyView.fit([300, 300], into: 20) == [24, 24])
+    }
+
+    /// 表の右端。行断片の枠は列の幅そのものなので、最大値が表の右端になる。
+    private func tableRight(_ body: MarkdownBodyView) throws -> CGFloat {
+        try fragments(body).map(\.maxX).max() ?? 0
+    }
+
+    private func fragments(_ body: MarkdownBodyView) throws -> [NSRect] {
+        let manager = try #require(body.layoutManager), container = try #require(body.textContainer)
+        manager.ensureLayout(for: container)
+        var rects: [NSRect] = []
+        manager.enumerateLineFragments(forGlyphRange: manager.glyphRange(for: container)) { rect, _, _, _, _ in
+            rects.append(rect)
+        }
+        return rects
+    }
+
+    private func canvas(_ views: MarkdownBodyView..., width: CGFloat) -> NSView {
+        let canvas = NSView(frame: NSRect(x: 0, y: 0, width: width, height: views.reduce(16) { $0 + $1.frame.height + 16 }))
+        canvas.wantsLayer = true
+        canvas.layer?.backgroundColor = Washi.paper.cgColor
+        var y: CGFloat = 16
+        for view in views.reversed() {
+            view.setFrameOrigin(NSPoint(x: 0, y: y))
+            canvas.addSubview(view)
+            y += view.frame.height + 16
+        }
+        return canvas
+    }
+
     private func assertFits(_ body: MarkdownBodyView) throws {
         let manager = try #require(body.layoutManager), container = try #require(body.textContainer)
         manager.ensureLayout(for: container)

@@ -22,6 +22,15 @@ final class MarkdownBodyView: NSTextView {
     private var source: String?
     private var measuredWidth: CGFloat?
     private var measuredHeight: CGFloat = 0
+    /// 描画は幅を知らずに1回だけ行うので、表の列は自然幅のまま置かれている。
+    /// 本文幅が決まってから、収まらない表だけ列を詰め直すために覚えておく。
+    private var tables: [TableColumns] = []
+    private var appliedWidth: CGFloat?
+
+    private struct TableColumns {
+        let cells: [[NSTextTableBlock]]
+        let naturals: [CGFloat]
+    }
 
     init() {
         let storage = NSTextStorage()
@@ -57,13 +66,78 @@ final class MarkdownBodyView: NSTextView {
         source = markdown
         textStorage?.setAttributedString(MarkdownBodyRenderer.render(MarkdownBlocks.parse(markdown)))
         measuredWidth = nil
+        appliedWidth = nil
+        collectTables()
+    }
+
+    /// 表の枡を列ごとに集める。自然幅は描画が置いた絶対値をそのまま覚える。
+    /// コード・引用・水平線の器は割合で幅を持つので、絶対値の枡だけを拾って区別する。
+    private func collectTables() {
+        tables = []
+        guard let storage = textStorage, storage.length > 0 else { return }
+        var order: [NSTextTable] = []
+        var columns: [ObjectIdentifier: [Int: [NSTextTableBlock]]] = [:]
+        var naturals: [ObjectIdentifier: [Int: CGFloat]] = [:]
+        storage.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: storage.length)) { value, _, _ in
+            // admonitionの中の表は外側の器が前置されるので、最も内側の器を見る。
+            guard let cell = (value as? NSParagraphStyle)?.textBlocks.last as? NSTextTableBlock,
+                  cell.contentWidthValueType == .absoluteValueType else { return }
+            let key = ObjectIdentifier(cell.table)
+            if columns[key] == nil { order.append(cell.table) }
+            columns[key, default: [:]][cell.startingColumn, default: []].append(cell)
+            naturals[key, default: [:]][cell.startingColumn] = cell.contentWidth
+        }
+        tables = order.compactMap { table in
+            let key = ObjectIdentifier(table)
+            let indices = Array(0..<table.numberOfColumns)
+            guard let cells = columns[key], let widths = naturals[key],
+                  indices.allSatisfy({ cells[$0] != nil && widths[$0] != nil }) else { return nil }
+            return TableColumns(cells: indices.map { cells[$0]! }, naturals: indices.map { widths[$0]! })
+        }
+    }
+
+    /// 収まらない表だけ、広い列から順に均して詰める。狭い列は自然幅のまま残すので、
+    /// 比例配分のように短い見出しが1文字ずつ折り返すことがない。
+    private func applyTableWidths(available: CGFloat) -> Bool {
+        guard appliedWidth != available else { return false }
+        appliedWidth = available
+        guard !tables.isEmpty else { return false }
+        for table in tables {
+            // 枡ごとの余白5pt×2と罫0.5pt×2は幅の予算から先に引く。
+            let widths = MarkdownBodyView.fit(table.naturals, into: available - CGFloat(table.naturals.count) * 11)
+            for (column, cells) in table.cells.enumerated() {
+                for cell in cells { cell.setContentWidth(widths[column], type: .absoluteValueType) }
+            }
+        }
+        return true
+    }
+
+    /// 自然幅の合計が予算を超えるときだけ、広い列から等しく詰める最大公平配分。
+    /// 下限24ptを割ってもなお超える表は、TextKitが器の幅まで比例で詰める。
+    static func fit(_ naturals: [CGFloat], into budget: CGFloat) -> [CGFloat] {
+        guard budget > 0, naturals.reduce(0, +) > budget else { return naturals }
+        var widths = naturals
+        var remaining = budget
+        var left = naturals.count
+        for index in naturals.indices.sorted(by: { naturals[$0] < naturals[$1] }) {
+            let share = max(24, remaining / CGFloat(left))
+            widths[index] = min(naturals[index], share)
+            remaining -= widths[index]
+            left -= 1
+        }
+        return widths
     }
 
     func height(for width: CGFloat) -> CGFloat {
         if measuredWidth == width { return measuredHeight }
         guard let container = textContainer, let manager = layoutManager else { return 0 }
-        container.containerSize = NSSize(width: max(1, width - textContainerInset.width * 2),
-                                         height: .greatestFiniteMagnitude)
+        let inner = max(1, width - textContainerInset.width * 2)
+        container.containerSize = NSSize(width: inner, height: .greatestFiniteMagnitude)
+        if applyTableWidths(available: inner), let storage = textStorage {
+            // 枡の幅は段落属性の変更ではないので、器の寸法だけでは組み直されない。
+            manager.invalidateLayout(forCharacterRange: NSRange(location: 0, length: storage.length),
+                                     actualCharacterRange: nil)
+        }
         manager.ensureLayout(for: container)
         let used = manager.usedRect(for: container)
         let extra = manager.extraLineFragmentTextContainer === container ? manager.extraLineFragmentRect.maxY : 0
@@ -205,21 +279,24 @@ enum MarkdownBodyRenderer {
                 table.layoutAlgorithm = .fixedLayoutAlgorithm
                 table.collapsesBorders = true
                 table.hidesEmptyCells = false
-                table.setContentWidth(100, type: .percentageValueType)
+                // 表の幅は指定せず、列の絶対幅の合計からTextKitに決めさせる。短い表は本文幅まで
+                // 伸びず左に寄る。描画は幅を知らずに1回だけ行うので、ここでは自然幅を置くだけにし、
+                // 合計が本文幅を超える表の詰め直しは幅が決まる height(for:) に任せる。
                 let rows = [model.header] + model.rows
-                // 短い番号列と長い説明列を同じ幅にせず、内容から割合を配分する。
-                // 上限は長いセル1つが他の列を押し潰さないため。実幅は表全体に追従させる。
+                // 列幅はその列のヘッダ・ボディの自然幅の最大。見出しはsemiboldで測る。
+                // 上限は長いセル1つが他の列を押し潰さないため。
                 let widths = model.header.indices.map { column -> CGFloat in
-                    let natural = rows.map { row in
-                        (row[column].map(\.text).joined() as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13)]).width
+                    let natural = rows.enumerated().map { row, cells in
+                        let font = NSFont.systemFont(ofSize: 13, weight: row == 0 ? .semibold : .regular)
+                        return (cells[column].map(\.text).joined() as NSString).size(withAttributes: [.font: font]).width
                     }.max() ?? 0
-                    return min(260, max(32, natural + 12))
+                    // +1は測定と組版の丸め差で最後の1文字が折り返さないための余裕。
+                    return min(260, max(24, ceil(natural) + 1))
                 }
-                let total = widths.reduce(0, +)
                 for (row, cells) in rows.enumerated() {
                     for (column, content) in cells.enumerated() {
                         let cell = NSTextTableBlock(table: table, startingRow: row, rowSpan: 1, startingColumn: column, columnSpan: 1)
-                        cell.setContentWidth(widths[column] / total * 100, type: .percentageValueType)
+                        cell.setContentWidth(widths[column], type: .absoluteValueType)
                         cell.setWidth(0.5, type: .absoluteValueType, for: .border)
                         cell.setBorderColor(Washi.rule)
                         cell.setWidth(5, type: .absoluteValueType, for: .padding)
