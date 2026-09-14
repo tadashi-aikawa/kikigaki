@@ -77,9 +77,29 @@ final class MarkdownBodyView: NSTextView {
 enum MarkdownBodyRenderer {
     static func render(_ blocks: [MarkdownBlock]) -> NSAttributedString {
         let result = NSMutableAttributedString(string: "")
+        // `<br>` は段落を割らずに行だけ折る。文字は通常の改行にしてコピーの見え方を保ち、
+        // 折り返し後の行は本文の開始位置(headIndent)へ揃え、段落の余白は最後の行にだけ残す。
         func append(_ runs: [MarkdownInline], paragraph: NSMutableParagraphStyle = paragraph(),
                     size: CGFloat = 15, weight: NSFont.Weight = .regular,
                     color: NSColor = Washi.ink, code: Bool = false) {
+            guard runs.contains(where: \.isLineBreak) else {
+                line(runs, paragraph: paragraph, size: size, weight: weight, color: color, code: code)
+                return
+            }
+            var segments: [[MarkdownInline]] = [[]]
+            for run in runs {
+                if run.isLineBreak { segments.append([]) } else { segments[segments.count - 1].append(run) }
+            }
+            for (index, segment) in segments.enumerated() {
+                let style = paragraph.mutableCopy() as! NSMutableParagraphStyle
+                if index > 0 { style.firstLineHeadIndent = paragraph.headIndent }
+                if index < segments.count - 1 { style.paragraphSpacing = 0 }
+                line(segment, paragraph: style, size: size, weight: weight, color: color, code: code)
+            }
+        }
+        func line(_ runs: [MarkdownInline], paragraph: NSMutableParagraphStyle = paragraph(),
+                  size: CGFloat = 15, weight: NSFont.Weight = .regular,
+                  color: NSColor = Washi.ink, code: Bool = false) {
             var attributes: [NSAttributedString.Key: Any] = [
                 .font: code ? NSFont.monospacedSystemFont(ofSize: size, weight: weight) : NSFont.systemFont(ofSize: size, weight: weight),
                 .foregroundColor: color, .paragraphStyle: paragraph

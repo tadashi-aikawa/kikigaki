@@ -233,10 +233,47 @@ import KikigakiCore
         #expect(runs.first?.webURL == nil)
     }
 
+    /// 解釈するHTMLは`<br>`だけ。他は従来どおり文字のまま残す。
     @Test func 対象外の画像とwikilinkとHTMLは表示用HTMLへ変換しない() {
-        for source in ["![**画像**](https://example.com/a.png)", "[[ノート|**別名**]]", "<script>alert(1)</script>", "deadbeef Notes/test.md"] {
+        for source in ["![**画像**](https://example.com/a.png)", "[[ノート|**別名**]]", "<script>alert(1)</script>",
+                       "deadbeef Notes/test.md", "<div>囲み</div>", #"<br class="x">"#, "<break>", "<b>太字</b>"] {
             #expect(MarkdownBlocks.inline(source) == [.init(source)])
         }
+    }
+
+    @Test func brタグだけを改行として扱い前後の装飾と文字を保つ() {
+        #expect(MarkdownBlocks.inline("一行目<br>二行目") == [.init("一行目"), .lineBreak, .init("二行目")])
+        for tag in ["<br>", "<br/>", "<br />", "<BR>", "<Br />", "<br\t/>"] {
+            #expect(MarkdownBlocks.inline("前" + tag + "後") == [.init("前"), .lineBreak, .init("後")])
+        }
+        #expect(MarkdownBlocks.inline("**太字<br>続き**")
+            == [.init("太字", style: .strong), .lineBreak, .init("続き", style: .strong)])
+        #expect(MarkdownBlocks.inline("[表示<br>先](https://example.com)") == [
+            .init("表示", destination: "https://example.com"), .lineBreak,
+            .init("先", destination: "https://example.com")
+        ])
+        // 改行の走りをまとめず、空行の数を保つ。
+        #expect(MarkdownBlocks.inline("a<br><br>b") == [.init("a"), .lineBreak, .lineBreak, .init("b")])
+        #expect(MarkdownBlocks.inline("末尾<br>") == [.init("末尾"), .lineBreak])
+        #expect(MarkdownBlocks.inline(#"\<br>"# ) == [.init("<br>")])
+    }
+
+    @Test func brは見出しと箇条書きと引用と表のセルで改行になりコードでは文字のまま() throws {
+        guard case .heading(_, let heading) = try #require(MarkdownBlocks.parse("# 題<br>続き").first)
+        else { Issue.record("見出しがない"); return }
+        #expect(heading == [.init("題"), .lineBreak, .init("続き")])
+        guard case .listItem(let item) = try #require(MarkdownBlocks.parse("- 項目<br>折り返し").first)
+        else { Issue.record("箇条書きがない"); return }
+        #expect(item.content == [.init("項目"), .lineBreak, .init("折り返し")])
+        guard case .quote(let lines) = try #require(MarkdownBlocks.parse("> 引用<br>続き").first)
+        else { Issue.record("引用がない"); return }
+        #expect(lines.first?.content == [.init("引用"), .lineBreak, .init("続き")])
+        guard case .table(let table) = try #require(MarkdownBlocks.parse("|担当|内容|\n|-|-|\n|迅雷|上<br>下|").first)
+        else { Issue.record("表がない"); return }
+        #expect(table.rows[0][1] == [.init("上"), .lineBreak, .init("下")])
+        // 行内コードとフェンスの中は原文のまま。
+        #expect(MarkdownBlocks.inline("`a<br>b`") == [.init("a<br>b", isCode: true)])
+        #expect(MarkdownBlocks.parse("```\na<br>b\n```") == [.code(text: "a<br>b", language: nil)])
     }
 
     @Test func 長文と未閉鎖の角括弧の連続でも文字を保持する() {

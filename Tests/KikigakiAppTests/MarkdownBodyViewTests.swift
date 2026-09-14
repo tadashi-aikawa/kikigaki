@@ -41,6 +41,8 @@ import KikigakiCore
     ---
 
     *開催時刻は未確定*です。~~社外への同時案内~~は見送り、[準備チェックリスト](https://example.com/trial/checklist)に確認事項をまとめます。
+
+    会場は本社3階の会議室A<br>受付は開始10分前からです。
     """
 
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
@@ -138,6 +140,8 @@ import KikigakiCore
             #expect(copied.contains(expected))
         }
         #expect(!copied.contains("**") && !copied.contains("```"))
+        // `<br>` は段落を割らずに行を折り、コピーでは通常の改行になる。
+        #expect(copied.contains("会議室A\n受付は開始10分前からです。") && !copied.lowercased().contains("<br"))
         let link = (body.string as NSString).range(of: "準備チェックリスト")
         #expect((storage.attribute(.link, at: link.location, effectiveRange: nil) as? URL)?.absoluteString
             == "https://example.com/trial/checklist")

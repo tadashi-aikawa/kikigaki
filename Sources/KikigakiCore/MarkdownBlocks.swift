@@ -14,9 +14,15 @@ public struct MarkdownInline: Equatable, Sendable {
     public var isCode: Bool
     /// 非http(s)の明示リンクも原文の行き先を保持する。クリック可否はwebURLで判定する。
     public var destination: String?
-    public init(_ text: String, style: Style = [], isCode: Bool = false, destination: String? = nil) {
+    /// `<br>` だけをHTMLから解釈した強制改行。textは通常の改行にして、
+    /// 素朴に連結する側でも文字を失わず、コピーした文字列も通常の改行になる。
+    public var isLineBreak: Bool
+    public init(_ text: String, style: Style = [], isCode: Bool = false, destination: String? = nil,
+                isLineBreak: Bool = false) {
         self.text = text; self.style = style; self.isCode = isCode; self.destination = destination
+        self.isLineBreak = isLineBreak
     }
+    public static let lineBreak = Self("\n", isLineBreak: true)
     public var webURL: URL? {
         guard let destination,
               !destination.contains(where: { $0.isWhitespace }),
@@ -252,7 +258,7 @@ private struct InlineScanner {
         func append(_ value: MarkdownInline) {
             guard !value.text.isEmpty else { return }
             if let last = result.last, last.style == value.style, last.isCode == value.isCode,
-               last.destination == value.destination {
+               last.destination == value.destination, !last.isLineBreak, !value.isLineBreak {
                 result[result.count - 1].text += value.text
             } else { result.append(value) }
         }
@@ -272,6 +278,10 @@ private struct InlineScanner {
                     plain(String(chars[start..<i]))
                 }
                 continue
+            }
+            // HTMLで解釈するのは`<br>`だけ。他のタグは従来どおり文字のまま残す。
+            if let end = lineBreakEnd(at: i) {
+                append(.lineBreak); i = end; continue
             }
             // 対象外の画像・wikilinkは塊で残す。中のURLや装飾だけを誤って有効にしない。
             if starts("![[", at: i), let end = find("]]", from: i + 3) {
@@ -338,6 +348,16 @@ private struct InlineScanner {
             i = end
         }
         return nil
+    }
+    /// `<br>`・`<br/>`・`<br />` を大文字小文字を問わず受ける。属性付きのタグは受けない。
+    private func lineBreakEnd(at start: Int) -> Int? {
+        guard chars[start] == "<", start + 2 < chars.count,
+              String(chars[start + 1...start + 2]).lowercased() == "br" else { return nil }
+        var i = start + 3
+        while i < chars.count, chars[i] == " " || chars[i] == "\t" { i += 1 }
+        if i < chars.count, chars[i] == "/" { i += 1 }
+        guard i < chars.count, chars[i] == ">" else { return nil }
+        return i + 1
     }
     private func starts(_ text: String, at index: Int) -> Bool {
         let value = Array(text)
