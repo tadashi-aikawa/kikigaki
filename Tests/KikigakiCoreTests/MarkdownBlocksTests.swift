@@ -71,13 +71,110 @@ import KikigakiCore
         ])
     }
 
-    @Test func 引用の連なりと空行と段数を保ちcalloutは文字として残す() throws {
-        let blocks = MarkdownBlocks.parse("> [!NOTE] お知らせ\n> **確認**\n>\n> > 入れ子\n\n終わり")
+    @Test func 引用の連なりと空行と段数を保つ() throws {
+        let blocks = MarkdownBlocks.parse("> 発言\n> **確認**\n>\n> > 入れ子\n\n終わり")
         guard case .quote(let lines) = try #require(blocks.first) else { Issue.record("引用がない"); return }
         #expect(lines.map(\.depth) == [1, 1, 1, 2])
-        #expect(lines.map { text($0.content) } == ["[!NOTE] お知らせ", "確認", "", "入れ子"])
+        #expect(lines.map { text($0.content) } == ["発言", "確認", "", "入れ子"])
         #expect(lines[1].content == [.init("確認", style: .strong)])
         #expect(blocks.count == 3)
+    }
+
+    private func admonition(_ source: String) throws -> MarkdownAdmonition {
+        guard case .admonition(let box) = try #require(MarkdownBlocks.parse(source).first)
+        else { Issue.record("admonitionがない"); throw TestError.missing }
+        return box
+    }
+    private enum TestError: Error { case missing }
+
+    @Test func admonitionは題と字下げ本文を持ち空行をまたいで終わりを判定する() throws {
+        let source = """
+        !!! info "会議の下書き"
+
+            hogehoge
+
+            - 項目
+              - 子
+
+            ```swift
+            let a = 1
+            ```
+
+        続きの段落
+        """
+        let blocks = MarkdownBlocks.parse(source)
+        guard case .admonition(let box) = try #require(blocks.first) else { Issue.record("枠がない"); return }
+        #expect(box.kind == .info && box.keyword == "info" && box.title == [.init("会議の下書き")])
+        #expect(box.blocks.count == 6)
+        #expect(box.blocks.first == .paragraph([.init("hogehoge")]) && box.blocks[1] == .paragraph([]))
+        let items = box.blocks.compactMap { block -> MarkdownListItem? in
+            if case .listItem(let item) = block { return item }; return nil
+        }
+        #expect(items.map(\.depth) == [0, 1])
+        #expect(items.map { text($0.content) } == ["項目", "子"])
+        #expect(box.blocks.last == .code(text: "let a = 1", language: "swift"))
+        // 末尾の空行は枠に含めず、字下げの無い行から通常の段落へ戻る。
+        #expect(Array(blocks.dropFirst()) == [.paragraph([]), .paragraph([.init("続きの段落")])])
+    }
+
+    @Test func admonitionの題を省くと種別名になり未知の種別はnoteの顔にする() throws {
+        #expect(try admonition("!!! warning\n    本文").title == [.init("warning")])
+        #expect(try admonition("!!! warning\n    本文").kind == .warning)
+        let unknown = try admonition("!!! ほげ\n    本文")
+        #expect(unknown.kind == .note && unknown.keyword == "ほげ" && unknown.title == [.init("ほげ")])
+        #expect(try admonition("!!! note \"\"\n    本文").title.isEmpty)
+        #expect(try admonition("!!! tip '**強調**した題'").title == [.init("強調", style: .strong), .init("した題")])
+        for kind in MarkdownAdmonition.Kind.allCases {
+            #expect(try admonition("!!! \(kind.rawValue.uppercased())").kind == kind)
+        }
+    }
+
+    @Test func admonitionの字下げが足りない行とタブと壊れた見出しを取り違えない() throws {
+        let blocks = MarkdownBlocks.parse("!!! note \"題\"\n    本文\n   足りない字下げ")
+        #expect(blocks.count == 2)
+        #expect(blocks.last == .paragraph([.init("   足りない字下げ")]))
+        #expect(try admonition("!!! note\n\t本文").blocks == [.paragraph([.init("本文")])])
+        // 題が引用符で囲まれていない行と種別の無い行は段落へ戻し、原文を失わない。
+        for line in ["!!!", "!!!note", "!!! note 題", "!!! note \"題", "  文中の !!! note"] {
+            #expect(MarkdownBlocks.parse(line) == [.paragraph([.init(line)])])
+        }
+        // 表の途中で始まったadmonitionを表へ飲み込ませない。
+        let table = MarkdownBlocks.parse("|a|b|\n|-|-|\n!!! note \"題\"")
+        #expect(table.count == 2)
+        guard case .table = try #require(table.first) else { Issue.record("表がない"); return }
+        guard case .admonition = try #require(table.last) else { Issue.record("枠がない"); return }
+    }
+
+    @Test func calloutも同じ枠にし折り畳みの指定と入れ子の引用を保つ() throws {
+        let callout = try admonition("> [!TIP]+ 折り畳み\n> 本文\n> - 項目")
+        #expect(callout.kind == .tip && callout.keyword == "TIP" && callout.title == [.init("折り畳み")])
+        #expect(callout.blocks.count == 2)
+        #expect(callout.blocks.first == .paragraph([.init("本文")]))
+        #expect(try admonition("> [!warning]-\n> 本文").title == [.init("warning")])
+        #expect(try admonition("> [!ほげ] 題").kind == .note)
+        guard case .quote(let lines) = try #require(admonition("> [!note] 題\n> > 中の引用\n> > > 深い").blocks.first)
+        else { Issue.record("入れ子の引用がない"); return }
+        #expect(lines.map(\.depth) == [1, 2])
+        #expect(lines.map { text($0.content) } == ["中の引用", "深い"])
+        // 角括弧が閉じない行や2段目から始まるcalloutは従来どおり引用のまま。
+        for source in ["> [!未閉鎖 題", "> > [!note] 題"] {
+            guard case .quote = try #require(MarkdownBlocks.parse(source).first)
+            else { Issue.record("引用がない"); return }
+        }
+    }
+
+    @Test func 入れ子の深さを限り最深部の文字も失わない() {
+        var source = ""
+        for level in 0..<8 { source += String(repeating: "    ", count: level) + "!!! note \"題\(level)\"\n" }
+        source += String(repeating: "    ", count: 8) + "最深部"
+        var blocks = MarkdownBlocks.parse(source), levels = 0
+        while let first = blocks.first, case .admonition(let box) = first {
+            levels += 1; blocks = box.blocks
+        }
+        #expect(levels == 6)
+        #expect(blocks.map { block -> String in
+            if case .paragraph(let runs) = block { return text(runs) } else { return "" }
+        }.joined(separator: "\n").contains("最深部"))
     }
 
     @Test func フェンス内は見出しや表や装飾を解釈せず同じ長さ以上で閉じる() {

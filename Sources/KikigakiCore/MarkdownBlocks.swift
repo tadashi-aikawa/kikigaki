@@ -54,6 +54,22 @@ public struct MarkdownTable: Equatable, Sendable {
     public var rows: [[[MarkdownInline]]]
 }
 
+/// `!!! 種別 "題"` とcallout `> [!種別] 題` を同じ器で表す。折り畳みの指定は展開して捨てる。
+public struct MarkdownAdmonition: Equatable, Sendable {
+    public enum Kind: String, Equatable, Sendable, CaseIterable {
+        case note, info, tip, hint, important, warning, attention, caution, danger, error
+        case seealso, abstract, summary, example, question, quote, bug, success, failure
+    }
+    /// 未知の種別はnoteの顔にする。題を省いたときの表示には原文の種別語keywordを使う。
+    public var kind: Kind
+    public var keyword: String
+    public var title: [MarkdownInline]
+    public var blocks: [MarkdownBlock]
+    public init(kind: Kind, keyword: String, title: [MarkdownInline], blocks: [MarkdownBlock]) {
+        self.kind = kind; self.keyword = keyword; self.title = title; self.blocks = blocks
+    }
+}
+
 public enum MarkdownBlock: Equatable, Sendable {
     /// 1原文行を1段落にする。空行も空の配列で保持し、行送りは描画側で決める。
     case paragraph([MarkdownInline])
@@ -62,6 +78,7 @@ public enum MarkdownBlock: Equatable, Sendable {
     case quote([MarkdownQuoteLine])
     case code(text: String, language: String?)
     case table(MarkdownTable)
+    case admonition(MarkdownAdmonition)
     case rule
 }
 
@@ -69,7 +86,14 @@ public enum MarkdownBlock: Equatable, Sendable {
 /// 記法が成立しない行は原文の段落へ戻し、読める内容を捨てない。
 public enum MarkdownBlocks {
     public static func parse(_ source: String, minutes: Bool = false) -> [MarkdownBlock] {
-        let source = minutes ? withoutFrontmatter(source) : source
+        parse(source, minutes: minutes, depth: 0)
+    }
+
+    /// admonitionの本文はここを再帰で呼ぶ。壊れたAI出力でスタックを使い切らないよう段数を限る。
+    private static let nesting = 6
+
+    private static func parse(_ source: String, minutes: Bool, depth: Int) -> [MarkdownBlock] {
+        let source = minutes && depth == 0 ? withoutFrontmatter(source) : source
         guard !source.isEmpty else { return [] }
         func inline(_ text: String) -> [MarkdownInline] { InlineScanner(Array(text), minutes: minutes).parse() }
         let lines = source.replacingOccurrences(of: "\r\n", with: "\n")
@@ -87,6 +111,27 @@ public enum MarkdownBlocks {
                 }
                 result.append(.code(text: body.joined(separator: "\n"), language: fence.language))
                 if index < lines.count { index += 1 }
+                indents = [0]
+                continue
+            }
+            if depth < nesting, let head = admonitionHead(line) {
+                // 本文は4桁の字下げ。間の空行は後ろに字下げ行が続くときだけ含め、末尾の空行は残す。
+                var body: [String] = [], pending: [String] = []
+                index += 1
+                while index < lines.count {
+                    if lines[index].trimmingCharacters(in: .whitespaces).isEmpty {
+                        pending.append(""); index += 1; continue
+                    }
+                    guard let stripped = stripIndent(lines[index]) else { break }
+                    // 題の直後の空行は本文に含めない。本文の途中の空行だけ段落の区切りとして残す。
+                    if !body.isEmpty { body.append(contentsOf: pending) }
+                    pending = []
+                    body.append(stripped); index += 1
+                }
+                index -= pending.count
+                result.append(.admonition(MarkdownAdmonition(kind: kind(head.keyword), keyword: head.keyword,
+                    title: inline(head.title ?? head.keyword),
+                    blocks: parse(body.joined(separator: "\n"), minutes: minutes, depth: depth + 1))))
                 indents = [0]
                 continue
             }
@@ -116,12 +161,25 @@ public enum MarkdownBlocks {
                 if item.indent > indents.last! { indents.append(item.indent) }
                 result.append(.listItem(MarkdownListItem(depth: indents.count - 1,
                     marker: item.marker, ordered: item.ordered, checked: item.checked, content: inline(item.text))))
-            } else if let quote = quoteLine(line, minutes: minutes) {
+            } else if let quote = quoteLine(line) {
                 var quoted = [quote]
-                while index + 1 < lines.count, let next = quoteLine(lines[index + 1], minutes: minutes) {
+                while index + 1 < lines.count, let next = quoteLine(lines[index + 1]) {
                     quoted.append(next); index += 1
                 }
-                result.append(.quote(quoted)); indents = [0]
+                // calloutは引用ではなくadmonitionにする。残りの行は段数を1つ下げて組み直す。
+                if depth < nesting, quoted[0].depth == 1, let head = calloutHead(quoted[0].text) {
+                    let inner = quoted.dropFirst()
+                        .map { String(repeating: "> ", count: $0.depth - 1) + $0.text }
+                        .joined(separator: "\n")
+                    result.append(.admonition(MarkdownAdmonition(kind: kind(head.keyword), keyword: head.keyword,
+                        title: inline(head.title ?? head.keyword),
+                        blocks: parse(inner, minutes: minutes, depth: depth + 1))))
+                } else {
+                    result.append(.quote(quoted.map {
+                        MarkdownQuoteLine(depth: $0.depth, content: InlineScanner(Array($0.text), minutes: minutes).parse())
+                    }))
+                }
+                indents = [0]
             } else {
                 result.append(.paragraph(inline(line)))
                 if !line.trimmingCharacters(in: .whitespaces).isEmpty { indents = [0] }
@@ -178,7 +236,7 @@ public enum MarkdownBlocks {
         }
         return (indent, parts[1], parts[1].first?.isNumber == true, checked, text)
     }
-    private static func quoteLine(_ line: String, minutes: Bool = false) -> MarkdownQuoteLine? {
+    private static func quoteLine(_ line: String) -> (depth: Int, text: String)? {
         guard let parts = captures(#"^ {0,3}>(.*)$"#, line) else { return nil }
         var text = parts[0], depth = 1
         if text.first == " " { text.removeFirst() }
@@ -186,10 +244,39 @@ public enum MarkdownBlocks {
             depth += 1; text.removeFirst()
             if text.first == " " { text.removeFirst() }
         }
-        return MarkdownQuoteLine(depth: depth, content: InlineScanner(Array(text), minutes: minutes).parse())
+        return (depth, text)
+    }
+    /// 題は引用符で囲んだものだけ受ける。囲みのない余りが続く行は段落へ戻し、原文を失わない。
+    /// titleがnilなら省略、空文字なら題を出さない指定。
+    private static func admonitionHead(_ line: String) -> (keyword: String, title: String?)? {
+        guard let parts = captures(#"^ {0,3}!!![ \t]+([^ \t"']+)[ \t]*(.*)$"#, line) else { return nil }
+        let rest = parts[1].trimmingCharacters(in: .whitespaces)
+        if rest.isEmpty { return (parts[0], nil) }
+        for quote in ["\"", "'"] where rest.hasPrefix(quote) && rest.hasSuffix(quote) && rest.count >= 2 {
+            return (parts[0], String(rest.dropFirst().dropLast()))
+        }
+        return nil
+    }
+    private static func calloutHead(_ text: String) -> (keyword: String, title: String?)? {
+        guard let parts = captures(#"^\[!([^\]\s]+)\][-+]?[ \t]*(.*)$"#, text) else { return nil }
+        let title = parts[1].trimmingCharacters(in: .whitespaces)
+        return (parts[0], title.isEmpty ? nil : title)
+    }
+    private static func kind(_ keyword: String) -> MarkdownAdmonition.Kind {
+        MarkdownAdmonition.Kind(rawValue: keyword.lowercased()) ?? .note
+    }
+    /// 4桁ぶんの字下げを外す。タブは4桁として数え、字下げが足りない行と空行はnilにする。
+    private static func stripIndent(_ line: String, columns: Int = 4) -> String? {
+        var used = 0, index = line.startIndex
+        while used < columns, index < line.endIndex {
+            if line[index] == " " { used += 1 } else if line[index] == "\t" { used += 4 - used % 4 } else { return nil }
+            index = line.index(after: index)
+        }
+        guard used >= columns else { return nil }
+        return String(repeating: " ", count: used - columns) + String(line[index...])
     }
     private static func startsBlock(_ line: String) -> Bool {
-        openingFence(line) != nil || isRule(line) || listLine(line) != nil
+        openingFence(line) != nil || isRule(line) || listLine(line) != nil || admonitionHead(line) != nil
             || line.range(of: #"^ {0,3}(>|#{1,6}(?:[ \t]|$))"#, options: .regularExpression) != nil
     }
     private static func captures(_ pattern: String, _ text: String) -> [String]? {

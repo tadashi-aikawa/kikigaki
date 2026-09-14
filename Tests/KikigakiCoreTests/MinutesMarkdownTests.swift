@@ -3,13 +3,19 @@ import Testing
 
 @Suite struct MinutesMarkdownTests {
     private func text(_ source: String, minutes: Bool = true) -> String {
-        MarkdownBlocks.parse(source, minutes: minutes).map { block in
+        text(MarkdownBlocks.parse(source, minutes: minutes))
+    }
+    private func text(_ blocks: [MarkdownBlock]) -> String {
+        blocks.map { block in
             switch block {
             case .paragraph(let runs), .heading(_, let runs): return runs.map(\.text).joined()
             case .listItem(let item): return item.content.map(\.text).joined()
             case .quote(let lines): return lines.flatMap(\.content).map(\.text).joined()
             case .code(let body, _): return body
             case .table(let table): return ([table.header] + table.rows).flatMap { $0 }.flatMap { $0 }.map(\.text).joined(separator: " ")
+            case .admonition(let admonition):
+                return ([admonition.title.map(\.text).joined(), text(admonition.blocks)])
+                    .filter { !$0.isEmpty }.joined(separator: "\n")
             case .rule: return "---"
             }
         }.joined(separator: "\n")

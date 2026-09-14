@@ -21,6 +21,15 @@ import KikigakiCore
 
     > 「質問の時間も五分あると安心ですね」— 鈴木さん
 
+    !!! warning "当日の注意"
+
+        受付は**開始10分前**から始めます。予備の端末は2台用意します。
+
+        - 入館証は当日受付で配布
+
+    > [!tip] 進行のこつ
+    > 質問は最後にまとめて受け、時間が余れば体験の延長にあてます。
+
     ### 試行時の設定
 
     配信前に `trial.toml` の内容を確認してください。
@@ -136,9 +145,20 @@ import KikigakiCore
         #expect(body.writeSelection(to: clipboard, types: body.writablePasteboardTypes))
         #expect(clipboard.string(forType: .string) == body.string)
         let copied = try #require(clipboard.string(forType: .string))
-        for expected in ["体験会の準備会議", "participants = 10", "接続テスト", "開催時刻は未確定", "準備チェックリスト"] {
+        for expected in ["体験会の準備会議", "participants = 10", "接続テスト", "開催時刻は未確定", "準備チェックリスト",
+                         "当日の注意", "入館証は当日受付で配布", "進行のこつ"] {
             #expect(copied.contains(expected))
         }
+        // admonitionとcalloutは枠で描き、記法の文字は残さない。
+        #expect(!copied.contains("!!!") && !copied.contains("[!tip]"))
+        for title in ["当日の注意", "進行のこつ"] {
+            let range = (body.string as NSString).range(of: title)
+            let style = storage.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
+            #expect(style?.textBlocks.isEmpty == false)
+        }
+        let nested = (body.string as NSString).range(of: "入館証は当日受付で配布")
+        #expect((storage.attribute(.paragraphStyle, at: nested.location, effectiveRange: nil) as? NSParagraphStyle)?
+            .textBlocks.count == 1)
         #expect(!copied.contains("**") && !copied.contains("```"))
         // `<br>` は段落を割らずに行を折り、コピーでは通常の改行になる。
         #expect(copied.contains("会議室A\n受付は開始10分前からです。") && !copied.lowercased().contains("<br"))

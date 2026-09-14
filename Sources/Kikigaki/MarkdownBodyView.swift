@@ -77,6 +77,19 @@ final class MarkdownBodyView: NSTextView {
 enum MarkdownBodyRenderer {
     static func render(_ blocks: [MarkdownBlock]) -> NSAttributedString {
         let result = NSMutableAttributedString(string: "")
+        render(blocks, into: result, enclosing: [])
+        // 表の空セル・空コードにも終端段落が必要。通常本文の余分な終端だけを取り除く。
+        if result.length > 0 {
+            let last = result.attribute(.paragraphStyle, at: result.length - 1, effectiveRange: nil) as? NSParagraphStyle
+            if last?.textBlocks.isEmpty != false { result.deleteCharacters(in: NSRange(location: result.length - 1, length: 1)) }
+        }
+        return result
+    }
+
+    /// admonitionの本文は外側の器を持ったまま再帰で描く。1つのtextStorageのままにして、
+    /// 枠を跨ぐ選択とコピーを保つ。
+    private static func render(_ blocks: [MarkdownBlock], into result: NSMutableAttributedString,
+                               enclosing: [NSTextBlock]) {
         // `<br>` は段落を割らずに行だけ折る。文字は通常の改行にしてコピーの見え方を保ち、
         // 折り返し後の行は本文の開始位置(headIndent)へ揃え、段落の余白は最後の行にだけ残す。
         func append(_ runs: [MarkdownInline], paragraph: NSMutableParagraphStyle = paragraph(),
@@ -100,6 +113,7 @@ enum MarkdownBodyRenderer {
         func line(_ runs: [MarkdownInline], paragraph: NSMutableParagraphStyle = paragraph(),
                   size: CGFloat = 15, weight: NSFont.Weight = .regular,
                   color: NSColor = Washi.ink, code: Bool = false) {
+            paragraph.textBlocks = enclosing + paragraph.textBlocks
             var attributes: [NSAttributedString.Key: Any] = [
                 .font: code ? NSFont.monospacedSystemFont(ofSize: size, weight: weight) : NSFont.systemFont(ofSize: size, weight: weight),
                 .foregroundColor: color, .paragraphStyle: paragraph
@@ -235,14 +249,49 @@ enum MarkdownBodyRenderer {
                 style.textBlocks = [box]
                 style.lineSpacing = 0
                 append([], paragraph: style, size: 1)
+            case .admonition(let admonition):
+                // 引用は細い罫と薄墨の本文だけ。admonitionは色の付いた太い左罫と題の帯で見分ける。
+                let accent = accent(admonition.kind)
+                let table = NSTextTable()
+                table.numberOfColumns = 1
+                table.layoutAlgorithm = .fixedLayoutAlgorithm
+                table.setContentWidth(100, type: .percentageValueType)
+                // 題を空にした指定では帯を出さない。本文が無ければ帯だけで枠を描く。
+                let hasBand = !admonition.title.isEmpty, hasBody = !admonition.blocks.isEmpty
+                let cells = (0..<max(1, (hasBand ? 1 : 0) + (hasBody ? 1 : 0))).map { row -> NSTextTableBlock in
+                    let cell = NSTextTableBlock(table: table, startingRow: row, rowSpan: 1, startingColumn: 0, columnSpan: 1)
+                    cell.setContentWidth(100, type: .percentageValueType)
+                    cell.setWidth(3, type: .absoluteValueType, for: .border, edge: .minX)
+                    cell.setBorderColor(accent)
+                    cell.setWidth(9, type: .absoluteValueType, for: .padding, edge: .minX)
+                    cell.setWidth(6, type: .absoluteValueType, for: .padding, edge: .maxX)
+                    cell.setWidth(4, type: .absoluteValueType, for: .padding, edge: .minY)
+                    cell.setWidth(4, type: .absoluteValueType, for: .padding, edge: .maxY)
+                    return cell
+                }
+                cells.first?.setWidth(6, type: .absoluteValueType, for: .margin, edge: .minY)
+                cells.last?.setWidth(6, type: .absoluteValueType, for: .margin, edge: .maxY)
+                if hasBand {
+                    cells[0].backgroundColor = Washi.shade
+                    let style = paragraph(spacing: 0)
+                    style.textBlocks = [cells[0]]
+                    append(admonition.title, paragraph: style, size: 14, weight: .semibold, color: accent)
+                }
+                if hasBody, let body = cells.last {
+                    render(admonition.blocks, into: result, enclosing: enclosing + [body])
+                }
             }
         }
-        // 表の空セル・空コードにも終端段落が必要。通常本文の余分な終端だけを取り除く。
-        if result.length > 0 {
-            let last = result.attribute(.paragraphStyle, at: result.length - 1, effectiveRange: nil) as? NSParagraphStyle
-            if last?.textBlocks.isEmpty != false { result.deleteCharacters(in: NSRange(location: result.length - 1, length: 1)) }
+    }
+
+    /// 種別ごとの色は既存のWashiだけを使う。未知の種別はnoteと同じ顔にする。
+    private static func accent(_ kind: MarkdownAdmonition.Kind) -> NSColor {
+        switch kind {
+        case .danger, .error, .bug, .failure: return Washi.red
+        case .warning, .attention, .caution: return Washi.goldInk
+        case .tip, .hint, .important, .success: return Washi.ai.background
+        case .note, .info, .abstract, .summary, .seealso, .example, .question, .quote: return Washi.muted
         }
-        return result
     }
 
     private static func fullWidthBlock() -> NSTextBlock {
