@@ -73,6 +73,33 @@ export function createRenderer() {
     state.push('admonition_close', 'aside', -1); state.line = close + 1;
     return true;
   }, { alt: ['paragraph','reference','blockquote','list'] });
+  // Python-Markdown/MkDocsの `!!! 種別 "題"`。本文は4空白(タブは4桁)字下げで、
+  // 字下げの無い非空行で終わる。MySTと同じトークン列へ合流させ、見た目も揃える。
+  md.block.ruler.before('fence', 'admonition_indent', (state, start, end, silent) => {
+    const line = n => state.src.slice(state.bMarks[n] + state.tShift[n], state.eMarks[n]);
+    if (state.sCount[start] - state.blkIndent >= 4) return false;
+    const match = /^!!![ \t]+([A-Za-z][\w-]*)(?:[ \t]+"([^"]*)")?[ \t]*$/.exec(line(start));
+    if (!match) return false;
+    if (silent) return true;
+    // 空行は読み飛ばすだけなので、後ろに字下げ行が無ければ本文から自然に外れる。
+    const indent = state.blkIndent + 4;
+    let last = start;
+    for (let next = start + 1; next < end; next++) {
+      if (!line(next).trim()) continue;
+      if (state.sCount[next] < indent) break;
+      last = next;
+    }
+    const open = state.push('admonition_open', 'aside', 1);
+    open.attrSet('class', 'callout'); open.attrSet('data-kind', match[1].toLowerCase());
+    // 題の省略は種別名、`""` の空題は帯を出さない。
+    if (match[2] !== '') { state.push('callout_title', '', 0).content = match[2] || match[1]; }
+    const oldParent = state.parentType, oldMax = state.lineMax, oldIndent = state.blkIndent;
+    state.parentType = 'blockquote'; state.lineMax = last + 1; state.blkIndent = indent;
+    state.md.block.tokenize(state, start + 1, last + 1);
+    state.blkIndent = oldIndent; state.parentType = oldParent; state.lineMax = oldMax;
+    state.push('admonition_close', 'aside', -1); state.line = last + 1;
+    return true;
+  }, { alt: ['paragraph','reference','blockquote','list'] });
   md.inline.ruler.before('link', 'wiki', (state, silent) => {
     const start = state.pos, embed = state.src.startsWith('![[', start);
     if (!embed && !state.src.startsWith('[[', start)) return false;

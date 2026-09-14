@@ -58,6 +58,12 @@ MySTのコロンフェンス。**注意点**やリストも本文として描画
 コードフェンス形式の注意書きです。
 ```
 
+!!! example "字下げ形式"
+
+    `!!!` の本文は4空白字下げで書きます。**強調**やリストも描画します。
+
+    - 項目
+
 <div style="padding:12px;border:1px solid purple;border-radius:8px;color:purple">HTMLの枠と文字色を描画します。</div>
 
 <details><summary>HTMLの補足を開く</summary><p>文書要素は表示し、スクリプトやイベント属性は除去します。</p></details>

@@ -124,6 +124,31 @@ test('MySTの3形式と入れ子を描き通常のコードを保持', () => {
   assert.match(code, /<code class="language-text">:::/);
   assert.match(code, /<p>続き<\/p>\n<\/aside>/);
 });
+test('!!!の字下げadmonitionを描き通常のインデントコードを保持', () => {
+  // 題は省略で種別名、`""` は帯なし。種別語は既存のkinds外も受ける。
+  const titled = render('!!! info "会議の下書き"\n\n    **中身**\n');
+  assert.match(titled, /<aside class="callout" data-kind="info">/);
+  assert.match(titled, /<div class="callout-title">会議の下書き<\/div>/);
+  assert.match(titled, /<strong>中身<\/strong>/);
+  assert.match(render('!!! note\n\n    本文\n'), /<div class="callout-title">note<\/div>/);
+  const bare = render('!!! note ""\n\n    本文\n');
+  assert.match(bare, /<aside class="callout"/); assert.doesNotMatch(bare, /callout-title/);
+  assert.match(render('!!! question "問い"\n\n    本文\n'), /data-kind="question"/);
+  // 本文は再分解する。空行を挟んでも続き、字下げの無い非空行で終わる。
+  const body = render('!!! tip "覚書"\n\n    - 項目\n\n    | 見出 | 値 |\n    | --- | --- |\n    | a | b |\n\n    行1<br>行2\n\n外の段落\n');
+  // sanitizer未指定のここでは`<br>`は文字で残る。実要素になることはMinutesWebTestsで確かめる。
+  assert.match(body, /<li>項目/); assert.match(body, /<table>/); assert.match(body, /行1&lt;br&gt;行2/);
+  assert.match(body, /<\/aside>\n<p>外の段落<\/p>/);
+  assert.equal((body.match(/<aside/g) || []).length, 1);
+  // 入れ子では内側の本文が8空白。単体の本文をさらに4空白下げたものはインデントコード。
+  const nested = render('!!! note "外"\n\n    !!! tip "内"\n\n        中\n');
+  assert.equal((nested.match(/<aside/g) || []).length, 2);
+  assert.match(nested, /<p>中<\/p>/);
+  assert.match(render('!!! note "コード"\n\n        中\n'), /<pre><code>中/);
+  // `!!!` の直後でない通常のインデントコードはコードのまま。
+  assert.match(render('段落\n\n    コード\n'), /<pre><code>コード/);
+  assert.doesNotMatch(render('!!!note\n\n    本文\n'), /<aside/);
+});
 test('画像の専用URLと不正scheme', () => {
   assert.equal(imageURL('javascript:alert(1)', 'ctx'), '');
   assert.equal(imageURL('https://example.com/a.png', 'ctx'), 'https://example.com/a.png');

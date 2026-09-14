@@ -386,8 +386,10 @@ root.addEventListener('click', event => {
   report({ kind: 'link', href });
 });
 function decorateCallouts() {
+  // 種別語は制限しないため、ここに無いもの(abstract・summary・example・question・quote・todoなど)はnoteの顔へ寄せる。
   const faces = { tip:'tip',hint:'tip',success:'tip',check:'tip',done:'tip',important:'important',
-    warning:'warning',attention:'warning',caution:'caution',danger:'caution',error:'caution',failure:'caution',bug:'caution' };
+    warning:'warning',attention:'warning',caution:'caution',danger:'caution',error:'caution',failure:'caution',
+    fail:'caution',missing:'caution',bug:'caution' };
   const paths = {
     note:'M8 7v4 M8 4.5v.1 M14.4 8A6.4 6.4 0 1 1 1.6 8a6.4 6.4 0 0 1 12.8 0',
     tip:'M6 11C6 9 3.6 9 3.6 6a4.4 4.4 0 0 1 8.8 0c0 3-2.4 3-2.4 5Z M6.4 13.4h3.2',
@@ -395,7 +397,9 @@ function decorateCallouts() {
     caution:'M5.6 1.7h4.8l3.9 3.9v4.8l-3.9 3.9H5.6l-3.9-3.9V5.6Z M8 5v3 M8 10.7v.1',
   };
   root.querySelectorAll('.callout').forEach(callout => {
-    const face = faces[callout.dataset.kind] || 'note'; callout.dataset.face = face;
+    // `constructor` のような種別語でプロトタイプのキーを拾わない。
+    const kind = callout.dataset.kind;
+    const face = Object.hasOwn(faces, kind) ? faces[kind] : 'note'; callout.dataset.face = face;
     const title = callout.querySelector(':scope > .callout-title'); if (!title) return;
     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     icon.setAttribute('viewBox', '0 0 16 16'); icon.setAttribute('aria-hidden', 'true');

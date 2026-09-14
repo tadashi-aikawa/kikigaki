@@ -471,6 +471,49 @@ import Testing
         let image = root.appendingPathComponent("x.png"); try Data(repeating: 1, count: 100).write(to: image)
         #expect(throws: (any Error).self) { try MinutesResourceHandler.bytes(image, limit: 99) }
     }
+    @Test func 字下げのadmonitionを実WebKitでcalloutとして描く() async throws {
+        let preferences = MinutesTestDefaults()
+        let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 700, height: 600), defaults: preferences.value)
+        let window = NSWindow(contentRect: preview.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = preview; window.orderFront(nil); preview.layoutSubtreeIfNeeded()
+        defer { preview.stop(); window.orderOut(nil) }
+        let fixture = """
+        !!! info "会議の下書き"
+
+            **決めたこと**を1行目<br>2行目で残す。
+
+            - 項目
+
+        !!! question ""
+
+            題のない枠。
+
+        通常の段落。
+
+            インデントコード
+        """
+        preview.document.render(fixture, reset: true)
+        try await wait { preview.document.renderedText.contains("題のない枠") }
+        let web = preview.document.webView
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('main aside.callout').length") as? Int == 2)
+        // 題の帯とアイコンはMySTのcalloutと同じ作りで、既存のkinds外の種別語はnoteの顔へ寄せる。
+        #expect(try await web.evaluateJavaScript("""
+            document.querySelector('main .callout').dataset.kind === 'info' &&
+            document.querySelector('main .callout').dataset.face === 'note' &&
+            document.querySelector('main .callout-title').textContent === '会議の下書き' &&
+            !!document.querySelector('main .callout-title svg') &&
+            document.querySelectorAll('main .callout')[1].dataset.kind === 'question' &&
+            document.querySelectorAll('main .callout')[1].querySelector('.callout-title') === null
+            """) as? Bool == true)
+        // 本文はMarkdownとして再分解し、`<br>` も実要素になる。
+        #expect(try await web.evaluateJavaScript("""
+            !!document.querySelector('main .callout strong') && !!document.querySelector('main .callout li') &&
+            document.querySelectorAll('main .callout br').length === 1
+            """) as? Bool == true)
+        // `!!!` の直後でない字下げは従来どおりコードのまま。
+        #expect(try await web.evaluateJavaScript(
+            "document.querySelector('main pre code').textContent.trim() === 'インデントコード'") as? Bool == true)
+    }
     @Test func Vault内のwikilinkを実WebKitでリンクとして描く() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let vault = root.appendingPathComponent("Vault")
