@@ -34,37 +34,26 @@ cask "kikigaki" do
   skill_homes = ["~/.claude/skills/kikigaki", "~/.codex/skills/kikigaki"].freeze
 
   # 自己署名(未公証)のため quarantine を外さないと Gatekeeper にブロックされる。
-  # 公式 tap では禁止されている手法だが、自前 tap なので postflight で除去する。
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/KIKIGAKI.app"],
-                   sudo: false
+  # 公式 tap では禁止されている手法だが、自前 tap なので postflight_steps で除去する。
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/KIKIGAKI.app"]
 
-    source = Pathname.new("#{appdir}/KIKIGAKI.app/Contents/Resources/skills/kikigaki")
+    skill_source = "{{appdir}}/KIKIGAKI.app/Contents/Resources/skills/kikigaki"
     skill_homes.each do |home|
-      target = Pathname.new(home).expand_path
-      next if target.symlink? && target.readlink == source
+      # 参照先が .app 内の同梱 Skill なら自分が張ったリンクなので、掃除して張り直す。
+      remove home, symlink_target_contains: "KIKIGAKI.app/Contents/Resources/skills/kikigaki"
 
       # 利用者が clone したリポジトリへ張ったリンクや自前の Skill がある場合は触らない。
       # 黙って奪うと、編集していた側の変更が以後まったく効かなくなるため。
-      if target.symlink? || target.exist?
-        opoo "#{target} が既にあるため、同梱 Skill へのリンクは張りませんでした。" \\
+      if_path_exists home do
+        warn "#{home} が既にあるため、同梱 Skill へのリンクは張りませんでした。" \\
              "同梱版を使う場合は削除してから brew reinstall --cask kikigaki を実行してください。"
-        next
       end
-
-      target.dirname.mkpath
-      target.make_symlink(source)
-    end
-  end
-
-  # 自分が張ったリンクだけ外す。利用者が置いた実体や別のリンクは残す。
-  # アンインストール時点で .app は消えているが、readlink は参照先を返す。
-  uninstall_postflight do
-    source = Pathname.new("#{appdir}/KIKIGAKI.app/Contents/Resources/skills/kikigaki")
-    skill_homes.each do |home|
-      target = Pathname.new(home).expand_path
-      target.delete if target.symlink? && target.readlink == source
+      unless_path_exists home do
+        # remove_on_uninstall はアンインストール時、自分が張ったリンク
+        # (readlink が一致するもの)だけ外す。利用者が置いた実体や別のリンクは残す。
+        symlink skill_source, home, remove_on_uninstall: true
+      end
     end
   end
 
