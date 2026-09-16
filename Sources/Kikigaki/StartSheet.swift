@@ -100,6 +100,11 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         add(separator(), to: rows)
         minutesBox.font = .systemFont(ofSize: 12)
         minutesBox.placeholderString = "議事録の絶対パス"
+        // 1行で横に流す。折り返すと欄の高さが変わらず2行目が見えなくなる。
+        minutesBox.usesSingleLineMode = true
+        minutesBox.lineBreakMode = .byClipping
+        minutesBox.cell?.isScrollable = true
+        minutesBox.cell?.wraps = false
         minutesBox.setAccessibilityLabel("議事録のパス")
         minutesBox.stringValue = minutesPath ?? ""
         minutesBox.onDrop = { [weak self] path in self?.setMinutesPath(path) }
