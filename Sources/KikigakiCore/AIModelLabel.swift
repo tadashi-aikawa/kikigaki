@@ -9,16 +9,22 @@ import Foundation
 /// 表記はモデルと作業場所の2つの塊に分かれる。頼んだ相手と頼んだ場所は意味が違うので、
 /// 中黒で1つに繋がず、塊ごとにアイコンを付けて離して置く。フッターの1行は折り返さないので、
 /// 幅が足りないときは 作業場所の塊 → エフォート の順に落とす。
+///
+/// 相手の塊は録音開始シートの宛先と同じ「Codex · gpt-5.4 (high)」。effortは括弧でモデルに掛ける。
+/// 中黒で並べると独立した項目に見え、何のhighなのか読めなくなる。
 public struct AIModelLabel: Equatable, Sendable {
     public static let separator = " · "
-    /// プロファイルの `model`。未設定のときはCLI名 (`codex` / `claude`)。
+    /// CLIの表示名 (`Codex` / `Claude`)。直接組んだ値では省ける。
+    public let provider: String?
+    /// プロファイルの `model`。未設定なら空で、CLI名だけを出す。
     public let model: String
     /// プロファイルの `effort`。未設定ならnil。
     public let effort: String?
     /// 解決済み `cwd` の末端ディレクトリ名。既定cwdでも出す。
     public let directory: String?
 
-    public init(model: String, effort: String? = nil, directory: String? = nil) {
+    public init(model: String, effort: String? = nil, directory: String? = nil, provider: String? = nil) {
+        self.provider = AIModelLabel.clean(provider)
         self.model = AIModelLabel.clean(model) ?? ""
         self.effort = AIModelLabel.clean(effort)
         self.directory = AIModelLabel.clean(directory)
@@ -26,15 +32,16 @@ public struct AIModelLabel: Equatable, Sendable {
 
     /// 会議開始時に固定したプロファイル。過去会議の保存済みプロファイルも同じ経路で読む。
     public init(profile: ResolvedAIConfig) {
-        self.init(model: AIModelLabel.clean(profile.model) ?? profile.cli.rawValue,
+        self.init(model: profile.model ?? "",
                   effort: profile.effort,
                   // 「/」しか残らないルート直下は末端ディレクトリとして意味を持たない。
-                  directory: profile.cwd.lastPathComponent == "/" ? nil : profile.cwd.lastPathComponent)
+                  directory: profile.cwd.lastPathComponent == "/" ? nil : profile.cwd.lastPathComponent,
+                  provider: profile.cli.rawValue.capitalized)
     }
 
     /// フッター1行の中身。2つの塊をそれぞれ別のアイコンで出すので、1本の文字列にしない。
     public struct Stage: Equatable, Sendable {
-        /// `cpu` のアイコンを付ける前の塊。「gpt-6-astra · high」。
+        /// `cpu` のアイコンを付ける前の塊。「Codex · gpt-6-astra (high)」。
         public let model: String
         /// `folder` のアイコンを付ける後ろの塊。落とした段ではnil。
         public let directory: String?
@@ -49,9 +56,10 @@ public struct AIModelLabel: Equatable, Sendable {
     /// 広い順の候補。先頭が全部入りで、以降は 作業場所の塊 → エフォート の順に落ちる。
     /// 項目が元から無い段は重複するので畳む。
     public var stages: [Stage] {
-        let withEffort = [model, effort].compactMap { $0 }.filter { !$0.isEmpty }
+        let head = [provider, model].compactMap { $0 }.filter { !$0.isEmpty }
             .joined(separator: AIModelLabel.separator)
-        let candidates = [Stage(model: withEffort, directory: directory), Stage(model: withEffort), Stage(model: model)]
+        let withEffort = effort.map { head.isEmpty ? "(\($0))" : "\(head) (\($0))" } ?? head
+        let candidates = [Stage(model: withEffort, directory: directory), Stage(model: withEffort), Stage(model: head)]
         var stages: [Stage] = []
         for candidate in candidates where !candidate.model.isEmpty {
             if stages.last != candidate { stages.append(candidate) }

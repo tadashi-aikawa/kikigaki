@@ -50,7 +50,7 @@ import KikigakiCore
     @Test func 名前行から外して本文の下へ2つの塊で置く() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let row = try row(root: root)
-        #expect(row.modelText == "gpt-6-astra · high · minutes")
+        #expect(row.modelText == "gpt-6-astra (high) · minutes")
         // 名前行には出さない。名前・時刻・所要のどれもモデル名を含まない。
         #expect(!labels(row).contains { $0.stringValue.contains("gpt-6-astra") })
         let footer = row.modelFooter
@@ -59,16 +59,16 @@ import KikigakiCore
         // 本文と同じ左端に揃え、1行ぶんの高さだけ使う。折り返さない。
         #expect(footer.frame.minX == AIRowMetrics.bodyX && footer.frame.height == AIModelFooter.height)
         let stage = try #require(footer.stage)
-        #expect(stage.model == "gpt-6-astra · high" && stage.directory == "minutes")
+        #expect(stage.model == "gpt-6-astra (high)" && stage.directory == "minutes")
         // 全部入りは名前とフッターのtooltip、読み上げから読める。
-        #expect(name.toolTip == "gpt-6-astra · high · minutes" && footer.toolTip == "gpt-6-astra · high · minutes")
-        #expect((row.accessibilityLabel() ?? "").contains("gpt-6-astra · high · minutes"))
+        #expect(name.toolTip == "gpt-6-astra (high) · minutes" && footer.toolTip == "gpt-6-astra (high) · minutes")
+        #expect((row.accessibilityLabel() ?? "").contains("gpt-6-astra (high) · minutes"))
     }
 
     /// 2つの塊はそれぞれアイコンを持ち、間を12pt空ける。中黒1つぶんより広い。
     @Test func 塊ごとにアイコンを付けて12pt離す() {
-        let full = AIModelLabel.Stage(model: "gpt-6-astra · high", directory: "minutes")
-        let dropped = AIModelLabel.Stage(model: "gpt-6-astra · high")
+        let full = AIModelLabel.Stage(model: "gpt-6-astra (high)", directory: "minutes")
+        let dropped = AIModelLabel.Stage(model: "gpt-6-astra (high)")
         #expect(AIModelFooter.gap == 12)
         #expect(AIModelFooter.width(of: full)
                 == AIModelFooter.modelWidth(full.model) + 12 + AIModelFooter.placeWidth("minutes"))
@@ -85,7 +85,7 @@ import KikigakiCore
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let row = try row(root: root, answered: false)
         #expect(row.isWaiting && row.timeText.isEmpty)
-        #expect(row.modelText == "gpt-6-astra · high · minutes")
+        #expect(row.modelText == "gpt-6-astra (high) · minutes")
         #expect(row.modelFooter.frame.minY >= row.progressView.frame.maxY)
         #expect(row.modelFooter.frame.maxY <= row.frame.height)
     }
@@ -122,7 +122,7 @@ import KikigakiCore
         // 420ptは利用者に出せる下限。そこでは全部入りが残る。
         row.frame = NSRect(x: 0, y: 0, width: 420, height: row.height(for: 420))
         row.layoutSubtreeIfNeeded()
-        #expect(row.modelText == "gpt-6-astra · high · minutes")
+        #expect(row.modelText == "gpt-6-astra (high) · minutes")
         // 落ちる順は作業場所の塊→エフォート。飛ばしも戻りもしない。
         #expect(seen == label.stages.map(\.text))
     }
@@ -150,7 +150,7 @@ import KikigakiCore
         let time = try field(row, row.timeText)
         #expect(failure.frame.maxX <= time.frame.minX && failure.frame.width >= 180)
         // 読み上げには全部入りを残す。
-        #expect((row.accessibilityLabel() ?? "").contains("gpt-6-astra · high · minutes"))
+        #expect((row.accessibilityLabel() ?? "").contains("gpt-6-astra (high) · minutes"))
     }
 
     /// 3宛先が同時に並ぶ混雑した会議を420ptで開いても、行ごとに自分の宛先の表記を出す。
@@ -182,6 +182,6 @@ import KikigakiCore
             #expect(!labels(row).contains { $0.stringValue.contains("gpt-6-astra") })
             seen.append(row.modelText)
         }
-        #expect(seen == ["gpt-6-astra · high · minutes", "claude · max · owlery", "gpt-6-astra · kikigaki"])
+        #expect(seen == ["gpt-6-astra (high) · minutes", "claude (max) · owlery", "gpt-6-astra · kikigaki"])
     }
 }
