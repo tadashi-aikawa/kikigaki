@@ -138,6 +138,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 宛先の指定を当て終えるまでデバッグ送信を保留する。0秒指定の質問は start 内の
     /// 通知から呼ばれるため、保留しないと先頭宛で飛んでしまう
     private var replayDestinationPending = false
+    /// 起動と同時に届いた `kikigaki://`。配線が済むまで持っておき、最後にまとめて流す
+    private var pendingURL: String?
     init(replayDebug: ReplayDebugOptions = .init()) { self.replayDebug = replayDebug; super.init() }
 
     convenience init(testingSession: MeetingSession, config: ResolvedConfig,
@@ -145,6 +147,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.init()
         self.session = testingSession; self.config = config
         self.window = window
+    }
+
+    /// URLの受け口は配線より前に開ける。`open kikigaki://…` での起動では、この登録が
+    /// 終わる前に届いたイベントが捨てられてしまう。
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSAppleEventManager.shared().setEventHandler(
+            self, andSelector: #selector(handleGetURLEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
+    }
+
+    @objc private func handleGetURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
+        guard let text = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue else { return }
+        open(url: text)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -271,6 +286,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if replayURL != nil {
             toggleRecording()
         }
+        #if DEBUG
+        // 検証用の入口。実際のリンクと同じ経路へ流す。replayとは併用しない
+        if replayURL == nil, let text = Self.argument(after: "--open-url") { pendingURL = text }
+        #endif
+        if let text = pendingURL {
+            pendingURL = nil
+            open(url: text)
+        }
+    }
+
+    // MARK: - URLスキーム
+
+    /// `kikigaki://start?minutes=…` を受ける。開けるのは録音開始シートまでで、録音は始めない。
+    /// 待機中でなければシートを出さず、理由だけをヘッダーへ出す。始まっている会議の指定を
+    /// 後から差し替えると、どの会議の議事録なのかが分からなくなる。
+    func open(url text: String) {
+        guard let start = KikigakiURL.start(text) else { return }
+        // 配線の前に届いたものは持っておく。`open kikigaki://…` での起動がこれになる
+        guard let session, let window else { pendingURL = text; return }
+        // replayは開始シートを出さない経路なので、リンクも受けない
+        guard replayURL == nil else { return }
+        guard session.snapshot.state.canStart else {
+            window.show()
+            window.showNotice("\(session.snapshot.state.statusLabel)のため、リンクの指定は受け取れません")
+            return
+        }
+        presentStartSheet(minutesPath: start.minutesPath)
+        if let problem = start.problem { startSheet?.showMinutesHint(problem) }
     }
 
     /// 録音中・停止処理中に終了されたら、保存してから終了する(書き起こしを失わないため)

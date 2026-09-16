@@ -14,6 +14,19 @@
     <string>APPL</string>
     <key>CFBundleIconFile</key>
     <string>kikigaki.icns</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.tadashi-aikawa.kikigaki.start</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>kikigaki</string>
+            </array>
+        </dict>
+    </array>
     <key>CFBundleShortVersionString</key>
     <string>0.0.0-development</string>
     <key>CFBundleVersion</key>

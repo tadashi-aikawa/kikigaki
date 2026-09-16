@@ -19,6 +19,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
   - `SpeakerNames.swift` / `TranscriptRenderer.swift` / `MeetingMarkdown.swift` / `MeetingFiles.swift`: 話者名の枡・行の整形・Markdown 生成・ファイル命名
   - `Config.swift`: 設定ファイルのパースと既定値
   - `RecordingState.swift`: 録音状態とメニュー表題
+  - `URLScheme.swift`: `kikigaki://start` の解析。開始シートの入口だけを開け、録音は始めない
 - `Sources/Kikigaki/`: 実行ターゲット (AppKit + Speech + FluidAudio)。Swift 5 言語モード (非 Sendable な型を音声スレッドと MainActor で受け渡すため)
   - `MeetingSession.swift`: 音源→WAV(任意)+話者判別+文字起こし→突き合わせ→表示、停止で保存、の流れ
   - `AudioSource.swift`: `MicSource` / `FileSource` (`--replay` 用) / `WavWriter`
@@ -26,7 +27,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
   - `StartSheet.swift`: 録音開始シート。会議ごとの話者判別・議事録・自動送信を `session.start` の前に決める
   - `TranscriptWindow.swift` / `StatusItem.swift` / `AppDelegate.swift`
 - `Tests/KikigakiCoreTests/`: ユニットテスト (swift-testing)
-- `Resources/`: アプリバンドル用の Info.plist (マイク使用の説明文 `NSMicrophoneUsageDescription` を含む)
+- `Resources/`: アプリバンドル用の Info.plist (マイク使用の説明文 `NSMicrophoneUsageDescription`・URLスキームの `CFBundleURLTypes` を含む)
 - `scripts/`: アプリバンドル組み立て (`make-app.sh`)・リリース成果物 (`build_release.sh`)・Homebrew tap 更新 (`update_tap.sh`)
 
 設計上の前提と判断の理由は各ファイルのコメントに書いてあります (プロトで反証された仮定を含む)。変える前に読んでください。
@@ -110,6 +111,8 @@ Claudeの同梱CLI限定allowは変えず、cwd外の編集は設定により承
 ロボットの目は表示中の準備中・返事待ちに限り1秒周期で左右へ動きます。非表示・最小化・非稼働ではタイマーを止め、「視差効果を減らす」では目を静止させます。連続アニメーションは使いません。
 
 「録音を開始」を押すと、その会議だけの指定を決める録音開始シートが出ます。決めるのは話者判別・議事録・自動送信の3つで、小音量除外は次回設定の文字だけを出します。既定値はすべて前回の値なので、何も触らず⏎(⌘⏎でも可)で始められます。取消は何も始めません。指定した議事録は開始と同時に右のペインへ出し、自動送信はシートの値で始めます。決めた値は設定ファイルへ書き戻しません。詳細は [録音開始シート](docs/start-sheet.md) を参照してください。
+
+`kikigaki://start?minutes=<パーセントエンコードした絶対パス>` のリンクからも同じシートを開けます。議事録を用意した側がリンクを出し、クリックで議事録入りのシートが出るところまでが役目で、録音そのものはリンクからは始めません。`~/` 始まりのパスは展開します。読めない議事録はパス欄を空のままにして、理由を議事録欄の下へ1行出します。待機中だけ受け付け、録音中などは理由をヘッダーへ出してシートを出しません。開いている最中のリンクはパス欄を差し替えます。`start` 以外のホストと `minutes` 以外のクエリは無視します。
 
 話者名かアバターをクリックすると、台帳の候補選択・自由入力・既定名へのリセットができます。同じ枡の全発言に反映し、停止後は保存も更新します。別の枡で使用中の候補は選べません。台帳の名前は空と重複を認めません。
 
@@ -204,6 +207,7 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - `--config <path>`: 設定ファイルを差し替える (保存先を作業用ディレクトリにするため)
 - `--replay <wav>`: マイクの代わりに音声ファイルを実時間より速く流す
 - `--show-window`: 起動直後に書き起こしウィンドウを表示する (見た目の確認用)
+- DEBUGの `--open-url <url>` は、起動直後に `kikigaki://` のリンクを実物と同じ経路へ流します。LaunchServicesが別の場所の `.app` へURLを配るため、組んだばかりの `.app` を確かめるのはこちらです。replayとは併用しません。
 - DEBUGの `--minutes-history-ui <出力先>` は専用UserDefaultsで議事録履歴の実操作と600pt・1800ptの撮影を行います。同じ引数に `--history-restart` を足して別プロセスで復元と再表示を検証し、専用設定を消します。通常の `--preview-minutes` も既存の隔離設定を使います。
 - DEBUGビルドの `KIKIGAKI_DEBUG_REPLAY_REALTIME=1` はreplayを等倍で入力する。省略時は従来の約10倍速。
 - 環境変数 `KIKIGAKI_DEBUG_DIARIZATION=off` または `on`: replayで話者判別を指定する。通常起動では無視し、replayではUserDefaultsを読み書きしない。LIVE_TRACE併用時は、無効会議のASR確定受信と表示反映の単調時計を同じトークン数で照合できる。

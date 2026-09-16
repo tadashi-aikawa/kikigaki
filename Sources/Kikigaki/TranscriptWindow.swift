@@ -211,6 +211,22 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         refreshSearch(reset: previous.timeline.startedAt != value.timeline.startedAt, reveal: false)
     }
 
+    /// 画面の外から届いた指定を断る1行。会話の受け渡しの知らせと同じ枠へ出し、4秒で消す。
+    /// 状態が変わるまで残すと、録音を止めた後も断り文句が居座る。
+    func showNotice(_ text: String) {
+        clearHandoffNotice()
+        handoffNotice = (text, false)
+        let dismissal = DispatchWorkItem { [weak self] in
+            self?.handoffNotice = nil
+            self?.updateRangeLabel()
+        }
+        noticeDismissal = dismissal
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: dismissal)
+        updateRangeLabel()
+    }
+    /// いまヘッダーに出ている1行。
+    var noticeText: String { messageLabel.isHidden ? "" : messageLabel.stringValue }
+
     private func clearHandoffNotice() {
         noticeDismissal?.cancel()
         noticeDismissal = nil

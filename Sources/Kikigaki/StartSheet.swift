@@ -373,10 +373,13 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         showMinutesHint(nil)
     }
     /// パス欄の下の1行。指定が読めないときだけ理由へ差し替える。
-    private func showMinutesHint(_ problem: String?) {
+    /// URLスキームが読めない議事録を渡してきたときも、パス欄は触らずここだけを差し替える。
+    func showMinutesHint(_ problem: String?) {
         minutesHint.stringValue = problem ?? "開始と同時に、右のペインへ表示します。"
         minutesHint.textColor = problem == nil ? Washi.muted : Washi.gold
     }
+    /// パス欄の下にいま出ている1行。
+    var minutesHintText: String { minutesHint.stringValue }
 
     /// 中身に合わせて高さを詰める。AI区画の畳み・プロンプトの展開で変わる。
     private func fit() {
