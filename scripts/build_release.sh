@@ -39,5 +39,8 @@ unzip -tq "$ARCHIVE"
 # grep は入力を最後まで読むため安全)
 unzip -Z1 "$ARCHIVE" | grep -x "KIKIGAKI.app/Contents/Info.plist" >/dev/null
 unzip -Z1 "$ARCHIVE" | grep -x "KIKIGAKI.app/Contents/Helpers/kikigaki-cli" >/dev/null
+# Caskがリンクを張る先。欠けたままリリースすると導入後にSkillが空振りする
+unzip -Z1 "$ARCHIVE" | grep -x "KIKIGAKI.app/Contents/Resources/skills/kikigaki/SKILL.md" >/dev/null
+unzip -Z1 "$ARCHIVE" | grep -x "KIKIGAKI.app/Contents/Resources/skills/kikigaki/references/meeting.md" >/dev/null
 
 echo "Built and validated $ARCHIVE (version $VERSION)"

@@ -68,6 +68,13 @@ open .build/KIKIGAKI.app
 
 作成された `.build/KIKIGAKI.app` をFinderで「アプリケーション」へコピーすれば、以後は通常のアプリとして起動できます。
 
+この方法ではSkillのリンクを張らないので、会議へAIを参加させる場合は使うCLIのSkill置き場へ自分で配置してください。
+
+```bash
+ln -s "$PWD/skills/kikigaki" ~/.claude/skills/kikigaki
+ln -s "$PWD/skills/kikigaki" ~/.codex/skills/kikigaki
+```
+
 ## 起動と基本操作
 
 メニューバーのフクロウから「開く」で書き起こしウィンドウを出し、録音を開始すると発話が順に表示されます。停止すると、既定では `~/Documents/KIKIGAKI` にMarkdownを保存します。
@@ -124,7 +131,13 @@ AIへ会話を渡す手順は [AIへの受け渡し](docs/ai-handoff.md)、そ�
 
 ### 会議へAIを参加させる
 
-herdrとCodexまたはClaude Codeを導入し、使うCLIで [kikigaki Skill](skills/kikigaki/SKILL.md) を利用できるようにします。設定へ次を追加すると、次の会議から「AIへ…」が使えます。`[ai]` を省略した場合は無効です。
+herdrとCodexまたはClaude Codeを導入します。AIが会話を受け取るための [kikigaki Skill](skills/kikigaki/SKILL.md) はアプリに同梱してあり、Homebrewでの導入時に `~/.claude/skills/kikigaki` と `~/.codex/skills/kikigaki` へリンクします。リポジトリをcloneして自分でリンクを張る必要はありません。
+
+- 同名のファイルが既にある場合は上書きせず、導入時に警告だけを出します。自分で置いたSkillをそのまま使い続けられます
+- 同梱版へ切り替えるときは、そのファイルを消してから `brew reinstall --cask kikigaki` を実行してください
+- `brew uninstall --cask kikigaki` では、KIKIGAKI.appを指すリンクだけを外します
+
+設定へ次を追加すると、次の会議から「AIへ…」が使えます。`[ai]` を省略した場合は無効です。
 
 ```toml
 [ai]

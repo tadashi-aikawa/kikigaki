@@ -438,6 +438,10 @@ notifyは本文と入力メッセージを残さず、識別子と背景処理�
 
 make-appはhelperをContents/Helpersへ同梱して先に署名し、親.appの署名後に両方を検証する。releaseではhelperのZIP同梱も検証する。Skillは通常手動コピーと会議参加モードを先頭envelopeで分け、会議参加モードの詳細を専用referenceへ置く。配布用Skillの更新は利用する各CLIの導入先へ反映してから使う。
 
+配布用Skillの場所は起動引数では渡さない。CLI側にセッション限定の置き場指定が無いか、あっても片方にしか無いためである。CodexにはSkillの置き場を差し替える設定が無く、Claude Codeの `--plugin-dir` はKIKIGAKIが起こしたセッションにしか効かない。手動コピーの貼り付け先や、利用者が自分で起こした準備済みペインには届かない。
+
+そのため `Contents/Resources/skills/kikigaki` を `.app` へ同梱し、Caskが `~/.claude/skills/kikigaki` と `~/.codex/skills/kikigaki` へリンクする。同名のファイルがあれば触らず警告だけ出す。cloneしたリポジトリへリンクを張って開発している利用者の編集対象を奪わないためである。`brew uninstall` で外すのは、参照先が今の `.app` を指すリンクだけとする。
+
 段5では全225テスト、Skill検証器、シェル構文検査を確認した。空白を含む隔離.appと `CODESIGN_IDENTITY=none` のmake-appによるbundleの両方で、ad-hoc署名と同梱helperの別プロセス返送が成功した。kikigaki-dev証明書での署名はKeychain待ちとなったため、本人の実機検分へ引き継ぐ。実CLI両種でのSkill発動・承認・往復と配布署名の検分は段6で行う。
 
 ## 対象外と後続課題

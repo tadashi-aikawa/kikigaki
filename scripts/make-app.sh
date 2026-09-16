@@ -18,6 +18,11 @@ cp "$BIN" "$APP/Contents/MacOS/KIKIGAKI"
 cp "$ROOT/.build/$CONFIG/kikigaki-cli" "$APP/Contents/Helpers/kikigaki-cli"
 cp "$ROOT/Resources/kikigaki.icns" "$APP/Contents/Resources/"
 cp -R "$ROOT/.build/$CONFIG/Kikigaki_Kikigaki.bundle" "$APP/Contents/Resources/"
+# AI参加者用のSkillを同梱する。Caskはここへリンクを張るので、利用者が
+# リポジトリをcloneしなくても導入でき、更新も.appの差し替えだけで届く。
+# 署名前に置くので Contents/Resources のシールに含まれ、--deep --strict も通る。
+mkdir -p "$APP/Contents/Resources/skills"
+cp -R "$ROOT/skills/kikigaki" "$APP/Contents/Resources/skills/"
 sed "s/0\.0\.0-development/$VERSION/" "$ROOT/Resources/Info.plist" >"$APP/Contents/Info.plist"
 
 # 署名: CODESIGN_IDENTITY(デフォルト "kikigaki-dev")の自己署名証明書が Keychain に
