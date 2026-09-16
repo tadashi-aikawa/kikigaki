@@ -65,8 +65,7 @@ import Testing
         #expect(resolved.outputDir.path == "/Users/test/Documents/KIKIGAKI")
         #expect(resolved.saveRecording == false)
         #expect(resolved.dropRepeatedBackchannels == false)
-        #expect(resolved.toggleRecording == KikigakiConfig.Hotkey(modifiers: ["ctrl", "alt", "cmd"], key: "k"))
-        #expect(resolved.togglePause == KikigakiConfig.Hotkey(modifiers: ["ctrl", "alt", "cmd"], key: "p"))
+        #expect(resolved.measureAudioLevels == false)
     }
 
     @Test func 全項目を読める() throws {
@@ -74,21 +73,13 @@ import Testing
             outputDir = "~/work/minerva/Notes/meetings"
             saveRecording = true
             dropRepeatedBackchannels = true
-
-            [hotkeys.toggleRecording]
-            modifiers = ["cmd", "shift"]
-            key = "f18"
-
-            [hotkeys.togglePause]
-            modifiers = ["cmd", "shift"]
-            key = "f19"
+            measureAudioLevels = true
             """
         let resolved = ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: home)
         #expect(resolved.outputDir.path == "/Users/test/work/minerva/Notes/meetings")
         #expect(resolved.saveRecording == true)
         #expect(resolved.dropRepeatedBackchannels == true)
-        #expect(resolved.toggleRecording == KikigakiConfig.Hotkey(modifiers: ["cmd", "shift"], key: "f18"))
-        #expect(resolved.togglePause == KikigakiConfig.Hotkey(modifiers: ["cmd", "shift"], key: "f19"))
+        #expect(resolved.measureAudioLevels == true)
     }
 
     @Test func 絶対パスはそのまま() throws {
@@ -100,58 +91,25 @@ import Testing
         #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "outputDir = \"  \"") }
     }
 
-    @Test func 空のキーは不正() {
-        let toml = """
-            [hotkeys.toggleRecording]
-            modifiers = []
-            key = ""
-            """
-        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: toml) }
-    }
-
     @Test func 相対パスの保存先は不正() {
         #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "outputDir = \"meetings\"") }
     }
 
-    @Test func 不明な修飾キーは不正() {
+    /// グローバルショートカットは廃止した。既存の設定ファイルを書き換えさせないため、
+    /// どんな `[hotkeys]` が書かれていても読み飛ばして通す。
+    @Test func 廃止したホットキーの設定は読み飛ばす() throws {
         let toml = """
+            outputDir = "/meetings"
+
+            [hotkeys.toggleRecording]
+            modifiers = ["hyper"]
+            key = ""
+
             [hotkeys.togglePause]
             modifiers = ["hyper"]
-            key = "p"
+            key = ""
             """
-        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: toml) }
-    }
-
-    @Test func 修飾キーの別名は同じ扱い() throws {
-        let toml = """
-            [hotkeys.toggleRecording]
-            modifiers = ["Command", "option"]
-            key = "K"
-            """
-        _ = try ConfigLoader.parse(toml: toml)
-    }
-
-    @Test func 二つの操作に同じキーは不正() {
-        let toml = """
-            [hotkeys.toggleRecording]
-            modifiers = ["cmd", "alt", "ctrl"]
-            key = "P"
-
-            [hotkeys.togglePause]
-            modifiers = ["control", "option", "command"]
-            key = "p"
-            """
-        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: toml) }
-    }
-
-    @Test func 片方だけ既定と同じキーにしても不正() {
-        // togglePause の既定 ctrl+alt+cmd+P と衝突
-        let toml = """
-            [hotkeys.toggleRecording]
-            modifiers = ["ctrl", "alt", "cmd"]
-            key = "p"
-            """
-        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: toml) }
+        #expect(ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: home).outputDir.path == "/meetings")
     }
 
     @Test func TOMLの文法エラーは不正() {

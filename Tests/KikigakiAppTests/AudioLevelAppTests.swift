@@ -51,7 +51,7 @@ import KikigakiCore
         }
     }
 
-    @Test func 実Speechと併用し一時停止と設定固定と取り止めを守る() async throws {
+    @Test func 実Speechと併用し一時停止と設定固定を守る() async throws {
         guard ProcessInfo.processInfo.environment["KIKIGAKI_TEST_SPEECH"] == "1" else { return }
         final class ManualSource: AudioSource {
             var receive: (([Float]) -> Void)?
@@ -84,10 +84,9 @@ import KikigakiCore
         #expect(!FileManager.default.fileExists(atPath: MeetingFiles.levelsURL(for: disabledURL).path))
         config.measureAudioLevels = true; session.update(config: config)
         #expect(await session.start(source: source))
-        let abandonedURL = try #require(session.snapshot.markdownURL)
+        let reenabledURL = try #require(session.snapshot.markdownURL)
         source.receive?(Array(repeating: 0, count: 1600))
-        await session.abandon()
-        #expect(!FileManager.default.fileExists(atPath: MeetingFiles.levelsURL(for: abandonedURL).path))
-        #expect(!FileManager.default.fileExists(atPath: abandonedURL.path))
+        await session.stop()
+        #expect(FileManager.default.fileExists(atPath: MeetingFiles.levelsURL(for: reenabledURL).path))
     }
 }

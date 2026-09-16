@@ -84,7 +84,6 @@ final class AIBadgeBar: NSStackView {
 struct AIViewState {
     var rangeBoundaries = AIRangeBoundaries()
     var conversation: AIConversation?
-    var hotkey = ResolvedAIConfig.defaultHotkey
     var participant = "迅雷"
     var connection: AIConnectionStatus = .unknown
     var warning: String?
@@ -148,10 +147,6 @@ struct AIViewState {
             (kind.rawValue, questions.filter { kind.matches($0, in: questions) }.count)
         }
         return counts.filter { $0.1 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
-    }
-    var shortcut: String {
-        [("ctrl", "⌃"), ("alt", "⌥"), ("shift", "⇧"), ("cmd", "⌘")]
-            .filter { hotkey.modifiers.contains($0.0) }.map(\.1).joined() + hotkey.key.uppercased()
     }
 }
 

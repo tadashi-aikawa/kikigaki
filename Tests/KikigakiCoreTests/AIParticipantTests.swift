@@ -50,7 +50,6 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         #expect(resolved.ai?.participantName == "迅雷")
         #expect(resolved.ai?.cwd.path == "/home/test/Library/Application Support/KIKIGAKI/ai-work")
         #expect(resolved.ai?.notifySound == false)
-        #expect(resolved.ai?.hotkey == ResolvedAIConfig.defaultHotkey)
     }
 
     @Test func 設定を全項目解釈しホームを引数から解決する() throws {
@@ -65,9 +64,6 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         extraArgs = ["--permission-mode", "plan"]
         prompt = "短く答える"
         notifySound = true
-        [ai.hotkey]
-        modifiers = ["command", "shift"]
-        key = "j"
         """)
         let ai = try #require(ResolvedConfig(config: parsed, home: URL(fileURLWithPath: "/home/person")).ai)
         #expect(ai.cli == .claude && ai.command == "/test/Claude Code" && ai.model == "test-model")
@@ -82,16 +78,30 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "[ai]\n" + field) }
     }
 
-    @Test func 改行とサイズ超過と既存キーとの衝突を拒否する() throws {
+    @Test func 改行とサイズ超過を拒否する() throws {
         #expect(throws: ConfigError.self) { try AIConfig(address: "人\n名").validate() }
         #expect(throws: ConfigError.self) { try AIConfig(address: " へ ").validate() }
         #expect(throws: ConfigError.self) { try AIConfig(prompt: String(repeating: "あ", count: 10923)).validate() }
-        #expect(throws: ConfigError.self) {
-            try ConfigLoader.parse(toml: "[ai.hotkey]\nmodifiers=['control','option','command']\nkey='K'")
-        }
-        #expect(throws: ConfigError.self) {
-            try ConfigLoader.parse(toml: "[ai.hotkey]\nmodifiers=['invalid']\nkey='j'")
-        }
+    }
+
+    /// ホットキーは廃止した。古い設定ファイルを書き換えさせないため、読み飛ばして通す。
+    @Test func 廃止したホットキーの設定は読み飛ばす() throws {
+        let parsed = try ConfigLoader.parse(toml: """
+        [hotkeys.toggleRecording]
+        modifiers = ["cmd", "shift"]
+        key = "f18"
+
+        [hotkeys.togglePause]
+        modifiers = ["invalid"]
+        key = ""
+
+        [ai]
+        address = "迅雷へ"
+        [ai.hotkey]
+        modifiers = ["control", "option", "command"]
+        key = "K"
+        """)
+        #expect(ResolvedConfig(config: parsed).ai?.participantName == "迅雷")
     }
 
     @Test(arguments: ["--settings=x", "--setting-sources=user", "--safe-mode", "--bare", "--bg", "-p", "--resume=x", "--model=x", "--", "prompt"])

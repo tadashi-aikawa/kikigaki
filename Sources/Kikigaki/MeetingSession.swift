@@ -82,14 +82,13 @@ final class MeetingSession {
     private let diagnostics = Diagnostics()
     private let aiStore: AIRecordStore?
     private(set) var waitingMinutesPath: String?
-    private var appliedWaitingMinutes: (meetingID: UUID, path: String)?
     func previewMinutesStore() throws -> MinutesStore? {
         guard let url = snapshot.markdownURL, let aiStore else { return nil }
         let store = try aiStore.minutesStores.store(meetingID: handoff.meetingID, markdownURL: url)
         if let waiting = waitingMinutesPath {
             waitingMinutesPath = nil
             // 成否にかかわらず自動適用は1回。失敗はstoreの警告に残し、人が再確定する。
-            do { try store.select(waiting); appliedWaitingMinutes = (handoff.meetingID, waiting) }
+            do { try store.select(waiting) }
             catch { log("議事録の指定を引き継げません: \(error)") }
         }
         return store
@@ -101,6 +100,17 @@ final class MeetingSession {
             waitingMinutesPath = path
         }
         emit()
+    }
+    /// 開始シートが決めた議事録。**シートを出したら必ず設定し、「指定なし」も区別する。**
+    /// 未指定(nil)なら、パス欄から置いた待機指定をそのまま使う。
+    private struct PendingMinutes { let path: String? }
+    private var pendingMinutes: PendingMinutes?
+    /// 開始シートで決めた議事録。**この場では表示中の会議のstoreへ当てない。**
+    /// 停止後も前の会議のMarkdownは残るので、いま当てると前の会議の議事録になってしまう。
+    /// 次の録音の開始で待機指定へ移し、`previewMinutesStore` が引き継ぐ。
+    func prepareMinutes(_ path: String?) throws {
+        if let path { try MinutesPath.validate(path) }
+        pendingMinutes = PendingMinutes(path: path)
     }
     /// 会議開始時に固定したプロファイル。並び順が宛先ポップアップの並びになる
     private(set) var meetingAIProfiles: [ResolvedAIConfig] = []
@@ -118,8 +128,10 @@ final class MeetingSession {
     private var rangeAutomaticSlot: Int?
 #if DEBUG
     func setMinutesPreparationForTesting() {
-        appliedWaitingMinutes = nil
         handoff = HandoffHistory()
+        // start() と同じ順で、開始シートの指定を待機指定へ移す。
+        if let pendingMinutes { waitingMinutesPath = pendingMinutes.path }
+        pendingMinutes = nil
         snapshot = SessionSnapshot(state: .preparing)
     }
     func completeMinutesPreparationForTesting(at url: URL) throws {
@@ -134,6 +146,11 @@ final class MeetingSession {
     var automaticHelper: URL? = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
     /// replayだけで使う間隔の上書き。分単位の設定値では実行時間に収まらない
     var automaticIntervalOverride: Double?
+    /// 開始シートで決めた自動送信。**シートを出したら必ず設定する。**
+    /// `slot` が nil なら「送らない」で、設定の `autoStart` も使わない。
+    /// この値そのものは設定ファイルへ書き戻さず、次の録音へも持ち越さない。
+    struct PendingAutomaticSchedule { let slot: Int?; let options: AIScheduleOptions? }
+    var pendingAutomaticSchedule: PendingAutomaticSchedule?
     private var aiScheduleWarning: String?
     /// 開いている手動シートが持つ枠。抑制も譲りもこの枠だけに効かせる
     private var manualAISheetSlot: Int?
@@ -259,9 +276,6 @@ final class MeetingSession {
     @discardableResult
     func start(source: AudioSource) async -> Bool {
         guard snapshot.state.canStart else { return false }
-        appliedWaitingMinutes = nil
-        // 前回の取り止めで片付けきれなかったものがあれば、ここでもう一度片付ける。
-        retryDiscard()
         cancelAIPreparation()
         stopAISchedule()
         aiSchedule = nil; lastScheduleOptions = nil; aiScheduleWarning = nil
@@ -280,6 +294,9 @@ final class MeetingSession {
         recopyInvalidated = false
         // 開始・停止の進捗は状態チップに任せ、短時間のメッセージでヘッダーを伸縮させない。
         snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers)
+        // 開始シートの指定はここで待機指定へ移す。前の会議のMarkdownはもう snapshot にない。
+        if let pendingMinutes { waitingMinutesPath = pendingMinutes.path }
+        pendingMinutes = nil
         snapshot.names.diarizationEnabled = diarizationEnabled
         speakerMapping = SpeakerMapping()
         liveSource = SpeakerTranscript(accurateFinalCount: 0)
@@ -437,93 +454,6 @@ final class MeetingSession {
         evaluateAISchedule()
         if let note { snapshot.message = note + " / " + (snapshot.message ?? "") }
         emit()
-    }
-
-    /// 録音そのものを取り止める。**保存しない**。予約したMarkdownとWAV、AIの置き場も残さない。
-    /// 通常の停止(最終判定して保存する)とは別の道にしてある。
-    /// 準備済みAIセッションの紐づけシートを廃止したので、いまは画面からの入口を持たない。
-    ///
-    /// 片付けは**記録が先、実体が後**。逆順にすると、消えた会議の登録だけが残る。
-    func abandon() async {
-        guard snapshot.state == .recording || snapshot.state == .paused else { return }
-        stopAISchedule()
-        for slot in aiPhases.keys { cancelAIPreparation(slot: slot) }
-        let markdownURL = snapshot.markdownURL
-        let meetingID = handoff.meetingID
-        // 片付け先は会議に固定したMarkdownの親から組み立てる。録音中に保存先を再読込しても、
-        // この会議が書いた場所は変わらない。
-        let outputDir = markdownURL?.deletingLastPathComponent() ?? config.outputDir
-        snapshot.state = .finishing
-        snapshot.message = "録音を取り止め中..."
-        emit()
-        await tearDown()
-        let leftover = Discarded(meetingID: meetingID, outputDir: outputDir, markdownURL: markdownURL)
-        guard cleanUp(leftover) else {
-            // 片付けられないものが残る。実体は消さず、やり直せる状態のままにする。
-            pendingDiscards[meetingID] = leftover
-            snapshot.state = .idle
-            snapshot.message = "録音を取り止めましたが、AIの記録を片付けられませんでした。保存先を確認してください"
-            aiWarning = "取り止めた会議のAIの記録が残っています"
-            emit()
-            return
-        }
-        if let applied = appliedWaitingMinutes, applied.meetingID == meetingID {
-            waitingMinutesPath = applied.path; appliedWaitingMinutes = nil
-        }
-        archive = nil; finalTokens = []; finalSegments = []; typedEntries = []
-        consumedAudioTime = 0
-        handoff = HandoffHistory()
-        resetMeetingAIState(config)
-        snapshot = SessionSnapshot(state: .idle, speakers: config.speakers, message: "録音を取り止めました")
-        emit()
-    }
-
-    /// 片付けきれなかった取り止め。**会議ごとに持つ。** 1つだけだと、続けて取り止めに
-    /// 失敗したときに古い会議が再試行の対象から消える
-    private struct Discarded { let meetingID: UUID; let outputDir: URL; let markdownURL: URL? }
-    private var pendingDiscards: [UUID: Discarded] = [:]
-    /// 片付け残しがあるか。表示と検証に使う
-    var hasPendingDiscard: Bool { !pendingDiscards.isEmpty }
-
-    /// 取り止めた会議の後始末。記録を外せなければ実体を消さず false を返す。
-    /// **実体を消せなかったときも false。** 「取消で何も残らない」を満たせていないため。
-    private func cleanUp(_ target: Discarded) -> Bool {
-        // 登録簿と監視を外す。実体だけ消すと、再起動時に無いmanifestを回収しようとして失敗する。
-        guard aiStore?.discard(meetingID: target.meetingID) ?? true else { return false }
-        var removed = true
-        // 予約したMarkdownは中身が無いときだけ消す。書き込み済みのものは触らない。
-        if let markdownURL = target.markdownURL {
-            if (try? Data(contentsOf: markdownURL))?.isEmpty ?? false {
-                do { try FileManager.default.removeItem(at: markdownURL) }
-                catch { log("予約の片付けに失敗: \(error)"); removed = false }
-            }
-            let wav = MeetingFiles.wavURL(for: markdownURL)
-            if FileManager.default.fileExists(atPath: wav.path) {
-                do { try FileManager.default.removeItem(at: wav) }
-                catch { log("録音の片付けに失敗: \(error)"); removed = false }
-            }
-        }
-        // この会議のAIの置き場も残さない。
-        let context = target.outputDir.appendingPathComponent(".kikigaki-context")
-            .appendingPathComponent(target.meetingID.uuidString)
-        if FileManager.default.fileExists(atPath: context.path) {
-            do { try FileManager.default.removeItem(at: context) }
-            catch { log("AIの置き場の片付けに失敗: \(error)"); removed = false }
-        }
-        return removed
-    }
-
-    /// 片付けきれなかった取り止めをもう一度片付ける。次の録音開始でも通る。
-    /// 片付いた会議から順に外し、残ったものは次の機会へ持ち越す。
-    @discardableResult
-    func retryDiscard() -> Bool {
-        guard !pendingDiscards.isEmpty else { return true }
-        for (meetingID, pending) in pendingDiscards where cleanUp(pending) {
-            pendingDiscards[meetingID] = nil
-        }
-        if pendingDiscards.isEmpty { aiWarning = nil }
-        emit()
-        return pendingDiscards.isEmpty
     }
 
     func togglePause() {
@@ -686,8 +616,6 @@ final class MeetingSession {
             var state = AIViewState()
             state.rangeBoundaries = controller?.rangeBoundaries(slot: rangeAutomaticSlot, utterances: snapshot.utterances) ?? AIRangeBoundaries()
             state.conversation = controller?.conversation
-            // ホットキーは1つ目のプロファイルのものだけを使う。宛先を選び直しても変わらない。
-            state.hotkey = meetingAIProfiles.first?.hotkey ?? config.hotkey
             state.participant = config.participantName
             state.connection = connections[slot] ?? .unknown
             state.warning = aiWarning ?? aiRecord?.saveWarning ?? controller?.warning
@@ -1168,18 +1096,36 @@ final class MeetingSession {
 }
 
 extension MeetingSession {
-    /// `autoStart` のプロファイルがあれば、録音開始と同時に自動送信を始める。
+    /// 録音開始と同時に自動送信を始める。
+    ///
+    /// 開始シートを出した会議は**シートの値だけ**を使う。「送らない」を選んだ会議では、
+    /// 設定に `autoStart` があっても始めない。シートを出さないreplayと検証だけが設定を使う。
     /// 設定だけで決まる非対話の開始なので、接続先を解決できなければ理由を出して開始しない。
     func startAutomaticSchedule(now: Date = Date()) {
-        guard let profile = meetingAIProfiles.first(where: \.autoStart), let helper = automaticHelper else { return }
+        let pending = pendingAutomaticSchedule
+        pendingAutomaticSchedule = nil
+        guard let helper = automaticHelper else { return }
+        let profile: ResolvedAIConfig
+        let prompt: String, interval: Double, workAllowed: Bool, sendFinal: Bool
+        if let pending {
+            guard let slot = pending.slot, let options = pending.options,
+                  let chosen = meetingAIProfiles.first(where: { $0.slot == slot }) else { return }
+            profile = chosen; prompt = options.prompt; interval = options.interval
+            workAllowed = options.workAllowed; sendFinal = options.sendFinal
+        } else {
+            guard let configured = meetingAIProfiles.first(where: \.autoStart) else { return }
+            profile = configured; prompt = configured.autoPrompt
+            interval = Double(configured.autoIntervalMinutes) * 60
+            workAllowed = configured.allowWork; sendFinal = true
+        }
         do {
-            let options = try AIScheduleOptions(prompt: profile.autoPrompt,
-                interval: automaticIntervalOverride ?? Double(profile.autoIntervalMinutes) * 60,
-                workAllowed: profile.allowWork, sendFinal: true)
+            // replayの秒指定は分の指定より優先する。実行時間に収めるための上書きのため。
+            let options = try AIScheduleOptions(prompt: prompt, interval: automaticIntervalOverride ?? interval,
+                                                workAllowed: workAllowed, sendFinal: sendFinal)
             try startAISchedule(options: options, helper: helper, now: now, profile: profile)
         } catch {
-            aiScheduleWarning = "設定の自動送信を開始できません。宛先と依頼を確認してください"
-            log("autoStartを開始できません: \(error)")
+            aiScheduleWarning = "自動送信を開始できません。宛先と依頼を確認してください"
+            log("自動送信を開始できません: \(error)")
         }
     }
 

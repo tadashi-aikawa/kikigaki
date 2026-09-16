@@ -1,7 +1,9 @@
 import AppKit
 import KikigakiCore
 
-final class AIQuestionWindow: NSWindow {
+/// シート共通の窓。Escで閉じ、Enterはプロンプト編集中だけ改行へ回す。
+/// 開始シート(`StartSheetWindow`)がここへ⌘⏎の開始を足すため、継承できるようにしてある。
+class AIQuestionWindow: NSWindow {
     var onDismiss: (() -> Void)?
     private var outsideMonitor: Any?
     var monitorsOutsideClicks: Bool { outsideMonitor != nil }

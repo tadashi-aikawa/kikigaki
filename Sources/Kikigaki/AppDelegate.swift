@@ -101,13 +101,12 @@ struct ReplayDebugOptions {
     }
 }
 
-/// 全体の配線。設定の読み込み、モデルの先読み、メニュー・ウィンドウ・ショートカットとセッションの接続
+/// 全体の配線。設定の読み込み、モデルの先読み、メニュー・ウィンドウとセッションの接続
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: StatusItem?
     private var window: TranscriptWindowController?
     private var session: MeetingSession?
-    private var hotkeys: [Hotkey] = []
     private var config: ResolvedConfig?
     /// Sortformer モデルの先読み。開始操作を待たせないよう起動直後に走らせる
     private var modelsTask: Task<SortformerModelStore.Loaded, Error>?
@@ -123,7 +122,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 確認への返答シートが固定している枠。通常のシートはnilで選択中の宛先へ追随する
     private var aiSheetSlot: Int?
     private var previousAI: AIPastMeetingsWindow?
-    private var registeredAIHotkey: KikigakiConfig.Hotkey?
+    /// 開いている開始シート。録音を始めるまでは何も起きていない
+    private(set) var startSheet: StartSheet?
     private let replayDebug: ReplayDebugOptions
     private var nextDebugQuestion = 0
     private var nextDebugTyped = 0
@@ -198,10 +198,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onSelectMinutes = { try session.selectMinutes($0) }
         window.onSpeakerMappingChange = { session.setSpeakerMapping(source: $0, target: $1) }
         window.onAudioExclusionChange = { value in session.setAudioExclusion(value) }
-        window.onDiarizationChange = { [weak self] enabled in
-            session.setDiarizationEnabled(enabled)
-            if session.snapshot.nextDiarizationEnabled { self?.preloadModels() }
-        }
         window.onStartStop = { [weak self] in self?.toggleRecording() }
         window.onPauseResume = { session.togglePause() }
         window.onCopy = { full in session.copyContext(full: full, writeClipboard: Self.writeClipboard) }
@@ -247,7 +243,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.window?.connectMinutes(try? session.previewMinutesStore(), waitingPath: session.waitingMinutesPath)
             self.previousAI?.update()
             self.performReplayDebugActions(snapshot)
-            if self.registeredAIHotkey != session.aiPrimaryConfiguration?.hotkey, let config = self.config { _ = self.registerHotkeys(config) }
             if let sheet = self.aiSheet {
                 if self.aiSheetMeetingID != session.aiMeetingID || !snapshot.canShare || snapshot.ai?.submissionID != nil {
                     sheet.close(); self.aiSheet = nil; self.aiSheetSlot = nil; session.endAIDraft()
@@ -268,9 +263,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         window.apply(session.snapshot)
-        if !registerHotkeys(config) {
-            Self.log("ショートカットを登録できない。メニューからは操作できる")
-        }
 
         // --show-window: 起動直後に書き起こしウィンドウを表示する(動作確認用)
         if CommandLine.arguments.contains("--show-window") {
@@ -300,22 +292,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        hotkeys.forEach { $0.unregister() }
-    }
-
     // MARK: - 操作
 
     private func toggleRecording() {
         guard let session else { return }
         if session.snapshot.state.canStart {
-            Task { await startRecording() }
+            // replayと検証は開始シートを出さない。前回の値と環境変数の指定で同じ開始経路を通す。
+            if replayURL != nil { Task { await startRecording(options: nil) } }
+            else { presentStartSheet() }
         } else if session.snapshot.state.canStop {
             Task { await session.stop() }
         }
     }
 
-    private func startRecording() async {
+    /// 録音を始める前に、その会議だけの指定を決めるシートを出す。
+    /// `minutesPath` はURLスキームなど外からの指定で、開いている最中なら差し替える。
+    func presentStartSheet(minutesPath: String? = nil) {
+        guard let session, let config, session.snapshot.state.canStart, replayURL == nil else { return }
+        window?.show()
+        if let startSheet {
+            if let minutesPath { startSheet.setMinutesPath(minutesPath) }
+            startSheet.focus()
+            return
+        }
+        guard let parent = window?.window else { return }
+        let sheet = StartSheet(profiles: config.aiProfiles,
+                               diarizationEnabled: session.snapshot.nextDiarizationEnabled,
+                               exclusion: session.snapshot.audioExclusion,
+                               minutesPath: minutesPath ?? session.waitingMinutesPath,
+                               minutesHistory: window?.minutesSplit.preview.history.paths ?? [])
+        sheet.onDiarizationPreload = { [weak self] in self?.preloadModels() }
+        sheet.onCancel = { [weak self] in self?.startSheet = nil }
+        sheet.onStart = { [weak self] options in
+            self?.startSheet = nil
+            Task { await self?.startRecording(options: options) }
+        }
+        startSheet = sheet
+        sheet.present(on: parent)
+    }
+
+    private func startRecording(options: StartSheet.Options?) async {
         guard let session else { return }
         let source: AudioSource
         if let replayURL {
@@ -349,12 +365,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             source = MicSource()
         }
+        // シートの値はこの録音にだけ効く。設定ファイルへは書き戻さない。
+        if let options {
+            session.setDiarizationEnabled(options.diarizationEnabled)
+            do { try session.prepareMinutes(options.minutesPath) }
+            catch { Self.log("議事録の指定を引き継げません: \(error)") }
+            session.pendingAutomaticSchedule = .init(slot: options.scheduleSlot, options: options.schedule)
+        }
         window?.show()
         if replayURL != nil {
             session.automaticIntervalOverride = replayDebug.automaticSeconds
             replayDestinationPending = replayDebug.askProfile != nil
         }
         let started = await session.start(source: source)
+        // 議事録を指定したら、開始と同時に右のペインへ出す。
+        if started, options?.minutesPath != nil { window?.showMinutes() }
         // 宛先の指定は録音開始のリセットより後に当てる。start()が先頭へ戻すので、
         // 前に当てると2つ目を指定しても先頭へ送ってしまう。
         if started, replayURL != nil, let name = replayDebug.askProfile {
@@ -487,40 +512,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showAlert("設定を再読込できません", detail: "\(error)")
             return
         }
-        // ショートカットの登録に失敗したら新しい設定は反映せず、前の設定に戻す(操作手段を失わないため)
-        guard registerHotkeys(config) else {
-            if let previous = self.config { _ = registerHotkeys(previous) }
-            showAlert("ショートカットを登録できません", detail: "設定は反映せず、前の設定のままにしました。キー名や他アプリとの重複を確認してください")
-            return
-        }
         self.config = config
         session?.update(config: config)
         Self.log("設定を再読込した")
-    }
-
-    /// 全部登録できたら true。1つでも失敗したら登録した分を解除して false
-    private func registerHotkeys(_ config: ResolvedConfig) -> Bool {
-        hotkeys.forEach { $0.unregister() }
-        hotkeys = []
-        var bindings: [(KikigakiConfig.Hotkey, () -> Void)] = [
-            (config.toggleRecording, { [weak self] in self?.toggleRecording() }),
-            (config.togglePause, { [weak self] in self?.session?.togglePause() }),
-        ]
-        // ホットキーは1つ目のプロファイルのものだけ。宛先を選び直しても登録し直さない。
-        let meetingAI = session == nil ? config.aiProfiles.first : session?.aiPrimaryConfiguration
-        if let ai = meetingAI { bindings.append((ai.hotkey, { [weak self] in self?.showAISheet(parent: nil) })) }
-        var registered: [Hotkey] = []
-        for (hotkey, handler) in bindings {
-            guard let one = Hotkey(modifiers: hotkey.modifiers, key: hotkey.key, handler: handler) else {
-                Self.log("ショートカットを登録できない: \(hotkey.modifiers.joined(separator: "+"))+\(hotkey.key)")
-                registered.forEach { $0.unregister() }
-                return false
-            }
-            registered.append(one)
-        }
-        hotkeys = registered
-        registeredAIHotkey = meetingAI?.hotkey
-        return true
     }
 
     private func showAlert(_ message: String, detail: String) {

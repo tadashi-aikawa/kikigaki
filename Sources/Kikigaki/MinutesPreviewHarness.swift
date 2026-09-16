@@ -2,7 +2,7 @@
 import AppKit
 import KikigakiCore
 
-/// マイク・モデル・AI・グローバルホットキーを起動せず、署名済み.appの議事録UIを検証する。
+/// マイク・モデル・AIを起動せず、署名済み.appの議事録UIを検証する。
 @MainActor final class MinutesPreviewHarness: NSObject, NSApplicationDelegate {
     private let path: String
     private var controller: TranscriptWindowController?

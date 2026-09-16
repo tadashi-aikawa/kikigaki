@@ -150,25 +150,21 @@ import KikigakiAIIO
         #expect(session.aiScheduleConfiguration?.slot == 2 && session.aiConfiguration?.slot == 2)
     }
 
-    /// 【中】宛先を選び直すと共通ホットキーが変わっていた。
-    @Test func 宛先を変えてもホットキーは1つ目のもの() throws {
+    /// 【中】宛先を選び直しても、共通の設定を引く先は1つ目のプロファイルのまま。
+    @Test func 宛先を変えても共通設定は1つ目のもの() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let list = try profiles(root, toml: """
         [[ai]]
         name = "議事録"
-        [ai.hotkey]
-        modifiers = ["cmd", "shift"]
-        key = "j"
 
         [[ai]]
         name = "相談"
         """)
         let session = session(root, profiles: list, fake: FakeHerdr())
-        #expect(session.snapshot.ai?.hotkey.key == "j")
+        #expect(session.aiPrimaryConfiguration?.slot == 1)
         session.selectAIProfile(slot: 2)
         #expect(session.aiConfiguration?.slot == 2)
-        #expect(session.snapshot.ai?.hotkey.key == "j")
         #expect(session.aiPrimaryConfiguration?.slot == 1)
     }
 

@@ -45,20 +45,19 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var autoIntervalMinutes: Int?
     /// 録音開始で自動送信を始める。配列全体で1つまで
     public var autoStart: Bool?
-    public var hotkey: KikigakiConfig.Hotkey?
 
     public init(name: String? = nil, cli: AIProvider? = nil, command: String? = nil, herdrCommand: String? = nil, model: String? = nil,
                 effort: String? = nil, address: String? = nil, avatar: String? = nil, cwd: String? = nil, attach: Bool? = nil,
                 displayAgent: String? = nil,
                 extraArgs: [String]? = nil, prompt: String? = nil, notifySound: Bool? = nil,
-                hotkey: KikigakiConfig.Hotkey? = nil, allowWork: Bool? = nil,
+                allowWork: Bool? = nil,
                 autoPrompt: String? = nil, autoIntervalMinutes: Int? = nil, autoStart: Bool? = nil) {
         self.name = name
         self.cli = cli; self.command = command; self.herdrCommand = herdrCommand; self.model = model; self.effort = effort
         self.address = address; self.avatar = avatar
         self.cwd = cwd; self.attach = attach; self.displayAgent = displayAgent
         self.extraArgs = extraArgs; self.prompt = prompt
-        self.notifySound = notifySound; self.hotkey = hotkey
+        self.notifySound = notifySound
         self.allowWork = allowWork
         self.autoPrompt = autoPrompt; self.autoIntervalMinutes = autoIntervalMinutes; self.autoStart = autoStart
     }
@@ -151,8 +150,6 @@ public struct AIProfileList: Codable, Equatable, Sendable {
             guard names.insert(profile.resolvedName).inserted else {
                 throw invalid("name must be unique: \(profile.resolvedName)")
             }
-            // ホットキーはプロファイルごとに持たない。録音・一時停止との衝突検証が組み合わせで増えるため。
-            guard index == 0 || profile.hotkey == nil else { throw invalid("hotkey is only allowed on the first profile") }
             // herdr自体はプロファイルごとに分けない。1つのadapterで全チャネルを扱うので、
             // 2つ目以降に別の値を書いても効かない。**省略は先頭を引き継ぎ**、明示した値だけ突き合わせる。
             // 省略まで拒否すると、共通の絶対パスを全プロファイルへ書き写させることになる。
@@ -168,7 +165,6 @@ public struct AIProfileList: Codable, Equatable, Sendable {
 
 public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public static let defaultCWD = "~/Library/Application Support/KIKIGAKI/ai-work/"
-    public static let defaultHotkey = KikigakiConfig.Hotkey(modifiers: ["ctrl", "alt", "cmd"], key: "a")
     /// 会議開始時に割り当てる1始まりの通し番号。`ai/sessions/<slot>/` の枝名になる
     public let slot: Int
     public let name: String
@@ -187,7 +183,6 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public let autoPrompt: String
     public let autoIntervalMinutes: Int
     public let autoStart: Bool
-    public let hotkey: KikigakiConfig.Hotkey
     public var participantName: String { address.hasSuffix("へ") ? String(address.dropLast()) : address }
     /// 起動引数へ翻訳した effort
     public var effortArguments: [String] { AIEffort.arguments(effort, provider: cli) }
@@ -204,14 +199,14 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         }
         cwd = ResolvedConfig.expand(config.cwd ?? Self.defaultCWD, home: home)
         extraArgs = config.extraArgs ?? []; prompt = config.prompt ?? ""
-        notifySound = config.notifySound ?? false; hotkey = config.hotkey ?? Self.defaultHotkey
+        notifySound = config.notifySound ?? false
         allowWork = config.allowWork ?? true
         autoPrompt = config.autoPrompt ?? ""; autoIntervalMinutes = config.autoIntervalMinutes ?? 3
         autoStart = config.autoStart ?? false
     }
 
     private enum CodingKeys: String, CodingKey {
-        case cli, command, herdrCommand, model, address, cwd, extraArgs, prompt, notifySound, hotkey, allowWork
+        case cli, command, herdrCommand, model, address, cwd, extraArgs, prompt, notifySound, allowWork
         case autoPrompt, autoIntervalMinutes
         case slot, name, effort, autoStart, avatar
     }
@@ -227,7 +222,6 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         extraArgs = try values.decode([String].self, forKey: .extraArgs)
         prompt = try values.decode(String.self, forKey: .prompt)
         notifySound = try values.decode(Bool.self, forKey: .notifySound)
-        hotkey = try values.decode(KikigakiConfig.Hotkey.self, forKey: .hotkey)
         // 旧会議のmanifestにこのキーが無い場合だけ、以前の作業可能な契約を引き継ぐ。
         allowWork = try values.contains(.allowWork) ? values.decode(Bool.self, forKey: .allowWork) : true
         autoPrompt = try values.contains(.autoPrompt) ? values.decode(String.self, forKey: .autoPrompt) : ""

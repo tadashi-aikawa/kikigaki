@@ -14,7 +14,6 @@ import KikigakiAIIO
         stores[meetingID] = value
         return value
     }
-    func discard(_ meetingID: UUID) { stores[meetingID] = nil }
 }
 
 /// 人の指定と通知回収をawaitなしで直列化し、永続化できた状態だけを公開する。

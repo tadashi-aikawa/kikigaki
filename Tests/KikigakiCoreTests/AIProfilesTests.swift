@@ -50,10 +50,6 @@ import Testing
         autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
         autoIntervalMinutes = 3
 
-        [ai.hotkey]
-        modifiers = ["ctrl", "alt", "cmd"]
-        key = "a"
-
         [[ai]]
         name = "相談"
         cli = "claude"
@@ -61,7 +57,6 @@ import Testing
         address = "ネオへ"
         """)
         #expect(profiles.count == 2)
-        #expect(profiles[0].hotkey == ResolvedAIConfig.defaultHotkey && profiles[1].hotkey == ResolvedAIConfig.defaultHotkey)
         #expect(profiles[0].cwd.path == "/home/person/work/minutes")
         #expect(profiles[0].effortArguments == ["-c", "model_reasoning_effort=\"high\""])
         #expect(profiles[1].effortArguments == ["--effort", "max"])
@@ -87,27 +82,22 @@ import Testing
         #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "ai = []") }
     }
 
-    @Test func ホットキーは1つ目のプロファイルにだけ許す() throws {
-        let ok = try resolved("""
+    /// ホットキーは廃止した。どのプロファイルに書かれていても読み飛ばして通す。
+    @Test func 廃止したホットキーはどのプロファイルにあっても読み飛ばす() throws {
+        let profiles = try resolved("""
         [[ai]]
         name = "一"
         [ai.hotkey]
         modifiers = ["cmd", "shift"]
         key = "j"
-        """)
-        #expect(ok[0].hotkey.key == "j")
-        #expect(throws: ConfigError.self) {
-            try ConfigLoader.parse(toml: """
-            [[ai]]
-            name = "一"
 
-            [[ai]]
-            name = "二"
-            [ai.hotkey]
-            modifiers = ["cmd", "shift"]
-            key = "j"
-            """)
-        }
+        [[ai]]
+        name = "二"
+        [ai.hotkey]
+        modifiers = ["cmd", "shift"]
+        key = "j"
+        """)
+        #expect(profiles.map(\.name) == ["一", "二"])
     }
 
     // MARK: - effort

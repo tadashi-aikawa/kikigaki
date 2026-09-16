@@ -1,11 +1,11 @@
 import AppKit
 import KikigakiCore
 
-/// 表示中の会議の統合と、次に始める録音の設定を分ける。
+/// 表示中の会議の統合と、小音量の除外。
+/// 次の録音の話者判別は録音開始シートへ移したので、ここには置かない。
 @MainActor
 final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
     var onMappingChange: ((Int, Int?) -> Void)?
-    var onDiarizationChange: ((Bool) -> Void)?
     var onAudioExclusionChange: ((AudioExclusion) -> Void)?
     let exclusionSwitch = NSSwitch()
     let exclusionSlider = NSSlider(value: -45, minValue: -80, maxValue: -20, target: nil, action: nil)
@@ -13,8 +13,6 @@ final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
     private var pendingExclusion: AudioExclusion?
     private var exclusionTimer: Timer?
     private let popover = NSPopover()
-    let diarizationSwitch = NSSwitch()
-    private let modeHint = NSTextField(wrappingLabelWithString: "")
     private let meetingTitle = Washi.label(size: 12, weight: .semibold)
     private let emptyHint = Washi.label(color: Washi.muted)
     private let mappingHint = NSTextField(wrappingLabelWithString:
@@ -80,18 +78,6 @@ final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
         exclusionHint.font = .systemFont(ofSize: 11); exclusionHint.textColor = Washi.muted
         exclusionHint.widthAnchor.constraint(equalToConstant: 384).isActive = true
         stack.addArrangedSubview(exclusionHint)
-        let nextTitle = Washi.label("次の録音", size: 12, weight: .semibold)
-        stack.addArrangedSubview(nextTitle)
-        let modeLabel = Washi.label("話者判別")
-        let spacer = NSView()
-        let modeRow = NSStackView(views: [modeLabel, spacer, diarizationSwitch])
-        modeRow.widthAnchor.constraint(equalToConstant: 384).isActive = true
-        diarizationSwitch.target = self; diarizationSwitch.action = #selector(modeChanged)
-        diarizationSwitch.setAccessibilityLabel("次の録音の話者判別")
-        stack.addArrangedSubview(modeRow)
-        modeHint.font = .systemFont(ofSize: 11); modeHint.textColor = Washi.muted
-        modeHint.widthAnchor.constraint(equalToConstant: 384).isActive = true
-        stack.addArrangedSubview(modeHint)
         let controller = NSViewController()
         controller.view = content
         popover.contentViewController = controller
@@ -179,24 +165,12 @@ final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
             row.choice.selectItem(withTag: target == slot ? -1 : target ?? -1)
             row.choice.toolTip = row.choice.selectedItem?.title
         }
-        diarizationSwitch.state = snapshot.nextDiarizationEnabled ? .on : .off
-        diarizationSwitch.isEnabled = snapshot.canChangeDiarization
-        modeHint.stringValue = (snapshot.canChangeDiarization ? "録音開始時に適用します。選択は次回も記憶します。"
-            : "録音を停止すると変更できます。この会議には適用しません。")
-            + (snapshot.nextDiarizationEnabled ? ""
-                : "\n文字起こしが確定したら、話者を待たず表示します。\n話者に基づく繰り返し相槌の省略は行いません。")
-        diarizationSwitch.toolTip = modeHint.stringValue
         contentView.layoutSubtreeIfNeeded()
         let size = NSSize(width: 420, height: ceil(stack.fittingSize.height) + 36)
         popover.contentSize = size
         contentView.setFrameSize(size)
         contentView.layoutSubtreeIfNeeded()
         if resumed { flushExclusion() }
-    }
-
-    @objc private func modeChanged() {
-        guard snapshot.canChangeDiarization else { return }
-        onDiarizationChange?(diarizationSwitch.state == .on)
     }
 
     @objc private func mappingChanged(_ sender: NSPopUpButton) {

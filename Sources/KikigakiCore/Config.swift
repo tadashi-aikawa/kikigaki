@@ -8,28 +8,6 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
         public var avatar: String?
         public init(name: String, avatar: String? = nil) { self.name = name; self.avatar = avatar }
     }
-    public struct Hotkey: Codable, Equatable, Sendable {
-        public var modifiers: [String]
-        public var key: String
-
-        public init(modifiers: [String], key: String) {
-            self.modifiers = modifiers
-            self.key = key
-        }
-    }
-
-    public struct Hotkeys: Codable, Equatable, Sendable {
-        /// 録音の開始・停止(トグル)
-        public var toggleRecording: Hotkey?
-        /// 一時停止・再開(トグル)
-        public var togglePause: Hotkey?
-
-        public init(toggleRecording: Hotkey? = nil, togglePause: Hotkey? = nil) {
-            self.toggleRecording = toggleRecording
-            self.togglePause = togglePause
-        }
-    }
-
     /// Markdown(と録音WAV)の保存先。`~` を使える
     public var outputDir: String?
     /// 録音WAVを Markdown と並べて残すか
@@ -38,16 +16,14 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     public var dropRepeatedBackchannels: Bool?
     /// 小音量候補の計測・表示だけを行う。本文からの除外はしない。
     public var measureAudioLevels: Bool?
-    public var hotkeys: Hotkeys?
     public var speakers: [Speaker]?
     /// 単数の `[ai]` と配列の `[[ai]]` の両方を読む
     public var ai: AIProfileList?
 
-    public init(outputDir: String? = nil, saveRecording: Bool? = nil, hotkeys: Hotkeys? = nil, dropRepeatedBackchannels: Bool? = nil,
+    public init(outputDir: String? = nil, saveRecording: Bool? = nil, dropRepeatedBackchannels: Bool? = nil,
                 speakers: [Speaker]? = nil, ai: AIProfileList? = nil, measureAudioLevels: Bool? = nil) {
         self.outputDir = outputDir
         self.saveRecording = saveRecording
-        self.hotkeys = hotkeys
         self.dropRepeatedBackchannels = dropRepeatedBackchannels
         self.measureAudioLevels = measureAudioLevels
         self.speakers = speakers
@@ -56,12 +32,12 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
 }
 
 /// 既定値を解決した設定
+///
+/// グローバルショートカットは廃止した。`[hotkeys]` と `[ai.hotkey]` が書かれていても
+/// **読み飛ばす**。既存の設定ファイルを書き換えさせないため、エラーにも警告にもしない。
 public struct ResolvedConfig: Equatable, Sendable {
     /// 既定の保存先。人が開く Markdown なので隠しディレクトリではなく書類フォルダに置く
     public static let defaultOutputDir = "~/Documents/KIKIGAKI"
-    /// 既定のショートカット。ctrl+alt+cmd は他アプリのショートカットとまず衝突しない組み合わせ
-    public static let defaultToggleRecording = KikigakiConfig.Hotkey(modifiers: ["ctrl", "alt", "cmd"], key: "k")
-    public static let defaultTogglePause = KikigakiConfig.Hotkey(modifiers: ["ctrl", "alt", "cmd"], key: "p")
 
     public var outputDir: URL
     /// 録音WAVは既定では残さない。通常利用では不要でディスクを食うだけで、要るのはデバッグや
@@ -69,8 +45,6 @@ public struct ResolvedConfig: Equatable, Sendable {
     public var saveRecording: Bool
     public var dropRepeatedBackchannels: Bool
     public var measureAudioLevels: Bool
-    public var toggleRecording: KikigakiConfig.Hotkey
-    public var togglePause: KikigakiConfig.Hotkey
     public var speakers: [KikigakiConfig.Speaker]
     /// 設定順のプロファイル。slotは1始まりで、この並びが宛先ポップアップの並びになる
     public var aiProfiles: [ResolvedAIConfig]
@@ -91,8 +65,6 @@ public struct ResolvedConfig: Equatable, Sendable {
         saveRecording = config.saveRecording ?? false
         dropRepeatedBackchannels = config.dropRepeatedBackchannels ?? false
         measureAudioLevels = config.measureAudioLevels ?? false
-        toggleRecording = config.hotkeys?.toggleRecording ?? Self.defaultToggleRecording
-        togglePause = config.hotkeys?.togglePause ?? Self.defaultTogglePause
         speakers = (config.speakers ?? []).map { speaker in
             var speaker = speaker
             speaker.name = SpeakerNames.normalized(speaker.name)
@@ -146,9 +118,6 @@ public enum ConfigLoader {
         return config
     }
 
-    /// 修飾キー名(KeyCodes が解釈できるもの)
-    public static let modifierNames: Set<String> = ["cmd", "command", "alt", "option", "ctrl", "control", "shift"]
-
     private static func validate(_ config: KikigakiConfig) throws {
         try config.ai?.validate()
         var speakerNames = Set<String>()
@@ -167,37 +136,6 @@ public enum ConfigLoader {
                 throw ConfigError.invalid(description: "outputDir must be an absolute path or start with ~ (got: \(dir))")
             }
         }
-        let resolved = ResolvedConfig(config: config)
-        var hotkeys = [("toggleRecording", resolved.toggleRecording), ("togglePause", resolved.togglePause)]
-        if let ai = resolved.ai { hotkeys.append(("ai", ai.hotkey)) }
-        for (label, hotkey) in hotkeys {
-            if hotkey.key.trimmingCharacters(in: .whitespaces).isEmpty {
-                throw ConfigError.invalid(description: "hotkeys.\(label).key must be a non-empty string")
-            }
-            for modifier in hotkey.modifiers where !modifierNames.contains(modifier.lowercased()) {
-                throw ConfigError.invalid(description: "hotkeys.\(label).modifiers contains unknown modifier: \(modifier)")
-            }
-        }
-        // 2操作に同じキーを割り当てると後の登録が失敗して片方を失うので、読み込み時に止める
-        if Self.normalized(resolved.toggleRecording) == Self.normalized(resolved.togglePause) {
-            throw ConfigError.invalid(description: "hotkeys.toggleRecording and hotkeys.togglePause must differ")
-        }
-        if let ai = resolved.ai,
-           [resolved.toggleRecording, resolved.togglePause].contains(where: { Self.normalized($0) == Self.normalized(ai.hotkey) }) {
-            throw ConfigError.invalid(description: "ai.hotkey must differ from recording hotkeys")
-        }
-    }
-
-    private static func normalized(_ hotkey: KikigakiConfig.Hotkey) -> String {
-        let modifiers = hotkey.modifiers.map { name -> String in
-            switch name.lowercased() {
-            case "command": return "cmd"
-            case "option": return "alt"
-            case "control": return "ctrl"
-            default: return name.lowercased()
-            }
-        }
-        return Set(modifiers).sorted().joined(separator: "+") + "+" + hotkey.key.lowercased().trimmingCharacters(in: .whitespaces)
     }
 
     /// 設定ファイルを読み込む。ファイルが存在しない場合は既定設定を返す

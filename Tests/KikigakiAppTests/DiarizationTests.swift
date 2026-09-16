@@ -55,28 +55,29 @@ import KikigakiCore
         #expect(session.snapshot.utterances == previous)
     }
 
-    @Test func 状態別にスイッチの操作とヘッダーの対象を保つ() throws {
+    /// 話者判別の切替は録音開始シートへ移した。ポップオーバーは表示中の会議だけを扱う。
+    @Test func 状態別に開始シートのラジオとヘッダーの対象を保つ() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         var snapshot = SessionSnapshot()
         let popover = SpeakerSettingsPopover(snapshot: snapshot)
         let button = SpeakerCountButton()
-        var selected: Bool?
-        popover.onDiarizationChange = { selected = $0 }
-        #expect(popover.diarizationSwitch.isEnabled && popover.diarizationSwitch.state == .on)
-        popover.diarizationSwitch.performClick(nil)
-        #expect(selected == false)
+        let sheet = StartSheet(profiles: [], diarizationEnabled: true, exclusion: AudioExclusion())
+        #expect(sheet.diarizeOn.state == .on && sheet.diarizeOff.state == .off)
+        #expect(sheet.options?.diarizationEnabled == true)
+        sheet.diarizeOff.performClick(nil)
+        #expect(sheet.options?.diarizationEnabled == false)
+        let off = StartSheet(profiles: [], diarizationEnabled: false, exclusion: AudioExclusion())
+        #expect(off.diarizeOff.state == .on && off.options?.diarizationEnabled == false)
         for state in [RecordingState.preparing, .recording, .paused, .finishing] {
             snapshot.state = state
             snapshot.names.diarizationEnabled = false
             popover.update(snapshot: snapshot); button.update(snapshot: snapshot)
-            #expect(!popover.diarizationSwitch.isEnabled)
             #expect(button.countText == "なし")
         }
         snapshot.state = .idle; snapshot.markdownURL = URL(fileURLWithPath: "/tmp/meeting.md")
         snapshot.names.diarizationEnabled = true; snapshot.detectedSpeakerSlots = [0, 1]
         snapshot.nextDiarizationEnabled = false
         popover.update(snapshot: snapshot); button.update(snapshot: snapshot)
-        #expect(popover.diarizationSwitch.isEnabled && popover.diarizationSwitch.state == .off)
         #expect(button.countText == "2/4")
         try capture("stopped-on-next-off", popover.contentView)
         snapshot.names.diarizationEnabled = false; snapshot.nextDiarizationEnabled = true
@@ -126,30 +127,28 @@ import KikigakiCore
         await session.stop()
     }
 
-    @Test func 停止と取り止めの途中に届く通知や改名と統合を受け付けない() async throws {
-        for abandoning in [false, true] {
-            let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
-            var receive: (([TimedToken], Int) -> Void)?
-            var session: MeetingSession!
-            session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: try config(root),
-                aiStore: AIRecordStore(directory: root), finishAudio: {
-                    #expect(session.snapshot.state == .finishing)
-                    let before = session.snapshot.utterances
-                    receive?([.init(text: "後着", phraseId: 2, start: 1, end: 2)], 1)
-                    #expect(session.snapshot.utterances == before)
-                }, diarizationEnabled: false)
-            receive = session.undiarizedResultHandlerForTesting
-            receive?([.init(text: "最初", phraseId: 1, start: 0, end: 1)], 1)
-            session.rename(slot: 0, to: "改名禁止")
-            session.setSpeakerMapping(source: 0, target: 1)
-            #expect(session.snapshot.names.customName(for: 0) == nil)
-            #expect(session.snapshot.speakerOverrides.isEmpty)
-            if abandoning { await session.abandon() } else { await session.stop() }
-            let after = session.snapshot.utterances
-            receive?([.init(text: "停止後", phraseId: 3, start: 2, end: 3)], 1)
-            #expect(session.snapshot.utterances == after)
-            session = nil
-        }
+    @Test func 停止の途中に届く通知や改名と統合を受け付けない() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        var receive: (([TimedToken], Int) -> Void)?
+        var session: MeetingSession!
+        session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: try config(root),
+            aiStore: AIRecordStore(directory: root), finishAudio: {
+                #expect(session.snapshot.state == .finishing)
+                let before = session.snapshot.utterances
+                receive?([.init(text: "後着", phraseId: 2, start: 1, end: 2)], 1)
+                #expect(session.snapshot.utterances == before)
+            }, diarizationEnabled: false)
+        receive = session.undiarizedResultHandlerForTesting
+        receive?([.init(text: "最初", phraseId: 1, start: 0, end: 1)], 1)
+        session.rename(slot: 0, to: "改名禁止")
+        session.setSpeakerMapping(source: 0, target: 1)
+        #expect(session.snapshot.names.customName(for: 0) == nil)
+        #expect(session.snapshot.speakerOverrides.isEmpty)
+        await session.stop()
+        let after = session.snapshot.utterances
+        receive?([.init(text: "停止後", phraseId: 3, start: 2, end: 3)], 1)
+        #expect(session.snapshot.utterances == after)
+        session = nil
     }
 
     /// オンデバイスSpeechを使う結合検証。通常のテストではモデル・言語アセットを要求しない。
@@ -180,7 +179,7 @@ import KikigakiCore
         session.setDiarizationEnabled(false)
         #expect(await session.start(source: Silence()))
         #expect(modelCalls == 1 && !session.snapshot.names.diarizationEnabled)
-        await session.abandon()
+        await session.stop()
     }
 
     private func capture(_ name: String, _ view: NSView) throws {

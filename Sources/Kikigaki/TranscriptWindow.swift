@@ -30,7 +30,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private var aiProgress: [UUID: AIProgress] = [:]
     private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
     private var speakerSettingsPopover: SpeakerSettingsPopover?
-    var onDiarizationChange: ((Bool) -> Void)?
     var onAudioExclusionChange: ((AudioExclusion) -> Void)?
     private let startStopButton = WashiActionButton()
     private var startStopWidth: NSLayoutConstraint?
@@ -152,6 +151,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         onMinutesVisibility?(visible)
     }
     @objc func toggleMinutes() { minutesSplit.setVisible(!minutesSplit.isPreviewVisible) }
+    /// 開始シートで議事録を指定したときだけ使う。隠れていれば開き、開いていればそのまま。
+    func showMinutes() { minutesSplit.setVisible(true) }
     func windowWillClose(_ notification: Notification) { minutesSplit.preview.stop(); minutesStore?.isVisible = false }
     func windowDidChangeScreen(_ notification: Notification) { minutesSplit.fitWindow() }
     func windowDidExitFullScreen(_ notification: Notification) { minutesSplit.fitWindow() }
@@ -614,7 +615,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         renamePopover?.close()
         let popover = SpeakerSettingsPopover(snapshot: snapshot)
         popover.onMappingChange = { [weak self] slot, target in self?.onSpeakerMappingChange?(slot, target) }
-        popover.onDiarizationChange = { [weak self] enabled in self?.onDiarizationChange?(enabled) }
         popover.onAudioExclusionChange = { [weak self] value in self?.onAudioExclusionChange?(value) }
         speakerSettingsPopover = popover
         popover.present(relativeTo: speakerButton.bounds, of: speakerButton)

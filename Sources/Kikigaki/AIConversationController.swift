@@ -225,16 +225,11 @@ final class AIConversationController {
     /// 取り止めた会議。置き場を消した後は、遅れて返ってきた観測でも何も書かない
     private(set) var discarded = false
 
-    /// 監視を止め、この会議への書き込みを一切やめる。取り止めた会議の置き場を消す前に呼ぶ。
+    /// 監視を止め、この会議への書き込みを一切やめる。**戻せない。**
     /// 監視元を止めるだけでは、既に走っているpollがawaitから戻って消した場所へ書き直せる。
     func stopWatching() {
         discarded = true
         monitor?.stop(); monitor = nil
-    }
-    /// 片付けに失敗して会議を残すときに戻す
-    func resumeWatching() throws {
-        discarded = false
-        try watch()
     }
 
     func connect(config: ResolvedAIConfig, label: String, executable: URL, arguments: [String], readinessTimeout: TimeInterval = 30) async throws {

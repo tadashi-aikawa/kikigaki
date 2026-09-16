@@ -132,7 +132,7 @@ import KikigakiCore
         view.update(path: nil, source: nil, active: false)
         #expect(!view.closeButton.isEnabled && view.pathField.stringValue.isEmpty && !view.isHidden)
     }
-    @Test func 待機指定は開始取消再開始と二回目の準備でも一度だけ適用する() async throws {
+    @Test func 待機指定は二回目の準備でも一度だけ適用する() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let config = ResolvedConfig(config: try ConfigLoader.parse(toml: ""), home: root)
         let records = AIRecordStore(directory: root)
@@ -142,14 +142,10 @@ import KikigakiCore
         try session.completeMinutesPreparationForTesting(at: root.appendingPathComponent("first.md"))
         #expect(try session.previewMinutesStore()?.state.humanMinutesPath == "/tmp/初回.md")
         #expect(session.waitingMinutesPath == nil)
-        await session.abandon()
-        #expect(session.waitingMinutesPath == "/tmp/初回.md")
         session.setMinutesPreparationForTesting()
-        try session.completeMinutesPreparationForTesting(at: root.appendingPathComponent("restart.md"))
-        #expect(try session.previewMinutesStore()?.state.humanMinutesPath == "/tmp/初回.md")
+        // 開始シートの指定は表示中の会議へ当てず、次の準備まで持ち越す。
+        try session.prepareMinutes("/tmp/二回目.md")
         session.setMinutesPreparationForTesting()
-        try session.selectMinutes("/tmp/二回目.md")
-        session.setMinutesPreparationForTesting() // 開始取消後、次の準備へ。未適用の指定を保持
         #expect(session.waitingMinutesPath == "/tmp/二回目.md")
         try session.completeMinutesPreparationForTesting(at: root.appendingPathComponent("second.md"))
         #expect(try session.previewMinutesStore()?.state.humanMinutesPath == "/tmp/二回目.md")
