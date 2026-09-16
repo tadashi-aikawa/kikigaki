@@ -604,7 +604,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             add("自動実行…", #selector(configureAutomaticPressed),
                 enabled: snapshot.ai != nil && (snapshot.state == .recording || snapshot.state == .paused))
         }
-        add("手動実行…", #selector(askPressed), enabled: snapshot.ai != nil && snapshot.canShare)
+        add("手動実行…", #selector(askPressed), enabled: snapshot.ai != nil && snapshot.canSubmitAI)
         return menu
     }
     func robotMenuPosition(_ menu: NSMenu) -> NSPoint {

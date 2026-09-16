@@ -142,5 +142,10 @@ struct AIHerdr: Sendable {
         _ = try await call(["agent", "prompt", target.paneID, text], as: Empty.self)
     }
     func show(_ target: AIHerdrConnection) async throws { _ = try await call(["workspace", "focus", target.workspaceID], as: Empty.self) }
+    /// 会議の後片付けでペインごと閉じる。既に無いworkspaceは閉じ終わったものとして扱う。
+    func close(_ target: AIHerdrConnection) async throws {
+        do { _ = try await call(["workspace", "close", target.workspaceID], as: Empty.self) }
+        catch AIHerdrError.missing { return }
+    }
     private static func identifier(_ value: String) -> Bool { !value.isEmpty && !value.hasPrefix("-") && value.utf8.allSatisfy { (33...126).contains($0) } }
 }

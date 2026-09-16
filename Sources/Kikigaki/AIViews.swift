@@ -99,6 +99,8 @@ struct AIViewState {
     var submissionID: UUID?
     var draft = ""
     var readOnly = false
+    /// 新しい依頼・確認への返答・再送を出せるか。録音停止後はペインを閉じるので出せない
+    var canAsk = true
     var canOpenPane = true
     var canRecreate = false
     var saveFailed = false

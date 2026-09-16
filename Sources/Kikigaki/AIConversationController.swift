@@ -59,6 +59,8 @@ final class AIConversationController {
     private var polling: Set<Int> = []
     /// 受信箱の走査で起きた失敗。プロファイルに属さないので会議単位で持つ
     private var scanWarning: String?
+    /// 後片付けで閉じたherdrのペインを持つ枠。閉じた先へは送らず、開き直さない
+    private var closedSlots: Set<Int> = []
     /// 既定のチャネル。プロファイル未指定の呼び出しと旧requestの帰属先
     private(set) var defaultSlot = 1
 
@@ -156,8 +158,12 @@ final class AIConversationController {
     /// 保存パスとenvelopeへ書く番号。単一プロファイルの会議は従来どおり平置きにして、
     /// 旧requestと同じ形を保つ。プロファイルを増やした会議だけ枝を切る。
     private func storedSlot(_ slot: Int) -> Int? { profiles.count > 1 || slot != defaultSlot ? slot : nil }
+    /// 開ける状態のペインがある枠。閉じた後は「ペインを開く」を出さない
+    func canOpenPane(slot: Int) -> Bool { channels[slot]?.connection != nil && !closedSlots.contains(slot) }
+    var hasOpenPanes: Bool { channels.keys.contains { canOpenPane(slot: $0) } }
+    func isPaneClosed(slot: Int) -> Bool { closedSlots.contains(slot) }
     func canSend(slot: Int) -> Bool {
-        guard allowsSending, !discarded, let channel = channels[slot] else { return false }
+        guard allowsSending, !discarded, !closedSlots.contains(slot), let channel = channels[slot] else { return false }
         return !channel.isSending && !channel.connecting
             && (channel.connection == nil ? !channel.launchingAttempted : channel.connectionStatus == .idle)
             && !questions(inSlot: slot, generation: channel.generation).contains { $0.isAwaitingResult || $0.state == .prepared }
@@ -329,8 +335,30 @@ final class AIConversationController {
         var next = conversation; try next.update(id, body); try commit(next); onChange?()
     }
     func showPane(slot: Int? = nil) async throws {
-        guard let connection = channels[slot ?? defaultSlot]?.connection else { throw AIHerdrError.notReady }
+        let target = slot ?? defaultSlot
+        guard !closedSlots.contains(target), let connection = channels[target]?.connection else { throw AIHerdrError.notReady }
         try await herdr.show(connection)
+    }
+
+    /// 会議の後片付けでherdrのペインを閉じる。**返事待ちが片付いてから呼ぶ。**
+    /// 閉じた枠へは送れなくなり、「ペインを開く」も出さない。閉じられなかった枠は
+    /// 開いたまま残して警告だけを置く。保存の成否には混ぜない。
+    @discardableResult
+    func closePanes() async -> Bool {
+        var allClosed = true
+        for slot in channels.keys.sorted() {
+            guard let channel = channels[slot], let target = channel.connection, !closedSlots.contains(slot) else { continue }
+            do {
+                try await herdr.close(target)
+                closedSlots.insert(slot)
+                channel.connectionStatus = .disconnected; channel.idleSince = nil
+            } catch {
+                allClosed = false
+                channel.warning = "herdrのペインを閉じられません。手で閉じてください"
+            }
+        }
+        onChange?()
+        return allClosed
     }
 
     /// 利用者の明示操作からだけ呼ぶ。旧質問は残し、新しいstreamを発行する。
@@ -515,7 +543,8 @@ final class AIConversationController {
 
     private func pollAll() { for slot in channels.keys { poll(slot) } }
     private func poll(_ slot: Int) {
-        guard !discarded, let channel = channels[slot], !polling.contains(slot),
+        // 閉じたペインは観測しない。無いagentを問い合わせ続けても切断が分かるだけ。
+        guard !discarded, !closedSlots.contains(slot), let channel = channels[slot], !polling.contains(slot),
               channel.connection != nil, channel.inputAttempted else { return }
         polling.insert(slot)
         Task { [weak self] in

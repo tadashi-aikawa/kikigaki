@@ -523,7 +523,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
     private func updateVisibility() {
         let failure = isFailure
         failureLabel.isHidden = !failure
-        retryAction.isHidden = !failure || state.readOnly
+        retryAction.isHidden = !failure || state.readOnly || !state.canAsk
         for view in [avatar, nameLabel] { view.isHidden = failure }
         // 失敗の帯にも確定時刻を出す。返事待ちは到着していないので時刻も種別も出さない。
         timeLabel.isHidden = isWaiting
@@ -542,7 +542,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
         confirmationMark.isHidden = failure || item.kind != .reply(.needsInput)
         notes.isHidden = failure || notes.stringValue.isEmpty
         // 点灯の1.5秒は操作を出さない。取り消せない依頼の取消も、本文のない返答導線も置かない。
-        replyAction.isHidden = failure || !item.needsAnswer || state.readOnly || isShowingArrival
+        replyAction.isHidden = failure || !item.needsAnswer || state.readOnly || !state.canAsk || isShowingArrival
         cancelAction.isHidden = failure || !isWaiting || state.readOnly || isShowingArrival
         // 幅で落とした塊に関係なく、読み上げには全部入りの表記を渡す。
         let spoken = model.map { "、" + $0.text } ?? ""

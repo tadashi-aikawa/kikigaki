@@ -74,4 +74,10 @@ struct SessionSnapshot {
     var canShare: Bool {
         markdownURL != nil && (state == .recording || state == .paused || state == .idle)
     }
+
+    /// AIへ新しく依頼を出せるのは録音中と一時停止中だけ。停止後はherdrのペインを閉じるので、
+    /// 会議が終わった後の相談は送らない(自動の「最後の1回」はこの入口を通らない)。
+    var canSubmitAI: Bool {
+        markdownURL != nil && (state == .recording || state == .paused)
+    }
 }

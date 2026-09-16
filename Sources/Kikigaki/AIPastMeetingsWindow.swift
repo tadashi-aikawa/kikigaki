@@ -77,12 +77,12 @@ import KikigakiCore
             connections[slot] = controller.connectionStatus(slot: slot)
             generations[slot] = controller.generation(slot: slot)
             participants[slot] = participant.participantName
-            if controller.connection(slot: slot) != nil { openablePanes.insert(slot) }
+            if controller.canOpenPane(slot: slot) { openablePanes.insert(slot) }
         }
         var state = AIViewState(conversation: controller.conversation, participant: record.manifest.config.participantName,
             warning: record.saveWarning,
             unconfirmed: Set(controller.conversation.questions.filter { controller.isReturnUnconfirmed($0) }.map { $0.request.id }),
-            canSubmit: false, readOnly: true, canOpenPane: controller.connection != nil,
+            canSubmit: false, readOnly: true, canOpenPane: controller.canOpenPane(slot: controller.defaultSlot),
             saveFailed: record.saveWarning != nil, generation: controller.generation,
             defaultSlot: controller.defaultSlot, connections: connections, generations: generations,
             participants: participants, openablePanes: openablePanes)

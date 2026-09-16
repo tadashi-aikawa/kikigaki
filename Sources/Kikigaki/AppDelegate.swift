@@ -259,7 +259,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.previousAI?.update()
             self.performReplayDebugActions(snapshot)
             if let sheet = self.aiSheet {
-                if self.aiSheetMeetingID != session.aiMeetingID || !snapshot.canShare || snapshot.ai?.submissionID != nil {
+                // 停止でシートも閉じる。停止後は新しい依頼を送れず、ペインも後片付けで閉じる。
+                if self.aiSheetMeetingID != session.aiMeetingID || !snapshot.canSubmitAI || snapshot.ai?.submissionID != nil {
                     sheet.close(); self.aiSheet = nil; self.aiSheetSlot = nil; session.endAIDraft()
                 } else {
                     // 返答シートは固定した枠の状態を見る。選択中の宛先が返事待ちでも無効にしない。
@@ -508,8 +509,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if replayHolding, snapshot.ai?.conversation?.questions.contains(where: { $0.result != nil }) == true {
             performReplayRename()
         }
-        // 手入力の保存検証では最終会話を送る。停止による確定待ち取消を避ける。
-        if replayDebug.verifyTyped && !replayHolding { return }
+        // 停止後は手動の依頼を送れない(ペインを後片付けで閉じるため)。HOLD中の送信はしない。
+        guard !replayHolding else { return }
         guard !replayDestinationPending, nextDebugQuestion < replayDebug.questions.count, let session else { return }
         if replayDebug.verifyMinutes == "main", !minutesVerification.canAsk(index: nextDebugQuestion) { return }
         let question = replayDebug.questions[nextDebugQuestion]
@@ -577,7 +578,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func showAISheet(parent: UUID?, resend: UUID? = nil) {
-        guard let session, session.snapshot.canShare, let window = window?.window else { return }
+        guard let session, session.snapshot.canSubmitAI, let window = window?.window else { return }
         let questions = session.aiRecord?.controller.conversation.questions
         // 失敗した依頼はそのまま送り直せるよう、送信文・親・作業許可を元requestから戻す。
         let source = resend.flatMap { id in questions?.first { $0.request.id == id } }

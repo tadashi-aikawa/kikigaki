@@ -152,6 +152,12 @@ final class MeetingSession {
     struct PendingAutomaticSchedule { let slot: Int?; let options: AIScheduleOptions? }
     var pendingAutomaticSchedule: PendingAutomaticSchedule?
     private var aiScheduleWarning: String?
+    /// 停止後の返事待ちの上限。超えたら待たずにペインを閉じる。人が答えない確認質問と、
+    /// 返事の来ない依頼を無限に待たないための値。検証では短くする
+    var aiPaneCloseTimeout: TimeInterval = 600
+    /// 後片付けの判定周期
+    var aiPaneClosePollInterval: TimeInterval = 0.5
+    private var aiCleanupTask: Task<Void, Never>?
     /// 開いている手動シートが持つ枠。抑制も譲りもこの枠だけに効かせる
     private var manualAISheetSlot: Int?
     private(set) var lastScheduleOptions: AIScheduleOptions?
@@ -453,8 +459,48 @@ final class MeetingSession {
             aiScheduleWarning = "保存が完了していないため最後の1回を中止しました"
         }
         evaluateAISchedule()
+        startAIPaneCleanup()
         if let note { snapshot.message = note + " / " + (snapshot.message ?? "") }
         emit()
+    }
+
+    /// 停止後の後片付け。最後の1回と返事待ちの依頼が片付いたら、この会議のAIのペインを閉じる。
+    /// 会議ごとにペインが残り続けるのを避けるための操作で、閉じた後は送信も再表示もしない。
+    ///
+    /// 待つのは自分が始めた送信と、返事が来る見込みのある依頼だけ。**未回答の確認質問は待たない**
+    /// (人が答えないまま次の録音へ進むため)。上限を過ぎたら待たずに閉じる。閉じられなくても
+    /// 保存は成功のままにして、警告だけを残す。
+    private func startAIPaneCleanup() {
+        let meetingID = handoff.meetingID
+        // **ペインの有無で始めるかを決めない。** 停止と同時に始まる最後の1回は、この時点で
+        // まだ接続も会議の登録簿も作っていない。待つものが無くなってから接続を確かめる。
+        guard let aiStore, aiStore.records[meetingID] != nil || isAIPaneCleanupPending(meetingID: meetingID) else { return }
+        let deadline = Date().addingTimeInterval(max(0, aiPaneCloseTimeout))
+        let interval = max(0.05, aiPaneClosePollInterval)
+        let log = self.log
+        aiCleanupTask?.cancel()
+        aiCleanupTask = Task { [weak self] in
+            while let self, !Task.isCancelled, Date() < deadline,
+                  self.isAIPaneCleanupPending(meetingID: meetingID) {
+                try? await Task.sleep(for: .seconds(interval))
+            }
+            guard !Task.isCancelled, let controller = aiStore.records[meetingID]?.controller,
+                  controller.hasOpenPanes else { return }
+            // 警告も画面の更新も controller の onChange から流れる。
+            let closed = await controller.closePanes()
+            log(closed ? "AIのペインを閉じた" : "AIのペインを閉じられない")
+        }
+    }
+
+    /// 停止後にまだ片付いていないもの。次の録音が始まった後は、その会議の送信状態を見ない。
+    private func isAIPaneCleanupPending(meetingID: UUID) -> Bool {
+        if meetingID == handoff.meetingID {
+            // 会議の登録簿より先に、始まったばかりの送信と最後の1回の判定を見る。
+            if !aiTasks.isEmpty { return true }
+            if let phase = aiSchedule?.phase, phase != .stopped { return true }
+        }
+        guard let controller = aiStore?.records[meetingID]?.controller else { return false }
+        return controller.conversation.questions.contains { $0.isAwaitingResult }
     }
 
     func togglePause() {
@@ -607,11 +653,11 @@ final class MeetingSession {
             for profile in meetingAIProfiles {
                 connections[profile.slot] = controller?.connectionStatus(slot: profile.slot) ?? .unknown
                 generations[profile.slot] = controller?.generation(slot: profile.slot) ?? 1
-                canSubmits[profile.slot] = snapshot.canShare && aiTasks[profile.slot] == nil
+                canSubmits[profile.slot] = snapshot.canSubmitAI && aiTasks[profile.slot] == nil
                     && (controller?.canSend(slot: profile.slot) ?? true)
                 progresses[profile.slot] = aiProgresses[profile.slot]
                 participants[profile.slot] = profile.participantName
-                if controller?.connection(slot: profile.slot) != nil { openablePanes.insert(profile.slot) }
+                if controller?.canOpenPane(slot: profile.slot) == true { openablePanes.insert(profile.slot) }
             }
             // 引数が多すぎると型検査が通らなくなるので、組み立ててから渡す。
             var state = AIViewState()
@@ -629,6 +675,7 @@ final class MeetingSession {
             minutesHighlight.observe(state.progressReports)
             state.minutesHighlightRevision = minutesHighlight.revision
             state.canSubmit = canSubmits[slot] ?? true
+            state.canAsk = snapshot.canSubmitAI
             state.submissionID = aiCompleted
             state.draft = aiDraft
             state.canOpenPane = openablePanes.contains(slot)
@@ -762,7 +809,9 @@ final class MeetingSession {
         }
         let selected = parentSlot.flatMap { slot in meetingAIProfiles.first { $0.slot == slot } }
             ?? profile ?? (trigger == .scheduled ? aiScheduleConfiguration : meetingAI)
-        guard snapshot.canShare, let config = selected, aiTasks[config.slot] == nil,
+        // 停止後に送れるのは自動の「最後の1回」だけ。人の依頼はペインを閉じる前に締め切る。
+        guard trigger == .scheduled ? snapshot.canShare : snapshot.canSubmitAI,
+              let config = selected, aiTasks[config.slot] == nil,
               let url = snapshot.markdownURL, let aiStore else { return }
         let slot = config.slot
         let meetingID = handoff.meetingID, capturedAt = Date(), cutoff = snapshot.state == .idle ? snapshot.elapsed : pause.audioTime
@@ -927,6 +976,7 @@ final class MeetingSession {
     }
     var pendingUndiarizedDrawForTesting: Task<Void, Never>? { pendingUndiarizedDraw }
     var submissionTaskForTesting: Task<Void, Never>? { aiTasks[meetingAI?.slot ?? 1] ?? aiTasks.values.first }
+    var paneCleanupTaskForTesting: Task<Void, Never>? { aiCleanupTask }
     func submissionTaskForTesting(slot: Int) -> Task<Void, Never>? { aiTasks[slot] }
     func publishForTesting(tokens: [TimedToken], speakers: [Int?], elapsed: Double,
                            finalCount: Int? = nil, accurateFinalCount: Int? = nil, frozenCount: Int = 0) {
