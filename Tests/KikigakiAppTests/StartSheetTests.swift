@@ -60,7 +60,7 @@ import KikigakiCore
                                exclusion: AudioExclusion(enabled: true, thresholdDBFS: -45),
                                minutesPath: "/work/minutes/2026-09-16 定例.md")
         #expect(sheet.selectedSlot == 2)
-        #expect(sheet.destinationTitle == "議事録 · Codex · gpt-5.4 · high")
+        #expect(sheet.destinationTitle == "議事録 · Codex · gpt-5.4 (high)")
         #expect(!sheet.aiDetails.isHidden)
         #expect(sheet.interval.selectedTag() == 5)
         // 作業許可の初期値は宛先の設定から採る。
@@ -117,7 +117,7 @@ import KikigakiCore
         let items = try #require(sheet.destination.menu?.items)
         #expect(items[0].title == "送らない" && items[0].attributedTitle == nil)
         let lines = items[2].attributedTitle?.string.split(separator: "\n").map(String.init) ?? []
-        #expect(lines == ["議事録", "Codex · gpt-5.4 · high", "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"])
+        #expect(lines == ["議事録", "Codex · gpt-5.4 (high)","会議の決定事項と担当・期限をMarkdown議事録へ更新してください"])
         #expect(StartSheet.promptLine("一行目\n二行目") == "一行目 二行目")
         #expect(StartSheet.promptLine("   ") == nil)
         #expect(StartSheet.promptLine(String(repeating: "あ", count: 60)) == String(repeating: "あ", count: 48) + "…")

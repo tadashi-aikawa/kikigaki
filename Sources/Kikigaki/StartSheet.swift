@@ -283,10 +283,13 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         destination.toolTip = item.title
         destination.needsDisplay = true
     }
-    /// 「Codex · gpt-5.4 · high」。未設定の項目は黙って飛ばす。
+    /// 「Codex · gpt-5.4 (high)」。未設定の項目は黙って飛ばす。
+    /// effortは括弧でモデルに掛ける。`·` で並べると独立した項目に見え、何のhighか読めない。
     static func meta(_ profile: ResolvedAIConfig) -> String {
-        [profile.cli.rawValue.capitalized, profile.model, profile.effort]
+        var text = [profile.cli.rawValue.capitalized, profile.model]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: AIModelLabel.separator)
+        if let effort = profile.effort, !effort.isEmpty { text += " (\(effort))" }
+        return text
     }
     /// メニューへ載せるプロンプトの1行。改行は空白にし、長ければ切る。空なら載せない。
     static func promptLine(_ prompt: String, limit: Int = 48) -> String? {
