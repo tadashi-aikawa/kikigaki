@@ -221,16 +221,18 @@ CLIのhelp、引数の必須・許可集合、AIInboxのファイル名検証と
 
 CLI一覧に上記minutesコマンドを追加し、`work_allowed` の説明では通知自体を連携操作に含める。falseのときに議事録を作成・更新してよいという意味にはしない。
 
-通常起動と準備済み起動の両方で `AILaunchConfiguration` が `outputDir` をCodexの `sandbox_workspace_write.writable_roots` へ追加し、包含される `contextWide` の許可先分岐を整理する。保持する既存許可先は `~/.codex/config.toml` 最上位の `[sandbox_workspace_write]` に限る。`CODEX_HOME` やプロファイル別の設定を拾わない既存の制約は変えない。任意に選択した議事録の親を追加したり、起動済みCLIの権限を変更したりしない。
+`AILaunchConfiguration` が `outputDir` をCodexの `sandbox_workspace_write.writable_roots` へ追加し、包含される `contextWide` の許可先分岐を整理する。保持する既存許可先は `~/.codex/config.toml` 最上位の `[sandbox_workspace_write]` に限る。`CODEX_HOME` やプロファイル別の設定を拾わない既存の制約は変えない。任意に選択した議事録の親を追加したり、起動済みCLIの権限を変更したりしない。
 
 受け入れたリスク: outputDirへの許可は、全会議のMarkdown、state、archive、minutes、tokenを含むrequestsをモデルから書き換え可能にする。会議Markdownを直接編集しない制約はSkillの規則であり、サンドボックスの境界では保証されなくなる。tokenは同じユーザー内での隔離ではない。この点を `CLAUDE.md` にも記載する。
 
-準備済み台帳へ任意キー `launch_revision` を追加する。新規起動時は現行値を保存し、欠損や旧版はstale相当で候補から外して「起動条件が古いため使えません」と表示する。保存先一致の既存判定は維持する。Claudeの同梱CLI限定allowも維持し、cwd外の編集は利用者の権限設定によって承認待ちとなり、herdrでblockedとして見える。Codexのwork_failedと区別して検証する。
+Claudeの同梱CLI限定allowは維持し、cwd外の編集は利用者の権限設定によって承認待ちとなり、herdrでblockedとして見える。Codexのwork_failedと区別して検証する。
+
+> 準備済み台帳へ `launch_revision` を持たせて起動条件の古いセッションを候補から外す仕組みも入れたが、準備済みAIセッションの撤去とともに削除した。
 
 `outputDir` 外で、cwdや利用者の既存許可にも含まれない場所への書き込みは、CLIの承認の仕組み(Codexのサンドボックス外への昇格要求、Claudeの編集の承認待ち)に委ねる。利用者がペインで承認すれば保存は成功し、拒否されたときだけ `work_failed` で見える。Skillには「許可の範囲を先読みして諦めず、まず保存を試みる」と書く。場所を選ぶ操作は無条件の書き込み権限の付与ではない。
     - 経緯: 初版のSkillは「許可外なら `work_failed` を返す」と読める文言で、AIが保存を試みる前に諦め、機能追加前には承認経由で書けていた `~/Documents/minutes` へ書けなくなった
 
-この制約を `CLAUDE.md` の設定説明とREADMEの関連箇所へ記載し、既存の「会議のai/だけを追加」という説明を更新する。導入前に起動した準備済みセッションには新しい許可が遡及しないため、新しく起動したセッションで結合検証する。
+この制約を `CLAUDE.md` の設定説明とREADMEの関連箇所へ記載し、既存の「会議のai/だけを追加」という説明を更新する。
 
 ## 段ごとの検証とレビュー
 
@@ -258,7 +260,7 @@ UI・結合の検証対象:
 - 長文の中途閲読中の更新・短縮、選択とコピー、frontmatter、表内wikilink、コード内記法、画像・埋め込み、壊れた構文の文字保持。
 - AI未設定、待機から録音開始と開始取消、新会議への切替、停止後の指定と通知、保持中のAI会議の回収、通常・rawの会議Markdownがminutesイベントで変化しないこと。
 - 人の指定を次requestでAIが受領すること、送信準備中の切替が固定requestを変えないこと、AI自選パスの通知が非表示のまま対象を切り替えること。
-- Codexの通常・準備済みの両起動でoutputDirを追加し、対応範囲の既存許可を維持すること。launch_revision欠損の候補除外、外部パスへの書き込み失敗、Claudeの承認待ち、通知失敗を成功と取り違えないこと。
+- Codexの起動でoutputDirを追加し、対応範囲の既存許可を維持すること。外部パスへの書き込み失敗、Claudeの承認待ち、通知失敗を成功と取り違えないこと。
 - 正規形・1024バイト境界・管理領域・会議Markdownの拒否、4MiB境界、iCloud待機の取消、ファイルとフォルダの許可拒否、フルスクリーン・タイル中の切替。
 
-各段でビルド・テスト後にコミットし、本人へ報告してレビューを待つ。段1bだけは裁定により報告後そのまま段2へ進む。段2にはMainActorのMinutesStore、回収とneedsRecovery、launch_revisionも含める。段3の画面は本人がクロディーヌへ、実装と外部IFは本人が交差レビューへ出す。
+各段でビルド・テスト後にコミットし、本人へ報告してレビューを待つ。段1bだけは裁定により報告後そのまま段2へ進む。段2にはMainActorのMinutesStore、回収とneedsRecoveryも含める。段3の画面は本人がクロディーヌへ、実装と外部IFは本人が交差レビューへ出す。

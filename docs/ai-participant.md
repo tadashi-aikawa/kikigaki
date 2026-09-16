@@ -4,7 +4,7 @@
 
 ## 採用する操作と範囲
 
-KIKIGAKIから起動するCodexには、通常起動・準備済みセッションの両方で `-c check_for_update_on_startup=false` を付ける。更新確認のプロンプトで会議への依頼が止まることを防ぐ。グローバル設定とClaudeの起動設定は変更しない。指定の意味は [Codex公式設定スキーマ](https://github.com/openai/codex/blob/main/codex-rs/core/config.schema.json) で確認した。
+KIKIGAKIから起動するCodexには `-c check_for_update_on_startup=false` を付ける。更新確認のプロンプトで会議への依頼が止まることを防ぐ。グローバル設定とClaudeの起動設定は変更しない。指定の意味は [Codex公式設定スキーマ](https://github.com/openai/codex/blob/main/codex-rs/core/config.schema.json) で確認した。
 
 設定に `[ai]` があるときだけ有効。ホットキーで書き起こしウィンドウの送信シートを開き、⌘Enterで送る。問い欄に文字があれば利用者の明示依頼として優先し、空なら会話末尾のAIへの問いを使う。初回の質問でherdrの対話セッションを起こし、同じ録音では使い回す。CodexとClaude Codeの両方に対応する。
 
@@ -226,7 +226,7 @@ herdr 0.8.2でSwift ProcessからHERDR環境を除去し、信頼済みcwdのage
 
 pane run で起こした直後は herdr がまだagentを検知しておらず、`agent get` は agent_not_found を返す(実測: 初回の質問だけ送信に失敗した)。起動直後の準備待ちに限り、未検知は切断ではなく待ちとして扱い、期限まで観測を続ける。起動後の通常の監視では未検知は切断のまま。また herdr 0.8.2 の `agent get` は pane run で起こしたagentに `interactive_ready` を返さないため、この項目が無い場合は idle をもって入力可能とみなす。
 
-Codexの通常起動・準備済み起動では `-c sandbox_workspace_write.writable_roots=[...]` に保存先 `outputDir` を追加する。利用者の `~/.codex/config.toml` 最上位の既存許可を先頭へ引き継ぎ、設定ファイルは変更しない。任意パスの指定では許可を増やさない。全会議のMarkdown・管理状態・token入りrequestsもモデルから書き換え可能になる点は受け入れたリスクである。起動条件が現行と異なる準備済みセッションは `launch_revision` で候補から外す。詳細は [議事録プレビューの許可とリスク](minutes-preview.md#skillへの追記案と書き込み許可) を参照する。
+Codexの起動では `-c sandbox_workspace_write.writable_roots=[...]` に保存先 `outputDir` を追加する。利用者の `~/.codex/config.toml` 最上位の既存許可を先頭へ引き継ぎ、設定ファイルは変更しない。任意パスの指定では許可を増やさない。全会議のMarkdown・管理状態・token入りrequestsもモデルから書き換え可能になる点は受け入れたリスクである。詳細は [議事録プレビューの許可とリスク](minutes-preview.md#skillへの追記案と書き込み許可) を参照する。
 
 設定commandの絶対パスを守る起動には `herdr pane run <pane> <厳密に引用した起動コマンド>` を使う。段2ではworkspace作成時のPATH差替がペイン内の解決先に反映されず、canonical executableによる起動では指定パスを保証できなかった。pane runで絶対パスを指定すると両CLIが起動した。Codexはagent getがunknownを抜けてidle/doneになるまで、Claudeは新しいagent_sessionが立ちidle/doneになるまで待つ。旧session値やblockedをreadyとしない。起動コマンドにはパスと引数だけを引用して置き、会話本文を含めない。KIKIGAKI自身はherdrを引数配列で起動するが、この起動コマンドは受信先シェルで解釈される。
 
@@ -256,7 +256,7 @@ Codexの通常起動・準備済み起動では `-c sandbox_workspace_write.writ
 
 目の動きと残り時間は表示中だけ1秒周期のタイマーで離散更新する。CALayerの連続アニメーションは使わない。非表示・最小化・非稼働でタイマーを止め、動きを減らす設定では目を静止させる。
 
-「…」メニューには会話をコピー、稼働中だけ今すぐ送る、AIセッションを準備、ペインを開く、AIセッションを作り直す、保存を再試行を置く。今すぐ送るはキーボード・VoiceOverからも操作でき、スキップ中・最終回待機中は無効にする。前の会議に返事がある場合だけ会議選択ウィンドウへの項目を追加する。コピー済みの場合は再コピー・全体コピーの入口も保つ。
+「…」メニューには会話をコピー、稼働中だけ今すぐ送る、ペインを開く、AIセッションを作り直す、保存を再試行を置く。今すぐ送るはキーボード・VoiceOverからも操作でき、スキップ中・最終回待機中は無効にする。前の会議に返事がある場合だけ会議選択ウィンドウへの項目を追加する。コピー済みの場合は再コピー・全体コピーの入口も保つ。
 
 ヘッダの話者設定は `person.2.fill` と、その真下に使用枠数 `3/4` を中央揃えで並べる。クリックで既存の話者ポップオーバーを開く。録音状態チップの直後に薄い小文字で記録範囲を続け、録音中は `20:12〜`、停止後は `20:12〜20:18` とする。
 

@@ -8,7 +8,6 @@ final class StatusItem {
     private let statusMenuItem: NSMenuItem
     private let startStopItem: NSMenuItem
     private let pauseResumeItem: NSMenuItem
-    private let prepareAIItem: NSMenuItem
     let minutesItem = NSMenuItem(title: "議事録を表示", action: nil, keyEquivalent: "")
     var onToggleMinutes: (() -> Void)?
 
@@ -27,8 +26,6 @@ final class StatusItem {
     var onShowWindow: (() -> Void)?
     var onOpenOutputDir: (() -> Void)?
     var onReloadConfig: (() -> Void)?
-    /// AIセッションの準備。待機中・録音中・一時停止中のいつでも押せる
-    var onPrepareAI: (() -> Void)?
 
     init() {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -41,11 +38,8 @@ final class StatusItem {
         statusMenuItem.isEnabled = false
         startStopItem = NSMenuItem(title: "", action: #selector(startStop), keyEquivalent: "")
         pauseResumeItem = NSMenuItem(title: "", action: #selector(pauseResume), keyEquivalent: "")
-        prepareAIItem = NSMenuItem(title: "AIセッションを準備…", action: #selector(prepareAI), keyEquivalent: "")
         startStopItem.target = self
         pauseResumeItem.target = self
-        prepareAIItem.target = self
-        prepareAIItem.isEnabled = false
 
         let menu = NSMenu()
         // 有効・無効は自分で決める。自動判定だと target のある項目が常に押せてしまう。
@@ -63,8 +57,6 @@ final class StatusItem {
         menu.addItem(.separator())
         menu.addItem(startStopItem)
         menu.addItem(pauseResumeItem)
-        menu.addItem(.separator())
-        menu.addItem(prepareAIItem)
         menu.addItem(.separator())
         minutesItem.target = self; minutesItem.action = #selector(toggleMinutes)
         menu.addItem(minutesItem)
@@ -101,10 +93,6 @@ final class StatusItem {
     }
     @objc private func openOutputDir() { onOpenOutputDir?() }
     @objc private func reloadConfig() { onReloadConfig?() }
-    @objc private func prepareAI() { onPrepareAI?() }
-
-    /// AI設定が無い・台帳が読めないときは押させない。
-    func setPrepareEnabled(_ enabled: Bool) { prepareAIItem.isEnabled = enabled }
 
     private static func icon(for state: RecordingState) -> NSImage? {
         // 待機中は採用ロゴ。動作中は録音・一時停止などの状態を優先する。

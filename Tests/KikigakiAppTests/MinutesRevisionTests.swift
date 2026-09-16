@@ -66,18 +66,6 @@ import KikigakiAIIO
         #expect(try #require(store.state.targetChangedAt) >= now)
     }
 
-    @Test func 未来版と負値とadoptの版ガードを検証する() async throws {
-        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
-        let config = ResolvedAIConfig(config: AIConfig(), home: root)
-        let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { _, _ in throw AIHerdrError.notReady }))
-        for revision in [-1, 0, 2] {
-            let prepared = AIPreparedSession(profileSlot: config.slot, profileName: config.name, startedAt: Date(), config: config,
-                token: "test", contextRoot: root, contextMeetingID: UUID(), connection: .init(workspaceID: "w", paneID: "p", provider: config.cli), launchRevision: revision)
-            if revision < 0 { #expect(throws: (any Error).self) { try prepared.validate() } }
-            await #expect(throws: AIError.mismatch) { try await controller.adopt(prepared, config: config) }
-        }
-    }
-
     @Test func store取得失敗では送信を始めず受信箱欠損は警告する() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr()

@@ -19,15 +19,6 @@ struct ReplayDebugOptions {
     var automaticSeconds: Double?
     /// 手動送信の宛先。自動と別のプロファイルへ同時に送ることを試す
     var askProfile: String?
-    /// 録音を始める前に起こしておくプロファイル名。連続する会議の準備を再現する
-    var prepareProfiles: [String] = []
-    /// 枠ごとの紐づけの選択。`oldest` は最も古い準備済み、`new` は新規に起動する
-    enum Attach: String { case oldest, new }
-    var attach: [Int: Attach] = [:]
-    /// 紐づけシートの「取消(録音を始めない)」を再現する。開始直後に取り止める
-    var attachCancel = false
-    /// 録音中に起こす準備。次の会議のぶんを会議の最中に用意することを再現する
-    var prepareDuring: [(seconds: Double, name: String)] = []
     @MainActor static func recoverForNextQuestion(_ controller: AIConversationController?, preparing: Bool) throws {
         guard !preparing, let controller, !controller.canSend,
               let previous = controller.conversation.questions.last,
@@ -78,40 +69,6 @@ struct ReplayDebugOptions {
             }
             result.askProfile = input
         }
-        if let input = env["KIKIGAKI_DEBUG_AI_PREPARE"], !input.isEmpty {
-            let names = input.split(separator: ";", omittingEmptySubsequences: false).map(String.init)
-            guard names.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && !$0.contains("\0") && !$0.contains(where: \.isNewline) }) else {
-                throw AIError.invalid("KIKIGAKI_DEBUG_AI_PREPARE")
-            }
-            result.prepareProfiles = names
-        }
-        if let input = env["KIKIGAKI_DEBUG_AI_ATTACH"], !input.isEmpty {
-            for entry in input.split(separator: ";", omittingEmptySubsequences: false) {
-                let pair = entry.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-                guard pair.count == 2, let slot = Int(pair[0]), slot > 0,
-                      let choice = Attach(rawValue: String(pair[1])), result.attach[slot] == nil else {
-                    throw AIError.invalid("KIKIGAKI_DEBUG_AI_ATTACH")
-                }
-                result.attach[slot] = choice
-            }
-        }
-        if let input = env["KIKIGAKI_DEBUG_AI_PREPARE_AT"], !input.isEmpty {
-            for entry in input.split(separator: ";", omittingEmptySubsequences: false) {
-                let pair = entry.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
-                guard pair.count == 2, let seconds = Double(pair[0]), seconds.isFinite, seconds >= 0,
-                      !pair[1].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      !pair[1].contains("\0"), !pair[1].contains(where: \.isNewline) else {
-                    throw AIError.invalid("KIKIGAKI_DEBUG_AI_PREPARE_AT")
-                }
-                result.prepareDuring.append((seconds, String(pair[1])))
-            }
-            result.prepareDuring.sort { $0.seconds < $1.seconds }
-        }
-        if let input = env["KIKIGAKI_DEBUG_AI_ATTACH_CANCEL"] {
-            guard ["0", "1"].contains(input) else { throw AIError.invalid("KIKIGAKI_DEBUG_AI_ATTACH_CANCEL") }
-            result.attachCancel = input == "1"
-        }
         if let input = env["KIKIGAKI_DEBUG_REPLAY_HOLD"] {
             guard let seconds = Double(input), seconds.isFinite, (0...86400).contains(seconds) else {
                 throw AIError.invalid("KIKIGAKI_DEBUG_REPLAY_HOLD")
@@ -161,22 +118,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var aiStore: AIRecordStore?
     private(set) var aiSheet: AIQuestionSheet?
     private(set) var scheduleSheet: AIScheduleSheet?
-    /// シートを閉じても紐づけ処理は続く。開き直したシートにも送信待ちを引き継ぐ。
-    private var preparedBinding = false
     private var scheduleSheetMeetingID: UUID?
     private var aiSheetMeetingID: UUID?
     /// 確認への返答シートが固定している枠。通常のシートはnilで選択中の宛先へ追随する
     private var aiSheetSlot: Int?
     private var previousAI: AIPastMeetingsWindow?
-    private var preparedStore: AIPreparedStore?
-    private var prepareSheet: AIPrepareSheet?
-    private var attachSheet: AIAttachSheet?
     private var registeredAIHotkey: KikigakiConfig.Hotkey?
     private let replayDebug: ReplayDebugOptions
     private var nextDebugQuestion = 0
-    private var nextDebugPrepare = 0
-    /// 録音中の準備は1件ずつ。同じ枠の起動を重ねない
-    private var preparingDuringRecording = false
     private var nextDebugTyped = 0
     private var debugTypedPausing = false
     private var replayHolding = false
@@ -191,10 +140,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var replayDestinationPending = false
     init(replayDebug: ReplayDebugOptions = .init()) { self.replayDebug = replayDebug; super.init() }
 
-    convenience init(testingSession: MeetingSession, config: ResolvedConfig, preparedStore: AIPreparedStore,
+    convenience init(testingSession: MeetingSession, config: ResolvedConfig,
                      window: TranscriptWindowController? = nil) {
         self.init()
-        self.session = testingSession; self.config = config; self.preparedStore = preparedStore
+        self.session = testingSession; self.config = config
         self.window = window
     }
 
@@ -234,23 +183,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let source = profiles.first { $0.slot == slot } ?? profiles.first
             if source?.notifySound == true { NSSound(named: "Glass")?.play() }
         }
-        // 準備済みセッションの台帳。会議の登録簿と同じ置き場だがファイルは別で、
-        // 片方が壊れてももう片方の機能は止まらない。
-        let preparedStore = AIPreparedStore(directory: support, makeHerdr: { [weak self] in
-            AIHerdr(executable: try AIProcessRunner.executable(self?.config?.ai?.herdrCommand ?? "herdr"))
-        })
-        self.preparedStore = preparedStore
-        preparedStore.load()
         let session = MeetingSession(config: config, models: { [weak self] in
             guard let self else { throw CancellationError() }
             return try await self.loadModels()
         }, log: Self.log, aiStore: aiStore, diarizationDefaults: replayURL == nil ? .standard : nil)
         if let enabled = replayDebug.diarizationEnabled { session.setDiarizationEnabled(enabled) }
         if session.snapshot.nextDiarizationEnabled { preloadModels() }
-        session.preparedStore = preparedStore
-        preparedStore.onChange = { [weak self] in self?.preparedChanged() }
-        // 同じ枠の送信と準備の起動を重ねない。判定はどちらの入口からも同じものを見る。
-        preparedStore.isSlotBusy = { [weak session] in session?.isAIBusy(slot: $0) ?? false }
         self.session = session
 
         let window = TranscriptWindowController()
@@ -279,7 +217,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onRecreateAI = { session.recreateAI() }
         window.onRetryAISave = { session.retryAISaves() }
         window.onShowPreviousAI = { [weak self] in self?.showPreviousAI() }
-        window.onPrepareAI = { [weak self] in self?.showPrepareSheet() }
         window.onOpenMarkdown = {
             if session.snapshot.saved, let url = session.snapshot.markdownURL { NSWorkspace.shared.open(url) }
         }
@@ -294,11 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.setMinutesVisible(window.minutesSplit.isPreviewVisible)
         statusItem.onOpenOutputDir = { [weak self] in self?.openOutputDir() }
         statusItem.onReloadConfig = { [weak self] in self?.reloadConfig() }
-        statusItem.onPrepareAI = { [weak self] in self?.showPrepareSheet() }
-        statusItem.setPrepareEnabled(!config.aiProfiles.isEmpty && preparedStore.isUsable)
         self.statusItem = statusItem
-        // ペインの表題と生存は台帳に持たないので、起動時に引き直す。
-        if !config.aiProfiles.isEmpty { Task { await preparedStore.refresh() } }
 
         session.onChange = { [weak self] snapshot in
             guard let self else { return }
@@ -324,10 +257,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     sheet.update(progress: snapshot.ai?.progress(slot: slot),
                                  canSubmit: snapshot.ai?.canSubmit(slot: slot) == true, warning: snapshot.ai?.warning)
                 }
-            }
-            // 録音がシートの最中に終わったら、紐づけずに閉じる。
-            if let sheet = self.attachSheet, snapshot.state != .recording, snapshot.state != .paused {
-                sheet.close(); self.attachSheet = nil; session.deferAutomaticStart = false
             }
             if let sheet = self.scheduleSheet,
                self.scheduleSheetMeetingID != session.aiMeetingID || (snapshot.state != .recording && snapshot.state != .paused) {
@@ -425,83 +354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             session.automaticIntervalOverride = replayDebug.automaticSeconds
             replayDestinationPending = replayDebug.askProfile != nil
         }
-        // 紐づけシートを出す間は設定の自動送信を待たせる。先に始めると、紐づける前の
-        // 新しいセッションへ1回目が飛んでしまう。判定は開始前に済ませる。
-        // replayは録音の前に準備を起こす。本番の `prepare` をそのまま通す。
-        if replayURL != nil, let preparedStore, let config, !replayDebug.prepareProfiles.isEmpty {
-            for name in replayDebug.prepareProfiles {
-                guard let profile = config.aiProfiles.first(where: { $0.name == name }) else {
-                    Self.log("replay 準備するプロファイルが設定にない: \(name)"); exit(1)
-                }
-                await preparedStore.prepare(profile: profile, helper: helperURL, outputDirectory: config.outputDir)
-                Self.log("replay 準備: \(profile.name)(slot \(profile.slot)) 未紐づけ \(preparedStore.unbound.count)件")
-            }
-        }
-        // 候補を確定する前に、前回の取り止めの片付けをやり直す。ここで台帳が戻ると、
-        // 復旧した準備済みも今回の選択肢に出る。start()の中の再試行では候補に間に合わない。
-        session.retryDiscard()
-        // 候補を出す前に生存と表題を引き直す。消えたペインを選ばせない。
-        if replayURL == nil, let preparedStore { await preparedStore.refresh() }
-        let choices = attachChoices()
-        // replayは紐づけシートを出さない代わりに、指定した選択を同じ経路へ当てる。
-        let replayAttach = replayURL == nil ? [:] : replayDebug.attach
-        session.deferAutomaticStart = !choices.isEmpty || !replayAttach.isEmpty
         let started = await session.start(source: source)
-        if started, !choices.isEmpty { presentAttachSheet(choices) }
-        else if started, replayURL != nil, replayDebug.attachCancel {
-            // 「取消(録音を始めない)」と同じ経路。何も残らないことを実機で確かめる。
-            // 検査対象は**取消の前に固定する**。取消が成功すると会議IDは新しくなる。
-            let cancelled = session.aiMeetingID
-            let markdown = session.snapshot.markdownURL
-            let root = markdown?.deletingLastPathComponent() ?? config?.outputDir
-            // 紐づけも実機で確かめる。指定があれば取消の前に当てておく。
-            if !replayDebug.attach.isEmpty, let preparedStore {
-                var selection: [Int: UUID?] = [:]
-                for (slot, choice) in replayDebug.attach {
-                    guard let profile = session.meetingAIProfiles.first(where: { $0.slot == slot }) else { continue }
-                    selection[slot] = choice == .oldest
-                        ? preparedStore.available(for: profile, contextRoot: session.aiContextRoot).first?.id : nil
-                }
-                let failed = await session.applyPreparedSelection(selection)
-                Self.log("replay 取消前の紐づけ: 失敗 \(failed.sorted()) 紐づけ済み \(preparedStore.ledger.sessions.filter { !$0.isUnbound }.count)件")
-                if !failed.isEmpty { exit(1) }
-            }
-            await session.abandon()
-            let context = root?.appendingPathComponent(".kikigaki-context").appendingPathComponent(cancelled.uuidString)
-            let leftovers = [
-                "Markdown": markdown.map { FileManager.default.fileExists(atPath: $0.path) } ?? false,
-                "WAV": markdown.map { FileManager.default.fileExists(atPath: MeetingFiles.wavURL(for: $0).path) } ?? false,
-                "置き場": context.map { FileManager.default.fileExists(atPath: $0.path) } ?? false,
-                "登録簿": aiStore?.records[cancelled] != nil,
-                "紐づけ": preparedStore?.ledger.sessions.contains { $0.bound?.meetingID == cancelled } ?? false,
-                "片付け残し": session.hasPendingDiscard,
-            ]
-            let remaining = leftovers.filter(\.value).keys.sorted()
-            Self.log("replay 取消: 会議 \(cancelled) 保存 \(session.snapshot.saved) 残り \(remaining)"
-                + " 未紐づけ \(preparedStore?.unbound.count ?? 0)件")
-            if session.snapshot.saved || !remaining.isEmpty { exit(1) }
-            NSApp.terminate(nil)
-            return
-        }
-        else if started, !replayAttach.isEmpty, let preparedStore {
-            var selection: [Int: UUID?] = [:]
-            for (slot, choice) in replayAttach {
-                guard let profile = session.meetingAIProfiles.first(where: { $0.slot == slot }) else {
-                    Self.log("replay 紐づけ先の枠が設定にない: \(slot)"); exit(1)
-                }
-                let oldest = preparedStore.available(for: profile, contextRoot: session.aiContextRoot).first
-                if choice == .oldest, oldest == nil {
-                    Self.log("replay 紐づける準備済みが無い: slot \(slot)"); exit(1)
-                }
-                selection[slot] = choice == .oldest ? oldest?.id : nil
-            }
-            let failed = await session.applyPreparedSelection(selection)
-            let summary = selection.keys.sorted()
-                .map { "\($0)=" + (selection[$0]! == nil ? "new" : "oldest") }.joined(separator: ",")
-            Self.log("replay 紐づけ: \(summary) 失敗 \(failed.sorted())")
-            if !failed.isEmpty { exit(1) }
-        }
-        else { session.deferAutomaticStart = false }
         // 宛先の指定は録音開始のリセットより後に当てる。start()が先頭へ戻すので、
         // 前に当てると2つ目を指定しても先頭へ送ってしまう。
         if started, replayURL != nil, let name = replayDebug.askProfile {
@@ -527,157 +380,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !started, replayURL != nil {
             Self.log("replay を開始できなかったので終了する")
             exit(1)
-        }
-    }
-
-    // MARK: - 準備済みAIセッション
-
-    private var helperURL: URL { Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli") }
-
-    /// 台帳が変わった。フッターの一行・メニューの可否・開いているシートを作り直す。
-    private func preparedChanged() {
-        guard let preparedStore else { return }
-        let configured = !(config?.aiProfiles.isEmpty ?? true)
-        statusItem?.setPrepareEnabled(configured && preparedStore.isUsable)
-        session?.refreshPrepared()
-        updatePrepareSheet()
-        // 宛先ポップアップの準備済みの行も引き直す。紐づけたものは候補から消える。
-        if let session, let sheet = aiSheet {
-            let slot = sheet.owningSlot
-            let name = session.meetingAIProfiles.first { $0.slot == slot }?.participantName ?? ""
-            sheet.updateDestinations(session.aiDestinationItems, selected: slot, participant: name)
-        }
-        if let session, let sheet = scheduleSheet, let target = session.aiScheduleConfiguration {
-            sheet.updateDestinations(session.aiDestinationItems, selected: target.slot,
-                                     participant: target.participantName)
-        }
-    }
-
-    private func showPrepareSheet() {
-        guard let config, let preparedStore, let parent = window?.window,
-              !config.aiProfiles.isEmpty, preparedStore.isUsable, prepareSheet == nil else { return }
-        let profiles = config.aiProfiles.map { (slot: $0.slot, name: $0.name) }
-        let selected = session?.snapshot.ai?.selectedSlot ?? profiles.first?.slot ?? 1
-        let sheet = AIPrepareSheet(profiles: profiles, selected: selected,
-                                  avatarSources: Dictionary(uniqueKeysWithValues: config.aiProfiles.compactMap { p in p.avatar.map { (p.slot, $0) } }))
-        sheet.onCancel = { [weak self] in self?.prepareSheet = nil }
-        sheet.onStart = { [weak self] slot, name in
-            guard let self, let profile = self.config?.aiProfiles.first(where: { $0.slot == slot }) else { return }
-            Task { await preparedStore.prepare(profile: profile, helper: self.helperURL,
-                                               outputDirectory: config.outputDir, name: name) }
-        }
-        sheet.onDiscard = { preparedStore.discard($0) }
-        sheet.onPane = { [weak sheet] id in
-            // 見出しの「ペインを開く」は、いま選んでいるプロファイルのいちばん新しいもの。
-            let target = id ?? preparedStore.unbound.last { $0.profileSlot == sheet?.selectedSlot }?.id
-            guard let target else { return }
-            Task { await preparedStore.showPane(target) }
-        }
-        prepareSheet = sheet
-        updatePrepareSheet()
-        window?.show(); sheet.present(on: parent)
-        Task { await preparedStore.refresh() }
-    }
-
-    private func updatePrepareSheet() {
-        guard let sheet = prepareSheet, let preparedStore else { return }
-        let profiles = config?.aiProfiles ?? []
-        let rows = preparedStore.unbound.map { session -> AIPrepareSheet.Row in
-            // いまの設定に同じ枠が無い、または設定が変わっていれば使えない。破棄だけできる。
-            // 使えない理由は分けて示す。設定を戻すのか、保存先を戻すのかが変わる。
-            let profile = profiles.first { $0.slot == session.profileSlot }
-            let reason: String?
-            if !session.hasCurrentLaunch {
-                reason = (session.launchRevision ?? 0) > AIPreparedSession.currentLaunchRevision
-                    ? "起動条件が異なるため使えません" : "起動条件が古いため使えません"
-            }
-            else if profile == nil || !session.matches(profile!) { reason = "設定が変わったため使えません" }
-            else if let root = self.config?.outputDir, !session.matchesContext(root: root) {
-                reason = "保存先が変わったため使えません"
-            } else { reason = nil }
-            return .init(id: session.id, label: preparedStore.label(session), reason: reason,
-                         name: session.profileName, avatar: session.config.avatar)
-        }
-        sheet.update(rows: rows, launching: !preparedStore.launching.isEmpty, warning: preparedStore.warning)
-    }
-
-    /// 録音開始時に選ばせる候補。未紐づけが1件も無ければシートを出さない。
-    /// - Parameters:
-    ///   - slots: 指定するとその枠だけを出す。引き継ぎに失敗した枠の選び直しに使う
-    ///   - includingEmpty: 候補が無い枠も「新規に起動する」だけの選択として出す。
-    ///     選び直しでは、候補が尽きても利用者に選ばせる。黙って新規起動へ進めない
-    func attachChoices(slots: Set<Int>? = nil, includingEmpty: Bool = false) -> [AIAttachSheet.Choice] {
-        guard replayURL == nil, let config, let preparedStore, preparedStore.isUsable else { return [] }
-        // 開始前は次の録音の設定。開始後の選び直しはadoptと同じ会議固定値で判定する。
-        let active = session.flatMap { $0.snapshot.state == .recording || $0.snapshot.state == .paused ? $0 : nil }
-        let profiles = active?.meetingAIProfiles ?? config.aiProfiles
-        let outputDirectory = active?.aiContextRoot ?? config.outputDir
-        return AIAttachSheet.choices(profiles: profiles.map { (slot: $0.slot, name: $0.name) },
-                                     slots: slots, includingEmpty: includingEmpty) { slot in
-            guard let profile = profiles.first(where: { $0.slot == slot }) else { return [] }
-            return preparedStore.available(for: profile, contextRoot: outputDirectory)
-                .map { ($0.id, preparedStore.label($0, includingName: false)) }
-        }
-    }
-
-    private func presentAttachSheet(_ choices: [AIAttachSheet.Choice], warning: String? = nil) {
-        guard let parent = window?.window else { session?.deferAutomaticStart = false; return }
-        // 出すものが無いときだけ、新規起動として続ける。呼び手は空の候補を渡さない。
-        guard !choices.isEmpty else { session?.deferAutomaticStart = false; return }
-        let profiles = session?.meetingAIProfiles ?? config?.aiProfiles ?? []
-        let sheet = AIAttachSheet(choices: choices, warning: warning,
-                                 avatarSources: Dictionary(uniqueKeysWithValues: profiles.compactMap { p in p.avatar.map { (p.slot, $0) } }))
-        sheet.onCancel = { [weak self] in
-            // 取消は録音を始めない。開始してからシートを出しているので、収録した分ごと取り止め、
-            // Markdownも録音も残さない。
-            self?.attachSheet = nil
-            Task { await self?.session?.abandon(); self?.session?.deferAutomaticStart = false }
-        }
-        sheet.onStart = { [weak self] selection in
-            self?.attachSheet = nil
-            Task { await self?.finishAttach(selection) }
-        }
-        attachSheet = sheet
-        window?.show(); sheet.present(on: parent)
-    }
-
-    private func finishAttach(_ selection: [Int: UUID?]) async {
-        guard let session else { return }
-        // 紐づけはawaitを跨ぐ。この選択が属する会議を固定し、途中で録音が入れ替わったら止める。
-        let meetingID = session.aiMeetingID
-        // 引き継ぎと、全部済んだときの自動送信の開始は session 側の1か所で行う。
-        let failed = await session.applyPreparedSelection(selection)
-        guard session.aiMeetingID == meetingID else { return }
-        // 紐づけた直後の生存と表題を引き直す。候補から消え、閉じた表題が最新になる。
-        if let preparedStore { await preparedStore.refresh() }
-        guard session.aiMeetingID == meetingID else { return }
-        // 失敗した枠は選び直させる。候補が尽きていれば新規起動として続ける。
-        if !failed.isEmpty, session.snapshot.state == .recording || session.snapshot.state == .paused {
-            // 候補が尽きていても「新規に起動する」を選ばせる。黙って新規起動へ進めない。
-            presentAttachSheet(attachChoices(slots: failed, includingEmpty: true),
-                               warning: "選んだ準備済みセッションを引き継げませんでした。選び直してください")
-        }
-    }
-
-    /// 宛先ポップアップで準備済みを選んだ。紐づけてから送信先も切り替える。
-    /// 表示だけ変えて送信先が元のままにならないよう、`session` 側で選択も動かす。
-    private func adoptPrepared(slot: Int, id: UUID, forSchedule: Bool, then: @escaping (Bool) -> Void) {
-        guard !preparedBinding, let session,
-              let profile = session.meetingAIProfiles.first(where: { $0.slot == slot }) else { then(false); return }
-        let meetingID = session.aiMeetingID
-        preparedBinding = true
-        // 確定するまで送信させない。画面は選んだ先を出すのに、送信は前の宛先へ飛ぶ食い違いを作らない。
-        aiSheet?.setBinding(true, canSubmit: false)
-        scheduleSheet?.setBinding(true)
-        Task {
-            let bound = await session.adoptPrepared(id, profile: profile, forSchedule: forSchedule)
-            self.preparedBinding = false
-            let owning = self.aiSheet?.owningSlot
-            self.aiSheet?.setBinding(false, canSubmit: owning.map { session.snapshot.ai?.canSubmit(slot: $0) == true } ?? false)
-            self.scheduleSheet?.setBinding(false)
-            guard session.aiMeetingID == meetingID else { return }
-            self.preparedChanged()
-            then(bound)
         }
     }
 
@@ -736,26 +438,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // 手入力の保存検証では最終会話を送る。停止による確定待ち取消を避ける。
         if replayDebug.verifyTyped && !replayHolding { return }
-        // 録音中の準備。次の会議のぶんを会議の最中に用意する。
-        if session != nil, nextDebugPrepare < replayDebug.prepareDuring.count,
-           snapshot.state == .recording, !preparingDuringRecording {
-            let target = replayDebug.prepareDuring[nextDebugPrepare]
-            if snapshot.elapsed >= target.seconds, let preparedStore, let config,
-               let profile = config.aiProfiles.first(where: { $0.name == target.name }) {
-                nextDebugPrepare += 1
-                preparingDuringRecording = true
-                // 起動そのものは非同期で、終わるころには録音が終わっていることもある。
-                // 「録音中に始めた」ことが分かるよう、判断した時点の状態と位置を先に出す。
-                Self.log("replay 録音中の準備を開始: \(profile.name)(指定\(target.seconds)秒、"
-                    + "経過\(snapshot.elapsed)秒、状態\(snapshot.state))")
-                Task {
-                    await preparedStore.prepare(profile: profile, helper: self.helperURL,
-                                                outputDirectory: config.outputDir)
-                    self.preparingDuringRecording = false
-                    Self.log("replay 録音中の準備が完了: \(profile.name) 未紐づけ \(preparedStore.unbound.count)件")
-                }
-            }
-        }
         guard !replayDestinationPending, nextDebugQuestion < replayDebug.questions.count, let session else { return }
         if replayDebug.verifyMinutes == "main", !minutesVerification.canAsk(index: nextDebugQuestion) { return }
         let question = replayDebug.questions[nextDebugQuestion]
@@ -813,8 +495,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.config = config
         session?.update(config: config)
-        // AI設定を足した直後でも準備の入口を使えるようにする。開いているシートも作り直す。
-        preparedChanged()
         Self.log("設定を再読込した")
     }
 
@@ -884,7 +564,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sheet.updateDestinations(session.aiDestinationItems, selected: slot, participant: config.participantName)
         // 紐づけがsessionの選択を先に変えても、表示していた宛先へ編集内容を保存する。
         var displayedSlot = slot
-        // 宛先の選び直しで動かすもの。準備済みの行を選んだときも、紐づけたあとに同じ処理を通す。
+        // 宛先の選び直しで動かすもの。
         let applyDestination: @MainActor (Int) -> Void = { [weak self, weak sheet] chosen in
             guard let sheet, session.meetingAIProfiles.contains(where: { $0.slot == chosen }) else { return }
             session.updateManualDraft(sheet.draft, slot: displayedSlot)
@@ -902,20 +582,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                           warning: session.snapshot.ai?.warning)
         }
         if !fixed { sheet.onDestination = applyDestination }
-        sheet.onPrepared = { [weak self] chosen, id in
-            // 返答シートは親の枠に固定なので、紐づけても送信先は動かさない。
-            self?.adoptPrepared(slot: chosen, id: id, forSchedule: false) { [weak self] bound in
-                guard let self, let sheet = self.aiSheet else { return }
-                // 開き直したシートへ反映する。返答・再送の固定シートにはonDestinationがない。
-                if bound { sheet.onDestination?(chosen) }
-                else {
-                    // 失敗したら送信先(session側)へ表示を揃える。画面だけBに残さない。
-                    let restored = session.aiConfiguration?.slot ?? sheet.owningSlot
-                    let name = session.meetingAIProfiles.first { $0.slot == restored }?.participantName ?? ""
-                    sheet.restoreDestination(restored, items: session.aiDestinationItems, participant: name)
-                }
-            }
-        }
         sheet.onDraft = {
             if fixed { session.updateAIDraft($0) }
             else { session.updateManualDraft($0, slot: displayedSlot) }
@@ -935,12 +601,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.aiSheetSlot = target?.slot
             session.submitAI(question: text, full: full, parent: parent, helper: helper, profile: target)
         }
-        sheet.setBinding(preparedBinding, canSubmit: snapshot.ai?.canSubmit(slot: slot) == true)
         aiSheet = sheet; aiSheetMeetingID = session.aiMeetingID
         aiSheetSlot = slot
         self.window?.show(); sheet.present(on: window)
-        // 宛先の準備済みも出すたびに引き直す。消えたペインを候補に残さない。
-        if let preparedStore { Task { await preparedStore.refresh() } }
     }
     func showScheduleSheet() {
         guard let session, let config = session.aiConfiguration, let parent = window?.window,
@@ -948,17 +611,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               aiSheet == nil, scheduleSheet == nil else { return }
         let target = session.aiScheduleConfiguration ?? config
         let sheet = AIScheduleSheet(session: session, profile: target)
-        sheet.onPrepared = { [weak self] slot, id in
-            self?.adoptPrepared(slot: slot, id: id, forSchedule: true) { [weak self] bound in
-                // await中に閉じて開き直していても、現在のシートへ宛先と文面を一緒に反映する。
-                guard let self, let sheet = self.scheduleSheet else { return }
-                if bound { sheet.onDestination?(slot) }
-                else if let target = session.aiScheduleConfiguration {
-                    sheet.updateDestinations(session.aiDestinationItems, selected: target.slot,
-                                              participant: target.participantName)
-                }
-            }
-        }
         sheet.onCancel = { [weak self] in self?.scheduleSheet = nil }
         sheet.onStart = { [weak self, weak sheet] options in
             do {
@@ -971,10 +623,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 sheet?.update(warning: "開始できませんでした。録音状態を確認して、もう一度開始してください")
             }
         }
-        sheet.setBinding(preparedBinding)
         scheduleSheet = sheet; scheduleSheetMeetingID = session.aiMeetingID
         window?.show(); sheet.present(on: parent)
-        if let preparedStore { Task { await preparedStore.refresh() } }
     }
 
     private func showPreviousAI() {

@@ -29,8 +29,7 @@ import KikigakiAIIO
         #expect(controller.minutes.state.minutesPath == "/tmp/AIの対象.md")
         let window = TranscriptWindowController()
         defer { window.window?.orderOut(nil); session.stopAISchedule(); controller.stopWatching() }
-        let prepared = AIPreparedStore(directory: root)
-        let app = AppDelegate(testingSession: session, config: config, preparedStore: prepared, window: window)
+        let app = AppDelegate(testingSession: session, config: config, window: window)
         if route == "自動" {
             session.setScheduleTranscriptForTesting("更新された架空会議")
             try session.startAISchedule(options: .init(prompt: "更新", sendFinal: false), helper: URL(fileURLWithPath: "/bin/echo"))

@@ -28,7 +28,7 @@ import KikigakiCore
         _ = NSApplication.shared
         let sheet = AIQuestionSheet(participant: "迅雷", parentNumber: nil, draft: "会議の決定事項をまとめてください", voice: "", range: "3発言", tentative: false, canSubmit: true)
         sheet.updateDestinations([
-            .init(slot: 1, name: "迅雷", prepared: [.init(id: UUID(), label: "議事録 · 13:05起動")], avatar: avatar),
+            .init(slot: 1, name: "迅雷", avatar: avatar),
             .init(slot: 2, name: "相談", avatar: "/missing/avatar.png"),
             .init(slot: 3, name: "確認")
         ], selected: 1, participant: "迅雷")
@@ -174,10 +174,8 @@ import KikigakiCore
             }
         }
 
-        // 「議事録」には準備済みセッションがある想定。
         let items: [AIDestinationPicker.Item] = [
-            .init(slot: 1, name: "議事録",
-                  prepared: [.init(id: UUID(), label: "Kikigaki 議事録抽出 · 13:05起動")]),
+            .init(slot: 1, name: "議事録"),
             .init(slot: 2, name: "相談")]
         let ask = AIQuestionSheet(participant: "迅雷", parentNumber: nil, draft: "この段取りで抜けはありますか",
             voice: "", range: "対象: 3〜7行(14:05:20〜14:06:16) · 送信時に確定", tentative: false, canSubmit: true)

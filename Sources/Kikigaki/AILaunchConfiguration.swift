@@ -14,9 +14,8 @@ struct AILaunchConfiguration {
                       codexConfigURL: codexConfigURL)
     }
 
-    /// 会議のcontrollerを持たない起動にも同じ引数を組ませる。準備済みセッションは
-    /// まだどの会議のものでもないので、仮の会議IDで作った置き場を使う。
-    /// 通常・準備済みとも議事録の保存先outputDirを許可する。起動引数は後から変えられない。
+    /// 会議のcontrollerを持たない起動にも同じ引数を組ませる。
+    /// 議事録の保存先outputDirを許可する。起動引数は後から変えられない。
     init(config: ResolvedAIConfig, helper: URL, outputDirectory: URL,
          sessionURL: URL, generation: Int, token: String,
          codexConfigURL: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/config.toml")) throws {

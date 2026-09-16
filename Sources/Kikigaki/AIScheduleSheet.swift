@@ -15,8 +15,6 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
     var onCancel: (() -> Void)?
     var onDraft: ((Draft) -> Void)?
     var onDestination: ((Int) -> Void)?
-    /// 準備済みセッションを選んだ。呼び手が紐づけてから一覧を差し替える
-    var onPrepared: ((Int, UUID) -> Void)?
     private let destination = AIDestinationPicker()
     private let title = Washi.label("", size: 17, weight: .semibold)
     private let editor = AIQuestionEditor()
@@ -30,8 +28,8 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         let draft = session.scheduleDraft(for: profile)
         self.init(prompt: draft.prompt, minutes: draft.minutes, workAllowed: draft.workAllowed,
                   sendFinal: draft.sendFinal, participant: profile.participantName)
-        // 準備済みへの紐づけ中はsession側の宛先が先に変わり得る。エディターに表示中の
-        // 枠へ保存し、一覧の非同期refreshでは文面を初期化しない。
+        // session側の宛先が先に変わり得る。エディターに表示中の枠へ保存し、
+        // 一覧の非同期更新では文面を初期化しない。
         var displayedSlot = profile.slot
         onDraft = { session.updateScheduleDraft($0, slot: displayedSlot) }
         onDestination = { [weak self] slot in
@@ -78,7 +76,6 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         title.stringValue = "\(participant)へ 自動送信"
         destination.onChange = { [weak self] in self?.onDestination?($0) }
-        destination.onPrepared = { [weak self] slot, id in self?.onPrepared?(slot, id) }
         editor.placeholder = "毎回送る依頼を書いてください"
         editor.onSubmit = { [weak self] in self?.start() }
         editor.onCancel = { [weak self] in self?.cancel() }
@@ -111,15 +108,6 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         textDidChange(Notification(name: NSText.didChangeNotification))
     }
 
-    /// 準備済みを選んで紐づけている最中。確定するまで開始させない
-    private var binding = false
-    func setBinding(_ active: Bool) {
-        binding = active
-        destination.setEnabled(!active)
-        if active { startButton.isEnabled = false; hint.stringValue = "準備済みのAIセッションへ紐づけています" }
-        else { update() }
-    }
-
     /// 宛先の一覧と選択を差し替える。
     func updateDestinations(_ items: [AIDestinationPicker.Item], selected: Int, participant: String) {
         destination.update(items: items, selected: selected)
@@ -138,7 +126,7 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         else if editor.string.contains("\0") { invalid = "使用できない文字が含まれています" }
         else if editor.string.utf8.count > AILimits.questionBytes { invalid = "入力が長すぎます。32 KiB以内に短くしてください" }
         else { invalid = nil }
-        startButton.isEnabled = invalid == nil && !binding
+        startButton.isEnabled = invalid == nil
         hint.stringValue = warning ?? invalid ?? "指定間隔ごとに差分を送ります"
         hint.textColor = warning != nil || invalid != nil ? Washi.gold : Washi.tentative
     }

@@ -1,27 +1,16 @@
 import AppKit
 import KikigakiCore
 
-/// 送信ごとの宛先を選ぶポップアップ。並ぶのは設定のプロファイルだけで、
-/// そのプロファイルに未紐づけの準備済みセッションがあれば行に添えて示す。
+/// 送信ごとの宛先を選ぶポップアップ。並ぶのは設定のプロファイルだけ。
 @MainActor
 final class AIDestinationPicker: NSStackView {
-    /// 未紐づけの準備済みセッション。プロファイルの下へ字下げして並べる
-    struct Prepared: Equatable {
-        let id: UUID
-        /// 「Kikigaki 議事録抽出 · 13:05起動」。表題が取れないときは「13:05起動」だけ
-        let label: String
-    }
-    /// 1行ぶんの表示。`bound` は紐づけ済みのときに閉じた表題へ添える文字列
+    /// 1行ぶんの表示
     struct Item: Equatable {
         let slot: Int
         let name: String
-        var prepared: [Prepared] = []
-        var bound: String?
         var avatar: String?
     }
     var onChange: ((Int) -> Void)?
-    /// 準備済みを選んだ。呼び手が紐づけてから一覧を差し替える
-    var onPrepared: ((Int, UUID) -> Void)?
     private let popup = NSPopUpButton()
     private let label = Washi.label("宛先", size: 13)
     private let avatars = AvatarStore()
@@ -38,47 +27,29 @@ final class AIDestinationPicker: NSStackView {
     }
     required init?(coder: NSCoder) { nil }
 
-    /// プロファイルが1つで準備済みも無ければ、選ぶものが無いので行ごと隠す。
+    /// プロファイルが1つなら、選ぶものが無いので行ごと隠す。
     func update(items: [Item], selected: Int) {
         self.items = items; self.selected = selected
         popup.removeAllItems()
         for item in items {
-            // 閉じた表題は「議事録 · 表題 · 13:05起動」。紐づけたときだけ添える。
-            popup.addItem(withTitle: item.bound.map { "\(item.name) · \($0)" } ?? item.name)
-            popup.lastItem?.representedObject = Choice.profile(item.slot)
-            for prepared in item.prepared {
-                popup.addItem(withTitle: "準備済み " + prepared.label)
-                popup.lastItem?.representedObject = Choice.prepared(item.slot, prepared.id)
-                popup.lastItem?.indentationLevel = 1
-            }
+            popup.addItem(withTitle: item.name)
+            popup.lastItem?.representedObject = item.slot
         }
-        let index = popup.itemArray.firstIndex { ($0.representedObject as? Choice) == .profile(selected) }
+        let index = popup.itemArray.firstIndex { ($0.representedObject as? Int) == selected }
         popup.selectItem(at: index ?? 0)
         refreshAvatars()
-        // 紐づけたものがあれば、選ぶ先が1つでも「何を使っているか」を出し続ける。
-        isHidden = items.count <= 1 && items.allSatisfy { $0.prepared.isEmpty && $0.bound == nil }
+        isHidden = items.count <= 1
     }
 
     /// AI行と同じ描画と読み込みキャッシュを使い、取得完了時は画像だけ差し替える。
-    /// メニューを作り直すと、準備済みの選択や開いているメニューを失ってしまう。
+    /// メニューを作り直すと、開いているメニューを失ってしまう。
     private func refreshAvatars() {
         for item in items {
             let image = AIProfileAvatar.image(name: item.name, source: item.avatar, store: avatars)
-            for entry in popup.itemArray {
-                guard let choice = entry.representedObject as? Choice else { continue }
-                let slot: Int
-                switch choice {
-                case .profile(let value), .prepared(let value, _): slot = value
-                }
-                if slot == item.slot { entry.image = image }
+            for entry in popup.itemArray where (entry.representedObject as? Int) == item.slot {
+                entry.image = image
             }
         }
-    }
-
-    /// ポップアップの行が指すもの。準備済みは選んだ時点で紐づける
-    private enum Choice: Equatable {
-        case profile(Int)
-        case prepared(Int, UUID)
     }
 
     /// 送信を始めたら操作させない。無効時は面を足さず、既にある枠のまま色を抜く。
@@ -88,10 +59,7 @@ final class AIDestinationPicker: NSStackView {
     }
 
     @objc private func changed() {
-        guard let choice = popup.selectedItem?.representedObject as? Choice else { return }
-        switch choice {
-        case .profile(let slot): selected = slot; onChange?(slot)
-        case .prepared(let slot, let id): selected = slot; onPrepared?(slot, id)
-        }
+        guard let slot = popup.selectedItem?.representedObject as? Int else { return }
+        selected = slot; onChange?(slot)
     }
 }

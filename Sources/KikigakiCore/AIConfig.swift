@@ -95,10 +95,10 @@ public struct AIConfig: Codable, Equatable, Sendable {
         // 稼働中ペインへ接続する案は取り下げた。黙って無視すると、接続するつもりの設定で
         // 新規起動が始まってしまうため、書かれていたら止めて移行先を示す。
         if attach != nil {
-            throw invalid("attach is no longer supported. prepare a session from the app instead")
+            throw invalid("attach is no longer supported. KIKIGAKI launches its own session")
         }
         if displayAgent != nil {
-            throw invalid("displayAgent is no longer supported. prepare a session from the app instead")
+            throw invalid("displayAgent is no longer supported. KIKIGAKI launches its own session")
         }
         if let effort, !AIEffort.values(for: cli ?? .codex).contains(effort) {
             throw invalid("effort must be one of " + AIEffort.values(for: cli ?? .codex).joined(separator: ", "))

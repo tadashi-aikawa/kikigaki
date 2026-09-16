@@ -134,11 +134,6 @@ final class MeetingSession {
     var automaticHelper: URL? = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
     /// replayだけで使う間隔の上書き。分単位の設定値では実行時間に収まらない
     var automaticIntervalOverride: Double?
-    /// 録音開始時の紐づけシートを出す間、`autoStart` の開始を保留する。
-    /// 先に始めると、紐づける前の新しいセッションへ1回目が飛んでしまう
-    var deferAutomaticStart = false {
-        didSet { if oldValue != deferAutomaticStart { emit() } }
-    }
     private var aiScheduleWarning: String?
     /// 開いている手動シートが持つ枠。抑制も譲りもこの枠だけに効かせる
     private var manualAISheetSlot: Int?
@@ -192,160 +187,29 @@ final class MeetingSession {
         return meetingAIProfiles.first { $0.slot == slot }
     }
 
-    /// 準備済みセッションの表示と紐づけを担う台帳。アプリが差し込む
-    weak var preparedStore: AIPreparedStore?
-
-    /// 宛先ポップアップへ並べる項目。未紐づけの準備済みはプロファイルの下へ字下げして並べる。
-    /// この会議の保存先。準備済みの返送許可がここへ向いているかの判定に使う
+    /// この会議の保存先
     var aiContextRoot: URL? { snapshot.markdownURL?.deletingLastPathComponent() }
 
+    /// 宛先ポップアップへ並べる項目
     var aiDestinationItems: [AIDestinationPicker.Item] {
-        meetingAIProfiles.map { profile in
-            let prepared = (preparedStore?.available(for: profile, contextRoot: aiContextRoot) ?? []).map {
-                AIDestinationPicker.Prepared(id: $0.id, label: preparedStore?.label($0, includingName: false) ?? "")
-            }
-            // 表題は台帳へ持たないので、閉じた表題も出すたびに解決する。
-            let bound = boundPrepared[profile.slot].flatMap { preparedStore?.label(id: $0, includingName: false) }
-            return .init(slot: profile.slot, name: profile.name, prepared: prepared, bound: bound, avatar: profile.avatar)
-        }
+        meetingAIProfiles.map { .init(slot: $0.slot, name: $0.name, avatar: $0.avatar) }
     }
 
-    /// 会議へ紐づけた準備済みセッションのid。表題ではなく識別子を持ち、表示時に解決する。
-    /// 録音開始と接続の作り直しで消す
-    private(set) var boundPrepared: [Int: UUID] = [:]
-
-    /// その枠を会議側が使っている(送信中・準備中)。準備の起動と重ねないための判定
-    func isAIBusy(slot: Int) -> Bool { aiTasks[slot] != nil || bindingSlots.contains(slot) }
-
-    /// 紐づけの最中の枠。確定するまで送信させない。
-    /// 画面は選んだ先を出すのに送信は前の宛先へ飛ぶ、という食い違いを作らないため
-    private(set) var bindingSlots: Set<Int> = []
-
-    /// 台帳が変わったので表示を作り直す。表題は台帳へ持たないので、出すたびに引き直す
-    func refreshPrepared() { emit() }
+    /// その枠を会議側が使っている(送信中)。
+    func isAIBusy(slot: Int) -> Bool { aiTasks[slot] != nil }
 
     /// 会議をまたいで引き継がないAIの状態。録音開始のたびにここを通す。
-    /// 宛先の選択も、紐づけた準備済みの表示も、前の会議のものを残さない。
+    /// 宛先の選択も前の会議のものを残さない。
     private func resetMeetingAIState(_ meetingConfig: ResolvedConfig) {
         scheduleDrafts = [:]
         manualDrafts = [:]
         meetingAIProfiles = meetingConfig.aiProfiles
         meetingAI = meetingConfig.aiProfiles.first; scheduleAI = meetingConfig.aiProfiles.first
-        boundPrepared = [:]
         aiDraft = ""; aiWarning = nil; aiCompleted = nil
         pendingAIDispatch = [:]
         aiRequestOwners = [:]
         minutesHighlight = MinutesHighlightBaseline()
         aiWorkAllowed = meetingConfig.ai?.allowWork ?? true
-    }
-
-    /// フッターの一行。「準備済み: 議事録 13:05 · 相談 13:10」。3件を超えたら畳む。
-    /// 台帳が読めないときは、1件も無い状態と区別して理由を出す。
-    private var preparedSummary: String {
-        guard let store = preparedStore else { return "" }
-        guard store.isUsable else { return store.warningText }
-        let rows = store.unbound
-        guard !rows.isEmpty else { return "" }
-        var shown: [String] = []
-        for row in rows.prefix(3) {
-            let time: String = AIPreparedStore.clock.string(from: row.startedAt)
-            shown.append((row.name ?? row.profileName) + " " + time)
-        }
-        let rest: Int = rows.count - shown.count
-        let tail: String = rest > 0 ? " ほか\(rest)件" : ""
-        return "準備済み: " + shown.joined(separator: " · ") + tail
-    }
-    private var preparedDetail: String {
-        guard let store = preparedStore, store.isUsable else { return "" }
-        return store.unbound.map { store.label($0) }.joined(separator: "\n")
-    }
-
-    /// 録音開始時の選択をまとめて当てる。**引き継げなかった枠を返す。**
-    /// 全部済むまで `autoStart` の保留を解かない。失敗した枠のまま進めると、
-    /// 下ごしらえを持たない新規セッションへ自動送信の1回目が飛ぶ。
-    func applyPreparedSelection(_ selection: [Int: UUID?]) async -> Set<Int> {
-        let meetingID = handoff.meetingID
-        var failed: Set<Int> = []
-        for (slot, id) in selection.sorted(by: { $0.key < $1.key }) {
-            guard handoff.meetingID == meetingID else { return failed }
-            guard let profile = meetingAIProfiles.first(where: { $0.slot == slot }) else { continue }
-            guard let id else {
-                // 「新規に起動する」。途中まで引き継いだ接続が残っていたら手放す。
-                // 残すと、新規を選んだのに準備済みのペインへ送ってしまう。
-                if !releasePreparedBinding(slot: slot) { failed.insert(slot) }
-                continue
-            }
-            if await adoptPrepared(id, profile: profile) == false { failed.insert(slot) }
-        }
-        guard handoff.meetingID == meetingID else { return failed }
-        guard failed.isEmpty else { return failed }
-        deferAutomaticStart = false
-        if snapshot.state == .recording || snapshot.state == .paused { startAutomaticSchedule() }
-        return []
-    }
-
-    /// 「新規に起動する」を選んだ枠の後始末。台帳の保存に失敗して途中まで引き継いだ接続を手放す。
-    /// 台帳の紐づけが成功している枠は手放さない(そちらは正しく使われている)。
-    /// - Returns: 手放せた、または手放すものが無ければ true
-    @discardableResult
-    private func releasePreparedBinding(slot: Int) -> Bool {
-        guard let controller = aiRecord?.controller, controller.hasAdopted(slot: slot),
-              boundPrepared[slot] == nil else { return true }
-        do { try controller.releaseAdopted(slot: slot); emit(); return true }
-        catch {
-            aiWarning = "準備済みAIセッションの引き継ぎを解除できません"
-            log("引き継ぎの解除に失敗: \(error)")
-            emit()
-            return false
-        }
-    }
-
-    /// 準備済みセッションをこの会議のチャネルへ引き継ぐ。
-    /// **会議側の保存が成功してから**台帳へ `bound` を書く。逆順にすると、台帳では使用済みなのに
-    /// 会議側に接続が無い行が残る。
-    @discardableResult
-    func adoptPrepared(_ id: UUID, profile: ResolvedAIConfig, forSchedule: Bool = false) async -> Bool {
-        guard let store = preparedStore, let aiStore, let url = snapshot.markdownURL,
-              let prepared = store.unbound.first(where: { $0.id == id }) else { return false }
-        // awaitを跨いで会議が入れ替わることがある(接続確認中に停止して次の録音を始める)。
-        // 会議IDを固定し、各await後に照合して、古い処理が次の会議へ書き込まないようにする。
-        let meetingID = handoff.meetingID
-        // 失敗したら戻す送信先。選び直しの表示もここへ揃える。
-        let previous = (forSchedule ? scheduleAI?.slot : meetingAI?.slot) ?? profile.slot
-        bindingSlots.insert(profile.slot); emit()
-        defer { bindingSlots.remove(profile.slot); emit() }
-        do {
-            let record = try aiStore.begin(meetingID: meetingID, markdownURL: url, profiles: meetingAIProfiles)
-            if let slot = rangeAutomaticSlot { aiStore.setAutomaticSlot(slot, for: record) }
-            // 紐づけの前に会議の全プロファイルを登録する。1つだけ登録すると保存パスが平置きになり、
-            // あとで他の枠が登録された時点で参照先が枝つきへ変わって、CLIがsessionを読めなくなる。
-            try record.controller.register(meetingAIProfiles)
-            // 同じ枠に、台帳へ書けなかった別の引き継ぎが残っていることがある。
-            // 先に手放さないと、別の準備済みを選び直せない(adoptが拒否する)。
-            if record.controller.hasAdopted(slot: profile.slot), boundPrepared[profile.slot] == nil,
-               record.controller.sessionToken(slot: profile.slot) != prepared.token {
-                try record.controller.releaseAdopted(slot: profile.slot)
-            }
-            // 同じ枠に、台帳へ書けなかった別の引き継ぎが残っていることがある。
-            // 先に手放さないと、別の準備済みを選び直せない(adoptが拒否する)。
-            try await record.controller.adopt(prepared, config: profile)
-            guard handoff.meetingID == meetingID else { return false }
-            // 台帳へは保存済みcontrollerの会議IDを書く。await後の現在の会議ではない。
-            try store.bind(id, to: record.controller.meetingID, config: profile)
-            boundPrepared[profile.slot] = id
-            // 選んだ枠を送信先にする。表示だけ変えて送信先が元のままになるのを防ぐ。
-            selectAIProfile(slot: profile.slot, forSchedule: forSchedule)
-            emit()
-            return true
-        } catch {
-            guard handoff.meetingID == meetingID else { return false }
-            // 表示と送信先を同じ枠へ戻す。画面だけ移って送信は元の宛先、という状態を残さない。
-            selectAIProfile(slot: previous, forSchedule: forSchedule)
-            aiWarning = "準備済みAIセッションを引き継げません"
-            log("準備済みセッションの引き継ぎに失敗: \(error)")
-            emit()
-            return false
-        }
     }
 
     init(config: ResolvedConfig, models: @escaping () async throws -> SortformerModelStore.Loaded, log: @escaping (String) -> Void,
@@ -576,11 +440,10 @@ final class MeetingSession {
     }
 
     /// 録音そのものを取り止める。**保存しない**。予約したMarkdownとWAV、AIの置き場も残さない。
-    /// 紐づけシートの「取消(録音を始めない)」から呼ぶ。表示している契約と動きを揃えるため、
     /// 通常の停止(最終判定して保存する)とは別の道にしてある。
+    /// 準備済みAIセッションの紐づけシートを廃止したので、いまは画面からの入口を持たない。
     ///
-    /// 片付けは**記録が先、実体が後**。逆順にすると、消えた会議の登録や使用済みのままの
-    /// 紐づけだけが残り、設計文書の表で「起きない」としている状態を作ってしまう。
+    /// 片付けは**記録が先、実体が後**。逆順にすると、消えた会議の登録だけが残る。
     func abandon() async {
         guard snapshot.state == .recording || snapshot.state == .paused else { return }
         stopAISchedule()
@@ -626,10 +489,7 @@ final class MeetingSession {
     /// **実体を消せなかったときも false。** 「取消で何も残らない」を満たせていないため。
     private func cleanUp(_ target: Discarded) -> Bool {
         // 登録簿と監視を外す。実体だけ消すと、再起動時に無いmanifestを回収しようとして失敗する。
-        let unregistered = aiStore?.discard(meetingID: target.meetingID) ?? true
-        // 紐づけ済みの準備済みは未紐づけへ戻す。会議が無くなった以上、次の録音でまた選べるべき。
-        let unbound = preparedStore?.unbindAll(meetingID: target.meetingID) ?? true
-        guard unregistered, unbound else { return false }
+        guard aiStore?.discard(meetingID: target.meetingID) ?? true else { return false }
         var removed = true
         // 予約したMarkdownは中身が無いときだけ消す。書き込み済みのものは触らない。
         if let markdownURL = target.markdownURL {
@@ -816,11 +676,7 @@ final class MeetingSession {
             for profile in meetingAIProfiles {
                 connections[profile.slot] = controller?.connectionStatus(slot: profile.slot) ?? .unknown
                 generations[profile.slot] = controller?.generation(slot: profile.slot) ?? 1
-                // 同じ枠で準備を起こしている間は送らせない。別の枠は止めない。
                 canSubmits[profile.slot] = snapshot.canShare && aiTasks[profile.slot] == nil
-                    && !deferAutomaticStart
-                    && !bindingSlots.contains(profile.slot)
-                    && preparedStore?.launching.contains(profile.slot) != true
                     && (controller?.canSend(slot: profile.slot) ?? true)
                 progresses[profile.slot] = aiProgresses[profile.slot]
                 participants[profile.slot] = profile.participantName
@@ -851,9 +707,6 @@ final class MeetingSession {
                 && (aiWarning != nil || connections[slot] == .disconnected)
             state.saveFailed = aiRecord?.saveWarning != nil
             state.generation = generations[slot] ?? 1
-            state.canPrepare = preparedStore?.isUsable ?? false
-            state.preparedSummary = preparedSummary
-            state.preparedToolTip = preparedDetail
             state.profiles = meetingAIProfiles.map { ($0.slot, $0.name) }
             state.selectedSlot = slot
             state.defaultSlot = controller?.defaultSlot ?? 1
@@ -945,8 +798,6 @@ final class MeetingSession {
     }
     func readAI(_ id: UUID) { do { try aiRecord?.controller.markRead(id) } catch { aiWarning = "既読を保存できません" }; emit() }
     func recreateAI() {
-        // 作り直した接続は準備済みのものではない。以前の表題を残さない。
-        if let slot = meetingAI?.slot { boundPrepared[slot] = nil }
         do { try aiRecord?.controller.newGeneration(slot: meetingAI?.slot); aiWarning = nil }
         catch { aiWarning = "接続を作り直せません" }
         emit()
@@ -982,10 +833,7 @@ final class MeetingSession {
         }
         let selected = parentSlot.flatMap { slot in meetingAIProfiles.first { $0.slot == slot } }
             ?? profile ?? (trigger == .scheduled ? aiScheduleConfiguration : meetingAI)
-        guard snapshot.canShare, !deferAutomaticStart, let config = selected, aiTasks[config.slot] == nil,
-              // 同じ枠の準備を起こしている最中は送らない。起動と送信が同じ枠で重なると、
-              // どちらの接続が正本か決まらなくなる。
-              preparedStore?.launching.contains(config.slot) != true, !bindingSlots.contains(config.slot),
+        guard snapshot.canShare, let config = selected, aiTasks[config.slot] == nil,
               let url = snapshot.markdownURL, let aiStore else { return }
         let slot = config.slot
         let meetingID = handoff.meetingID, capturedAt = Date(), cutoff = snapshot.state == .idle ? snapshot.elapsed : pause.audioTime
@@ -1323,7 +1171,6 @@ extension MeetingSession {
     /// `autoStart` のプロファイルがあれば、録音開始と同時に自動送信を始める。
     /// 設定だけで決まる非対話の開始なので、接続先を解決できなければ理由を出して開始しない。
     func startAutomaticSchedule(now: Date = Date()) {
-        guard !deferAutomaticStart else { return }
         guard let profile = meetingAIProfiles.first(where: \.autoStart), let helper = automaticHelper else { return }
         do {
             let options = try AIScheduleOptions(prompt: profile.autoPrompt,
@@ -1378,9 +1225,7 @@ extension MeetingSession {
         }
         // 手動シートを開いている間に止めるのは、そのシートが持つ枠と同じときだけ。
         // 選択中の宛先で判定すると、Aへの返答シートを開いている間にBの自動送信が止まる。
-        // 準備の起動中も同じ枠は塞がっている扱いにする。送信すると起動と競合する。
-        if aiTasks[slot] != nil || manualAISheetSlot == slot || bindingSlots.contains(slot)
-            || preparedStore?.launching.contains(slot) == true { return .busy }
+        if aiTasks[slot] != nil || manualAISheetSlot == slot { return .busy }
         if let controller {
             let generation = controller.generation(slot: slot)
             let current = controller.conversation.questions.filter {

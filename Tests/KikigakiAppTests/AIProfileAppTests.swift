@@ -126,9 +126,5 @@ import KikigakiCore
         picker.update(items: [.init(slot: 1, name: "議事録"),
                               .init(slot: 2, name: "相談")], selected: 2)
         #expect(!picker.isHidden && picker.selected == 2)
-        // 1つしか無くても、準備済みがあるなら選ぶ意味がある。
-        picker.update(items: [.init(slot: 1, name: "議事録",
-                                    prepared: [.init(id: UUID(), label: "Kikigaki 議事録抽出 · 13:05起動")])], selected: 1)
-        #expect(!picker.isHidden)
     }
 }

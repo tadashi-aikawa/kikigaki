@@ -89,7 +89,7 @@ struct AIViewState {
     var connection: AIConnectionStatus = .unknown
     var warning: String?
     var progress: String?
-    /// 確定待ち・起動・接続からCLI入力試行直前まで。単なる準備済みセッションは含めない。
+    /// 確定待ち・起動・接続からCLI入力試行直前まで。
     var isPreparing = false
     var unconfirmed: Set<UUID> = []
     /// 編集・返答へ入ったと確認できた依頼。自己申告とフック観測をまとめた結果だけを持つ
@@ -112,11 +112,6 @@ struct AIViewState {
     /// 枠ごとの接続状態と現世代。行は自分を送った枠のものを見る
     var connections: [Int: AIConnectionStatus] = [:]
     var generations: [Int: Int] = [:]
-    /// 準備の入口を使えるか。台帳が読めないときだけ無効にする
-    var canPrepare = true
-    /// フッターの一行。「準備済み: 議事録 13:05 · 相談 13:10」。3件を超えたら畳む
-    var preparedSummary = ""
-    var preparedToolTip = ""
     /// 枠ごとの送信可否と進捗。確認への返答シートは親の枠のものを見る
     var canSubmits: [Int: Bool] = [:]
     var progresses: [Int: String] = [:]

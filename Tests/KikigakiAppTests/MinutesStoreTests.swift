@@ -183,23 +183,6 @@ import KikigakiAIIO
         #expect(try Data(contentsOf: markdown) == before)
     }
 
-    @Test func 起動条件の欠損と旧版を候補から外し新規だけ紐づける() throws {
-        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
-        let config = ResolvedAIConfig(config: AIConfig(), home: root)
-        let fresh = AIPreparedSession(profileSlot: config.slot, profileName: config.name, startedAt: Date(), config: config,
-            token: "token", contextRoot: root, contextMeetingID: UUID(), connection: .init(workspaceID: "w", paneID: "p", provider: config.cli))
-        for revision: Any? in [nil, 0, 2] {
-            var json = try #require(JSONSerialization.jsonObject(with: AIJSON.encode(fresh)) as? [String: Any])
-            json["launch_revision"] = revision
-            let stale = try AIJSON.decode(AIPreparedSession.self, from: JSONSerialization.data(withJSONObject: json))
-            var ledger = AIPreparedLedger(sessions: [stale])
-            #expect(!stale.hasCurrentLaunch && ledger.available(for: config, contextRoot: root).isEmpty)
-            #expect(ledger.stale(for: config, contextRoot: root).count == 1)
-            #expect(throws: (any Error).self) { try ledger.bind(stale.id, to: UUID(), config: config) }
-        }
-        #expect(fresh.hasCurrentLaunch && AIPreparedLedger(sessions: [fresh]).available(for: config, contextRoot: root).count == 1)
-    }
-
     @Test func 送信入口の人の書き先を固定し通知の表示対象を混ぜない() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr()

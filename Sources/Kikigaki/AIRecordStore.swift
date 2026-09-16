@@ -169,12 +169,6 @@ final class AIRecordStore {
         return true
     }
 
-    /// 稼働中のpane ID。準備済みセッションの生存確認に使う。
-    func alivePaneIDs() async -> Set<String>? {
-        guard let herdr = try? makeHerdr() else { return nil }
-        return try? await herdr.alivePaneIDs()
-    }
-
     /// プロファイルの定義を固定値の記録へ足す。requestが参照する定義を残すため、
     /// 既存のプロファイルは書き換えず、新しいslotの追加だけを許す。
     func register(_ profile: ResolvedAIConfig, for record: Record) throws {

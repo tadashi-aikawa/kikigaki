@@ -18,7 +18,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onFireScheduleAI: (() -> Void)?
     let compactFooter = AICompactFooter()
     private let recordingRange = Washi.label(size: 11, color: Washi.muted)
-    var onPrepareAI: (() -> Void)?
     var onReadAI: ((UUID) -> Void)?
     var onOpenAIPane: (() -> Void)?
     var onCancelAI: ((UUID) -> Void)?
@@ -556,8 +555,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             add("今すぐ送る", #selector(fireAutomaticPressed),
                 enabled: canFireAutomatic)
         }
-        add("AIセッションを準備…", #selector(preparePressed), enabled: snapshot.ai?.canPrepare == true)
-        menu.items.last?.toolTip = snapshot.ai?.preparedToolTip
         add("ペインを開く", #selector(panePressed), enabled: snapshot.ai?.canOpenPane == true)
         add("AIセッションを作り直す", #selector(recreatePressed), enabled: snapshot.ai?.canRecreate == true)
         add("保存を再試行", #selector(retrySavePressed), enabled: snapshot.ai?.saveFailed == true)
@@ -606,7 +603,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         guard canFireAutomatic else { return }
         onFireScheduleAI?()
     }
-    @objc private func preparePressed() { onPrepareAI?() }
     @objc private func panePressed() { onOpenAIPane?() }
     @objc private func recreatePressed() { onRecreateAI?() }
     @objc private func retrySavePressed() { onRetryAISave?() }

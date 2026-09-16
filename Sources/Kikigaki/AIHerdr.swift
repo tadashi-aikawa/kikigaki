@@ -48,9 +48,6 @@ struct AIHerdr: Sendable {
     }
     private struct AgentReply: Decodable { let agent: Agent }
     private struct AgentList: Decodable { let agents: [Agent] }
-    /// `pane list` はagentが検知される前のペインも返す。起動直後の準備済みを
-    /// 「消えた」と誤判定しないよう、生存と表題はこちらから取る。
-    private struct PaneList: Decodable { let panes: [Agent] }
     private struct Failure: Decodable {
         struct Detail: Decodable { let code: String }
         let error: Detail
@@ -89,22 +86,8 @@ struct AIHerdr: Sendable {
         guard Self.identifier(result.workspace.workspace_id), Self.identifier(result.root_pane.pane_id) else { throw AIProcessError.invalidResponse }
         return AIHerdrConnection(workspaceID: result.workspace.workspace_id, paneID: result.root_pane.pane_id, provider: provider)
     }
-    /// 稼働中のpane IDを列挙する。準備済みセッションの生存確認にだけ使い、
-    /// 宛先の候補には使わない(利用者が手で起こしたペインへ繋ぐ案は取り下げた)。
-    func alivePaneIDs() async throws -> Set<String> { Set(try await panes().map(\.paneID)) }
-
-    /// 稼働中のペインと表題。表題はCLIがOSCで設定する値なので、表示のたびに引き直す。
-    /// `terminal_title` には状態記号が付くため、素の `terminal_title_stripped` を先に使う。
-    func panes() async throws -> [(paneID: String, title: String?)] {
-        try await call(["pane", "list"], as: PaneList.self).panes
-            .filter { Self.identifier($0.pane_id) }
-            .map { ($0.pane_id, $0.terminal_title_stripped ?? $0.terminal_title) }
-    }
     func label(_ target: AIHerdrConnection, participant: String) async throws {
         _ = try await call(["pane", "report-metadata", target.paneID, "--source", "owlery", "--display-agent", participant], as: Empty.self)
-    }
-    func rename(_ target: AIHerdrConnection, name: String) async throws {
-        _ = try await call(["pane", "rename", target.paneID, "--", name], as: Empty.self)
     }
     static func agentName(generation: Int, id: UUID = UUID()) throws -> String {
         guard generation > 0 else { throw AIProcessError.invalidInput }
