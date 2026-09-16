@@ -411,6 +411,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // シートの値はこの録音にだけ効く。設定ファイルへは書き戻さない。
         if let options {
             session.setDiarizationEnabled(options.diarizationEnabled)
+            // しきい値はシートで変えない。ON/OFFだけを次回設定へ重ねる。
+            var exclusion = session.snapshot.audioExclusion
+            exclusion.enabled = options.exclusionEnabled
+            session.setAudioExclusion(exclusion)
             do { try session.prepareMinutes(options.minutesPath) }
             catch { Self.log("議事録の指定を引き継げません: \(error)") }
             session.pendingAutomaticSchedule = .init(slot: options.scheduleSlot, options: options.schedule)

@@ -12,6 +12,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     /// シートが決めた、この録音だけの指定。
     struct Options: Equatable {
         var diarizationEnabled = true
+        /// 小音量除外のON/OFF。しきい値は次回設定のまま
+        var exclusionEnabled = false
         /// 議事録の絶対パス。nilは指定なし
         var minutesPath: String?
         /// 自動送信の宛先の枠。nilは「送らない」
@@ -36,17 +38,15 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     private let stack = NSStackView()
     let diarizeOn = NSButton(radioButtonWithTitle: "区別する(最大4人)", target: nil, action: nil)
     let diarizeOff = NSButton(radioButtonWithTitle: "区別しない", target: nil, action: nil)
-    private let diarizeHint = Washi.label(size: 11, color: Washi.muted)
+    let exclusionSwitch = NSSwitch()
+    private let exclusionText = Washi.label(size: 13)
     let minutesBox = StartSheetPathBox()
-    private let minutesHint = Washi.label("開始と同時に、右のペインへ表示します。", size: 11, color: Washi.muted)
+    /// 議事録の指定が読めないときだけ出す1行。説明文は置かない
+    private let minutesHint = Washi.label(size: 11, color: Washi.gold)
     private let aiSection = NSStackView()
     let destination = NSPopUpButton()
     let interval = NSPopUpButton()
-    private let cwdLabel = Washi.label(size: 11, color: Washi.muted)
-    let promptLine = StartSheetPromptLine()
-    private let editButton = NSButton(title: "編集", target: nil, action: nil)
-    private let promptRow = NSStackView()
-    let editorBox = NSStackView()
+    private let cwdLabel = Washi.label(size: 12, color: Washi.muted)
     let editor = AIQuestionEditor()
     let work = NSButton(checkboxWithTitle: "作業を許可する(ファイル編集・コマンド実行)", target: nil, action: nil)
     let final = NSButton(checkboxWithTitle: "録音停止時に最後の1回を送る", target: nil, action: nil)
@@ -57,7 +57,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     init(profiles: [ResolvedAIConfig], diarizationEnabled: Bool, exclusion: AudioExclusion,
          minutesPath: String? = nil, minutesHistory: [String] = []) {
         self.profiles = profiles
-        window = StartSheetWindow(contentRect: NSRect(x: 0, y: 0, width: 504, height: 400),
+        window = StartSheetWindow(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 400),
                                   styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
         window.appearance = NSAppearance(named: .aqua)
@@ -67,8 +67,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         Washi.surface(stack, color: Washi.paper)
-        // 幅は504ptで固定し、長いパスや依頼は縮めて収める。高さだけを中身に合わせる。
-        stack.widthAnchor.constraint(equalToConstant: 504).isActive = true
+        // 幅は固定し、高さだけを中身に合わせる。議事録の長いパスがそのまま読める幅にする。
+        stack.widthAnchor.constraint(equalToConstant: Self.width).isActive = true
 
         let rows = NSStackView()
         rows.orientation = .vertical; rows.alignment = .leading; rows.spacing = 0
@@ -79,17 +79,19 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         diarizeOff.state = diarizationEnabled ? .off : .on
         let radios = NSStackView(views: [diarizeOn, diarizeOff])
         radios.orientation = .horizontal; radios.spacing = 20
-        add(row("話者判別", column([radios, diarizeHint], spacing: 4)), to: rows)
+        add(row("話者判別", radios), to: rows)
 
-        // 小音量除外は次回設定の文字だけ。操作は録音中の「話者…」に残す。
+        // 小音量除外はON/OFFだけ。しきい値は音を聞いて決めるものなので、録音中の「話者…」に残す。
         add(separator(), to: rows)
-        let exclusionText = Washi.label(exclusion.enabled
-            ? String(format: "ON · %.0f dBFS未満を除外", exclusion.thresholdDBFS) : "OFF · 全発話を含む", size: 13)
-        let exclusionNote = Washi.label("録音中に「話者…」から調整できます", size: 11, color: Washi.muted)
-        exclusionNote.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let exclusionRow = NSStackView(views: [exclusionText, exclusionNote])
-        exclusionRow.orientation = .horizontal; exclusionRow.spacing = 10; exclusionRow.alignment = .firstBaseline
+        exclusionSwitch.controlSize = .small
+        exclusionSwitch.state = exclusion.enabled ? .on : .off
+        exclusionSwitch.target = self; exclusionSwitch.action = #selector(exclusionChanged)
+        exclusionSwitch.setAccessibilityLabel("小音量発話を除外")
+        exclusionText.stringValue = String(format: "%.0f dBFS未満を除外", exclusion.thresholdDBFS)
+        let exclusionRow = NSStackView(views: [exclusionSwitch, exclusionText])
+        exclusionRow.orientation = .horizontal; exclusionRow.spacing = 10; exclusionRow.alignment = .centerY
         add(row("小音量除外", exclusionRow), to: rows)
+        applyExclusionState()
 
         // 議事録。指定すると開始と同時に右のペインへ出す。
         add(separator(), to: rows)
@@ -102,14 +104,15 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         minutesBox.numberOfVisibleItems = 10
         minutesBox.stringValue = minutesPath ?? ""
         minutesBox.onDrop = { [weak self] path in self?.setMinutesPath(path) }
+        // 欄はボタンを除いた幅いっぱいに伸ばす。NSComboBoxの固有幅は中身で決まり、積極的には伸びない。
         minutesBox.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        // 欄の幅は固定する。NSComboBoxの固有幅は中身で決まり、積極的には伸びない。
-        minutesBox.widthAnchor.constraint(equalToConstant: 266).isActive = true
+        minutesBox.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let choose = NSButton(title: "ファイルを選ぶ…", target: self, action: #selector(chooseMinutes))
         choose.bezelStyle = .rounded
         choose.setContentHuggingPriority(.required, for: .horizontal)
         let minutesRow = NSStackView(views: [minutesBox, choose])
         minutesRow.orientation = .horizontal; minutesRow.spacing = 8; minutesRow.distribution = .fill
+        minutesHint.isHidden = true
         add(row("議事録", column([minutesRow, minutesHint], spacing: 4)), to: rows)
 
         // 自動送信。`[[ai]]` が無ければ区画ごと出さない。
@@ -120,7 +123,6 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         stack.addArrangedSubview(Washi.label("録音を開始", size: 17, weight: .semibold))
         stack.addArrangedSubview(rows)
 
-        let note = Washi.label("前回の設定のままです", size: 11, color: Washi.muted)
         let cancel = NSButton(title: "取消", target: self, action: #selector(cancelPressed))
         cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
         startButton.title = "開始 ⏎"; startButton.emphasis = .primary; startButton.isBordered = false
@@ -130,7 +132,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         startButton.refreshStyle()
         startButton.heightAnchor.constraint(equalToConstant: 28).isActive = true
         startButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 96).isActive = true
-        let actions = NSStackView(views: [note, NSView(), cancel, startButton])
+        let actions = NSStackView(views: [NSView(), cancel, startButton])
         actions.orientation = .horizontal; actions.spacing = 12
         stack.addArrangedSubview(actions)
         for view in [rows, actions] {
@@ -141,10 +143,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         (window as? StartSheetWindow)?.onCommandReturn = { [weak self] in self?.startPressed() }
         editor.onSubmit = { [weak self] in self?.startPressed() }
         editor.onCancel = { [weak self] in self?.cancelPressed() }
-        for label in [diarizeHint, minutesHint] {
-            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        }
-        applyDiarizationHint()
+        minutesHint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         selectDestination(profiles.first(where: \.autoStart)?.slot)
         fit()
     }
@@ -163,6 +162,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         stack.orientation = .horizontal; stack.alignment = .top; stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 10, left: 0, bottom: 10, right: 0)
         value.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        // 値の側は見出しの右から右端まで使う。パスや依頼を縮めない。
+        value.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
         return stack
     }
     private func column(_ views: [NSView], spacing: CGFloat) -> NSStackView {
@@ -189,52 +190,50 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         interval.setContentHuggingPriority(.required, for: .horizontal)
         let intervalLabel = Washi.label("間隔", size: 13)
         intervalLabel.setContentHuggingPriority(.required, for: .horizontal)
-        let head = NSStackView(views: [destination, intervalLabel, interval])
-        head.orientation = .horizontal; head.spacing = 8; head.alignment = .centerY; head.distribution = .fill
+        let intervalRow = NSStackView(views: [intervalLabel, interval])
+        intervalRow.orientation = .horizontal; intervalRow.spacing = 8; intervalRow.alignment = .centerY
 
+        // 作業ディレクトリ。フォルダの記号を添え、パスだけの行に見えないようにする。
         cwdLabel.lineBreakMode = .byTruncatingHead
         cwdLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        editButton.bezelStyle = .rounded; editButton.target = self; editButton.action = #selector(toggleEditor)
-        editButton.setContentHuggingPriority(.required, for: .horizontal)
-        promptLine.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        promptRow.setViews([promptLine, editButton], in: .leading)
-        promptRow.orientation = .horizontal; promptRow.spacing = 8; promptRow.alignment = .centerY
-        promptRow.distribution = .fill
+        let folder = NSImageView(image: NSImage(systemSymbolName: "folder", accessibilityDescription: "作業ディレクトリ") ?? NSImage())
+        folder.contentTintColor = Washi.muted
+        folder.symbolConfiguration = .init(pointSize: 12, weight: .regular)
+        folder.setContentHuggingPriority(.required, for: .horizontal)
+        let cwdRow = NSStackView(views: [folder, cwdLabel])
+        cwdRow.orientation = .horizontal; cwdRow.spacing = 5; cwdRow.alignment = .centerY
 
+        // プロンプトは畳まず、幅いっぱいの欄でそのまま書ける。長い依頼でも中を読めるよう数行ぶん見せる。
         editor.font = .systemFont(ofSize: 12); editor.textColor = Washi.ink
         editor.backgroundColor = .white; editor.isRichText = false; editor.delegate = self
         editor.textContainerInset = NSSize(width: 4, height: 5)
         editor.isVerticallyResizable = true; editor.autoresizingMask = [.width]
         editor.textContainer?.widthTracksTextView = true
-        editor.placeholder = "毎回送る依頼を書いてください"
+        editor.placeholder = "毎回送る依頼"
         editor.setAccessibilityLabel("毎回送るプロンプト")
-        editor.frame = NSRect(x: 0, y: 0, width: 360, height: 52)
+        editor.frame = NSRect(x: 0, y: 0, width: 400, height: Self.promptHeight)
         let scroll = NSScrollView(); scroll.documentView = editor; scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
-        scroll.heightAnchor.constraint(equalToConstant: 52).isActive = true
-        let close = NSButton(title: "閉じる", target: self, action: #selector(toggleEditor))
-        close.bezelStyle = .rounded
-        close.setContentHuggingPriority(.required, for: .horizontal)
-        let foot = NSStackView(views: [Washi.label("この会議のあいだだけ覚えます", size: 11, color: Washi.muted), NSView(), close])
-        foot.orientation = .horizontal; foot.spacing = 10
-        editorBox.orientation = .vertical; editorBox.alignment = .leading; editorBox.spacing = 5
-        add(scroll, to: editorBox); add(foot, to: editorBox)
-        editorBox.isHidden = true
+        scroll.heightAnchor.constraint(equalToConstant: Self.promptHeight).isActive = true
 
         for control in [work, final] { control.target = self; control.action = #selector(draftChanged) }
         aiDetails.orientation = .vertical; aiDetails.alignment = .leading; aiDetails.spacing = 6
-        for view in [cwdLabel, promptRow, editorBox] { add(view, to: aiDetails) }
+        for view in [cwdRow, scroll] { add(view, to: aiDetails) }
+        aiDetails.addArrangedSubview(intervalRow)
         aiDetails.addArrangedSubview(work)
         aiDetails.addArrangedSubview(final)
         aiSection.orientation = .vertical; aiSection.alignment = .leading; aiSection.spacing = 6
-        add(head, to: aiSection); add(aiDetails, to: aiSection)
+        add(destination, to: aiSection); add(aiDetails, to: aiSection)
         rebuildDestinationMenu()
         return aiSection
     }
+    /// プロンプト欄の高さ。12ptの文字で6行ほど見える。
+    static let promptHeight: CGFloat = 100
 
     // MARK: - 宛先
 
-    /// 宛先メニュー。行はavatar・name・cli+model+effortの2行で、「送らない」だけ1行。
+    /// 宛先メニュー。行はavatar・name・cli+model+effort・プロンプトの3行で、「送らない」だけ1行。
+    /// プロンプトも並べるのは、同じ名前と型のプロファイルを依頼の中身で見分けるため。
     private func rebuildDestinationMenu() {
         let menu = NSMenu()
         let none = NSMenuItem(title: "送らない", action: nil, keyEquivalent: "")
@@ -247,6 +246,10 @@ final class StartSheet: NSObject, NSTextViewDelegate {
                 attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)])
             title.append(NSAttributedString(string: "\n" + Self.meta(profile), attributes: [
                 .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]))
+            if let prompt = Self.promptLine(profile.autoPrompt) {
+                title.append(NSAttributedString(string: "\n" + prompt, attributes: [
+                    .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]))
+            }
             item.attributedTitle = title
             menu.addItem(item)
         }
@@ -276,6 +279,13 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     static func meta(_ profile: ResolvedAIConfig) -> String {
         [profile.cli.rawValue.capitalized, profile.model, profile.effort]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: AIModelLabel.separator)
+    }
+    /// メニューへ載せるプロンプトの1行。改行は空白にし、長ければ切る。空なら載せない。
+    static func promptLine(_ prompt: String, limit: Int = 48) -> String? {
+        let flat = prompt.split(whereSeparator: \.isNewline).joined(separator: " ")
+            .trimmingCharacters(in: .whitespaces)
+        guard !flat.isEmpty else { return nil }
+        return flat.count > limit ? String(flat.prefix(limit)) + "…" : flat
     }
     /// 閉じた宛先ポップアップに出ている1行。
     var destinationTitle: String { (destination.cell as? NSPopUpButtonCell)?.menuItem?.title ?? "" }
@@ -312,16 +322,13 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         interval.selectItem(withTag: draft.minutes)
         work.state = draft.workAllowed ? .on : .off
         final.state = draft.sendFinal ? .on : .off
-        refreshPrompt()
+        refreshPromptState()
         refreshDestinationTitle()
     }
-    private func refreshPrompt() {
-        let text = editor.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        promptLine.stringValue = text.isEmpty ? "毎回送る依頼を書いてください" : text.replacingOccurrences(of: "\n", with: " ")
-        promptLine.textColor = text.isEmpty ? Washi.muted : Washi.tentative
-        promptLine.toolTip = text.isEmpty ? nil : editor.string
-        // 依頼が空のままでは自動送信を始められない。録音そのものは止めない。
-        startButton.toolTip = selectedSlot != nil && text.isEmpty ? "依頼が空のため、自動送信は始めません" : nil
+    /// 依頼が空のままでは自動送信を始められない。録音そのものは止めず、理由はツールチップだけに出す。
+    private func refreshPromptState() {
+        let empty = editor.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        startButton.toolTip = selectedSlot != nil && empty ? "依頼が空のため、自動送信は始めません" : nil
     }
     private static func shortPath(_ url: URL) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -331,12 +338,12 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     // MARK: - 操作
 
     @objc private func diarizationChanged() {
-        applyDiarizationHint()
         if diarizeOn.state == .on { onDiarizationPreload?() }
     }
-    private func applyDiarizationHint() {
-        diarizeHint.stringValue = diarizeOn.state == .on ? "録音を始めると変えられません。"
-            : "録音を始めると変えられません。すべて「発言」として記録します。"
+    @objc private func exclusionChanged() { applyExclusionState() }
+    /// OFFのときはしきい値を薄墨にし、効いていないことを色で見せる。
+    private func applyExclusionState() {
+        exclusionText.textColor = exclusionSwitch.state == .on ? Washi.ink : Washi.muted
     }
     /// ポップアップで選び直したとき。表示中の宛先の下書きを先に保存する。
     @objc func destinationChanged() {
@@ -348,14 +355,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     @objc private func draftChanged() {
         if let slot = selectedSlot { drafts[slot] = currentDraft }
     }
-    @objc func toggleEditor() {
-        editorBox.isHidden.toggle()
-        promptRow.isHidden = !editorBox.isHidden
-        fit()
-        if !editorBox.isHidden { window.makeFirstResponder(editor) }
-    }
     func textDidChange(_ notification: Notification) {
-        editor.needsDisplay = true; draftChanged(); refreshPrompt()
+        editor.needsDisplay = true; draftChanged(); refreshPromptState()
     }
     @objc private func chooseMinutes() {
         let panel = NSOpenPanel()
@@ -372,11 +373,12 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         minutesBox.stringValue = path
         showMinutesHint(nil)
     }
-    /// パス欄の下の1行。指定が読めないときだけ理由へ差し替える。
-    /// URLスキームが読めない議事録を渡してきたときも、パス欄は触らずここだけを差し替える。
+    /// パス欄の下の1行。指定が読めないときだけ出し、普段は空ける。
+    /// URLスキームが読めない議事録を渡してきたときも、パス欄は触らずここだけを出す。
     func showMinutesHint(_ problem: String?) {
-        minutesHint.stringValue = problem ?? "開始と同時に、右のペインへ表示します。"
-        minutesHint.textColor = problem == nil ? Washi.muted : Washi.gold
+        minutesHint.stringValue = problem ?? ""
+        minutesHint.isHidden = problem == nil
+        fit()
     }
     /// パス欄の下にいま出ている1行。
     var minutesHintText: String { minutesHint.stringValue }
@@ -384,8 +386,10 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     /// 中身に合わせて高さを詰める。AI区画の畳み・プロンプトの展開で変わる。
     private func fit() {
         stack.layoutSubtreeIfNeeded()
-        window.setContentSize(NSSize(width: 504, height: ceil(stack.fittingSize.height)))
+        window.setContentSize(NSSize(width: Self.width, height: ceil(stack.fittingSize.height)))
     }
+    /// シートの幅。既定のウィンドウ(600pt)より広いが、議事録の絶対パスを縮めずに読めることを優先する。
+    static let width: CGFloat = 640
 
     func present(on parent: NSWindow) {
         parent.beginSheet(window)
@@ -405,7 +409,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
 
     /// 画面の値。開始できない入力があれば nil。
     var options: Options? {
-        var result = Options(diarizationEnabled: diarizeOn.state == .on)
+        var result = Options(diarizationEnabled: diarizeOn.state == .on, exclusionEnabled: exclusionSwitch.state == .on)
         if let path = minutesInput {
             guard (try? MinutesPath.validate(path)) != nil else { return nil }
             result.minutesPath = path
@@ -479,32 +483,5 @@ final class StartSheetPathBox: NSComboBox {
         guard let path = droppedPath(sender.draggingPasteboard) else { return false }
         onDrop?(path)
         return true
-    }
-}
-
-/// プロンプトの畳んだ1行。和紙の枡へ収め、押すものではないことを見せる。
-final class StartSheetPromptLine: NSTextField {
-    private final class InsetCell: NSTextFieldCell {
-        override func drawingRect(forBounds rect: NSRect) -> NSRect {
-            super.drawingRect(forBounds: rect.insetBy(dx: 8, dy: 4))
-        }
-    }
-    init() {
-        super.init(frame: .zero)
-        cell = InsetCell(textCell: "")
-        isEditable = false; isSelectable = false; isBezeled = false; isBordered = false
-        drawsBackground = false
-        font = .systemFont(ofSize: 12)
-        textColor = Washi.tentative
-        lineBreakMode = .byTruncatingTail
-        wantsLayer = true
-        layer?.backgroundColor = Washi.shade.cgColor
-        layer?.cornerRadius = 5
-    }
-    required init?(coder: NSCoder) { fatalError() }
-    override var intrinsicContentSize: NSSize {
-        var size = super.intrinsicContentSize
-        size.width += 16; size.height += 8
-        return size
     }
 }

@@ -37,8 +37,20 @@ import KikigakiCore
         sheet.onStart = { started = $0 }
         #expect(sheet.destination.superview == nil)
         sheet.startPressed()
-        #expect(started == StartSheet.Options(diarizationEnabled: false))
+        #expect(started == StartSheet.Options(diarizationEnabled: false, exclusionEnabled: false))
+        // 説明文は置かない。読めない議事録の理由だけを出す。
+        #expect(sheet.minutesHintText.isEmpty)
         try capture("b-minimal", sheet)
+    }
+
+    @Test func 小音量除外はスイッチでON_OFFだけを決める() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let sheet = StartSheet(profiles: [], diarizationEnabled: true,
+                               exclusion: AudioExclusion(enabled: true, thresholdDBFS: -50))
+        #expect(sheet.exclusionSwitch.state == .on)
+        #expect(sheet.options?.exclusionEnabled == true)
+        sheet.exclusionSwitch.state = .off
+        #expect(sheet.options?.exclusionEnabled == false)
     }
 
     @Test func 既定の宛先はautoStartのプロファイルで閉じた行に型式を出す() throws {
@@ -91,21 +103,24 @@ import KikigakiCore
         #expect(sheet.options?.schedule == nil)
     }
 
-    @Test func プロンプトの編集はその場で開いて閉じる() throws {
+    @Test func プロンプトは畳まずそのまま書き換えられ宛先メニューにも先頭が並ぶ() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true, exclusion: AudioExclusion())
-        #expect(sheet.editorBox.isHidden)
-        #expect(sheet.promptLine.stringValue == "会議の決定事項と担当・期限をMarkdown議事録へ更新してください")
-        sheet.toggleEditor()
-        #expect(!sheet.editorBox.isHidden)
+        #expect(sheet.editor.string == "会議の決定事項と担当・期限をMarkdown議事録へ更新してください")
+        #expect(sheet.editor.enclosingScrollView?.frame.height ?? 0 >= StartSheet.promptHeight)
         sheet.editor.string = "決定事項だけ書いてください"
         sheet.textDidChange(Notification(name: NSText.didChangeNotification))
-        try capture("d-ai-expanded", sheet)
-        sheet.toggleEditor()
-        #expect(sheet.editorBox.isHidden)
-        #expect(sheet.promptLine.stringValue == "決定事項だけ書いてください")
+        try capture("d-ai-edited", sheet)
         #expect(sheet.options?.schedule?.prompt == "決定事項だけ書いてください")
+        // メニューの各行は名前・型式・プロンプトの3行。「送らない」だけ1行。
+        let items = try #require(sheet.destination.menu?.items)
+        #expect(items[0].title == "送らない" && items[0].attributedTitle == nil)
+        let lines = items[2].attributedTitle?.string.split(separator: "\n").map(String.init) ?? []
+        #expect(lines == ["議事録", "Codex · gpt-5.4 · high", "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"])
+        #expect(StartSheet.promptLine("一行目\n二行目") == "一行目 二行目")
+        #expect(StartSheet.promptLine("   ") == nil)
+        #expect(StartSheet.promptLine(String(repeating: "あ", count: 60)) == String(repeating: "あ", count: 48) + "…")
     }
 
     @Test func 議事録は履歴とドロップで指定し不正なパスでは開始しない() throws {
@@ -128,7 +143,7 @@ import KikigakiCore
         #expect(started?.minutesPath == "/work/dropped.md")
     }
 
-    @Test func 実ウィンドウへシートとして出し504ptに収める() throws {
+    @Test func 実ウィンドウへシートとして出し幅を固定する() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let suite = "StartSheetTests.\(UUID())"
@@ -140,11 +155,12 @@ import KikigakiCore
         let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true, exclusion: AudioExclusion())
         sheet.present(on: parent)
         #expect(parent.attachedSheet === sheet.window)
-        #expect(sheet.window.frame.width == 504)
-        // 畳み・展開で高さだけが変わる。幅は動かさない。
-        let collapsed = sheet.window.frame.height
-        sheet.toggleEditor()
-        #expect(sheet.window.frame.width == 504 && sheet.window.frame.height > collapsed)
+        #expect(sheet.window.frame.width == StartSheet.width)
+        // 「送らない」で詳細を畳むと高さだけが変わる。幅は動かさない。
+        let expanded = sheet.window.frame.height
+        sheet.destination.selectItem(withTag: 0)
+        sheet.destinationChanged()
+        #expect(sheet.window.frame.width == StartSheet.width && sheet.window.frame.height < expanded)
         sheet.close()
         #expect(parent.attachedSheet == nil)
     }
