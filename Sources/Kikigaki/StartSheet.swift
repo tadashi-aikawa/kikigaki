@@ -41,6 +41,9 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     let exclusionSwitch = NSSwitch()
     private let exclusionText = Washi.label(size: 13)
     let minutesBox = StartSheetPathBox()
+    let historyButton = NSButton()
+    /// 最近表示できた議事録。新しい順
+    private(set) var historyPaths: [String] = []
     /// 議事録の指定が読めないときだけ出す1行。説明文は置かない
     private let minutesHint = Washi.label(size: 11, color: Washi.gold)
     private let aiSection = NSStackView()
@@ -95,22 +98,27 @@ final class StartSheet: NSObject, NSTextViewDelegate {
 
         // 議事録。指定すると開始と同時に右のペインへ出す。
         add(separator(), to: rows)
-        minutesBox.completes = false
-        minutesBox.isButtonBordered = true
         minutesBox.font = .systemFont(ofSize: 12)
         minutesBox.placeholderString = "議事録の絶対パス"
         minutesBox.setAccessibilityLabel("議事録のパス")
-        minutesBox.addItems(withObjectValues: minutesHistory)
-        minutesBox.numberOfVisibleItems = 10
         minutesBox.stringValue = minutesPath ?? ""
         minutesBox.onDrop = { [weak self] path in self?.setMinutesPath(path) }
-        // 欄はボタンを除いた幅いっぱいに伸ばす。NSComboBoxの固有幅は中身で決まり、積極的には伸びない。
+        // 欄はボタンを除いた幅いっぱいに伸ばす。
         minutesBox.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         minutesBox.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        // 履歴はNSComboBoxの一覧ではなく自前のメニューで出す。一覧は1行に切り詰めるので、
+        // 長い絶対パスの肝心なファイル名から欠ける。ファイル名とディレクトリの2行にする。
+        historyPaths = minutesHistory
+        historyButton.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: "最近の議事録")
+        historyButton.bezelStyle = .rounded; historyButton.imagePosition = .imageOnly
+        historyButton.target = self; historyButton.action = #selector(showHistory)
+        historyButton.isEnabled = !minutesHistory.isEmpty
+        historyButton.setAccessibilityLabel("最近の議事録")
+        historyButton.setContentHuggingPriority(.required, for: .horizontal)
         let choose = NSButton(title: "ファイルを選ぶ…", target: self, action: #selector(chooseMinutes))
         choose.bezelStyle = .rounded
         choose.setContentHuggingPriority(.required, for: .horizontal)
-        let minutesRow = NSStackView(views: [minutesBox, choose])
+        let minutesRow = NSStackView(views: [minutesBox, historyButton, choose])
         minutesRow.orientation = .horizontal; minutesRow.spacing = 8; minutesRow.distribution = .fill
         minutesHint.isHidden = true
         add(row("議事録", column([minutesRow, minutesHint], spacing: 4)), to: rows)
@@ -330,9 +338,10 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         let empty = editor.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         startButton.toolTip = selectedSlot != nil && empty ? "依頼が空のため、自動送信は始めません" : nil
     }
-    private static func shortPath(_ url: URL) -> String {
+    private static func shortPath(_ url: URL) -> String { shortPath(url.path) }
+    static func shortPath(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return url.path.hasPrefix(home + "/") ? "~" + url.path.dropFirst(home.count) : url.path
+        return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
     }
 
     // MARK: - 操作
@@ -366,6 +375,30 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             guard response == .OK, let self, let url = panel.url else { return }
             self.setMinutesPath(url.path)
         }
+    }
+
+    /// 履歴のメニュー。1項目はファイル名(墨)とディレクトリ(薄墨)の2行で、`~` に縮めたパスを出す。
+    func historyMenu() -> NSMenu {
+        let menu = NSMenu()
+        for (index, path) in historyPaths.enumerated() {
+            let item = NSMenuItem(title: path, action: #selector(historyChosen(_:)), keyEquivalent: "")
+            item.target = self; item.tag = index; item.toolTip = path
+            let title = NSMutableAttributedString(string: (path as NSString).lastPathComponent,
+                attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)])
+            title.append(NSAttributedString(string: "\n" + Self.shortPath((path as NSString).deletingLastPathComponent),
+                attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]))
+            item.attributedTitle = title
+            menu.addItem(item)
+        }
+        return menu
+    }
+    @objc private func showHistory() {
+        let menu = historyMenu()
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: historyButton.bounds.height + 4), in: historyButton)
+    }
+    @objc private func historyChosen(_ sender: NSMenuItem) {
+        guard historyPaths.indices.contains(sender.tag) else { return }
+        setMinutesPath(historyPaths[sender.tag])
     }
 
     /// URLスキームやドロップから、開いている最中に議事録を差し替える入口。
@@ -457,8 +490,8 @@ final class StartSheetWindow: AIQuestionWindow {
     }
 }
 
-/// 履歴付きの議事録パス欄。`.md` のファイルをドロップしても指定できる。
-final class StartSheetPathBox: NSComboBox {
+/// 議事録パス欄。`.md` のファイルをドロップしても指定できる。履歴は隣のボタンのメニューから選ぶ。
+final class StartSheetPathBox: NSTextField {
     var onDrop: ((String) -> Void)?
     /// 変換中のEnterで開始しないための確認。
     var hasMarkedTextForStart: Bool { (currentEditor() as? NSTextView)?.hasMarkedText() == true }

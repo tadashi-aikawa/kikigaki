@@ -48,6 +48,15 @@ import KikigakiCore
         let next = MeetingSession(config: config, models: { throw CancellationError() }, log: { _ in }, diarizationDefaults: defaults)
         #expect(next.snapshot.audioExclusion.thresholdDBFS == -70 && next.snapshot.audioExclusion.enabled)
     }
+    @Test func 除外がOFFのあいだはスライダーとしきい値を畳む() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let popover = SpeakerSettingsPopover(snapshot: SessionSnapshot(state: .recording))
+        #expect(popover.exclusionSlider.isHidden && popover.exclusionValue.isHidden)
+        popover.exclusionSwitch.state = .on
+        popover.exclusionSwitch.sendAction(try #require(popover.exclusionSwitch.action), to: popover.exclusionSwitch.target)
+        #expect(!popover.exclusionSlider.isHidden && popover.exclusionValue.stringValue == "-45 dBFS未満を除外")
+        popover.close()
+    }
     @Test func スライダーの操作値を更新で巻き戻さず閉じると一度だけ反映する() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let snapshot = SessionSnapshot(state: .recording)

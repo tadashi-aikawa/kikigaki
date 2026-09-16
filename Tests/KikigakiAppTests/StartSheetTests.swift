@@ -127,7 +127,12 @@ import KikigakiCore
         NSApplication.shared.setActivationPolicy(.prohibited)
         let sheet = StartSheet(profiles: [], diarizationEnabled: true, exclusion: AudioExclusion(),
                                minutesHistory: ["/work/a.md", "/work/b.md"])
-        #expect(sheet.minutesBox.objectValues as? [String] == ["/work/a.md", "/work/b.md"])
+        #expect(sheet.historyPaths == ["/work/a.md", "/work/b.md"])
+        // 履歴のメニューはファイル名とディレクトリの2行。長いパスでもファイル名から欠けない。
+        let items = sheet.historyMenu().items
+        #expect(items.map(\.toolTip) == ["/work/a.md", "/work/b.md"])
+        #expect(items[0].attributedTitle?.string == "a.md\n/work")
+        #expect(sheet.historyButton.isEnabled)
         var started: StartSheet.Options?
         sheet.onStart = { started = $0 }
         sheet.minutesBox.stringValue = "relative.txt"

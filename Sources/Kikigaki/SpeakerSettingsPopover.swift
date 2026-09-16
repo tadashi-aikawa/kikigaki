@@ -9,7 +9,7 @@ final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
     var onAudioExclusionChange: ((AudioExclusion) -> Void)?
     let exclusionSwitch = NSSwitch()
     let exclusionSlider = NSSlider(value: -45, minValue: -80, maxValue: -20, target: nil, action: nil)
-    private let exclusionValue = Washi.label(size: 11)
+    let exclusionValue = Washi.label(size: 11)
     private var pendingExclusion: AudioExclusion?
     private var exclusionTimer: Timer?
     private let popover = NSPopover()
@@ -71,13 +71,9 @@ final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
         exclusionSlider.isContinuous = true
         exclusionSlider.widthAnchor.constraint(equalToConstant: 384).isActive = true
         exclusionSlider.setAccessibilityLabel("除外する音量のしきい値 dBFS")
+        // 説明文は置かない。OFFのときはしきい値の操作も畳み、効いていないものを並べない。
         stack.addArrangedSubview(exclusionSlider)
         stack.addArrangedSubview(exclusionValue)
-        let exclusionHint = NSTextField(wrappingLabelWithString:
-            "左ほど声を残し、右ほど除外します。薄い行はコピー・AI送信から除きます。\nOFFやしきい値の引き下げで復元できます。変更は次回も記憶します。\nマイク・入力音量を変えたら再調整してください。遠くの大声は区別できません。")
-        exclusionHint.font = .systemFont(ofSize: 11); exclusionHint.textColor = Washi.muted
-        exclusionHint.widthAnchor.constraint(equalToConstant: 384).isActive = true
-        stack.addArrangedSubview(exclusionHint)
         let controller = NSViewController()
         controller.view = content
         popover.contentViewController = controller
@@ -94,6 +90,7 @@ final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
         guard snapshot.canChangeAudioExclusion else { return }
         pendingExclusion = AudioExclusion(enabled: exclusionSwitch.state == .on, thresholdDBFS: exclusionSlider.doubleValue.rounded())
         refreshExclusionControls()
+        resize()
         exclusionTimer?.invalidate()
         let timer = Timer(timeInterval: 0.15, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.flushExclusion() }
@@ -114,8 +111,9 @@ final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
         exclusionSlider.doubleValue = value.thresholdDBFS
         exclusionSwitch.isEnabled = snapshot.canChangeAudioExclusion
         exclusionSlider.isEnabled = snapshot.canChangeAudioExclusion
-        exclusionValue.stringValue = String(format: "%.0f dBFS未満 · %@", value.thresholdDBFS,
-            value.enabled ? "除外ON" : "除外OFF・全発話を含む")
+        exclusionSlider.isHidden = !value.enabled
+        exclusionValue.isHidden = !value.enabled
+        exclusionValue.stringValue = String(format: "%.0f dBFS未満を除外", value.thresholdDBFS)
     }
 
     func update(snapshot: SessionSnapshot) {
@@ -165,12 +163,16 @@ final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
             row.choice.selectItem(withTag: target == slot ? -1 : target ?? -1)
             row.choice.toolTip = row.choice.selectedItem?.title
         }
+        resize()
+        if resumed { flushExclusion() }
+    }
+    /// 中身に合わせて高さを詰める。除外のON/OFFでスライダーが畳まれると変わる。
+    private func resize() {
         contentView.layoutSubtreeIfNeeded()
         let size = NSSize(width: 420, height: ceil(stack.fittingSize.height) + 36)
         popover.contentSize = size
         contentView.setFrameSize(size)
         contentView.layoutSubtreeIfNeeded()
-        if resumed { flushExclusion() }
     }
 
     @objc private func mappingChanged(_ sender: NSPopUpButton) {
