@@ -314,8 +314,9 @@ final class MeetingSession {
                 throw NSError(domain: "kikigaki", code: 3, userInfo: [NSLocalizedDescriptionKey: "マイクの使用が許可されていない。システム設定 > プライバシーとセキュリティ > マイク で KIKIGAKI を許可する"])
             }
             let loaded = diarizationEnabled ? try await models() : nil
-            let onResult: ((TranscriptMerge.Snapshot) async -> Void)? = diarizationEnabled ? nil : { [weak self] value in
-                await self?.publishUndiarized(value, generation: preparation)
+            // 反映はMainActorの同期処理。閉包の隔離を明示し、待つものが無い `await` を書かない。
+            let onResult: ((TranscriptMerge.Snapshot) async -> Void)? = diarizationEnabled ? nil : { @MainActor [weak self] value in
+                self?.publishUndiarized(value, generation: preparation)
             }
             let transcriber = try await AppleTranscriber(log: log, usesFastResults: true, onResult: onResult)
             let diarizer = loaded.map { SpeakerDiarizer(models: $0) }
