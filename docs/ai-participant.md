@@ -456,7 +456,9 @@ make-appはhelperをContents/Helpersへ同梱して先に署名し、親.appの�
 
 配布用Skillの場所は起動引数では渡さない。CLI側にセッション限定の置き場指定が無いか、あっても片方にしか無いためである。CodexにはSkillの置き場を差し替える設定が無く、Claude Codeの `--plugin-dir` はKIKIGAKIが起こしたセッションにしか効かない。手動コピーの貼り付け先や、利用者が自分で起こした準備済みペインには届かない。
 
-そのため `Contents/Resources/skills/kikigaki` を `.app` へ同梱し、Caskが `~/.claude/skills/kikigaki` と `~/.codex/skills/kikigaki` へリンクする。同名のファイルがあれば触らず警告だけ出す。cloneしたリポジトリへリンクを張って開発している利用者の編集対象を奪わないためである。`brew uninstall` で外すのは、参照先が今の `.app` を指すリンクだけとする。
+そのため `Contents/Resources/skills/kikigaki` を `.app` へ同梱し、利用者が同梱CLIの `kikigaki-cli skill install` で `~/.claude/skills/kikigaki` と `~/.codex/skills/kikigaki` へリンクする。同名のファイルがあれば触らない。cloneしたリポジトリへリンクを張って開発している利用者の編集対象を奪わないためである。`skill uninstall` で外すのは、参照先が `KIKIGAKI.app/Contents/Resources/skills/kikigaki` で終わるリンクだけとする。
+
+当初はCaskの `postflight_steps` でリンクを張ったが、Homebrew 7はこの手順をHOMEを一時ディレクトリへ差し替えたsandboxで走らせる。`~` で書いたリンクは一時ディレクトリへ作られて消え、HOME基準へ直しても `~/.claude` の読み取りがsandboxで禁じられているため導入が失敗した。Caskはリンクに関与せず、caveatsでコマンドを案内する。
 
 段5では全225テスト、Skill検証器、シェル構文検査を確認した。空白を含む隔離.appと `CODESIGN_IDENTITY=none` のmake-appによるbundleの両方で、ad-hoc署名と同梱helperの別プロセス返送が成功した。kikigaki-dev証明書での署名はKeychain待ちとなったため、本人の実機検分へ引き継ぐ。実CLI両種でのSkill発動・承認・往復と配布署名の検分は段6で行う。
 

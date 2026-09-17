@@ -27,45 +27,24 @@ cask "kikigaki" do
 
   app "KIKIGAKI.app"
 
-  # AI参加者用 Skill のリンク先。Claude Code は ~/.claude/skills、Codex は
-  # ~/.codex/skills を読む。どちらも起動引数でセッション限定の置き場を指定できないため、
-  # KIKIGAKI からは渡せず、この共通の置き場へ導入する。
-  # 実体は .app の中を指すので、brew upgrade でリンクを張り直さなくても更新が届く。
-  skill_homes = ["~/.claude/skills/kikigaki", "~/.codex/skills/kikigaki"].freeze
-
   # 自己署名(未公証)のため quarantine を外さないと Gatekeeper にブロックされる。
   # 公式 tap では禁止されている手法だが、自前 tap なので postflight_steps で除去する。
   postflight_steps do
     run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/KIKIGAKI.app"]
-
-    skill_source = "{{appdir}}/KIKIGAKI.app/Contents/Resources/skills/kikigaki"
-    skill_homes.each do |home|
-      # 参照先が .app 内の同梱 Skill なら自分が張ったリンクなので、掃除して張り直す。
-      remove home, symlink_target_contains: "KIKIGAKI.app/Contents/Resources/skills/kikigaki"
-
-      # 利用者が clone したリポジトリへ張ったリンクや自前の Skill がある場合は触らない。
-      # 黙って奪うと、編集していた側の変更が以後まったく効かなくなるため。
-      if_path_exists home do
-        warn "#{home} が既にあるため、同梱 Skill へのリンクは張りませんでした。" \\
-             "同梱版を使う場合は削除してから brew reinstall --cask kikigaki を実行してください。"
-      end
-      unless_path_exists home do
-        # remove_on_uninstall はアンインストール時、自分が張ったリンク
-        # (readlink が一致するもの)だけ外す。利用者が置いた実体や別のリンクは残す。
-        symlink skill_source, home, remove_on_uninstall: true
-      end
-    end
   end
 
+  # AI参加者用 Skill のリンクは Cask では張らない。postflight_steps は HOME を差し替えた
+  # sandbox で走り、~/.claude の読み取りも禁じられるため、Claude Code 側へ届かない。
+  # 利用者の権限で動く同梱 CLI の skill install に任せ、ここでは案内だけする。
   caveats <<~EOS
     KIKIGAKI は自己署名(未公証)アプリです。
     初回起動がブロックされた場合は以下で許可してください:
     システム設定 → プライバシーとセキュリティ → 「このまま開く」
 
-    会議へ AI を参加させる Skill は次の場所へリンクしました。
-    既に同名のファイルがある場合は、上書きせず警告だけを出しています。
-      ~/.claude/skills/kikigaki (Claude Code)
-      ~/.codex/skills/kikigaki (Codex)
+    会議へ AI を参加させる場合は、同梱の Skill を次のコマンドで導入してください。
+    ~/.claude/skills/kikigaki と ~/.codex/skills/kikigaki へリンクします。
+    既に同名のファイルがある場合は触りません。一度実行すれば brew upgrade 後も更新が届きます。
+      "#{appdir}/KIKIGAKI.app/Contents/Helpers/kikigaki-cli" skill install
   EOS
 end
 EOF

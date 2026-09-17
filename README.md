@@ -131,11 +131,15 @@ AIへ会話を渡す手順は [AIへの受け渡し](docs/ai-handoff.md)、そ�
 
 ### 会議へAIを参加させる
 
-herdrとCodexまたはClaude Codeを導入します。AIが会話を受け取るための [kikigaki Skill](skills/kikigaki/SKILL.md) はアプリに同梱してあり、Homebrewでの導入時に `~/.claude/skills/kikigaki` と `~/.codex/skills/kikigaki` へリンクします。リポジトリをcloneして自分でリンクを張る必要はありません。
+herdrとCodexまたはClaude Codeを導入します。AIが会話を受け取るための [kikigaki Skill](skills/kikigaki/SKILL.md) はアプリに同梱してあります。次のコマンドで `~/.claude/skills/kikigaki` と `~/.codex/skills/kikigaki` へリンクしてください。一度実行すれば、`brew upgrade` 後も新しいSkillが届きます。
 
-- 同名のファイルが既にある場合は上書きせず、導入時に警告だけを出します。自分で置いたSkillをそのまま使い続けられます
-- 同梱版へ切り替えるときは、そのファイルを消してから `brew reinstall --cask kikigaki` を実行してください
-- `brew uninstall --cask kikigaki` では、KIKIGAKI.appを指すリンクだけを外します
+```bash
+/Applications/KIKIGAKI.app/Contents/Helpers/kikigaki-cli skill install
+```
+
+- 同名のファイルが既にある場合は上書きしません。自分で置いたSkillをそのまま使い続けられます
+- 同梱版へ切り替えるときは、そのファイルを消してから再実行してください
+- 外すときは `skill uninstall` を実行します。KIKIGAKI.appを指すリンクだけを外し、`brew uninstall --cask kikigaki` では外れません
 
 設定へ次を追加すると、次の会議から「AIへ…」が使えます。`[ai]` を省略した場合は無効です。
 

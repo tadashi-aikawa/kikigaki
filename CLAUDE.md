@@ -28,7 +28,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
   - `TranscriptWindow.swift` / `StatusItem.swift` / `AppDelegate.swift`
 - `Tests/KikigakiCoreTests/`: ユニットテスト (swift-testing)
 - `Resources/`: アプリバンドル用の Info.plist (マイク使用の説明文 `NSMicrophoneUsageDescription`・URLスキームの `CFBundleURLTypes` を含む)
-- `skills/kikigaki/`: AI参加者用の配布Skill。`.app` へ同梱し、Cask が利用者のSkill置き場へリンクする
+- `skills/kikigaki/`: AI参加者用の配布Skill。`.app` へ同梱し、同梱CLIの `skill install` が利用者のSkill置き場へリンクする
 - `scripts/`: アプリバンドル組み立て (`make-app.sh`)・リリース成果物 (`build_release.sh`)・Cask 本文の書き出し (`render_cask.sh`)・Homebrew tap 更新 (`update_tap.sh`)
 
 設計上の前提と判断の理由は各ファイルのコメントに書いてあります (プロトで反証された仮定を含む)。変える前に読んでください。
@@ -145,7 +145,7 @@ Claudeの同梱CLI限定allowは変えず、cwd外の編集は設定により承
 
 `measureAudioLevels = true` は次の会議から音量の計測を有効にします。行にdBFSと小音量候補を表示し、停止時に `.levels.json` とMarkdown末尾の計測表を保存します。WAV保存とは独立し、本文・コピー・AI送信には全発話を含めます。詳細は [小音量発話の計測](docs/audio-levels.md) を参照してください。
 
-会議中・停止後の「会話をコピー」は、固定したローカル会話ファイルへの参照と読む範囲をコピーします。AI側の `skills/kikigaki` は `brew install --cask` が導入するため、利用者がリポジトリをcloneしてリンクを張る必要はありません。続きのコピー、訂正、再コピーの契約は [AIへの受け渡し](docs/ai-handoff.md) を参照してください。話者名はウィンドウ上部の「話者名…」でまとめて変更できます。
+会議中・停止後の「会話をコピー」は、固定したローカル会話ファイルへの参照と読む範囲をコピーします。AI側の `skills/kikigaki` は `.app` に同梱してあり、同梱CLIの `skill install` で導入するため、利用者がリポジトリをcloneしてリンクを張る必要はありません。続きのコピー、訂正、再コピーの契約は [AIへの受け渡し](docs/ai-handoff.md) を参照してください。話者名はウィンドウ上部の「話者名…」でまとめて変更できます。
 
 `[ai]` を設定すると、herdrの専用ペインへ依頼や返答を送り、返事を同じ会議へ回収できます。既定はCodex・宛名「迅雷へ」・通知音なし。CLI種別や設定は会議開始時に固定し、変更は次の会議から反映します。初回は固定cwdへの信頼を利用者がherdrペインで承認します。CLIとherdrの実行ファイルはPATHのほか `~/.local/bin`・miseのshims・Homebrewを探し、見つからないときは `command` / `herdrCommand` の絶対パスで指定します。詳細は次の2つを参照してください。
 
@@ -160,14 +160,15 @@ Claudeの同梱CLI限定allowは変えず、cwd外の編集は設定により承
 
 - `KikigakiCore`: AI設定、独立stream履歴、envelope、質問と受信イベント、Markdown。herdr・AppKit・Processを置かない
 - `KikigakiAIIO`: アプリと返送CLIが共有するfd検証、原子的な保存、sessionとフック観測の型
-- `KikigakiCLI`: `accept`・`reply`・`notify`・`minutes`。reply本文はstdinから読み、固定requestの受信箱へ排他公開する。minutesは議事録の絶対パスを独立イベントとして同じ検証で保存する。会議Markdownへ直接書かない
+- `KikigakiCLI`: `accept`・`reply`・`notify`・`minutes`・`skill`。reply本文はstdinから読み、固定requestの受信箱へ排他公開する。minutesは議事録の絶対パスを独立イベントとして同じ検証で保存する。会議Markdownへ直接書かない。`skill install|uninstall` は利用者が端末で打つ配布Skillの導入口
 - `scripts/make-app.sh`: `Contents/Helpers/kikigaki-cli` と `Contents/Resources/skills/kikigaki` を同梱し、helperを先に署名してから.appを署名する。配布ZIPでもhelperとSkillの存在、helperの署名を検証する
 - `scripts/render_cask.sh`: Cask本文を標準出力へ書く。`update_tap.sh` はそれをtapへ置くだけにして、pushせずに `brew audit --cask` や手元tapでの導入・削除を試せるようにする
 
-配布Skillの導入はCaskが行い、同梱先 `Contents/Resources/skills/kikigaki` へのシンボリックリンクを `~/.claude/skills/kikigaki` と `~/.codex/skills/kikigaki` に張ります。リンクなので `brew upgrade` で `.app` を入れ替えるだけでSkillも新しくなります。
+配布Skillの導入は、利用者が同梱CLIの `kikigaki-cli skill install` を実行して行います。同梱先 `Contents/Resources/skills/kikigaki` へのシンボリックリンクを `~/.claude/skills/kikigaki` と `~/.codex/skills/kikigaki` に張ります。リンクなので `brew upgrade` で `.app` を入れ替えるだけでSkillも新しくなります。
 
-- 同名のファイルが既にあるときは触らず警告だけ出します。cloneしたリポジトリへリンクを張って開発している利用者から、編集中のSkillを黙って奪わないためです。同梱版へ切り替えるときは自分で消してから `brew reinstall --cask kikigaki` を実行します
-- `brew uninstall` で外すのは、参照先が今の `.app` を指すリンクだけです
+- Caskはリンクに一切関与せず、caveatsで上のコマンドを案内するだけです。Homebrew 7の `postflight_steps` はHOMEを一時ディレクトリへ差し替えたsandboxで走り、`~/.claude` の読み取りも禁じるため、Claude Code側へ張れません
+- 同名のファイルが既にあるときは触らず、その旨を出力します。cloneしたリポジトリへリンクを張って開発している利用者から、編集中のSkillを黙って奪わないためです。同梱版へ切り替えるときは自分で消してから再実行します
+- 参照先が `KIKIGAKI.app/Contents/Resources/skills/kikigaki` で終わるリンクだけを自分のものとみなし、張り直しと `skill uninstall` での削除の対象にします。`brew uninstall` ではリンクは外れません
 - Claude Codeの `--plugin-dir` のような起動時の指定は使いません。Codexには同種の指定がなく、手動コピーで貼り付ける相手や利用者が自分で起こしたペインにも届かないためです。利用者のSkill置き場へ入れるのが唯一の共通経路です
 
 Claudeのフック設定はセッション専用の `--settings` JSONへ生成し、同梱CLIの絶対パスだけをallowします。利用者のグローバルsettingsは編集しません。Codexのnotifyはセッション限定で差し替え、TOMLで読める配列を渡します。フックは回答の正本にせず、未返送の補助表示に留めます。
