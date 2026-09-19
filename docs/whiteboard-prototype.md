@@ -89,7 +89,7 @@ Mermaidは同じ内容でも書き方が変わると配置が変わる。会議�
 ````text
 議論のホワイトボードを描き直してください。議事録ではなく「いま何を話しているか」を1画面で見せる板です。経緯の記録ではなく現在地の可視化が目的です。
 
-書き先は `participant.minutes_path`。無ければ ~/Documents/boards/${yyyyMMdd_HHmmss}.md を作り、変数は録音開始の日時。既にある板は必ず読んでから書き換えます。
+書き先は `participant.minutes_path`。無ければ ~/Documents/KIKIGAKI/boards/${yyyyMMdd_HHmmss}.md を作り、変数は録音開始の日時。既にある板は必ず読んでから書き換えます。
 
 型はこの4ブロックと順序を必ず守ります。
 
@@ -187,6 +187,7 @@ autoPrompt = '''
 書き先は `cli` の権限の外に置かないほうが楽に回る。
 
 - Codexは保存先 `outputDir` が無条件に書き込み許可へ入るため、`~/Documents/KIKIGAKI/boards/` のように保存先の下へ置けば承認を挟まない。検証もこの形で通した
+    - `autoPrompt` の既定の書き先も `outputDir` の既定値 `~/Documents/KIKIGAKI` に合わせてある。保存先を変えているなら、`autoPrompt` の書き先もそこへ合わせる
 - Claudeはcwdの外の編集が承認待ちになり、herdrのペインでblockedとして見える。`cli = "claude"` にするなら、板の置き場を `cwd` の下にするか、ペインで一度承認する。`autoPrompt` の中身はCLIによらず同じ
 
 ## 検証結果
