@@ -131,7 +131,7 @@ Claudeの同梱CLI限定allowは変えず、cwd外の編集は設定により承
 
 画面の時刻も、発話・手入力・AIの行・送信の細い1行をすべて `HH:MM:SS` で表示します。
 
-本文下の1行入力欄から、録音中・一時停止中だけ⌘Enterで投稿できます。素のEnter・Shift+Enterでは投稿も改行もしません。固定名「手入力」は4話者とは別で、改名・統合・相槌省略の対象外です。IMEのEnterは変換確定を優先し、Escでは下書きを残します。手入力のURLはクリックで開け、名前と本文は検索対象です。
+本文下の複数行入力欄から、録音中・一時停止中だけ⌘Enterで投稿できます。Enter・Shift+Enterで改行し、長文は折り返して縦スクロールします。画面・archive・Markdownは改行を保持し、コピー・AI送信は1発話1行へまとめます。固定名「手入力」は4話者とは別で、改名・統合・相槌省略の対象外です。IMEのEnterは変換確定を優先し、Escでは下書きを残します。手入力のURLはクリックで開け、名前と本文は検索対象です。
 
 `MeetingSession.typedEntries` を音声処理から独立して保持し、`TranscriptEntries.merge` で音声位置順に併合します。typedは必須のpostedAtを持ち、画面・Markdown・AI文脈は `TranscriptRenderer.clock` で投稿日時を表示します。AI送信のtypedは最初のawaitより前に固定します。詳細は [手入力の設計](docs/typed-entry.md)。
 

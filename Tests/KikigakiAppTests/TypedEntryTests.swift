@@ -42,7 +42,7 @@ import KikigakiCore
         #expect(!session.submitTyped(" \n "))
         #expect(session.submitTyped(" https://example.com/meeting\n補足 "))
         let first = try #require(session.snapshot.utterances.first)
-        #expect(first.start == 2 && first.end == 2 && first.text == "https://example.com/meeting 補足")
+        #expect(first.start == 2 && first.end == 2 && first.text == "https://example.com/meeting\n補足")
         #expect(session.snapshot.elapsed == 0 && session.snapshot.contextEnd == 2)
         session.publishForTesting(tokens: [.init(text: "URL送ります", phraseId: 0, start: 0, end: 1)], speakers: [0], elapsed: 1)
         #expect(session.snapshot.utterances == [.init(speaker: 0, start: 0, end: 1, text: "URL送ります"), first])
@@ -66,7 +66,7 @@ import KikigakiCore
         #expect(session.snapshot.utterances == [first, paused])
         session.rename(slot: 0, to: "佐藤")
         let saved = try String(contentsOf: root.appendingPathComponent("meeting.md"), encoding: .utf8)
-        #expect(saved.contains("手入力: " + first.text) && saved.contains("手入力: 一時停止中"))
+        #expect(saved.contains("手入力: https://example.com/meeting  \n  補足") && saved.contains("手入力: 一時停止中"))
         #expect(await !session.start(source: NoAudio()))
         #expect(session.snapshot.utterances.isEmpty && !session.submitTyped("待機中"))
     }
@@ -78,7 +78,7 @@ import KikigakiCore
         let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"),
             config: try config(root), aiStore: store)
         session.togglePause()
-        #expect(session.submitTyped("送信前のURL"))
+        #expect(session.submitTyped("送信前のURL\n補足"))
         session.submitAI(question: "このURLを見て", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"))
         let task = try #require(session.submissionTaskForTesting)
         #expect(session.submitTyped("送信後のURL"))
@@ -87,7 +87,7 @@ import KikigakiCore
         #expect(first.state == .submitted)
         let file = URL(fileURLWithPath: first.request.envelope.transcriptPath)
         let text = try String(contentsOf: file, encoding: .utf8)
-        #expect(text.contains("手入力: 送信前のURL") && !text.contains("送信後のURL"))
+        #expect(text.contains("手入力: 送信前のURL 補足") && !text.contains("送信後のURL"))
         await session.stop()
     }
 
@@ -106,22 +106,24 @@ import KikigakiCore
         defer { pasteboard.releaseGlobally() }
         pasteboard.setString("https://example.com/a\r\n補足\u{2028}続き", forType: .string)
         #expect(editor.readSelection(from: pasteboard, type: .string))
-        #expect(editor.string == "https://example.com/a 補足 続き")
+        #expect(editor.string == "https://example.com/a\n補足\n続き")
         try enter(editor, modifiers: [])
         try enter(editor, modifiers: .shift)
         editor.insertNewline(nil)
         editor.insertLineBreak(nil)
-        #expect(posted.isEmpty && editor.string == "https://example.com/a 補足 続き")
-        #expect(editor.placeholder.contains("⌘Enterで投稿") && editor.toolTip == "⌘Enterで投稿")
+        #expect(posted.isEmpty && editor.string == "https://example.com/a\n補足\n続き\n\n\n\n")
+        #expect(editor.placeholder.contains("⌘Enterで投稿") && editor.toolTip == "Enterで改行、⌘Enterで投稿")
         try enter(editor)
         #expect(posted.count == 1 && editor.string.isEmpty)
         editor.setMarkedText("へんかん", selectedRange: NSRange(location: 4, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
         #expect(editor.hasMarkedText())
         try enter(editor, modifiers: [])
         #expect(posted.count == 1)
+        #expect(!editor.string.contains("\n"))
         editor.setMarkedText("へんかん", selectedRange: NSRange(location: 4, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
         try enter(editor)
         #expect(posted.count == 1)
+        #expect(!editor.string.contains("\n"))
         editor.unmarkText()
         try enter(editor)
         #expect(posted.count == 2 && editor.string.isEmpty)
@@ -192,8 +194,10 @@ import KikigakiCore
             let content = controller.window!.contentView!
             content.layoutSubtreeIfNeeded()
             #expect(abs(content.bounds.width - 600) < 1)
-            #expect(controller.typedEntry.bounds.height == 34)
-            #expect(controller.typedEntry.editor.frame.width >= controller.typedEntry.contentSize.width)
+            #expect(controller.typedEntry.bounds.height == 78)
+            let field = controller.typedEntry
+            #expect(field.editor.frame.width <= field.contentSize.width)
+            #expect(field.editor.frame.width >= field.contentSize.width - field.contentInsets.left - field.contentInsets.right)
             guard let output else { return }
             let view = content.superview!
             view.layoutSubtreeIfNeeded()
@@ -224,7 +228,7 @@ import KikigakiCore
         state.timeline = .init(startedAt: startedAt, pauses: [.init(audioTime: 105, duration: 180)])
         voices.append(.init(speaker: 1, start: 110, end: 115, text: "再開します。会場案内も確認できました。"))
         state.elapsed = 120
-        controller.typedEntry.editor.string = "案内文も後で確認する"
+        controller.typedEntry.editor.string = "案内文も後で確認する\n会場への経路\n持ち物の一覧"
         state.state = .idle; refresh()
         let meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: 120, utterances: state.utterances,
             names: state.names, pauses: state.timeline.pauses)
@@ -241,7 +245,7 @@ import KikigakiCore
             #expect(text.contains("手入力: https://example.com/workshop") && text.contains("手入力: 会場案内:"))
             if let output { try text.write(to: output.appendingPathComponent(file.lastPathComponent), atomically: true, encoding: .utf8) }
         }
-        // 狭い高さ・長いURLでも入力欄は一行を保ち、会話本文の幅を押し広げない。
+        // 狭い高さ・長いURLでも折り返し、会話本文の幅を押し広げない。
         state.state = .recording; controller.apply(state)
         controller.typedEntry.editor.string = ""
         controller.window!.setContentSize(NSSize(width: 600, height: 460))
@@ -250,6 +254,13 @@ import KikigakiCore
         editor.scrollRangeToVisible(NSRange(location: editor.string.utf16.count, length: 0))
         try capture("long-url")
         #expect(!editor.string.contains("\n"))
+        #expect(editor.frame.height > controller.typedEntry.contentSize.height)
+        editor.string = ""
+        editor.insertText("会場の案内\nhttps://example.com/access\n持ち物を確認してください", replacementRange: NSRange(location: 0, length: 0))
+        try capture("multiline-draft")
+        try enter(editor)
+        #expect(entries.last?.text == "会場の案内\nhttps://example.com/access\n持ち物を確認してください")
+        try capture("multiline-posted")
     }
 
     @Test func 手入力の名前とURLを検索してもリンクと行の由来を保つ() throws {

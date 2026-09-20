@@ -47,9 +47,19 @@ import Testing
         #expect(throws: (any Error).self) { try JSONDecoder().decode(Utterance.self, from: Data(json.utf8)) }
     }
 
-    @Test func 入力を一行にして不正な投稿を保存しない() throws {
+    @Test func 保存時に手入力の行頭をMarkdown構造へ変えない() throws {
+        let entry = try typed("説明\n- 項目\n1. 手順\n> 引用\n# 見出し\n```\n続き")
+        let meeting = MeetingMarkdown.Meeting(startedAt: start, duration: 120, utterances: [entry], names: .init())
+        let archive = try JSONDecoder().decode(MeetingMarkdown.Meeting.self, from: JSONEncoder().encode(meeting))
+        #expect(archive.utterances[0].text == entry.text)
+        let markdown = MeetingMarkdown.render(archive)
+        #expect(markdown.contains("説明  \n  \\- 項目  \n  1\\. 手順  \n  \\> 引用  \n  \\# 見出し  \n  \\```  \n  続き"))
+    }
+
+    @Test func 改行を保持して不正な投稿を保存しない() throws {
         let entry = try typed("  https://example.com/a?q=1:2\r\n補足\u{2028}続き  ")
-        #expect(entry.text == "https://example.com/a?q=1:2 補足 続き")
+        #expect(entry.text == "https://example.com/a?q=1:2\n補足\n続き")
+        #expect(try JSONDecoder().decode(Utterance.self, from: JSONEncoder().encode(entry)) == entry)
         #expect(entry.kind == .typed && entry.speaker == nil && entry.start == entry.end)
         for text in [" \n\r\t", "本文\0"] {
             #expect(throws: Utterance.ValidationError.invalidTypedEntry) { try typed(text) }

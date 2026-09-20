@@ -11,11 +11,11 @@ public enum AIMarkdown {
     static func transcriptLines(_ meeting: MeetingMarkdown.Meeting, timeZone: TimeZone) -> [String] {
         // 既存の手動保存では発話順も含めて従来どおり。
         guard let ai = meeting.ai, !ai.questions.isEmpty else {
-            return meeting.utterances.map { "- " + TranscriptRenderer.line($0, names: meeting.names, timeline: meeting.timeline, timeZone: timeZone) }
+            return meeting.utterances.map { "- " + TranscriptRenderer.markdownLine($0, names: meeting.names, timeline: meeting.timeline, timeZone: timeZone) }
         }
         let lines = meeting.utterances.enumerated().map { index, utterance in
             Line(date: TranscriptRenderer.date(for: utterance, timeline: meeting.timeline), kind: 0, order: index,
-                 text: "- " + TranscriptRenderer.line(utterance, names: meeting.names, timeline: meeting.timeline, timeZone: timeZone))
+                 text: "- " + TranscriptRenderer.markdownLine(utterance, names: meeting.names, timeline: meeting.timeline, timeZone: timeZone))
         }
         var marks: [Line] = []
         var attached: [Int: [Line]] = [:]

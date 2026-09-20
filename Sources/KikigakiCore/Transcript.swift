@@ -68,8 +68,8 @@ public struct Utterance: Codable, Equatable, Sendable {
     }
 
     public static func normalizedTypedText(_ text: String) -> String {
-        text.replacingOccurrences(of: "\r\n", with: " ")
-            .components(separatedBy: .newlines).joined(separator: " ")
+        text.replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: .newlines).joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

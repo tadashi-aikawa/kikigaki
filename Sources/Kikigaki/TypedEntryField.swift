@@ -5,6 +5,7 @@ final class TypedEntryEditor: NSTextView {
     var onSubmit: (() -> Void)?
     var onFocusChange: ((Bool) -> Void)?
     var placeholder = "録音中に書き込めます"
+    private var confirmingMarkedText = false
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
         if accepted { onFocusChange?(true) }
@@ -25,13 +26,20 @@ final class TypedEntryEditor: NSTextView {
     override func keyDown(with event: NSEvent) {
         if (event.keyCode == 36 || event.keyCode == 76), !hasMarkedText() {
             let modifiers = event.modifierFlags.intersection([.command, .shift, .control, .option])
-            if isEditable && modifiers == .command { onSubmit?() }
-            return
+            if modifiers == .command {
+                if isEditable { onSubmit?() }
+                return
+            }
         }
+        confirmingMarkedText = hasMarkedText()
+        defer { confirmingMarkedText = false }
         super.keyDown(with: event)
     }
-    // 投稿は未確定文字のない⌘EnterのkeyDownだけ。IME確定後の改行命令も消費する。
-    override func insertNewline(_ sender: Any?) {}
+    // IMEの確定と同じキーイベントから出た改行命令だけを消費する。
+    override func insertNewline(_ sender: Any?) {
+        guard isEditable, !confirmingMarkedText, !hasMarkedText() else { return }
+        super.insertNewline(sender)
+    }
     override func insertLineBreak(_ sender: Any?) { insertNewline(sender) }
     override func paste(_ sender: Any?) {
         _ = readSelection(from: .general, type: .string)
@@ -43,8 +51,8 @@ final class TypedEntryEditor: NSTextView {
     }
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
         let text = (insertString as? NSAttributedString)?.string ?? (insertString as? String) ?? ""
-        // IMEの未確定領域には触らない。確定入力と貼り付けだけ改行を空白へ畳む。
-        let line = text.replacingOccurrences(of: "\r\n", with: " ").components(separatedBy: .newlines).joined(separator: " ")
+        // 改行の種類だけ統一し、貼り付けた段落を保持する。
+        let line = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: .newlines).joined(separator: "\n")
         super.insertText(line, replacementRange: replacementRange)
         needsDisplay = true
     }
@@ -58,7 +66,7 @@ private final class TypedEntryOutline: NSView {
     var color = Washi.rule.withAlphaComponent(0.4) { didSet { needsDisplay = true } }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func draw(_ dirtyRect: NSRect) {
-        // 横スクロールしても紙の余白と枠は動かさない。cacheDisplayでも同じ枠を描く。
+        // スクロールしても紙の余白と枠は動かさない。
         Washi.paper.setFill()
         NSRect(x: 0, y: 0, width: 2, height: bounds.height).fill()
         NSRect(x: bounds.width - 2, y: 0, width: 2, height: bounds.height).fill()
@@ -83,7 +91,8 @@ final class TypedEntryField: NSScrollView, NSTextViewDelegate {
         contentInsets = NSEdgeInsets(top: 0, left: 2, bottom: 0, right: 2)
         backgroundColor = Washi.paper
         drawsBackground = true
-        hasVerticalScroller = false; hasHorizontalScroller = false
+        hasVerticalScroller = true; hasHorizontalScroller = false
+        autohidesScrollers = true
         editor.font = .systemFont(ofSize: 14); editor.textColor = Washi.ink
         editor.backgroundColor = Washi.paper; editor.insertionPointColor = Washi.ink
         editor.isRichText = false; editor.importsGraphics = false
@@ -91,17 +100,17 @@ final class TypedEntryField: NSScrollView, NSTextViewDelegate {
         editor.isAutomaticQuoteSubstitutionEnabled = false
         editor.isAutomaticDashSubstitutionEnabled = false
         editor.isAutomaticTextReplacementEnabled = false
-        editor.isHorizontallyResizable = true; editor.isVerticallyResizable = false
-        editor.autoresizingMask = [.height]
-        editor.minSize = NSSize(width: 0, height: 32)
-        editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: 32)
+        editor.isHorizontallyResizable = false; editor.isVerticallyResizable = true
+        editor.autoresizingMask = [.width]
+        editor.minSize = NSSize(width: 0, height: 76)
+        editor.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         editor.textContainerInset = NSSize(width: 8, height: 6)
-        editor.textContainer?.widthTracksTextView = false
-        editor.textContainer?.heightTracksTextView = true
-        editor.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: 32)
+        editor.textContainer?.widthTracksTextView = true
+        editor.textContainer?.heightTracksTextView = false
+        editor.textContainer?.containerSize = NSSize(width: 524, height: CGFloat.greatestFiniteMagnitude)
         editor.delegate = self
         editor.setAccessibilityLabel("会話に書き込む")
-        editor.toolTip = "⌘Enterで投稿。録音中・一時停止中に使えます"
+        editor.toolTip = "Enterで改行、⌘Enterで投稿。録音中・一時停止中に使えます"
         editor.setAccessibilityHelp(editor.toolTip)
         editor.onSubmit = { [weak self] in
             guard let self, editor.isEditable, !editor.hasMarkedText(), onSubmit?(editor.string) == true else { return }
@@ -117,14 +126,16 @@ final class TypedEntryField: NSScrollView, NSTextViewDelegate {
         addSubview(outline)
         editor.onFocusChange = { [weak self] in self?.updateBorder(focused: $0) }
         updateBorder()
-        heightAnchor.constraint(equalToConstant: 34).isActive = true
+        heightAnchor.constraint(equalToConstant: 78).isActive = true
     }
     required init?(coder: NSCoder) { fatalError() }
     override func layout() {
         super.layout()
-        // 短い入力でも空白部分までクリックを受け、長いURLだけ横へ伸びる。
-        editor.minSize = NSSize(width: contentSize.width, height: 32)
-        if editor.frame.width < contentSize.width { editor.setFrameSize(NSSize(width: contentSize.width, height: 32)) }
+        // 幅に合わせて折り返し、長文は欄内で縦にスクロールする。
+        editor.minSize = NSSize(width: 0, height: contentSize.height)
+        if editor.frame.width != contentSize.width {
+            editor.setFrameSize(NSSize(width: contentSize.width, height: max(editor.frame.height, contentSize.height)))
+        }
         draftLabel.frame = NSRect(x: max(0, bounds.width - 48), y: 9, width: 42, height: 16)
         outline.frame = bounds
     }
@@ -135,7 +146,7 @@ final class TypedEntryField: NSScrollView, NSTextViewDelegate {
         editor.textColor = enabled ? Washi.ink : Washi.muted
         editor.backgroundColor = Washi.paper
         backgroundColor = editor.backgroundColor
-        editor.toolTip = enabled ? "⌘Enterで投稿" : "録音中・一時停止中に会話へ投稿できます"
+        editor.toolTip = enabled ? "Enterで改行、⌘Enterで投稿" : "録音中・一時停止中に会話へ投稿できます"
         editor.setAccessibilityHelp(editor.toolTip)
         editor.setAccessibilityEnabled(enabled)
         if !enabled, window?.firstResponder === editor { window?.makeFirstResponder(nil) }

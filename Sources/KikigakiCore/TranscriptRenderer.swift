@@ -15,6 +15,31 @@ public enum TranscriptRenderer {
         formattedLine(utterance, names: names, stamp: clock(for: utterance, timeline: timeline, seconds: true, timeZone: timeZone))
     }
 
+    /// 手入力の段落は同じ箇条書き項目の継続行として保存する。
+    /// AI・コピーは1発話1行の契約があるため、従来のlineを使う。
+    static func markdownLine(_ utterance: Utterance, names: SpeakerNames,
+                             timeline: MeetingTimeline, timeZone: TimeZone) -> String {
+        guard utterance.kind == .typed else {
+            return line(utterance, names: names, timeline: timeline, timeZone: timeZone)
+        }
+        let stamp = clock(for: utterance, timeline: timeline, timeZone: timeZone)
+        let lines = utterance.text.components(separatedBy: "\n")
+        let text = ([lines[0]] + lines.dropFirst().map(markdownContinuation)).joined(separator: "  \n  ")
+        return "[\(stamp)] \(names.displayName(for: utterance)): \(text)"
+    }
+
+    private static func markdownContinuation(_ line: String) -> String {
+        // プレーンテキストの行頭がリスト・引用・見出し・コードフェンスへ化けないようにする。
+        guard let first = line.firstIndex(where: { $0 != " " && $0 != "\t" }) else { return line }
+        var result = line
+        if "#>*+-=_`~[<!\\".contains(line[first]) {
+            result.insert("\\", at: first)
+        } else if let range = line.range(of: #"^[ \t]*[0-9]+[.)](?=[ \t])"#, options: .regularExpression) {
+            result.insert("\\", at: line.index(before: range.upperBound))
+        }
+        return result
+    }
+
     /// 並びの第一キーは音声位置だが、手入力の時計は実際の投稿日時で固定する。
     public static func date(for utterance: Utterance, timeline: MeetingTimeline) -> Date {
         if utterance.kind == .typed, let postedAt = utterance.postedAt { return postedAt }
