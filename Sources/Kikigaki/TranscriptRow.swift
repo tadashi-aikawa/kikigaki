@@ -93,6 +93,9 @@ final class TranscriptRow: NSView, DocumentRow {
     private var hasLevelNote: Bool { audioLevel != nil || excluded }
     private let body = NSTextField(wrappingLabelWithString: "")
     private let typedBody = TypedEntryBody()
+    private let imageStrip = TypedImageStrip()
+    private var displayedImagePaths: [String] = []
+    private var imagesHeight: CGFloat { displayedImagePaths.isEmpty ? 0 : 90 }
     private let speakerButton = SpeakerButton()
     var onRename: ((Int, NSView) -> Void)?
     private var utterance: Utterance?
@@ -134,7 +137,7 @@ final class TranscriptRow: NSView, DocumentRow {
         levelLabel.isHidden = true
         levelLabel.lineBreakMode = .byTruncatingTail
         typedBody.isHidden = true
-        for view in [avatar, nameLabel, timeLabel, levelLabel, body, typedBody] { content.addSubview(view) }
+        for view in [avatar, nameLabel, timeLabel, levelLabel, body, typedBody, imageStrip] { content.addSubview(view) }
         speakerButton.isBordered = false
         speakerButton.title = ""
         speakerButton.target = self
@@ -182,6 +185,11 @@ final class TranscriptRow: NSView, DocumentRow {
         avatar.initial = value.speaker.map { names.customName(for: $0) == nil ? SpeakerNames.letter(for: $0) : String(name.prefix(1)) } ?? "?"
         avatar.setAccessibilityLabel(name)
         avatar.needsDisplay = true
+        if displayedImagePaths != value.imagePaths {
+            displayedImagePaths = value.imagePaths
+            imageStrip.update(previews: value.imagePaths.map { TypedImageDraft.preview(at: $0) }, paths: value.imagePaths)
+            measuredWidth = -1
+        }
         setBody(value.text)
         return changed
     }
@@ -257,7 +265,7 @@ final class TranscriptRow: NSView, DocumentRow {
             // NSTextFieldの内側余白まで含めて測る。文字列だけのboundingRectでは
             // 折り返し境界の数pt差で最終行が切れるため、描画するセル自身に問い合わせる。
             let size = body.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: max(44, width - 74), height: .greatestFiniteMagnitude)) ?? .zero
-            measuredHeight = max(20, typedBody.isHidden ? ceil(size.height) : typedBody.height(for: max(44, width - 74))) + 36 + (hasLevelNote ? 20 : 0)
+            measuredHeight = max(20, typedBody.isHidden ? ceil(size.height) : typedBody.height(for: max(44, width - 74))) + 36 + (hasLevelNote ? 20 : 0) + imagesHeight
             measuredWidth = width
         }
         return measuredHeight
@@ -277,8 +285,9 @@ final class TranscriptRow: NSView, DocumentRow {
         speakerButton.frame = NSRect(x: 18, y: 5, width: nameWidth + 40, height: 29)
         timeLabel.frame = NSRect(x: 54 + nameWidth + 12, y: 8, width: 62, height: 18)
         let levelHeight: CGFloat = hasLevelNote ? 20 : 0
-        body.frame = NSRect(x: 54, y: 31, width: max(44, bounds.width - 74), height: max(20, bounds.height - 36 - levelHeight))
+        body.frame = NSRect(x: 54, y: 31, width: max(44, bounds.width - 74), height: max(20, bounds.height - 36 - levelHeight - imagesHeight))
         typedBody.frame = body.frame
+        imageStrip.frame = NSRect(x: 54, y: body.frame.maxY + 4, width: max(44, bounds.width - 74), height: 84)
         levelLabel.frame = NSRect(x: 54, y: bounds.height - 23, width: max(44, bounds.width - 74), height: 18)
     }
     func appear(animated: Bool) {

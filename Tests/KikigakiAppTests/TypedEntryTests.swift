@@ -101,7 +101,7 @@ import KikigakiCore
         controller.window?.makeFirstResponder(editor)
         var posted: [String] = []
         var accept = true
-        controller.onSubmitTyped = { text in posted.append(text); return accept }
+        controller.onSubmitTyped = { text, _ in posted.append(text); return accept }
         let pasteboard = NSPasteboard.withUniqueName()
         defer { pasteboard.releaseGlobally() }
         pasteboard.setString("https://example.com/a\r\n補足\u{2028}続き", forType: .string)
@@ -160,7 +160,7 @@ import KikigakiCore
         let document = try #require(descendants(controller.window!.contentView!).compactMap { $0 as? TranscriptDocument }.first)
         document.scroll(.zero)
         #expect(!document.anchor().atBottom && !document.followsBottom)
-        controller.onSubmitTyped = { text in
+        controller.onSubmitTyped = { text, _ in
             state.utterances.append(try! Utterance(typedText: text, at: 40, postedAt: Date()))
             controller.apply(state)
             return true
@@ -205,7 +205,7 @@ import KikigakiCore
             view.cacheDisplay(in: view.bounds, to: bitmap)
             try #require(bitmap.representation(using: .png, properties: [:])).write(to: output.appendingPathComponent(name + ".png"))
         }
-        controller.onSubmitTyped = { text in
+        controller.onSubmitTyped = { text, _ in
             guard state.canSubmitTyped, let entry = try? Utterance(typedText: text, at: state.elapsed,
                 postedAt: startedAt.addingTimeInterval(state.state == .paused ? 240 : state.elapsed)) else { return false }
             entries.append(entry); refresh(); return true

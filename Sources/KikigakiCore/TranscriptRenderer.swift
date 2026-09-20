@@ -24,7 +24,10 @@ public enum TranscriptRenderer {
         }
         let stamp = clock(for: utterance, timeline: timeline, timeZone: timeZone)
         let lines = utterance.text.components(separatedBy: "\n")
-        let text = ([lines[0]] + lines.dropFirst().map(markdownContinuation)).joined(separator: "  \n  ")
+        let images = utterance.imagePaths.enumerated().map { index, path in
+            "![画像\(index + 1)](<\(URL(fileURLWithPath: path).absoluteString)>)"
+        }
+        let text = ([lines[0]] + lines.dropFirst().map(markdownContinuation) + images).joined(separator: "  \n  ")
         return "[\(stamp)] \(names.displayName(for: utterance)): \(text)"
     }
 
@@ -56,7 +59,9 @@ public enum TranscriptRenderer {
             .replacingOccurrences(of: "\r\n", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
-        return "[\(stamp)] \(names.displayName(for: utterance)): \(text)"
+        let images = utterance.imagePaths.enumerated().map { "画像\($0.offset + 1): `\($0.element)`" }
+        let body = ([text] + images).filter { !$0.isEmpty }.joined(separator: " ")
+        return "[\(stamp)] \(names.displayName(for: utterance)): \(body)"
     }
 
     public static func lines(_ utterances: [Utterance], names: SpeakerNames,

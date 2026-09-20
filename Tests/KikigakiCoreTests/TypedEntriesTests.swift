@@ -56,6 +56,21 @@ import Testing
         #expect(markdown.contains("説明  \n  \\- 項目  \n  1\\. 手順  \n  \\> 引用  \n  \\# 見出し  \n  \\```  \n  続き"))
     }
 
+    @Test func 画像だけの投稿の互換とパスを検証する() throws {
+        let entry = try Utterance(typedText: "", at: 0, postedAt: start, imagePaths: ["/tmp/画像 1.png"])
+        #expect(try JSONDecoder().decode(Utterance.self, from: JSONEncoder().encode(entry)) == entry)
+        #expect(try typed().imagePaths.isEmpty)
+        for path in ["relative.png", "/tmp/改\n行.png", "/tmp/a`b.png", "/tmp/a\0.png"] {
+            #expect(throws: Utterance.ValidationError.invalidTypedEntry) {
+                try Utterance(typedText: "本文", at: 0, postedAt: start, imagePaths: [path])
+            }
+        }
+        let voiceWithImage = Data(#"{"kind":"voice","start":0,"end":1,"text":"声","imagePaths":["/tmp/a.png"]}"#.utf8)
+        #expect(throws: (any Error).self) { try JSONDecoder().decode(Utterance.self, from: voiceWithImage) }
+        let line = TranscriptRenderer.line(entry, names: .init(), timeline: timeline)
+        #expect(line.contains("画像1: `/tmp/画像 1.png`"))
+    }
+
     @Test func 改行を保持して不正な投稿を保存しない() throws {
         let entry = try typed("  https://example.com/a?q=1:2\r\n補足\u{2028}続き  ")
         #expect(entry.text == "https://example.com/a?q=1:2\n補足\n続き")

@@ -42,6 +42,8 @@ public struct Utterance: Codable, Equatable, Sendable {
     public let kind: Kind
     /// 声には日時を重ねて持たない。手入力は一時停止の境界でも投稿日時を変えない。
     public let postedAt: Date?
+    /// 投稿時に会議の保存先へコピーした画像。旧archiveでは省略される。
+    public let imagePaths: [String]
     /// voiceのnil = どの話者区間にも当たらなかった。typedは常にnil。
     public var speaker: Int?
     public var start: Double
@@ -51,18 +53,20 @@ public struct Utterance: Codable, Equatable, Sendable {
     public init(speaker: Int?, start: Double, end: Double, text: String) {
         kind = .voice
         postedAt = nil
+        imagePaths = []
         self.speaker = speaker
         self.start = start
         self.end = end
         self.text = text
     }
 
-    public init(typedText: String, at audioTime: Double, postedAt: Date) throws {
+    public init(typedText: String, at audioTime: Double, postedAt: Date, imagePaths: [String] = []) throws {
         kind = .typed
         speaker = nil
         start = audioTime
         end = audioTime
         self.postedAt = postedAt
+        self.imagePaths = imagePaths
         text = Self.normalizedTypedText(typedText)
         guard validTypedEntry else { throw ValidationError.invalidTypedEntry }
     }
@@ -76,32 +80,38 @@ public struct Utterance: Codable, Equatable, Sendable {
     private var validTypedEntry: Bool {
         speaker == nil && start.isFinite && start >= 0 && end == start
             && postedAt?.timeIntervalSinceReferenceDate.isFinite == true
-            && !text.isEmpty && !text.contains("\0") && text == Self.normalizedTypedText(text)
+            && (!text.isEmpty || !imagePaths.isEmpty) && !text.contains("\0") && text == Self.normalizedTypedText(text)
+            && imagePaths.allSatisfy { path in
+                path.hasPrefix("/") && !path.contains("`")
+                    && !path.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0) }
+            }
     }
 
-    private enum CodingKeys: String, CodingKey { case kind, postedAt, speaker, start, end, text }
+    private enum CodingKeys: String, CodingKey { case kind, postedAt, speaker, start, end, text, imagePaths }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         // kindだけを省略できる。未知のkindや欠損したtypedの投稿日時は音声へ読み替えない。
         kind = values.contains(.kind) ? try values.decode(Kind.self, forKey: .kind) : .voice
         postedAt = try values.decodeIfPresent(Date.self, forKey: .postedAt)
+        imagePaths = try values.decodeIfPresent([String].self, forKey: .imagePaths) ?? []
         speaker = try values.decodeIfPresent(Int.self, forKey: .speaker)
         start = try values.decode(Double.self, forKey: .start)
         end = try values.decode(Double.self, forKey: .end)
         text = try values.decode(String.self, forKey: .text)
-        guard kind == .typed ? validTypedEntry : postedAt == nil else {
+        guard kind == .typed ? validTypedEntry : postedAt == nil && imagePaths.isEmpty else {
             throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid utterance origin or postedAt"))
         }
     }
 
     public func encode(to encoder: Encoder) throws {
-        guard kind == .typed ? validTypedEntry : postedAt == nil else {
+        guard kind == .typed ? validTypedEntry : postedAt == nil && imagePaths.isEmpty else {
             throw EncodingError.invalidValue(self, .init(codingPath: encoder.codingPath, debugDescription: "Invalid utterance origin or postedAt"))
         }
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(kind, forKey: .kind)
         try values.encodeIfPresent(postedAt, forKey: .postedAt)
+        if !imagePaths.isEmpty { try values.encode(imagePaths, forKey: .imagePaths) }
         try values.encodeIfPresent(speaker, forKey: .speaker)
         try values.encode(start, forKey: .start)
         try values.encode(end, forKey: .end)

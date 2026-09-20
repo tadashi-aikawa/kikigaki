@@ -135,6 +135,8 @@ Claudeの同梱CLI限定allowは変えず、cwd外の編集は設定により承
 
 `MeetingSession.typedEntries` を音声処理から独立して保持し、`TranscriptEntries.merge` で音声位置順に併合します。typedは必須のpostedAtを持ち、画面・Markdown・AI文脈は `TranscriptRenderer.clock` で投稿日時を表示します。AI送信のtypedは最初のawaitより前に固定します。詳細は [手入力の設計](docs/typed-entry.md)。
 
+手入力欄への⌘Vで画像を添付できます。クリップボードの画像とコピーした画像ファイルを受け、番号付きサムネイルから取り外せます。画像だけの投稿も可能です。下書きはメモリに持ち、投稿時に会議Markdownの隣の `<会議名>.attachments/` へ保存します。`Utterance.imagePaths` は絶対パスの配列で、旧archiveでは省略可能です。Markdownには画像を埋め込み、コピー・AI文脈には `画像N: ` とパスを載せます。投稿済みの画像はサムネイルから開けます。
+
 同じ分に録音を始め直した場合、既存の保存物があれば `_2`、`_3` と連番を付けます。
 
 `dropRepeatedBackchannels = true` は、停止時に「うんうん」「そうそう」など短い反復の候補を省きます。録音中は省略せず、通常の `.md` と停止後の画面へ省略結果を反映し、省略前の書き起こしは同名の `.raw.md` に残します。話者名の変更は両方へ反映します。原文ファイルの保存に失敗した会議は、通常の `.md` と画面へ原文を残します。

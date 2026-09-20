@@ -520,10 +520,21 @@ final class MeetingSession {
 
     /// 投稿受付からemitまでawaitを挟まない。停止より先に受理した行は最終保存に含める。
     @discardableResult
-    func submitTyped(_ text: String) -> Bool {
-        guard snapshot.canSubmitTyped,
-              let entry = try? Utterance(typedText: text, at: pause.audioTime, postedAt: Date()) else { return false }
-        typedEntries.append(entry)
+    func submitTyped(_ text: String, images: [TypedImageDraft] = []) -> Bool {
+        guard snapshot.canSubmitTyped, let markdownURL = snapshot.markdownURL,
+              !text.contains("\0"), !Utterance.normalizedTypedText(text).isEmpty || !images.isEmpty else { return false }
+        let audioTime = pause.audioTime, postedAt = Date()
+        var paths: [String] = []
+        do {
+            paths = try TypedImageDraft.save(images, beside: markdownURL)
+            let entry = try Utterance(typedText: text, at: audioTime, postedAt: postedAt, imagePaths: paths)
+            typedEntries.append(entry)
+        } catch {
+            for path in paths { try? FileManager.default.removeItem(atPath: path) }
+            snapshot.message = "画像付きの投稿を保存できませんでした: \(error.localizedDescription)"
+            emit()
+            return false
+        }
         refreshLive()
         emit()
         return true

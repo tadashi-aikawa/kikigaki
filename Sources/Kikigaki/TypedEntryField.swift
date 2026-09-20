@@ -4,6 +4,7 @@ import AppKit
 final class TypedEntryEditor: NSTextView {
     var onSubmit: (() -> Void)?
     var onFocusChange: ((Bool) -> Void)?
+    var onPasteImages: ((NSPasteboard) -> Bool)?
     var placeholder = "録音中に書き込めます"
     private var confirmingMarkedText = false
     override func becomeFirstResponder() -> Bool {
@@ -42,7 +43,14 @@ final class TypedEntryEditor: NSTextView {
     }
     override func insertLineBreak(_ sender: Any?) { insertNewline(sender) }
     override func paste(_ sender: Any?) {
+        guard isEditable else { return }
+        if onPasteImages?(.general) == true { return }
         _ = readSelection(from: .general, type: .string)
+    }
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(paste(_:)), isEditable,
+           TypedImageDraft.canRead(.general) { return true }
+        return super.validateUserInterfaceItem(item)
     }
     override func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
         guard isEditable, let text = pboard.string(forType: .string) else { return false }
@@ -79,7 +87,10 @@ private final class TypedEntryOutline: NSView {
 
 final class TypedEntryField: NSScrollView, NSTextViewDelegate {
     let editor = TypedEntryEditor(frame: NSRect(x: 0, y: 0, width: 540, height: 32))
-    var onSubmit: ((String) -> Bool)?
+    var onSubmit: ((String, [TypedImageDraft]) -> Bool)?
+    private(set) var images: [TypedImageDraft] = []
+    let attachmentsView = TypedImageStrip()
+    let attachmentError = NSTextField(wrappingLabelWithString: "")
     private let draftLabel = NSTextField(labelWithString: "未投稿")
     private let outline = TypedEntryOutline()
     override init(frame: NSRect) {
@@ -113,9 +124,19 @@ final class TypedEntryField: NSScrollView, NSTextViewDelegate {
         editor.toolTip = "Enterで改行、⌘Enterで投稿。録音中・一時停止中に使えます"
         editor.setAccessibilityHelp(editor.toolTip)
         editor.onSubmit = { [weak self] in
-            guard let self, editor.isEditable, !editor.hasMarkedText(), onSubmit?(editor.string) == true else { return }
+            guard let self, editor.isEditable, !editor.hasMarkedText(), onSubmit?(editor.string, images) == true else { return }
             reset()
         }
+        editor.onPasteImages = { [weak self] in self?.pasteImages(from: $0) ?? false }
+        attachmentsView.heightAnchor.constraint(equalToConstant: 84).isActive = true
+        attachmentsView.onRemove = { [weak self] index in
+            guard let self, editor.isEditable, images.indices.contains(index) else { return }
+            images.remove(at: index)
+            refreshAttachments()
+        }
+        attachmentError.font = .systemFont(ofSize: 11)
+        attachmentError.textColor = Washi.red
+        attachmentError.isHidden = true
         documentView = editor
         draftLabel.font = .systemFont(ofSize: 11)
         draftLabel.textColor = Washi.muted
@@ -141,6 +162,7 @@ final class TypedEntryField: NSScrollView, NSTextViewDelegate {
     }
     func update(enabled: Bool, resetDraft: Bool) {
         if resetDraft { reset() }
+        let editableChanged = editor.isEditable != enabled
         editor.isEditable = enabled
         editor.isSelectable = enabled
         editor.textColor = enabled ? Washi.ink : Washi.muted
@@ -151,10 +173,28 @@ final class TypedEntryField: NSScrollView, NSTextViewDelegate {
         editor.setAccessibilityEnabled(enabled)
         if !enabled, window?.firstResponder === editor { window?.makeFirstResponder(nil) }
         editor.placeholder = enabled ? "会話に書き込む… · ⌘Enterで投稿" : "録音中に書き込めます"
-        draftLabel.isHidden = enabled || editor.string.isEmpty
+        draftLabel.isHidden = enabled || (editor.string.isEmpty && images.isEmpty)
         contentInsets.right = draftLabel.isHidden ? 2 : 50
         editor.needsDisplay = true
+        if editableChanged { refreshAttachments() }
         updateBorder()
+    }
+    @discardableResult
+    func pasteImages(from pasteboard: NSPasteboard) -> Bool {
+        guard editor.isEditable else { return false }
+        do {
+            guard let pasted = try TypedImageDraft.read(from: pasteboard) else { return false }
+            images.append(contentsOf: pasted)
+            attachmentError.isHidden = true
+            refreshAttachments()
+        } catch {
+            attachmentError.stringValue = error.localizedDescription
+            attachmentError.isHidden = false
+        }
+        return true
+    }
+    private func refreshAttachments() {
+        attachmentsView.update(previews: images.map(\.preview), removable: editor.isEditable)
     }
     private func updateBorder(focused: Bool? = nil) {
         let color = !editor.isEditable ? Washi.rule.withAlphaComponent(0.4)
@@ -164,6 +204,9 @@ final class TypedEntryField: NSScrollView, NSTextViewDelegate {
     private func reset() {
         editor.unmarkText()
         editor.string = ""
+        images = []
+        attachmentError.isHidden = true
+        refreshAttachments()
         editor.undoManager?.removeAllActions(withTarget: editor)
         editor.setSelectedRange(NSRange(location: 0, length: 0))
         contentView.scroll(to: .zero)

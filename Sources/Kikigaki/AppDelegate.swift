@@ -209,7 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let window = TranscriptWindowController()
         window.minutesSplit.preview.herdrCommand = { [weak self] in self?.config?.ai?.herdrCommand }
         window.onRename = { session.rename(slot: $0, to: $1) }
-        window.onSubmitTyped = { session.submitTyped($0) }
+        window.onSubmitTyped = { session.submitTyped($0, images: $1) }
         window.onSelectMinutes = { try session.selectMinutes($0) }
         window.onSpeakerMappingChange = { session.setSpeakerMapping(source: $0, target: $1) }
         window.onAudioExclusionChange = { value in session.setAudioExclusion(value) }

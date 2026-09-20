@@ -4,7 +4,7 @@ import KikigakiCore
 @MainActor
 final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegate, NSMenuItemValidation, NSWindowDelegate {
     var onRename: ((Int, String) -> Void)?
-    var onSubmitTyped: ((String) -> Bool)?
+    var onSubmitTyped: ((String, [TypedImageDraft]) -> Bool)?
     let typedEntry = TypedEntryField()
     var onStartStop: (() -> Void)?
     var onPauseResume: (() -> Void)?
@@ -456,12 +456,12 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         for view in [searchField, searchCount, searchPrevious, searchNext, close] { searchBar.addArrangedSubview(view) }
         Washi.surface(searchBar)
         searchBar.isHidden = true
-        typedEntry.onSubmit = { [weak self] text in
-            guard let self, onSubmitTyped?(text) == true else { return false }
+        typedEntry.onSubmit = { [weak self] text, images in
+            guard let self, onSubmitTyped?(text, images) == true else { return false }
             latestPressed()
             return true
         }
-        let entryArea = column([typedEntry], spacing: 0, inset: 12)
+        let entryArea = column([typedEntry, typedEntry.attachmentsView, typedEntry.attachmentError], spacing: 4, inset: 12)
         Washi.surface(entryArea, color: Washi.paper)
         return column([header, searchBar, separator(), body, entryArea, separator(), footer], spacing: 0, inset: 0)
     }
