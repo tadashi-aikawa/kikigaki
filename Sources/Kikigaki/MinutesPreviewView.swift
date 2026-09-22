@@ -168,6 +168,7 @@ private final class MinutesPathField: NSTextField {
         tabs.selectedSegment = 0; tabs.target = self; tabs.action = #selector(changeTab)
         tabs.selectedSegmentBezelColor = Washi.ai.background
         tabs.setAccessibilityLabel("議事録の表示タブ")
+        tabs.setContentCompressionResistancePriority(.required, for: .horizontal)
         tabBar.orientation = .horizontal; tabBar.edgeInsets = NSEdgeInsets(top: 8, left: 24, bottom: 8, right: 24)
         tabBar.addArrangedSubview(tabs); tabBar.addArrangedSubview(NSView()); tabBar.isHidden = true
         boardDocument.isHidden = true
@@ -375,6 +376,8 @@ private final class MinutesPathField: NSTextField {
     private func renderBody(reset: Bool) {
         guard let body else { return }
         let parts = boardHeading.map { BoardSection.split(body, heading: $0) }
+        tabs.setLabel(parts?.updatedTime.map { "ボード \($0)" } ?? "ボード", forSegment: 1)
+        tabs.setWidth(0, forSegment: 1)
         tabBar.isHidden = parts?.board == nil
         if tabBar.isHidden { selectedBoard = false; tabs.selectedSegment = 0 }
         let minutes = parts?.minutes ?? body, board = parts?.board

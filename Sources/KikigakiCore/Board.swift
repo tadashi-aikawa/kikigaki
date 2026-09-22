@@ -15,8 +15,13 @@ public enum BoardHeading {
     /// Swiftの文字単位の前方一致で正規等価性を保ち、時刻以外の接尾辞は許さない。
     public static func matches(_ line: String, heading: String) -> Bool {
         guard line.hasPrefix(heading) else { return false }
+        return line == heading || updateTime(line, heading: heading) != nil
+    }
+    public static func updateTime(_ line: String, heading: String) -> String? {
+        guard line.hasPrefix(heading) else { return nil }
         let suffix = String(line.dropFirst(heading.count))
-        return suffix.isEmpty || suffix.range(of: #"\A\((?:[01][0-9]|2[0-3]):[0-5][0-9] 更新\)\z"#, options: .regularExpression) != nil
+        guard suffix.range(of: #"\A\((?:[01][0-9]|2[0-3]):[0-5][0-9] 更新\)\z"#, options: .regularExpression) != nil else { return nil }
+        return String(suffix.dropFirst().prefix(5))
     }
 }
 
@@ -26,6 +31,7 @@ public enum BoardSection {
     public struct Parts: Equatable, Sendable {
         public let minutes: String
         public let board: String?
+        public let updatedTime: String?
     }
     private static func section(_ text: String, heading: String) -> (Range<String.Index>, Range<String.Index>)? {
         guard let level = BoardHeading.level(heading) else { return nil }
@@ -66,8 +72,10 @@ public enum BoardSection {
         return (start..<text.endIndex, bodyStart..<text.endIndex)
     }
     public static func split(_ text: String, heading: String) -> Parts {
-        guard let (whole, body) = section(text, heading: heading) else { return Parts(minutes: text, board: nil) }
-        return Parts(minutes: String(text[..<whole.lowerBound]) + text[whole.upperBound...], board: String(text[body]))
+        guard let (whole, body) = section(text, heading: heading) else { return Parts(minutes: text, board: nil, updatedTime: nil) }
+        let headingLine = String(text[whole.lowerBound..<body.lowerBound].drop(while: { $0 == " " })).trimmingCharacters(in: .newlines)
+        return Parts(minutes: String(text[..<whole.lowerBound]) + text[whole.upperBound...], board: String(text[body]),
+                     updatedTime: BoardHeading.updateTime(headingLine, heading: heading))
     }
     public static func replacing(_ text: String, heading: String, body: String, headingLine: String? = nil) throws -> String {
         try BoardHeading.validate(heading)

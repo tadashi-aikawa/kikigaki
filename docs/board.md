@@ -26,6 +26,8 @@ autoIntervalMinutes = 1
 
 ## 保存と表示
 
+タブ名は見出し行の `(HH:MM 更新)` があれば `ボード HH:MM`、なければ `ボード` とする。
+
 ボードの見出しは最初の自動送信開始時にai/minutes.jsonのboard_headingへ保存する。schema_versionは1で旧ファイルは省略を許す。既存のrevision比較更新を使い、対象パス・target_source・通知の到達点は変更しない。会議途中の異なる見出しへの変更は拒否する。
 
 パス無しで作成したAIは同梱CLIの `minutes --path` で絶対パスを通知する。通知は `minutes_path` と `target_source: "ai"` に保存し、右ペインの表示先を切り替える。人の指定を表す `human_minutes_path` へはコピーしない。ボードの会議では以後の手動・自動送信に、人の指定を優先し、無ければ通知されたパスを `participant.minutes_path` として渡す。送信操作の入口で見出しとパスを固定する。ボードのない会議ではAI通知を次の書き先へ伝播しない。

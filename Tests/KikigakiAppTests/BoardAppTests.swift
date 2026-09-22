@@ -153,10 +153,22 @@ import KikigakiAIIO
         #expect(!preview.minutesDocument.renderedText.contains("ボードだけの論点"))
         #expect(!preview.boardDocument.renderedText.contains("手動の記録"))
         #expect(!preview.tabs.isHiddenOrHasHiddenAncestor)
-        #expect(preview.tabs.label(forSegment: 1) == "ボード")
+        #expect(preview.tabs.label(forSegment: 1) == "ボード 17:48")
         #expect(!preview.minutesDocument.renderedText.contains("17:48 更新"))
         preview.selectBoard(true)
         #expect(preview.document === preview.boardDocument)
+        _ = try await preview.minutesDocument.webView.evaluateJavaScript("window.savedHeading = document.querySelector('h1'); true")
+        _ = try await preview.boardDocument.webView.evaluateJavaScript("window.savedBody = document.body.firstElementChild; document.body.style.minHeight = '3000px'; window.scrollTo(0, 120); true")
+        let boardScroll = try await preview.boardDocument.webView.evaluateJavaScript("window.scrollY") as? Double
+        #expect((boardScroll ?? 0) > 0)
+        for (suffix, label) in [("(18:07 更新)", "ボード 18:07"), ("", "ボード")] {
+            preview.receive(.body("# 会議\n## 本文\n手動の記録\n## ボード\(suffix)\nボードだけの論点\n## 次\n後半の本文", [], modifiedAt: Date()))
+            #expect(preview.tabs.label(forSegment: 1) == label)
+            #expect(preview.selectedBoard && preview.tabs.selectedSegment == 1)
+            #expect(try await preview.minutesDocument.webView.evaluateJavaScript("window.savedHeading === document.querySelector('h1')") as? Bool == true)
+            #expect(try await preview.boardDocument.webView.evaluateJavaScript("window.savedBody === document.body.firstElementChild") as? Bool == true)
+            #expect(try await preview.boardDocument.webView.evaluateJavaScript("window.scrollY") as? Double == boardScroll)
+        }
         preview.receive(.body("# 会議\nボードが消えた", [], modifiedAt: Date()))
         #expect(preview.document === preview.minutesDocument)
         #expect(preview.tabs.isHiddenOrHasHiddenAncestor)

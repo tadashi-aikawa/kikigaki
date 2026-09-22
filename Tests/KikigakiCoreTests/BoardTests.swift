@@ -8,6 +8,7 @@ import Testing
         let source = "前\n## ボード\(suffix)\r\n```mermaid\r\nflowchart TB\r\n```\r\n### 立場\r\n未表明\r\n## 次\r\n後"
         let parts = BoardSection.split(source, heading: "## ボード")
         #expect(parts.minutes == "前\n## 次\r\n後")
+        #expect(parts.updatedTime == (suffix.isEmpty ? nil : String(suffix.dropFirst().prefix(5))))
         #expect(parts.board == "```mermaid\r\nflowchart TB\r\n```\r\n### 立場\r\n未表明\r\n")
     }
     @Test(arguments: ["2", "補足", " (17:48 更新)", "(7:48 更新)", "(24:00 更新)", "(17:60 更新)", "(１７:４８ 更新)", "(17:48 更新)追記", "(17:48 更新)\n"])
@@ -17,6 +18,7 @@ import Testing
             let source = "## ボード\(suffix)\n対象外"
             #expect(BoardSection.split(source, heading: "## ボード").minutes == source)
             #expect(BoardSection.split(source, heading: "## ボード").board == nil)
+            #expect(BoardSection.split(source, heading: "## ボード").updatedTime == nil)
         }
     }
     @Test func 見出し行ごと更新し境界と改行を保つ() throws {
@@ -24,6 +26,7 @@ import Testing
         let updated = try BoardSection.replacing(original, heading: "## ボード", body: "図\r\n", headingLine: "## ボード(17:49 更新)")
         #expect(updated.utf8.elementsEqual(original.replacingOccurrences(of: "## ボード(17:48 更新)\r\n旧", with: "## ボード(17:49 更新)\r\n図").utf8))
         #expect(BoardSection.split(updated, heading: "## ボード").board == "図\r\n")
+        #expect(BoardSection.split(updated, heading: "## ボード").updatedTime == "17:49")
         for old in ["", "## ボード", "## ボード(17:48 更新)"] {
             #expect(try BoardSection.replacing(old, heading: "## ボード", body: "図", headingLine: "## ボード(17:49 更新)") == "## ボード(17:49 更新)\n図\n")
         }
