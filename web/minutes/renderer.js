@@ -124,7 +124,8 @@ export function createRenderer() {
       const width = size ? ' width="' + Math.min(4096, Number(size[1])) + '"' : '';
       return '<img referrerpolicy="no-referrer" src="' + escape(imageURL(target, env.context)) + '" alt="' + escape(target) + '"' + width + '>';
     }
-    if (target.startsWith('#')) return '<a href="#' + escape(target.slice(1)) + '">' + escape(label) + '</a>';
+    // 同じ本文の見出しはVault不要。%を含む見出しもクリック時の復号で壊さない。
+    if (target.startsWith('#')) return '<a href="#' + escape(encodeURIComponent(target.slice(1))) + '">' + escape(label) + '</a>';
     // Vault内の議事録だけリンクにする。Vault外では開き先を決められないため、
     // 押せない顔をさせず従来どおり平文へ畳む。宛先はObsidian側が解釈するので加工しない。
     if (!env.vault) return escape(label);

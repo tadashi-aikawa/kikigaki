@@ -21,7 +21,7 @@ export function attachBoardLinks(holder, links, navigate) {
     const id = /^flowchart-(T[1-9][0-9]*)-[0-9]+$/.exec(localID)?.[1];
     if (!id || !links.has(id)) continue;
     node.setAttribute('role', 'link'); node.setAttribute('tabindex', '0');
-    node.setAttribute('aria-label', '議事録へ: ' + links.get(id));
+    node.setAttribute('aria-label', '見出しへ: ' + links.get(id));
     node.style.cursor = 'pointer';
     node.addEventListener('click', event => { event.preventDefault(); navigate(links.get(id)); });
     node.addEventListener('keydown', event => {

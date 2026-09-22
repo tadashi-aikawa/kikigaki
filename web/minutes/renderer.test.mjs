@@ -87,7 +87,7 @@ test('Vault内だけwikilinkをリンクにする', () => {
   assert.match(html, /<a class="wiki" data-wiki="議事\/定例\.md">\*\*別名\*\*<\/a>/);
   assert.match(html, /<a class="wiki" data-wiki="ノート#見出し">ノート#見出し<\/a>/);
   // 文書内アンカーと画像埋め込みは従来どおり。画像以外の埋め込みは記法のまま。
-  assert.match(html, /<a href="#章">#章<\/a>/);
+  assert.ok(html.includes('<a href="#' + encodeURIComponent('章') + '">#章</a>'));
   assert.match(html, /<img referrerpolicy="no-referrer" src="minutes-image:/);
   assert.match(html, /!\[\[ノート\]\]/);
   // Vault外は押せない顔をさせない。
@@ -97,6 +97,15 @@ test('Vault内だけwikilinkをリンクにする', () => {
   const preview = readFileSync(new URL('./preview.js', import.meta.url), 'utf8');
   assert.match(preview, /ADD_URI_SAFE_ATTR: \['data-wiki'\]/);
   assert.equal(/ALLOW_DATA_ATTR:\s*false/.test(preview), false);
+});
+test('Vault外でも同じ本文の見出しへリンクし予約文字と別名を保持する', () => {
+  for (const vault of [undefined, '仕事']) {
+    const html = createRenderer().render('[[#料金 10%の詳細|料金の詳細]]\n\n[[#chapter]]\n\n[[ノート#見出し]]', { context: 'test', vault });
+    assert.ok(html.includes('<a href="#' + encodeURIComponent('料金 10%の詳細') + '">料金の詳細</a>'));
+    assert.ok(html.includes('<a href="#chapter">#chapter</a>'));
+    assert.equal(html.includes('data-wiki="ノート#見出し"'), !!vault);
+  }
+  assert.match(render('`[[#見出し]]`'), /<code>\[\[#見出し\]\]<\/code>/);
 });
 test('脚注とcalloutとチェックボックス', () => {
   const html = render('本文[^a]\n\n[^a]: 補足\n\n> [!NOTE] 注意\n> **本文**\n>\n> - 内側\n\n- [x] 済\n  - 子\n- [ ] 未');

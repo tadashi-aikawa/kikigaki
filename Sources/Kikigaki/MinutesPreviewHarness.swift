@@ -53,9 +53,30 @@ import KikigakiCore
         }
         guard !preview.boardDocument.renderedText.isEmpty else { throw AIError.invalid("ボードの描画が完了しません") }
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        for (board, name) in [(false, "minutes"), (true, "board")] {
+        var captures = [(false, "minutes"), (true, "board")]
+        let anchor = ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_BOARD_ANCHOR"]
+        if anchor != nil { captures.append((true, "board-link")) }
+        for (board, name) in captures {
             preview.selectBoard(board); preview.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(200))
+            if name == "board-link", let anchor {
+                let clicked = try await preview.document.webView.callAsyncJavaScript("""
+                const link = [...document.querySelectorAll('main a[href^="#"]')]
+                  .find(a => decodeURIComponent(a.getAttribute('href').slice(1)) === anchor);
+                if (!link) return false;
+                link.click(); return true;
+                """, arguments: ["anchor": anchor], contentWorld: .page) as? Bool
+                guard clicked == true else { throw AIError.invalid("詳細図へのリンク行がありません") }
+                try await Task.sleep(for: .milliseconds(100))
+                let landed = try await preview.document.webView.callAsyncJavaScript("""
+                const h = [...document.querySelectorAll('[data-heading]')].find(h => h.dataset.heading === anchor);
+                if (!h) return false;
+                const rect = h.getBoundingClientRect();
+                return rect.top >= 0 && rect.bottom <= innerHeight && h.getAnimations().length > 0;
+                """, arguments: ["anchor": anchor], contentWorld: .page) as? Bool
+                guard preview.selectedBoard && landed == true else { throw AIError.invalid("詳細図への移動を確認できません") }
+                FileHandle.standardError.write(Data("board link: \(anchor) へ移動成功\n".utf8))
+            }
             guard let bitmap = preview.bitmapImageRepForCachingDisplay(in: preview.bounds) else { throw AIError.invalid("capture") }
             preview.cacheDisplay(in: preview.bounds, to: bitmap)
             let webImage = try await preview.document.webView.takeSnapshot(configuration: WKSnapshotConfiguration())

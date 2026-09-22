@@ -344,7 +344,10 @@ window.minutes = {
         const { svg } = await mermaid.render('diagram-' + current + '-' + crypto.randomUUID(), definition);
         if (current !== generation) return;
         holder.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, FORBID_TAGS: ['foreignObject', 'script', 'a'] });
-        attachBoardLinks(holder, board.links, target => report({ kind: 'boardAnchor', target }));
+        attachBoardLinks(holder, board.links, target => {
+          // 詳細図は同じボード内。そこに無い見出しだけ議事録タブへ渡す。
+          if (!window.minutes.jump(target)) report({ kind: 'boardAnchor', target });
+        });
         pre.replaceWith(holder);
       } catch { pre.title = '図を描画できないため、記法を表示しています'; }
     }

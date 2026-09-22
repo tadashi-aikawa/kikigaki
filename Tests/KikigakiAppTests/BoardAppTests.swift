@@ -218,6 +218,64 @@ import KikigakiAIIO
         #expect(request.envelope.participant.minutesPath == root.appendingPathComponent("minutes.md").path)
         #expect(request.trigger == nil)
     }
+    @Test func Vault外のボードのリンク行とカードから詳細図へ移動する() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let defaults = MinutesTestDefaults()
+        let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 800, height: 650), defaults: defaults.value)
+        let window = NSWindow(contentRect: preview.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = preview
+        defer { preview.stop(); window.orderOut(nil) }
+        let markdown = """
+        # 会議
+        ## 本文
+        手動の記録
+        ## ボード
+        ~~~mermaid
+        flowchart TB
+          T1["T1 料金"]
+          click T1 "#料金%2010%25の詳細"
+        ~~~
+        [[#料金 10%の詳細|料金の詳細]]
+
+        \(String(repeating: "段落\n\n", count: 40))
+        ### 料金 10%の詳細
+        ~~~mermaid
+        flowchart TB
+          T2["T2 値上げ幅"]
+          T3["T3 開始日"]
+          T2 --> T3
+          classDef now stroke:#9b72c6,stroke-width:3px
+          class T2 now
+        ~~~
+        \(String(repeating: "末尾\n\n", count: 30))
+        """
+        preview.update(path: nil, source: nil, active: true, boardHeading: "## ボード")
+        preview.receive(.body(markdown, [], modifiedAt: Date()))
+        for _ in 0..<400 {
+            if preview.boardDocument.renderedText.contains("T3 開始日") && preview.minutesDocument.renderedText.contains("手動の記録") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        preview.selectBoard(true)
+        preview.layoutSubtreeIfNeeded()
+        let web = preview.boardDocument.webView
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('.diagram').length") as? Int == 2)
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('main a[href^=\"#\"]').length") as? Int == 1)
+        for selector in ["main a[href^=\"#\"]", ".diagram g.node[role=link]"] {
+            _ = try await web.evaluateJavaScript("scrollTo(0, 0); true")
+            _ = try await web.callAsyncJavaScript("""
+            document.querySelector(selector).dispatchEvent(new MouseEvent('click', {bubbles:true}));
+            return true;
+            """, arguments: ["selector": selector], contentWorld: .page)
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(preview.selectedBoard)
+            #expect(try await web.evaluateJavaScript("scrollY > 0") as? Bool == true)
+            #expect(try await web.evaluateJavaScript("""
+            (() => { const h = document.querySelector('h3'), r = h.getBoundingClientRect();
+              return r.top >= 0 && r.bottom < innerHeight && h.getAnimations().length > 0; })()
+            """) as? Bool == true)
+        }
+        #expect(!preview.minutesDocument.renderedText.contains("料金の詳細"))
+    }
     @Test func 実Mermaidのカードから議事録へ移動し外部clickは無効() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let defaults = MinutesTestDefaults()
