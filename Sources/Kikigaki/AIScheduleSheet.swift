@@ -23,6 +23,9 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
     private let final = NSButton(checkboxWithTitle: "録音停止時に最後の1回を送る", target: nil, action: nil)
     private let startButton = NSButton(title: "開始", target: nil, action: nil)
     private let hint = Washi.label(size: 11, color: Washi.tentative)
+    private var boardStartIssue: (() -> String?)?
+    var canStart: Bool { startButton.isEnabled }
+    var hintText: String { hint.stringValue }
 
     convenience init(session: MeetingSession, profile: ResolvedAIConfig) {
         let draft = session.scheduleDraft(for: profile)
@@ -31,6 +34,12 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         // session側の宛先が先に変わり得る。エディターに表示中の枠へ保存し、
         // 一覧の非同期更新では文面を初期化しない。
         var displayedSlot = profile.slot
+        boardStartIssue = { [weak session] in
+            guard let session,
+                  let target = session.meetingAIProfiles.first(where: { $0.slot == displayedSlot }) else { return nil }
+            do { return target.boardStartIssue(minutesPath: try session.previewMinutesStore()?.state.participantMinutesPath) }
+            catch { return "議事録の書き先を確認できません" }
+        }
         onDraft = { session.updateScheduleDraft($0, slot: displayedSlot) }
         onDestination = { [weak self] slot in
             guard let self, let target = session.meetingAIProfiles.first(where: { $0.slot == slot }) else { return }
@@ -43,6 +52,7 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         }
         updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
         editor.isEditable = profile.board == nil
+        update()
     }
 
     var draft: Draft {
@@ -127,7 +137,7 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         if editor.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { invalid = "毎回行ってほしい作業を入力してください" }
         else if editor.string.contains("\0") { invalid = "使用できない文字が含まれています" }
         else if editor.string.utf8.count > AILimits.questionBytes { invalid = "入力が長すぎます。32 KiB以内に短くしてください" }
-        else { invalid = nil }
+        else { invalid = boardStartIssue?() }
         startButton.isEnabled = invalid == nil
         hint.stringValue = warning ?? invalid ?? "指定間隔ごとに差分を送ります"
         hint.textColor = warning != nil || invalid != nil ? Washi.gold : Washi.tentative

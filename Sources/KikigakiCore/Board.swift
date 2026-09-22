@@ -75,11 +75,19 @@ public enum BoardSection {
 }
 
 public enum BoardPrompt {
+    public static let missingLocation = "板の自動送信には議事録のパスか boardLocation が必要です"
+    public static func compose(base: String, location: String) -> String {
+        base + "\n\n" + locationInstruction + "\n" + location
+    }
+    public static let locationInstruction = """
+    書き先が無いときの作り方:
+    participant.minutes_path が無いので、次の指示に従って書き先を決め、板を含む議事録ファイルを作成してください。変数はAIが解釈してください。保存成功後、answeredの前に同梱CLIの minutes --path で実際の絶対パスを通知してください。以後は通知したファイルが participant.minutes_path として渡されます。
+    """
     public static func summary(heading: String) -> String { "板を更新(\(heading))" }
     public static let builtIn = """
     議論の板を更新してください。「いま何を話しているか」を1画面で見せる板です。
 
-    書き先は participant.minutes_path のファイル内の participant.board_heading です。必ず既存ファイルを読んでから、その見出しの直後から次の同階層以上の見出しの直前までだけを差し替えてください。他の見出しと本文は一切触りません。コードブロック内の見出しは区切りではありません。NFC/NFDの違いは同じ見出しとして扱います。見出しが無ければ末尾に見出しごと追加し、ファイルが無ければ作成してください。書き先か見出しが無ければ作業を止めて理由を返してください。
+    書き先は participant.minutes_path のファイル内の participant.board_heading です。必ず既存ファイルを読んでから、その見出しの直後から次の同階層以上の見出しの直前までだけを差し替えてください。他の見出しと本文は一切触りません。コードブロック内の見出しは区切りではありません。NFC/NFDの違いは同じ見出しとして扱います。見出しが無ければ末尾に見出しごと追加し、ファイルが無ければ作成してください。書き先が無ければ末尾の「書き先が無いときの作り方」に従って作成してください。その指示も無い場合、または participant.board_heading が無い場合は作業を止めて理由を返してください。
 
     型は次の4ブロックと順序を守ります。見出し行は participant.board_heading をそのまま使い、その配下に置きます。「論点」「立場」「直近の動き」は板より1段深い見出しにし、板が第6階層なら太字の段落にします。
 
@@ -133,6 +141,6 @@ public enum BoardPrompt {
     - 立場の表は意見が割れている論点だけにし、全員一致と未表明は書きません。話者名は会話のまま、立場は10字以内。割れていなければ表の代わりに「まだ割れていない」と書きます。
     - 直近の動きは3行まで。古い行は消します。論点は12個までです。
 
-    保存後にminutesで通知しないでください。表示対象は既に議事録です。accept、progress --editing、保存、progress --replying、reply --kind answeredの順に進め、answeredは「第n版: 動いた点」の1〜2行だけにしてください。
+    participant.minutes_path がある場合は、保存後にminutesで通知しないでください。書き先が無く指示に従って作成した場合は、保存成功後に同梱CLIの minutes --path で実際の絶対パスを通知してください。accept、progress --editing、保存、必要なminutes通知、progress --replying、reply --kind answeredの順に進め、answeredは「第n版: 動いた点」の1〜2行だけにしてください。
     """
 }

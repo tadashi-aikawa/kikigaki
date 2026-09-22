@@ -826,18 +826,20 @@ final class MeetingSession {
               let url = snapshot.markdownURL, let aiStore else { return }
         let slot = config.slot
         let meetingID = handoff.meetingID, capturedAt = Date(), cutoff = snapshot.state == .idle ? snapshot.elapsed : pause.audioTime
-        // 確定待ち後のprepareでは遅い。人の書き先を送信操作の入口で固定する。
-        // AI通知は表示対象だけを変えるので、この値へ混ぜない。
+        // 書き先は送信操作の入口で固定する。板の会議は人の指定が無ければAI通知を引き継ぐ。
         let minutesPath: String?
         let boardHeading: String?
         do {
             let state = try aiStore.minutesStores.store(meetingID: meetingID, markdownURL: url).state
-            minutesPath = state.humanMinutesPath
+            minutesPath = state.participantMinutesPath
             // 板を持たない宛先の自動送信を、板の更新として記録・解釈しない。
             // 手動は宛先を問わず会議の板を保護する。
             boardHeading = trigger == .scheduled ? config.board : state.boardHeading
         }
         catch { aiWarning = "議事録の書き先を確認できません"; emit(); return }
+        // 開始時のプロンプトを使い回すと初版の作成指示が残る。毎回、固定したパスに合わせる。
+        let question = trigger == .scheduled && config.board != nil
+            ? config.scheduledPrompt(minutesPath: minutesPath) : question
         let names = snapshot.names, timeline = snapshot.timeline, typed = typedEntries
         let exclusion = audioExclusion
         let workAllowed = suppliedWorkAllowed ?? aiWorkAllowed
@@ -1209,10 +1211,10 @@ extension MeetingSession {
         if let profile = aiScheduleConfiguration, let heading = profile.board {
             guard let url = snapshot.markdownURL, let aiStore else { throw AIError.invalid("議事録の書き先を確認できません") }
             let store = try aiStore.minutesStores.store(meetingID: aiMeetingID, markdownURL: url)
-            guard store.state.humanMinutesPath != nil else { throw AIError.invalid("板の自動送信には議事録のパスが必要です") }
+            if let issue = profile.boardStartIssue(minutesPath: store.state.participantMinutesPath) { throw AIError.invalid(issue) }
             try store.bindBoard(heading)
             // 板の全文差し替えは設定だけで行う。シートの古い下書きで内蔵規則を上書きしない。
-            options = try AIScheduleOptions(prompt: profile.scheduledPrompt, interval: options.interval,
+            options = try AIScheduleOptions(prompt: profile.scheduledPrompt(minutesPath: store.state.participantMinutesPath), interval: options.interval,
                                             workAllowed: options.workAllowed, sendFinal: options.sendFinal)
         }
         var next = aiSchedule ?? AIScheduleState(meetingID: aiMeetingID)

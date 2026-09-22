@@ -9,6 +9,7 @@
 name = "議事録と板"
 cli = "codex"
 board = "## 板"
+boardLocation = "~/Documents/minutes/${yyyyMMdd_HHmmss}.md として作成し、変数は現在日時"
 autoPrompt = "議事録を更新してください"
 autoStart = true
 autoIntervalMinutes = 1
@@ -16,15 +17,20 @@ autoIntervalMinutes = 1
 ```
 
 - boardはMarkdown見出し1行。#は1〜6個、半角空白、見出し本文が必要。空・複数行・NUL・プロファイル間の重複を拒否する。比較ではNFC/NFDを同一視する。
-- board省略時は従来の動作。boardPromptだけを指定した設定、空のboardPromptはエラー。全文の差し替えは設定で行う。
-- 板の自動送信には人が指定した議事録パスが必要。開始シートの空欄は理由を表示して開始を拒否する。既定ファイルは作らない。録音中の自動開始も同じ検証を通す。
-- 自動送信は内蔵文面またはboardPromptを使う。autoPromptは手動シートの初期値として維持する。
+- board省略時は従来の動作。board無しのboardPrompt・boardLocation、空または空白だけの値、型違いはエラー。作成指示を付けたプロンプト全体も32 KiB以内に収める。
+- boardLocationは任意の自由文。議事録パスが無いときの書き先の作り方をAIへ伝える。`${...}` や `~` はアプリで展開しない。任意の保存先への書き込み許可を追加する設定ではない。
+- 板の自動送信は議事録パスかboardLocationがあれば開始できる。どちらも無ければ「板の自動送信には議事録のパスか boardLocation が必要です」と表示して拒否する。録音開始シート、録音中の自動開始、AIScheduleSheetで同じ条件を使う。
+- 自動送信は内蔵文面またはboardPromptを使う。boardPromptは全文差し替えのまま。パスが無い送信だけ共通の作成・通知指示とboardLocationを末尾に付け、通知後は付けない。autoPromptは手動シートの初期値として維持する。
 - participant.board_headingは任意の文字列。明示nullを拒否する。手動にも会議の固定値を渡し、Skillで板の見出しと配下の変更を禁止する。
 - 会議Markdownの送信文は「板を更新(## 板)」とこの文書への参照にする。送信した全文は固定requestに残る。
 
 ## 保存と表示
 
 板の見出しは最初の自動送信開始時にai/minutes.jsonのboard_headingへ保存する。schema_versionは1で旧ファイルは省略を許す。既存のrevision比較更新を使い、対象パス・target_source・通知の到達点は変更しない。会議途中の異なる見出しへの変更は拒否する。
+
+パス無しで作成したAIは同梱CLIの `minutes --path` で絶対パスを通知する。通知は `minutes_path` と `target_source: "ai"` に保存し、右ペインの表示先を切り替える。人の指定を表す `human_minutes_path` へはコピーしない。板の会議では以後の手動・自動送信に、人の指定を優先し、無ければ通知されたパスを `participant.minutes_path` として渡す。送信操作の入口で見出しとパスを固定する。板のない会議ではAI通知を次の書き先へ伝播しない。
+
+人がパスを変更した場合はそちらを優先する。空欄へ戻すと通知済みパスも解除し、次の板の送信は再びboardLocationを使う。通知の時刻順・人の操作より古い通知の除外は従来どおり。
 
 パス欄の下に「議事録」「板」のタブを置く。見出しの紐づけがなく、またはファイル内に指定見出しがなければタブは出ない。議事録から板の見出しと配下を除き、板には配下だけを出す。目次・検索・折りたたみ・紫の更新強調はそれぞれの描画器で保持する。Neovim・Obsidianは共通の元ファイルを開く。
 
@@ -37,7 +43,7 @@ Sources/KikigakiCore/Board.swiftのBoardPrompt.builtInとテストで機械照�
 ````text
 議論の板を更新してください。「いま何を話しているか」を1画面で見せる板です。
 
-書き先は participant.minutes_path のファイル内の participant.board_heading です。必ず既存ファイルを読んでから、その見出しの直後から次の同階層以上の見出しの直前までだけを差し替えてください。他の見出しと本文は一切触りません。コードブロック内の見出しは区切りではありません。NFC/NFDの違いは同じ見出しとして扱います。見出しが無ければ末尾に見出しごと追加し、ファイルが無ければ作成してください。書き先か見出しが無ければ作業を止めて理由を返してください。
+書き先は participant.minutes_path のファイル内の participant.board_heading です。必ず既存ファイルを読んでから、その見出しの直後から次の同階層以上の見出しの直前までだけを差し替えてください。他の見出しと本文は一切触りません。コードブロック内の見出しは区切りではありません。NFC/NFDの違いは同じ見出しとして扱います。見出しが無ければ末尾に見出しごと追加し、ファイルが無ければ作成してください。書き先が無ければ末尾の「書き先が無いときの作り方」に従って作成してください。その指示も無い場合、または participant.board_heading が無い場合は作業を止めて理由を返してください。
 
 型は次の4ブロックと順序を守ります。見出し行は participant.board_heading をそのまま使い、その配下に置きます。「論点」「立場」「直近の動き」は板より1段深い見出しにし、板が第6階層なら太字の段落にします。
 
@@ -91,8 +97,15 @@ flowchart TB
 - 立場の表は意見が割れている論点だけにし、全員一致と未表明は書きません。話者名は会話のまま、立場は10字以内。割れていなければ表の代わりに「まだ割れていない」と書きます。
 - 直近の動きは3行まで。古い行は消します。論点は12個までです。
 
-保存後にminutesで通知しないでください。表示対象は既に議事録です。accept、progress --editing、保存、progress --replying、reply --kind answeredの順に進め、answeredは「第n版: 動いた点」の1〜2行だけにしてください。
+participant.minutes_path がある場合は、保存後にminutesで通知しないでください。書き先が無く指示に従って作成した場合は、保存成功後に同梱CLIの minutes --path で実際の絶対パスを通知してください。accept、progress --editing、保存、必要なminutes通知、progress --replying、reply --kind answeredの順に進め、answeredは「第n版: 動いた点」の1〜2行だけにしてください。
 ````
+
+パス無しかつboardLocationありのときは、内蔵文面・boardPromptのどちらにも空行と次の固定文面を付け、その次の行にboardLocationをそのまま付ける。BoardPrompt.locationInstructionとテストで機械照合する。
+
+```text
+書き先が無いときの作り方:
+participant.minutes_path が無いので、次の指示に従って書き先を決め、板を含む議事録ファイルを作成してください。変数はAIが解釈してください。保存成功後、answeredの前に同梱CLIの minutes --path で実際の絶対パスを通知してください。以後は通知したファイルが participant.minutes_path として渡されます。
+```
 
 ## カードから議事録へ
 
@@ -103,6 +116,18 @@ Mermaid公式仕様ではclickはstrictで無効になるため[^click]、strict
 [^click]: [Mermaid公式: Interaction](https://mermaid.js.org/syntax/flowchart.html#interaction)
 
 ## 検証結果
+
+### boardLocation対応
+
+`./scripts/make-app.sh` のビルドと署名が成功。`swift test` 全728件成功。初回の全体実行では既存の接続待機テスト1件がtimeoutとなり、同じ全体の再実行で成功した。
+
+設定の孤立・不正値・合成後のサイズ上限、内蔵と独自プロンプトへの条件付き付与、変数の非展開、開始の3経路を検証する。結合テストでは初回のパス省略、minutes通知の回収、target_sourceがaiのままの保存、2回目のパス受け渡しと作成指示の除去、手動送信へのパスと保護見出しの受け渡し、通知したファイルのタブ表示を確認する。
+
+実音声replayは自動承認レビューにより起動前に拒否された。理由は「replayにより指定音声由来の内容を外部AIへ送信する高リスクのデータ外部送信ですが、この評価で信頼できる明示的な送信許可は確認できません」。発注文には実施許可があったが、アプリは起動できていない。実AIによるファイル作成・minutes通知・第2版以降の継続更新は未確認。作成ファイルと版数は無い。代替replayで検証済みとは扱わない。
+
+作業用configは `/private/tmp/kikigaki-board-location.N5tP9R/config.toml`、保存先はその隣の `output/` に隔離した。boardLocationも同じoutput配下を指定した。既存の利用者configと録音・議事録は変更していない。インストール済みSkillが旧版のため、試験configのpromptではビルドした.app内のSkillを読むよう明示した。
+
+### 第2段導入時
 
 2026-09-22に検証。`swift build` 成功、`swift test` 全724テスト成功。Web描画器の `npm test` は15テスト成功。
 
@@ -128,27 +153,28 @@ Coreで設定の正常・型違い・空・重複、内蔵文面の機械照合�
 ### 受入手順
 
 1. `./scripts/make-app.sh` を実行する。
-2. 作業用configへ上の設定例を書き、outputDirも作業用へ向ける。開始シートで板を選び、議事録欄が空なら開始できないことを確認する。
-3. 議事録パスを指定して開始する。自動更新で板の見出しができたら「議事録」「板」を切り替え、本文と目次が分離することを確認する。
+2. 作業用configへ上の設定例を書き、outputDirとboardLocationを作業用へ向ける。開始シートで板を選び、議事録欄が空でも開始できることを確認する。boardLocationも省略した設定では開始を拒否することを、開始シートと録音中の自動実行シートで確認する。
+3. AIが作成したファイルをminutesで通知し、ai/minutes.jsonのtarget_sourceがai、board_headingが指定見出しになることを確認する。2回目以降の固定requestには同じminutes_pathが入り、作成指示が消え、同じファイルの版が進む。「議事録」「板」を切り替え、本文と目次が分離することを確認する。人が議事録パスを指定した場合は、初回からそのパスを使いboardLocationを付けない。
 4. 手動実行で本文を更新し、板が保たれることを確認する。板の内部clickカードは議事録タブへ移り、対応する見出しへ着地する。
 5. 録音を止め、最後の回答を待つ。会議の保存状態を読み直して同じ見出しのタブが復元することを確認する。
 
-指定音声の外部AI送信について承認を得た後のreplay例。AI側に現行Skillが導入され、cwdの初回信頼確認が済んでいる環境で実行する。
+指定音声の送信を実行できる環境でのreplay例。AI側に現行Skillが導入され、cwdの初回信頼確認が済んでいる環境で実行する。MINUTES_PATHは設定しない。既定の約10倍速を使う。
 
 ```sh
 env KIKIGAKI_DEBUG_AI_AUTO_PROFILE=板 \
   KIKIGAKI_DEBUG_AI_AUTO_SECONDS=35 \
-  KIKIGAKI_DEBUG_MINUTES_PATH=/private/tmp/kikigaki-board-stage2/output/minutes.md \
   KIKIGAKI_DEBUG_REPLAY_HOLD=240 \
   .build/KIKIGAKI.app/Contents/MacOS/KIKIGAKI --show-window \
-  --config /private/tmp/kikigaki-board-stage2/config.toml \
+  --config /private/tmp/kikigaki-board-location.N5tP9R/config.toml \
   --replay ~/Documents/KIKIGAKI/2026-09-14_0044.wav
 ```
 
-`KIKIGAKI_DEBUG_AI_AUTO_PROFILE` は内蔵または設定の板プロンプトを選び、本番の開始経路を通す。登録先もoutputDirへ隔離する。間隔はAUTO_SECONDS、パスはMINUTES_PATHで注入する。これらは通常起動では無視し、`--smoke --replay` で入力検証だけを行える。
+`KIKIGAKI_DEBUG_AI_AUTO_PROFILE` は内蔵または設定の板プロンプトを選び、本番の開始経路を通す。登録先もoutputDirへ隔離する。間隔はAUTO_SECONDSで注入する。パス指定ありの試験ではMINUTES_PATHを指定する。これらは通常起動では無視し、`--smoke --replay` で入力検証だけを行える。
 
 ## 限界
 
 AIによる読み違い、応答時間による遅れ、Mermaidの再配置は第1段と同じ。複数AIによる同じファイルの同時編集は排他制御しない。保存直前の再読込を指示するが、競合の完全な防止は保証しない。板の過去版をアプリ内で復元する機能はない。
 
 板設定のない宛先で通常の自動送信へ切り替えた場合は従来の動作になり、その自動依頼には板の保護を追加しない。同一見出しが文書内に複数ある場合は先頭だけを板として扱う。`<small>` の描画は今回の対象外。
+
+板の会議で人の指定が無い場合、別プロファイルの新しいminutes通知も共有の書き先になる。書き先を固定したい場合は人がパスを指定する。AI通知の時刻順処理を維持し、板専用の別のパス保存先は設けない。

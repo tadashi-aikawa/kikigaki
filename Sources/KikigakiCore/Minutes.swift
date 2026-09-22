@@ -80,7 +80,7 @@ public struct MinutesEventPosition: Codable, Equatable, Comparable, Sendable {
     enum CodingKeys: String, CodingKey { case recordedAt = "recorded_at", eventID = "event_id" }
 }
 
-/// 表示対象と人が指定した書き先を分離する。AIの通知で別のAIの書き先を変えてはならない。
+/// 表示対象と人が指定した書き先を分離する。板の会議のみ通知先を共有の書き先に使う。
 public struct MinutesState: Codable, Equatable, Sendable {
     public enum Source: String, Codable, Sendable { case human, ai }
     public let schemaVersion: Int
@@ -92,6 +92,11 @@ public struct MinutesState: Codable, Equatable, Sendable {
     public private(set) var targetSource: Source?
     public private(set) var lastEvent: MinutesEventPosition?
     public private(set) var revision: Int
+
+    /// 板の会議だけ、未指定の書き先をAI通知から引き継ぐ。人の指定は常に優先する。
+    public var participantMinutesPath: String? {
+        humanMinutesPath ?? (boardHeading == nil ? nil : minutesPath)
+    }
 
     public init(meetingID: UUID) { schemaVersion = 1; self.meetingID = meetingID; revision = 0 }
 

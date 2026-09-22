@@ -458,7 +458,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         }
         if let slot = selectedSlot {
             let draft = currentDraft
-            if profiles.first(where: { $0.slot == slot })?.board != nil, minutesInput == nil { return nil }
+            if profiles.first(where: { $0.slot == slot })?.boardStartIssue(minutesPath: minutesInput) != nil { return nil }
             // 依頼が空・間隔が不正なら自動送信は始めない。録音そのものは始める。
             if let options = try? AIScheduleOptions(prompt: draft.prompt, interval: Double(draft.minutes) * 60,
                                                    workAllowed: draft.workAllowed, sendFinal: draft.sendFinal) {
@@ -473,7 +473,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         guard !editor.hasMarkedText(), !minutesBox.hasMarkedTextForStart else { return }
         guard let value = options else {
             showMinutesHint(minutesInput == nil && selectedSlot.flatMap { slot in profiles.first { $0.slot == slot } }?.board != nil
-                ? "板の自動送信には議事録のパスが必要です" : "絶対パスの.mdファイルを指定してください")
+                ? BoardPrompt.missingLocation : "絶対パスの.mdファイルを指定してください")
             return
         }
         showMinutesHint(nil)

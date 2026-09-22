@@ -88,6 +88,9 @@ import Testing
         #expect(try state.receive(pairs[0].0, for: pairs[0].1) == false)
         #expect(state.lastEvent == pairs[1].0.position)
         #expect(state.minutesPath == pairs[1].0.minutesPath && state.humanMinutesPath == nil)
+        #expect(state.participantMinutesPath == nil)
+        try state.bindBoard("## 板")
+        #expect(state.participantMinutesPath == pairs[1].0.minutesPath)
     }
 
     @Test func 壊れた状態と未知版を空状態へ読み替えない() throws {

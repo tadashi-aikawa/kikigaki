@@ -3,6 +3,32 @@ import Testing
 @testable import KikigakiCore
 
 @Suite struct BoardTests {
+    @Test func 書き先指示は未展開で保存されパスがない時だけ末尾に付く() throws {
+        let location = "~/Documents/minutes/${yyyyMMdd_HHmmss}.md として作成し、変数は現在日時"
+        for custom: String? in [nil, "独自の板"] {
+            let parsed = try ConfigLoader.parse(toml: """
+            [ai]
+            board = '## 板'
+            boardLocation = '\(location)'
+            \(custom.map { "boardPrompt = '\($0)'" } ?? "")
+            """)
+            let profile = try #require(ResolvedConfig(config: parsed, home: URL(fileURLWithPath: "/tmp")).aiProfiles.first)
+            #expect(profile.boardLocation == location)
+            #expect(try AIJSON.decode(ResolvedAIConfig.self, from: AIJSON.encode(profile)) == profile)
+            #expect(profile.scheduledPrompt(minutesPath: nil) == (custom ?? BoardPrompt.builtIn) + "\n\n" + BoardPrompt.locationInstruction + "\n" + location)
+            #expect(profile.scheduledPrompt(minutesPath: "/tmp/minutes.md") == (custom ?? BoardPrompt.builtIn))
+        }
+    }
+    @Test func 書き先指示の孤立と不正値と組み立て後の上限を拒否する() {
+        for toml in ["[ai]\nboardLocation = '作成'", "[ai]\nboard = '## 板'\nboardLocation = 1",
+                     "[ai]\nboard = '## 板'\nboardLocation = ''", "[ai]\nboard = '## 板'\nboardLocation = '  '"] {
+            #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: toml) }
+        }
+        #expect(throws: (any Error).self) { try AIConfig(board: "## 板", boardLocation: "\0").validate() }
+        #expect(throws: (any Error).self) {
+            try AIConfig(board: "## 板", boardPrompt: String(repeating: "a", count: AILimits.questionBytes), boardLocation: "作成").validate()
+        }
+    }
     @Test func 設定は板と手動プロンプトを共存させる() throws {
         let parsed = try ConfigLoader.parse(toml: """
         [[ai]]
@@ -82,6 +108,9 @@ import Testing
         let start = try #require(doc.range(of: "````text\n"))
         let end = try #require(doc.range(of: "\n````", range: start.upperBound..<doc.endIndex))
         #expect(String(doc[start.upperBound..<end.lowerBound]) == BoardPrompt.builtIn)
+        let locationStart = try #require(doc.range(of: "```text\n", range: end.upperBound..<doc.endIndex))
+        let locationEnd = try #require(doc.range(of: "\n```", range: locationStart.upperBound..<doc.endIndex))
+        #expect(String(doc[locationStart.upperBound..<locationEnd.lowerBound]) == BoardPrompt.locationInstruction)
     }
     @Test func 自動の送信文だけ要約する() throws {
         let meeting = UUID()

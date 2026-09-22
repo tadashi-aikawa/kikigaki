@@ -50,7 +50,7 @@ sequenceDiagram
     I->>C: reply answered
 ```
 
-`minutes_path` が無ければ、AIは依頼文から書き先を決める。通知後はそのパスがプレビュー対象になるが、envelopeへは伝播しない。envelopeに載せるのは人が指定したパスだけであり、別プロファイルの通知でAIの書き先を変更しない。パスだけで議事録作成の依頼・作業許可・ファイルの実在を推定しない。
+`minutes_path` が無ければ、AIは依頼文から書き先を決める。通知後はそのパスがプレビュー対象になる。通常はenvelopeに載せるのは人が指定したパスだけであり、別プロファイルの通知でAIの書き先を変更しない。例外として `board_heading` が固定された板の会議では、人の指定が無いとき通知パスを以後の手動・自動envelopeへ渡す。詳細は [議論の板](board.md)。パスだけで議事録作成の依頼・作業許可・ファイルの実在を推定しない。
 
 ### envelope
 
@@ -112,7 +112,7 @@ CLIのhelp、引数の必須・許可集合、AIInboxのファイル名検証と
 | `schema_version` | 整数1。未知版は読めない旨を表示する。 |
 | `meeting_id` | 親階層と一致するUUID。 |
 | `minutes_path` | 任意文字列。プレビュー対象。未指定は省略し、対象なし。 |
-| `human_minutes_path` | 任意文字列。人が指定した書き先。envelopeへはこちらだけを渡す。 |
+| `human_minutes_path` | 任意文字列。人が指定した書き先。envelopeでは最優先。板の会議だけ、未指定ならminutes_pathで補う。 |
 | `target_changed_at` | 対象を最後に変更したISO8601日時。人の対象解除でも更新する。初期状態は省略。 |
 | `target_source` | `human` または `ai`。対象なしなら省略。ファイルなしの案内を区別する。 |
 | `last_event` | 任意の `{recorded_at, event_id}`。回収の到達点。時刻、同値ならIDの辞書順で比較する。 |
@@ -219,7 +219,7 @@ CLIのhelp、引数の必須・許可集合、AIInboxのファイル名検証と
 
 段2で `skills/kikigaki/references/meeting.md` へ次を追記する。段1では実ファイルを変更しない。
 
-> `participant.minutes_path` は人が指定した書き先。あれば議事録はその絶対パスのファイルへ書く。無ければ議事録の置き場は依頼文に従う。AIが通知したプレビューのパスはenvelopeへ伝播しない。パスの存在だけで作業を開始せず、依頼と `work_allowed` に従う。既存の議事録は内容を確認してから更新する。
+> `participant.minutes_path` は人が指定した書き先、または板の会議でAIが通知した書き先。あれば議事録はその絶対パスのファイルへ書く。無ければ議事録の置き場は依頼文に従う。板のない会議ではAI通知をenvelopeへ伝播しない。パスの存在だけで作業を開始せず、依頼と `work_allowed` に従う。既存の議事録は内容を確認してから更新する。
 >
 > 議事録を作成・更新して保存が成功したら、answeredを返す前に同梱CLIの `minutes` へ実際の絶対パスを通知する。session・request・tokenは先頭envelopeの値を使う。1 requestにつき通知するパスは1つとし、同じ通知の再試行で作業をやり直さない。minutesはacceptやreplyの代わりにならない。
 >

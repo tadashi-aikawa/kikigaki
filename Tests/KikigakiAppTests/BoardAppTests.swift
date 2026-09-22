@@ -21,13 +21,102 @@ import KikigakiAIIO
         let sheet = StartSheet(profiles: config.aiProfiles, diarizationEnabled: false, exclusion: AudioExclusion())
         #expect(sheet.options == nil)
         sheet.startPressed()
-        #expect(sheet.minutesHintText == "板の自動送信には議事録のパスが必要です")
+        #expect(sheet.minutesHintText == BoardPrompt.missingLocation)
         sheet.setMinutesPath(root.appendingPathComponent("minutes.md").path)
         #expect(sheet.options?.schedule?.prompt == BoardPrompt.builtIn)
         #expect(!sheet.editor.isEditable)
         let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config,
                                      aiStore: AIRecordStore(directory: root))
         #expect(session.manualDraft(for: config.aiProfiles[0]) == "議事録本文を更新")
+    }
+    @Test func 三つの開始経路はパスか書き先指示を必要とする() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        for location: String? in [nil, "作業用に作成"] {
+            for path: String? in [nil, "/tmp/minutes.md"] {
+                let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+                var config = ResolvedConfig(config: try ConfigLoader.parse(toml: ""), home: root)
+                config.ai = ResolvedAIConfig(config: AIConfig(autoStart: true, board: "## 板", boardLocation: location), home: root)
+                let allowed = location != nil || path != nil
+                let sheet = StartSheet(profiles: config.aiProfiles, diarizationEnabled: false, exclusion: AudioExclusion(), minutesPath: path)
+                #expect((sheet.options != nil) == allowed)
+                let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config,
+                                             aiStore: AIRecordStore(directory: root))
+                if let path { try session.selectMinutes(path) }
+                let robot = AIScheduleSheet(session: session, profile: config.aiProfiles[0])
+                #expect(robot.canStart == allowed)
+                if !allowed { #expect(robot.hintText == BoardPrompt.missingLocation) }
+                let options = try AIScheduleOptions(prompt: "古い下書き", interval: 60)
+                if allowed {
+                    try session.startAISchedule(options: options, helper: URL(fileURLWithPath: "/bin/echo"))
+                    #expect(try session.previewMinutesStore()?.state.boardHeading == "## 板")
+                    #expect(session.lastScheduleOptions?.prompt.contains("作業用に作成") == (path == nil))
+                    session.stopAISchedule()
+                } else {
+                    #expect(throws: (any Error).self) { try session.startAISchedule(options: options, helper: URL(fileURLWithPath: "/bin/echo")) }
+                }
+            }
+        }
+    }
+    @Test func 作成通知後は二回目と手動へ同じパスを渡し板タブが出る() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let records = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
+        var config = ResolvedConfig(config: try ConfigLoader.parse(toml: ""), home: root)
+        config.ai = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path,
+            board: "## 板", boardLocation: "ここに作成"), home: root)
+        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config,
+            aiStore: records, recordedSamples: 16_000)
+        session.setScheduleTranscriptForTesting("最初の論点")
+        try session.startAISchedule(options: .init(prompt: "下書き", interval: 3600), helper: URL(fileURLWithPath: "/bin/echo"))
+        defer { session.stopAISchedule() }
+        await session.submissionTaskForTesting?.value
+        let controller = try #require(session.aiRecord?.controller)
+        let first = try #require(controller.conversation.questions.first?.request)
+        #expect(first.envelope.participant.minutesPath == nil)
+        #expect(first.envelope.participant.question.contains("ここに作成"))
+        let path = root.appendingPathComponent("created.md")
+        try Data("# 議事録\n## 本文\n議事録本文\n## 板\n第1版".utf8).write(to: path)
+        let event = try AIMinutesEvent(request: first, path: path.path, recordedAt: Date())
+        let inbox = [".kikigaki-context", session.aiMeetingID.uuidString, "ai", "inbox"]
+        try AIFileStore(root: root).write(AIJSON.encode(event), to: inbox + [event.filename])
+        func reply(_ request: AIRequest) throws {
+            let answer = try AIReceiveEvent(request: request, kind: .answered, recordedAt: Date(), body: "更新済み")
+            try AIFileStore(root: root).write(AIJSON.encode(answer), to: inbox + [request.id.uuidString + ".result.json"])
+            controller.scan()
+        }
+        try reply(first)
+        let store = try #require(try session.previewMinutesStore())
+        #expect(store.state.targetSource == .ai && store.state.humanMinutesPath == nil)
+        #expect(store.state.participantMinutesPath == path.path)
+        let restored = MinutesStore(meetingID: store.meetingID, outputDirectory: root, markdownURL: store.markdownURL)
+        #expect(restored.state.participantMinutesPath == path.path && restored.state.boardHeading == "## 板")
+        let defaults = MinutesTestDefaults()
+        let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 800, height: 700), defaults: defaults.value)
+        defer { preview.stop() }
+        preview.update(path: store.state.minutesPath, source: store.state.targetSource, active: true, boardHeading: store.state.boardHeading)
+        for _ in 0..<300 {
+            if !preview.tabs.isHiddenOrHasHiddenAncestor { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!preview.tabs.isHiddenOrHasHiddenAncestor)
+        session.setScheduleTranscriptForTesting("最初の論点と次の論点")
+        session.fireAIScheduleNow()
+        await session.submissionTaskForTesting?.value
+        let second = try #require(controller.conversation.questions.last?.request)
+        #expect(second.id != first.id)
+        #expect(second.envelope.participant.minutesPath == path.path)
+        #expect(second.envelope.participant.question == BoardPrompt.builtIn)
+        try reply(second)
+        session.submitAI(question: "本文を更新", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"))
+        await session.submissionTaskForTesting?.value
+        let manual = try #require(controller.conversation.questions.last?.request)
+        #expect(manual.trigger == nil && manual.id != second.id)
+        #expect(manual.envelope.participant.minutesPath == path.path && manual.envelope.participant.boardHeading == "## 板")
+        try session.selectMinutes(root.appendingPathComponent("human.md").path)
+        #expect(store.state.participantMinutesPath == root.appendingPathComponent("human.md").path)
+        try session.selectMinutes(nil)
+        #expect(store.state.participantMinutesPath == nil && store.state.boardHeading == "## 板")
     }
     @Test func 自動開始は議事録パスを検証し会議の見出しを復元する() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
