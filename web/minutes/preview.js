@@ -5,6 +5,7 @@ import { cleanHTML } from './html.js';
 import { UpdateHighlighter, updateEntries, clearUpdates, highlightUpdates } from './updates.js';
 import { isTimeline, wrapTimeline } from './timeline.js';
 import { layoutTables } from './tables.js';
+import { boardLinks, attachBoardLinks } from './board.js';
 const md = createRenderer(), root = document.getElementById('minutes');
 const toc = document.getElementById('toc'), tocNav = toc.querySelector('nav');
 let headings = [], tocLinks = [], activeTOCLink = null, tocFrame = 0;
@@ -289,7 +290,7 @@ function paint(reveal) {
   }
 }
 window.minutes = {
-  async render(text, newContext, reset, ticket, newVault) {
+  async render(text, newContext, reset, ticket, newVault, boardLinksEnabled = false) {
     cancelNavigation();
     const current = ++generation;
     if (reset) updates.reset();
@@ -338,10 +339,12 @@ window.minutes = {
       if (current !== generation) return;
       const holder = document.createElement('div'); holder.className = 'diagram';
       try {
-        const definition = isTimeline(pre.textContent) ? wrapTimeline(pre.textContent, fitsTimelineNode) : pre.textContent;
+        const board = boardLinksEnabled ? boardLinks(pre.textContent) : { definition: pre.textContent, links: new Map() };
+        const definition = isTimeline(board.definition) ? wrapTimeline(board.definition, fitsTimelineNode) : board.definition;
         const { svg } = await mermaid.render('diagram-' + current + '-' + crypto.randomUUID(), definition);
         if (current !== generation) return;
         holder.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, FORBID_TAGS: ['foreignObject', 'script', 'a'] });
+        attachBoardLinks(holder, board.links, target => report({ kind: 'boardAnchor', target }));
         pre.replaceWith(holder);
       } catch { pre.title = '図を描画できないため、記法を表示しています'; }
     }
@@ -358,6 +361,12 @@ window.minutes = {
   },
   // AIへの依頼の送信と編集の開始で呼ぶ。今の本文を基準にし、その依頼の編集をすべて強調へ残す。
   markBaseline() { updates.mark(); clearUpdates(); },
+  jump(name) {
+    const target = document.getElementById(name) || document.getElementById('heading-' + name) ||
+      [...root.querySelectorAll('[data-heading]')].find(el => el.dataset.heading === name);
+    jumpTo(target);
+    return !!target;
+  },
   clear() { cancelNavigation(); generation++; updates.reset(); clearUpdates(); updateListeners.abort(); closeImage(); folded.clear(); source = ''; root.replaceChildren(); rebuildTOC(true); query = ''; refreshSearch(); scrollTo(0, 0); },
   invalidate() { cancelNavigation(); generation++; clearUpdates(); updateListeners.abort(); },
   search(value, direction = 0, reveal = true) {

@@ -259,7 +259,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
                 attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)])
             title.append(NSAttributedString(string: "\n" + Self.meta(profile), attributes: [
                 .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]))
-            if let prompt = Self.promptLine(profile.autoPrompt) {
+            if let prompt = Self.promptLine(profile.board.map { BoardPrompt.summary(heading: $0) } ?? profile.autoPrompt) {
                 title.append(NSAttributedString(string: "\n" + prompt, attributes: [
                     .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]))
             }
@@ -311,7 +311,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         guard let profile = profiles.first(where: { $0.slot == slot }) else {
             return .init(prompt: "", minutes: 3, workAllowed: true)
         }
-        return .init(prompt: profile.autoPrompt, minutes: profile.autoIntervalMinutes,
+        return .init(prompt: profile.scheduledPrompt, minutes: profile.autoIntervalMinutes,
                      workAllowed: profile.allowWork, sendFinal: true)
     }
     private var currentDraft: AIScheduleSheet.Draft {
@@ -327,6 +327,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             refreshDestinationTitle(); return
         }
         let draft = draft(for: slot)
+        editor.isEditable = profile.board == nil
         cwdLabel.stringValue = Self.shortPath(profile.cwd)
         editor.unmarkText(); editor.string = draft.prompt
         editor.setSelectedRange(NSRange(location: 0, length: 0))
@@ -457,6 +458,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         }
         if let slot = selectedSlot {
             let draft = currentDraft
+            if profiles.first(where: { $0.slot == slot })?.board != nil, minutesInput == nil { return nil }
             // 依頼が空・間隔が不正なら自動送信は始めない。録音そのものは始める。
             if let options = try? AIScheduleOptions(prompt: draft.prompt, interval: Double(draft.minutes) * 60,
                                                    workAllowed: draft.workAllowed, sendFinal: draft.sendFinal) {
@@ -470,7 +472,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     @objc func startPressed() {
         guard !editor.hasMarkedText(), !minutesBox.hasMarkedTextForStart else { return }
         guard let value = options else {
-            showMinutesHint("絶対パスの.mdファイルを指定してください")
+            showMinutesHint(minutesInput == nil && selectedSlot.flatMap { slot in profiles.first { $0.slot == slot } }?.board != nil
+                ? "板の自動送信には議事録のパスが必要です" : "絶対パスの.mdファイルを指定してください")
             return
         }
         showMinutesHint(nil)

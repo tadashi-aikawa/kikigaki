@@ -70,6 +70,8 @@ cwd = "~/work/minutes"    # 起動時の作業ディレクトリ。省略時は�
 autoStart = true          # 録音開始シートの宛先の既定になる。配列で1つまで
 # 手動・自動実行シートと録音開始シートのプロンプト初期値
 autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください" # 省略時は空欄
+# board = "## 板"          # 自動はこの見出しだけ更新。autoPromptは手動の初期値
+# boardPrompt = "独自の板のプロンプト全文" # board指定時のみ。省略時は内蔵
 autoIntervalMinutes = 3 # 1〜60分、省略時は3分
 
 [[ai]]
@@ -96,6 +98,8 @@ Codexは議事録を書けるよう保存先 `outputDir` を書き込み許可�
 Claudeの同梱CLI限定allowは変えず、cwd外の編集は設定により承認待ちとなりherdrでblockedとして見えます。
 
 通常の手動実行の入力欄も、宛先の `autoPrompt` を初期表示します。編集した文面は空欄も含めて宛先ごとに会議内で保持し、送信後やシートを開き直したときに復元します。自動実行の下書きとは独立し、新しい録音で初期値へ戻ります。確認質問への返答と失敗した依頼の再送は従来の入力復元を使います。
+
+`board = "## 板"` がある宛先の自動送信は、内蔵プロンプトで議事録の板の見出しだけを更新します。`boardPrompt` で全文を差し替えられます。板を使う自動送信には開始シートで議事録パスを指定してください。「議事録」「板」の別タブで表示し、議事録本文と目次からは板を外します。見出しは会議ごとに固定して保存し、手動更新にも渡して保護します。設定・内蔵文面・限界は [議論の板](docs/board.md) を参照してください。
 
 詳細は [AI設定の複数プロファイル](docs/ai-profiles.md) を参照してください。稼働中のherdrペインへ接続する `attach` と `displayAgent` は取り下げたため、書くと設定エラーになります。会議に紐づかない「準備済みAIセッション」も取り下げ、実装ごと撤去しました。利用者の台帳 `~/Library/Application Support/KIKIGAKI/ai-prepared.json` と準備用の置き場は読まず、消しません。
 
@@ -230,6 +234,9 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - 環境変数 `KIKIGAKI_DEBUG_AI_ASK="40:;100:問い"`: replayの音声経過秒に達したら本番のsubmitAIで送信する。空の問いは声の末尾を使い、返事待ちは順番を保つ。前問がfailed/cancelledで接続が送信不可なら次問のために新世代へ作り直す。期限に達していない問いや失敗した問いの再送は行わない
 - 環境変数 `KIKIGAKI_DEBUG_AI_AUTO="3:議事録を更新してください"`: replay開始時に本番の自動送信を開始し、直後に1回判定する。変更があれば即送信、空会話を含む変更なしなら開始から1間隔待つ。間隔は有限の正の秒数、プロンプトは必須。最初のコロンだけで分割し、以後のコロン・改行を保持する。作業許可は設定値、停止時の最後の1回はON。返事待ちをスキップし、自動で世代を再作成しない。判定時の効果・接続可否・変更の有無・request数をstderrへ出す。ASKと併用でき、停止後の最終待機と返送回収にはHOLDを設定する。通常起動では無視し、`--smoke --replay <wav>` は形式だけを検証する
 - 環境変数 `KIKIGAKI_DEBUG_AI_AUTO_SECONDS=20`: 設定の `autoStart` の送信間隔を秒へ上書きする。0より大きく3600秒以下。分単位の設定値ではreplayの実行時間に収まらないため。開始そのものは本番の経路を通る
+- 環境変数 `KIKIGAKI_DEBUG_AI_AUTO_PROFILE="板"`: replayの自動送信先を固定し、宛先の内蔵板プロンプトまたは設定のプロンプトを本番の開始経路から送る。間隔は `KIKIGAKI_DEBUG_AI_AUTO_SECONDS` で上書きできる。AI登録先もoutputDir内へ隔離する。
+- 環境変数 `KIKIGAKI_DEBUG_MINUTES_PATH="/absolute/minutes.md"`: replay開始前に議事録パスを渡す。板のプロファイルでは必須。通常起動では無視する。
+- DEBUGの `--preview-minutes <path>` に `KIKIGAKI_DEBUG_BOARD_HEADING="## 板"` と `KIKIGAKI_DEBUG_BOARD_CAPTURE=<出力先>` を添えると、両タブをPNGへ撮影して終了する。
 - 環境変数 `KIKIGAKI_DEBUG_AI_ASK_PROFILE="相談"`: `KIKIGAKI_DEBUG_AI_ASK` の送信先プロファイルを名前で固定する。`autoStart` と別のプロファイルを指定すると、手動と自動が同時に別のAIへ飛ぶことを確かめられる。設定に無い名前なら起動時に止まる
 - 環境変数 `KIKIGAKI_DEBUG_REPLAY_HOLD=180`: replayの停止・保存後に指定秒だけ終了を遅らせる。0〜86400秒、既定0。到達済みの送信待ちと回答回収を継続する。停止後にペインを閉じるところまで見るときも、返事が届くまでの時間をここで確保する
 - DEBUGビルドで `KIKIGAKI_DEBUG_AI_PROGRESS_REPLAY=/path/to/evidence` を指定すると、replayの本番画面更新直後にAI進行の変化をPNGと `evidence.json` へ記録する。AI登録簿は保存先の `.typed-test-support/` へ隔離し、request・受信箱・保存形式は変更しない。実herdrを使うため同梱CLIのある `.app` から起動する

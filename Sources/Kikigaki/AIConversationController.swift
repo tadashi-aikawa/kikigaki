@@ -189,7 +189,8 @@ final class AIConversationController {
     func prepare(lines: [String], question: String, voiceQuestion: String, capturedAt: Date, cutoff: Double,
                  tail: AITentativeTail?, config: ResolvedAIConfig, helper: URL, parent: UUID? = nil,
                  full: Bool = false, workAllowed: Bool? = nil, voiceUtteranceStart: Double? = nil,
-                 trigger: AIParticipantContext.Trigger? = nil, minutesPath: String? = nil) throws -> AIRequest {
+                 trigger: AIParticipantContext.Trigger? = nil, minutesPath: String? = nil,
+                 boardHeading: String? = nil) throws -> AIRequest {
         if let minutesPath { try minutes.validateTarget(minutesPath) }
         try register([config])
         let channel = try channel(config.slot)
@@ -208,7 +209,7 @@ final class AIConversationController {
             audioCutoffSeconds: cutoff, tentativeTail: tail, inReplyToRequestID: parent,
             inReplyToEventID: parent.map { "\($0.uuidString)/result" }, workAllowed: workAllowed ?? config.allowWork,
             trigger: trigger, profile: slot == nil ? nil : config.name, profileSlot: slot,
-            minutesPath: minutesPath)
+            minutesPath: minutesPath, boardHeading: boardHeading)
         let request = try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant),
             number: conversation.questions.count + 1, voiceQuestion: voiceQuestion, snapshot: snapshot, voiceUtteranceStart: voiceUtteranceStart)
         var next = conversation

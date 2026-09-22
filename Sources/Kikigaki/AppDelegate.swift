@@ -19,6 +19,8 @@ struct ReplayDebugOptions {
     var automaticSeconds: Double?
     /// 手動送信の宛先。自動と別のプロファイルへ同時に送ることを試す
     var askProfile: String?
+    var automaticProfile: String?
+    var minutesPath: String?
     @MainActor static func recoverForNextQuestion(_ controller: AIConversationController?, preparing: Bool) throws {
         guard !preparing, let controller, !controller.canSend,
               let previous = controller.conversation.questions.last,
@@ -28,6 +30,14 @@ struct ReplayDebugOptions {
     static func load(arguments: [String] = CommandLine.arguments, environment env: [String: String] = ProcessInfo.processInfo.environment) throws -> Self {
         guard arguments.contains("--replay") else { return Self() }
         var result = Self()
+        if let input = env["KIKIGAKI_DEBUG_AI_AUTO_PROFILE"] {
+            guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !input.contains("\0"), !input.contains(where: \.isNewline) else { throw AIError.invalid("KIKIGAKI_DEBUG_AI_AUTO_PROFILE") }
+            result.automaticProfile = input
+        }
+        if let input = env["KIKIGAKI_DEBUG_MINUTES_PATH"] {
+            try MinutesPath.validate(input); result.minutesPath = input
+        }
         if let mode = env["KIKIGAKI_DEBUG_DIARIZATION"] {
             guard ["on", "off"].contains(mode) else { throw AIError.invalid("KIKIGAKI_DEBUG_DIARIZATION") }
             result.diarizationEnabled = mode == "on"
@@ -179,7 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.config = config
         replayURL = Self.argument(after: "--replay").map { URL(fileURLWithPath: $0) }
 
-        let support = replayURL != nil && (replayDebug.verifyTyped || replayDebug.verifyMinutes != nil
+        let support = replayURL != nil && (replayDebug.verifyTyped || replayDebug.verifyMinutes != nil || replayDebug.automaticProfile != nil
             || ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_PROGRESS_REPLAY"] != nil)
             ? config.outputDir.appendingPathComponent(".typed-test-support")
             : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/KIKIGAKI")
@@ -424,10 +434,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if replayURL != nil {
             session.automaticIntervalOverride = replayDebug.automaticSeconds
             replayDestinationPending = replayDebug.askProfile != nil
+            do {
+                if let path = replayDebug.minutesPath { try session.prepareMinutes(path) }
+                if let name = replayDebug.automaticProfile {
+                    guard let profile = config?.aiProfiles.first(where: { $0.name == name }) else {
+                        throw AIError.invalid("KIKIGAKI_DEBUG_AI_AUTO_PROFILE: 設定にない宛先")
+                    }
+                    let options = try AIScheduleOptions(prompt: profile.scheduledPrompt,
+                        interval: replayDebug.automaticSeconds ?? Double(profile.autoIntervalMinutes) * 60,
+                        workAllowed: profile.allowWork)
+                    session.pendingAutomaticSchedule = .init(slot: profile.slot, options: options)
+                }
+            } catch { Self.log("replay 自動送信の指定が不正: \(error)"); exit(1) }
         }
         let started = await session.start(source: source)
         // 議事録を指定したら、開始と同時に右のペインへ出す。
-        if started, options?.minutesPath != nil { window?.showMinutes() }
+        if started, options?.minutesPath != nil || replayDebug.minutesPath != nil { window?.showMinutes() }
         // 宛先の指定は録音開始のリセットより後に当てる。start()が先頭へ戻すので、
         // 前に当てると2つ目を指定しても先頭へ送ってしまう。
         if started, replayURL != nil, let name = replayDebug.askProfile {
@@ -662,7 +684,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 sheet?.close(); self?.scheduleSheet = nil
             } catch {
                 Self.log("自動送信を開始できません: \(error)")
-                sheet?.update(warning: "開始できませんでした。録音状態を確認して、もう一度開始してください")
+                if case AIError.invalid(let reason) = error {
+                    sheet?.update(warning: reason)
+                } else { sheet?.update(warning: "開始できませんでした。録音状態を確認して、もう一度開始してください") }
             }
         }
         scheduleSheet = sheet; scheduleSheetMeetingID = session.aiMeetingID

@@ -1,5 +1,7 @@
 # AIへの定期自動送信
 
+`board` を指定したプロファイルは自動送信で内蔵の板プロンプトを使い、開始時に議事録パスを必須とする。`boardPrompt` による差し替えと手動の `autoPrompt` の扱いは [議論の板](board.md) を参照。
+
 本人レビューで採用した設計と実装の記録。Core、アプリ、replayと実herdrの順で実装する。会議参加モードの既存契約は [ai-participant.md](ai-participant.md) を引き継ぐ。
 
 ## 確定した仕様

@@ -97,6 +97,12 @@ import KikigakiAIIO
         if let pendingSelection { try? select(pendingSelection.path, at: Date()) }
     }
 
+    func bindBoard(_ heading: String) throws {
+        let previous = change
+        defer { notify(after: previous) }
+        _ = try update { try $0.bindBoard(heading) }
+    }
+
     /// 既知の送信済みrequestだけを読む。resultより後に来ても会話の状態は変更しない。
     func scan(questions: [AIQuestion]) {
         let previous = change

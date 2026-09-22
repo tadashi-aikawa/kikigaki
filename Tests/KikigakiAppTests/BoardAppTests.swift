@@ -1,0 +1,170 @@
+import AppKit
+import WebKit
+import Testing
+import KikigakiCore
+import KikigakiAIIO
+@testable import Kikigaki
+
+@Suite(.serialized) @MainActor struct BoardAppTests {
+    private func config(_ root: URL) throws -> ResolvedConfig {
+        try ResolvedConfig(config: ConfigLoader.parse(toml: """
+        [[ai]]
+        board = "## 板"
+        autoPrompt = "議事録本文を更新"
+        autoStart = true
+        """), home: root)
+    }
+    @Test func 開始シートで板にはパスが必須で手動の初期文は残る() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let config = try config(root)
+        let sheet = StartSheet(profiles: config.aiProfiles, diarizationEnabled: false, exclusion: AudioExclusion())
+        #expect(sheet.options == nil)
+        sheet.startPressed()
+        #expect(sheet.minutesHintText == "板の自動送信には議事録のパスが必要です")
+        sheet.setMinutesPath(root.appendingPathComponent("minutes.md").path)
+        #expect(sheet.options?.schedule?.prompt == BoardPrompt.builtIn)
+        #expect(!sheet.editor.isEditable)
+        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config,
+                                     aiStore: AIRecordStore(directory: root))
+        #expect(session.manualDraft(for: config.aiProfiles[0]) == "議事録本文を更新")
+    }
+    @Test func 自動開始は議事録パスを検証し会議の見出しを復元する() throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let config = try config(root)
+        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config,
+                                     aiStore: AIRecordStore(directory: root))
+        let options = try AIScheduleOptions(prompt: "古い下書き", interval: 60)
+        #expect(throws: (any Error).self) { try session.startAISchedule(options: options, helper: root.appendingPathComponent("helper")) }
+        try session.selectMinutes(root.appendingPathComponent("minutes.md").path)
+        try session.startAISchedule(options: options, helper: root.appendingPathComponent("helper"))
+        defer { session.stopAISchedule() }
+        #expect(session.lastScheduleOptions?.prompt == BoardPrompt.builtIn)
+        let store = try #require(try session.previewMinutesStore())
+        let source = store.state.targetSource, changedAt = store.state.targetChangedAt
+        #expect(store.state.boardHeading == "## 板")
+        let restored = MinutesStore(meetingID: store.meetingID, outputDirectory: root, markdownURL: store.markdownURL)
+        #expect(restored.state.boardHeading == "## 板")
+        #expect(restored.state.targetSource == source && restored.state.targetChangedAt == changedAt)
+    }
+    @Test func タブは見出しがある時だけ表示し両本文を分離する() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let defaults = MinutesTestDefaults()
+        let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 800, height: 700), defaults: defaults.value)
+        let window = NSWindow(contentRect: preview.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = preview
+        defer { preview.stop(); window.orderOut(nil) }
+        preview.update(path: nil, source: nil, active: true, boardHeading: "## 板")
+        preview.receive(.body("# 会議\n## 本文\n手動の記録\n## 板\n### 論点\n板だけの論点\n## 次\n後半の本文", [], modifiedAt: Date()))
+        for _ in 0..<300 {
+            if preview.boardDocument.renderedText.contains("板だけの論点") && preview.minutesDocument.renderedText.contains("後半の本文") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(preview.minutesDocument.renderedText.contains("手動の記録"))
+        #expect(!preview.minutesDocument.renderedText.contains("板だけの論点"))
+        #expect(!preview.boardDocument.renderedText.contains("手動の記録"))
+        #expect(!preview.tabs.isHiddenOrHasHiddenAncestor)
+        preview.selectBoard(true)
+        #expect(preview.document === preview.boardDocument)
+        preview.receive(.body("# 会議\n板が消えた", [], modifiedAt: Date()))
+        #expect(preview.document === preview.minutesDocument)
+        #expect(preview.tabs.isHiddenOrHasHiddenAncestor)
+        preview.resetContext()
+        #expect(!preview.selectedBoard)
+    }
+    @Test func replayでプロファイルとパスを指定でき通常起動では無視する() throws {
+        let env = ["KIKIGAKI_DEBUG_AI_AUTO_PROFILE": "板", "KIKIGAKI_DEBUG_MINUTES_PATH": "/tmp/minutes.md"]
+        let debug = try ReplayDebugOptions.load(arguments: ["--replay"], environment: env)
+        #expect(debug.automaticProfile == "板" && debug.minutesPath == "/tmp/minutes.md")
+        #expect(try ReplayDebugOptions.load(arguments: [], environment: env).automaticProfile == nil)
+        #expect(throws: (any Error).self) { try ReplayDebugOptions.load(arguments: ["--replay"], environment: ["KIKIGAKI_DEBUG_MINUTES_PATH": "relative.md"]) }
+    }
+    @Test func 見出し保存の競合でも新しい人のパスと時刻を巻き戻さない() throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meeting = UUID(), disk = MinutesFileStore(root: root, meetingID: meeting)
+        let store = MinutesStore(meetingID: meeting, outputDirectory: root)
+        try store.select("/tmp/元.md", at: Date(timeIntervalSince1970: 1))
+        var attempts = 0
+        store.beforeSave = {
+            attempts += 1
+            if attempts == 1 {
+                let old = try disk.read()
+                var next = old
+                try next.select("/tmp/新.md", at: Date(timeIntervalSince1970: 2)); try next.advanceRevision()
+                try disk.save(next, replacing: old)
+            }
+        }
+        try store.bindBoard("## 板")
+        #expect(attempts == 2 && store.state.revision == 3)
+        #expect(store.state.boardHeading == "## 板" && store.state.humanMinutesPath == "/tmp/新.md")
+        #expect(store.state.targetChangedAt == Date(timeIntervalSince1970: 2) && store.state.targetSource == .human)
+    }
+    @Test func 手動送信は板設定のない宛先にも会議の見出しを渡す() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let records = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
+        var config = ResolvedConfig(config: try ConfigLoader.parse(toml: ""), home: root)
+        config.ai = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path), home: root)
+        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config, aiStore: records)
+        try session.selectMinutes(root.appendingPathComponent("minutes.md").path)
+        try session.previewMinutesStore()?.bindBoard("## 板")
+        session.submitAI(question: "本文を更新", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"))
+        await session.submissionTaskForTesting?.value
+        let request = try #require(session.aiRecord?.controller.conversation.questions.first?.request)
+        #expect(request.envelope.participant.boardHeading == "## 板")
+        #expect(request.envelope.participant.minutesPath == root.appendingPathComponent("minutes.md").path)
+        #expect(request.trigger == nil)
+    }
+    @Test func 実Mermaidのカードから議事録へ移動し外部clickは無効() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let defaults = MinutesTestDefaults()
+        let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 800, height: 650), defaults: defaults.value)
+        let window = NSWindow(contentRect: preview.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = preview
+        defer { preview.stop(); window.orderOut(nil) }
+        let markdown = """
+        # 会議
+        ## 決定事項 {#decision}
+        本文の決定
+        ## 板
+        ```mermaid
+        flowchart TB
+          T1["T1 決定事項"]
+          T2["T2 外部"]
+          T3["T3 callback"]
+          click T1 "#decision"
+          click T2 "https://example.com"
+          click T3 callback
+        ```
+        """
+        preview.update(path: nil, source: nil, active: true, boardHeading: "## 板")
+        preview.receive(.body(markdown, [], modifiedAt: Date()))
+        for _ in 0..<400 {
+            if preview.boardDocument.renderedText.contains("T1 決定事項") && preview.minutesDocument.renderedText.contains("本文の決定") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        preview.selectBoard(true)
+        let web = preview.boardDocument.webView
+        let nodes = try await web.evaluateJavaScript("JSON.stringify([...document.querySelectorAll('.diagram g.node')].map(n=>[n.id,n.getAttribute('role')]))") as? String ?? "なし"
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('.diagram g.node[role=link]').length") as? Int == 1, "ノード: \(nodes)、本文: \(preview.boardDocument.renderedText)")
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('.diagram a,.diagram script').length") as? Int == 0)
+        _ = try await web.evaluateJavaScript("document.querySelector('.diagram g.node[role=link]').dispatchEvent(new MouseEvent('click', {bubbles:true}))")
+        for _ in 0..<100 {
+            if !preview.selectedBoard { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!preview.selectedBoard)
+        #expect(try await preview.minutesDocument.webView.evaluateJavaScript("window.minutes.jump('decision')") as? Bool == true)
+        #expect(try await preview.minutesDocument.webView.evaluateJavaScript("document.querySelector('#toc').textContent.includes('板')") as? Bool == false)
+        _ = try await preview.minutesDocument.webView.evaluateJavaScript("window.originalHeading = document.querySelector('h1'); true")
+        preview.markUpdateBaseline()
+        preview.receive(.body(markdown.replacingOccurrences(of: "T1 決定事項", with: "T1 更新済み"), [], modifiedAt: Date()))
+        for _ in 0..<300 {
+            if preview.boardDocument.renderedText.contains("更新済み") { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(preview.boardDocument.renderedText.contains("更新済み"))
+        #expect(!preview.minutesDocument.renderedText.contains("更新済み"))
+        #expect(try await preview.minutesDocument.webView.evaluateJavaScript("window.originalHeading === document.querySelector('h1')") as? Bool == true)
+    }
+}

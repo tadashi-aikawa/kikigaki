@@ -38,9 +38,11 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
             session.selectAIProfile(slot: slot, forSchedule: true)
             displayedSlot = slot
             self.restoreDraft(session.scheduleDraft(for: target))
+            self.editor.isEditable = target.board == nil
             self.updateDestinations(session.aiDestinationItems, selected: slot, participant: target.participantName)
         }
         updateDestinations(session.aiDestinationItems, selected: profile.slot, participant: profile.participantName)
+        editor.isEditable = profile.board == nil
     }
 
     var draft: Draft {

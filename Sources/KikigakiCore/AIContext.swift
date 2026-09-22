@@ -100,13 +100,15 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     public let profileSlot: Int?
     /// 人が指定した議事録の書き先だけ。AI通知の表示対象を伝播させない。
     public let minutesPath: String?
+    public let boardHeading: String?
 
     public init(streamID: UUID, requestID: UUID, sessionGeneration: Int, participantName: String,
                 cliPath: String, sessionPath: String, requestToken: String, question: String,
                 capturedAt: Date, audioCutoffSeconds: Double, tentativeTail: AITentativeTail? = nil,
                 inReplyToRequestID: UUID? = nil, inReplyToEventID: String? = nil, workAllowed: Bool = true,
                 trigger: Trigger? = nil, profile: String? = nil, profileSlot: Int? = nil,
-                minutesPath: String? = nil) {
+                minutesPath: String? = nil, boardHeading: String? = nil) {
+        self.boardHeading = boardHeading
         self.minutesPath = minutesPath
         self.trigger = trigger; self.profile = profile; self.profileSlot = profileSlot
         schemaVersion = 1; mode = "meeting"; self.streamID = streamID; self.requestID = requestID
@@ -121,6 +123,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
 
     public func validate() throws {
         if let minutesPath { try MinutesPath.validate(minutesPath) }
+        if let boardHeading { try BoardHeading.validate(boardHeading) }
         guard schemaVersion == 1, mode == "meeting", sessionGeneration > 0,
               AIValidation.singleLine(participantName), AIValidation.absolutePath(cliPath),
               AIValidation.absolutePath(sessionPath), AIValidation.singleLine(requestToken),
@@ -156,6 +159,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case trigger, profile
         case minutesPath = "minutes_path"
+        case boardHeading = "board_heading"
         case profileSlot = "profile_slot"
         case schemaVersion = "schema_version", mode, streamID = "stream_id", requestID = "request_id"
         case sessionGeneration = "session_generation", participantName = "participant_name"
@@ -169,6 +173,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         trigger = try values.contains(.trigger) ? values.decode(Trigger.self, forKey: .trigger) : nil
         minutesPath = try values.contains(.minutesPath) ? values.decode(String.self, forKey: .minutesPath) : nil
+        boardHeading = try values.contains(.boardHeading) ? values.decode(String.self, forKey: .boardHeading) : nil
         // 複数プロファイル以前のrequestはこのキーを持たない。欠損は既定プロファイルとして読む。
         profile = try values.decodeIfPresent(String.self, forKey: .profile)
         profileSlot = try values.decodeIfPresent(Int.self, forKey: .profileSlot)

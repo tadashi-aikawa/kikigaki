@@ -49,7 +49,13 @@ private final class MinutesPathField: NSTextField {
 @MainActor final class MinutesPreviewView: NSView, NSSearchFieldDelegate {
     let pathField: NSTextField = MinutesPathField(string: "")
     let headerBar = NSView()
-    let document = MinutesWebView(frame: .zero)
+    let minutesDocument = MinutesWebView(frame: .zero)
+    let boardDocument = MinutesWebView(frame: .zero)
+    var document: MinutesWebView { selectedBoard ? boardDocument : minutesDocument }
+    let tabs = NSSegmentedControl(labels: ["議事録", "板"], trackingMode: .selectOne, target: nil, action: nil)
+    private let tabBar = NSStackView()
+    private(set) var selectedBoard = false
+    private var boardHeading: String?
     let updateStatus = MinutesUpdateStatus(frame: .zero)
     private var pendingModifiedAt: Date?
     private var rendering = false
@@ -77,6 +83,8 @@ private final class MinutesPathField: NSTextField {
     private var active = false
     private var monitor: MinutesFileMonitor?
     private var body: String?
+    private var minutesBody: String?
+    private var boardBody: String?
     let history: MinutesHistoryStore
     let historyPopup = MinutesHistoryPopup(frame: .zero)
     private var historyFocusGeneration = 0
@@ -157,15 +165,33 @@ private final class MinutesPathField: NSTextField {
         searchField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         searchCount.setContentHuggingPriority(.required, for: .horizontal)
         searchBar.isHidden = true
-        document.onRendered = { [weak self] text in
-            guard let self, self.active else { return }
-            self.rendering = false
-            self.updateStatus.setDate(self.pendingModifiedAt)
-            if text.isEmpty { self.showMessage("議事録はまだ空です") } else { self.showBody() }
-            if let path = self.path { self.history.record(path) }
-            if !self.searchBar.isHidden { self.search(reveal: false) }
+        tabs.selectedSegment = 0; tabs.target = self; tabs.action = #selector(changeTab)
+        tabs.selectedSegmentBezelColor = Washi.ai.background
+        tabs.setAccessibilityLabel("議事録の表示タブ")
+        tabBar.orientation = .horizontal; tabBar.edgeInsets = NSEdgeInsets(top: 8, left: 24, bottom: 8, right: 24)
+        tabBar.addArrangedSubview(tabs); tabBar.addArrangedSubview(NSView()); tabBar.isHidden = true
+        boardDocument.isHidden = true
+        boardDocument.boardLinksEnabled = true
+        boardDocument.onBoardAnchor = { [weak self] heading in
+            guard let self, self.selectedBoard else { return }
+            self.selectBoard(false)
+            self.layoutSubtreeIfNeeded()
+            self.minutesDocument.jump(to: heading)
         }
-        document.onError = { [weak self] text in self?.cancelRender(); self?.showMessage(text, retry: true) }
+        for renderedDocument in [minutesDocument, boardDocument] {
+            renderedDocument.onRendered = { [weak self, weak renderedDocument] text in
+                guard let self, self.active, renderedDocument === self.document else { return }
+                self.rendering = false
+                self.updateStatus.setDate(self.pendingModifiedAt)
+                if text.isEmpty { self.showMessage("議事録はまだ空です") } else { self.showBody() }
+                if let path = self.path { self.history.record(path) }
+                if !self.searchBar.isHidden { self.search(reveal: false) }
+            }
+            renderedDocument.onError = { [weak self, weak renderedDocument] text in
+                guard let self, renderedDocument === self.document else { return }
+                self.cancelRender(); self.showMessage(text, retry: true)
+            }
+        }
         message.font = .systemFont(ofSize: 14); message.textColor = Washi.muted; message.alignment = .center
         message.setAccessibilityLabel("議事録の状態")
         retryButton.target = self; retryButton.action = #selector(reload)
@@ -177,11 +203,13 @@ private final class MinutesPathField: NSTextField {
         message.widthAnchor.constraint(equalTo: status.widthAnchor, constant: -48).isActive = true
         let bodyView = NSView()
         bodyView.setContentHuggingPriority(.defaultLow, for: .vertical)
-        bodyView.addSubview(document); bodyView.addSubview(status)
-        for view in [document, status] { view.translatesAutoresizingMaskIntoConstraints = false }
+        bodyView.addSubview(minutesDocument); bodyView.addSubview(boardDocument); bodyView.addSubview(status)
+        for view in [minutesDocument, boardDocument, status] { view.translatesAutoresizingMaskIntoConstraints = false }
         NSLayoutConstraint.activate([
             document.leadingAnchor.constraint(equalTo: bodyView.leadingAnchor), document.trailingAnchor.constraint(equalTo: bodyView.trailingAnchor),
             document.topAnchor.constraint(equalTo: bodyView.topAnchor), document.bottomAnchor.constraint(equalTo: bodyView.bottomAnchor),
+            boardDocument.leadingAnchor.constraint(equalTo: bodyView.leadingAnchor), boardDocument.trailingAnchor.constraint(equalTo: bodyView.trailingAnchor),
+            boardDocument.topAnchor.constraint(equalTo: bodyView.topAnchor), boardDocument.bottomAnchor.constraint(equalTo: bodyView.bottomAnchor),
             status.centerXAnchor.constraint(equalTo: bodyView.centerXAnchor),
             status.widthAnchor.constraint(equalTo: bodyView.widthAnchor, constant: -48),
             status.leadingAnchor.constraint(greaterThanOrEqualTo: bodyView.leadingAnchor, constant: 20),
@@ -194,7 +222,7 @@ private final class MinutesPathField: NSTextField {
         status.topAnchor.constraint(equalTo: guide.bottomAnchor).isActive = true
         let bodyColumn = column([notice, bodyView], spacing: 0, inset: 0)
         bodyColumn.setContentHuggingPriority(.defaultLow, for: .vertical)
-        let layout = column([headerBar, separator(), searchBar, bodyColumn, separator(), updateStatus], spacing: 0, inset: 0)
+        let layout = column([headerBar, separator(), tabBar, searchBar, bodyColumn, separator(), updateStatus], spacing: 0, inset: 0)
         addSubview(layout); layout.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             layout.leadingAnchor.constraint(equalTo: leadingAnchor), layout.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -268,11 +296,13 @@ private final class MinutesPathField: NSTextField {
         historyPopup.needsLayout = true
     }
     /// AIの依頼が編集を始める直前に、更新強調の基準を今の本文へ置き直す。
-    func markUpdateBaseline() { document.markUpdateBaseline() }
+    func markUpdateBaseline() { minutesDocument.markUpdateBaseline(); boardDocument.markUpdateBaseline() }
     func resetContext() {
         stop(); path = nil; body = nil; editing = false; commitError = nil; contextGeneration += 1
         window?.makeFirstResponder(nil)
-        document.clear(); document.setFile(nil); resetNextRender = true
+        for view in [minutesDocument, boardDocument] { view.clear(); view.setFile(nil) }
+        selectedBoard = false; boardHeading = nil; tabs.selectedSegment = 0; tabBar.isHidden = true
+        resetNextRender = true
         closeSearch(); editorTask?.cancel(); editorTask = nil
     }
 
@@ -291,12 +321,17 @@ private final class MinutesPathField: NSTextField {
         return line
     }
 
-    func update(path: String?, source: MinutesState.Source?, active: Bool, warning: String? = nil) {
+    func update(path: String?, source: MinutesState.Source?, active: Bool, warning: String? = nil, boardHeading: String? = nil) {
+        let headingChanged = self.boardHeading != boardHeading
+        self.boardHeading = boardHeading
         let changed = self.path != path
         let start = active && (!self.active || changed || self.source != source)
         self.path = path; self.source = source; self.active = active
         updateStatus.active = active
-        if changed { document.setFile(path.map { URL(fileURLWithPath: $0) }); resetNextRender = true }
+        if changed {
+            for view in [minutesDocument, boardDocument] { view.setFile(path.map { URL(fileURLWithPath: $0) }) }
+            selectedBoard = false; tabs.selectedSegment = 0; tabBar.isHidden = true; resetNextRender = true
+        }
         neovimButton.isEnabled = path != nil && editorTask == nil
         obsidianButton.isEnabled = path != nil
         closeButton.isEnabled = path != nil
@@ -306,12 +341,13 @@ private final class MinutesPathField: NSTextField {
         if let commitError { notice.stringValue = commitError; notice.isHidden = false }
         if !active { closeHistory(); cancelRender(); monitor?.stop(); monitor = nil; return }
         if start { beginRead(reset: changed) }
+        else if headingChanged, body != nil { renderBody(reset: true) }
     }
 
     private func beginRead(reset: Bool) {
         cancelRender()
         monitor?.stop(); monitor = nil
-        if reset { body = nil; document.clear(); resetNextRender = true }
+        if reset { body = nil; minutesDocument.clear(); boardDocument.clear(); resetNextRender = true }
         guard let path else { showMessage("議事録のファイルを指定するか、AIに書かせると表示します"); return }
         showMessage("読み込んでいます…", cancel: true)
         monitor = MinutesFileMonitor(path: path) { [weak self] result in self?.receive(result) }
@@ -327,7 +363,7 @@ private final class MinutesPathField: NSTextField {
             }
             body = source
             rendering = true
-            document.render(source, reset: resetNextRender)
+            renderBody(reset: resetNextRender)
             resetNextRender = false
         case .missing: cancelRender(); showMessage(source == .ai ? "AIが通知したファイルはまだありません。作成されると自動で表示します" : "指定したファイルはまだありません。作成されると自動で表示します", retry: true)
         case .cloud: cancelRender(); showMessage("iCloudからのダウンロードを待っています…", cancel: true)
@@ -336,13 +372,43 @@ private final class MinutesPathField: NSTextField {
         }
     }
 
-    private func cancelRender() { body = nil; rendering = false; pendingModifiedAt = nil; updateStatus.setDate(nil); document.invalidate() }
+    private func renderBody(reset: Bool) {
+        guard let body else { return }
+        let parts = boardHeading.map { BoardSection.split(body, heading: $0) }
+        tabBar.isHidden = parts?.board == nil
+        if tabBar.isHidden { selectedBoard = false; tabs.selectedSegment = 0 }
+        let minutes = parts?.minutes ?? body, board = parts?.board
+        let updateMinutes = reset || minutesBody != minutes
+        let updateBoard = reset || boardBody != board
+        // 板の自動更新で、読んでいる議事録の選択・スクロール・画像モーダルを作り直さない。
+        minutesBody = minutes; boardBody = board
+        rendering = selectedBoard ? updateBoard : updateMinutes
+        if updateMinutes { minutesDocument.render(minutes, reset: reset) }
+        if updateBoard {
+            if let board { boardDocument.render(board, reset: reset) }
+            else { boardDocument.clear() }
+        }
+        if !rendering { updateStatus.setDate(pendingModifiedAt) }
+        showBody()
+    }
+    @objc private func changeTab() { selectBoard(tabs.selectedSegment == 1) }
+    func selectBoard(_ board: Bool) {
+        guard !tabBar.isHidden || !board else { return }
+        selectedBoard = board; tabs.selectedSegment = board ? 1 : 0
+        showBody()
+        if !searchBar.isHidden { search(reveal: false) }
+    }
+    private func cancelRender() {
+        body = nil; minutesBody = nil; boardBody = nil; rendering = false; pendingModifiedAt = nil; updateStatus.setDate(nil)
+        minutesDocument.invalidate(); boardDocument.invalidate(); tabBar.isHidden = true
+    }
     private func showBody() {
-        message.isHidden = true; emptyChoose.isHidden = true; retryButton.isHidden = true; cancelButton.isHidden = true; document.isHidden = false
+        message.isHidden = true; emptyChoose.isHidden = true; retryButton.isHidden = true; cancelButton.isHidden = true
+        minutesDocument.isHidden = selectedBoard; boardDocument.isHidden = !selectedBoard
     }
 
     private func showMessage(_ value: String, retry: Bool = false, cancel: Bool = false) {
-        message.stringValue = value; message.isHidden = false; document.isHidden = true
+        message.stringValue = value; message.isHidden = false; minutesDocument.isHidden = true; boardDocument.isHidden = true
         emptyChoose.isHidden = path != nil
         retryButton.isHidden = !retry; cancelButton.isHidden = !cancel
     }
@@ -432,7 +498,8 @@ private final class MinutesPathField: NSTextField {
     @objc func closeSearch() {
         searchGeneration += 1
         searchBar.isHidden = true; searchField.stringValue = ""
-        document.search("") { _, _ in }
+        minutesDocument.search("") { _, _ in }
+        boardDocument.search("") { _, _ in }
         if let editor = searchField.currentEditor(), window?.firstResponder === editor {
             window?.makeFirstResponder(document.webView)
         }

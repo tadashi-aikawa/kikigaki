@@ -5,6 +5,19 @@ import { createRenderer, withoutFrontmatter, imageURL } from './renderer.js';
 import { changedEntries, UpdateHighlighter, foldUpdateMarks } from './updates.js';
 import { isTimeline, wrapTimeline } from './timeline.js';
 import { fitColumns } from './tables.js';
+import { boardLinks } from './board.js';
+test('板のclickはT番号から内部見出しへの単独行だけを抽出する', () => {
+  const source = 'flowchart TB\nT1["論点"]\nclick T1 "#決定事項"\nclick T2 href "#some-id";\nclick T3 "#%E6%9D%BF"';
+  const result = boardLinks(source);
+  assert.deepEqual([...result.links], [['T1', '決定事項'], ['T2', 'some-id'], ['T3', '板']]);
+  assert.ok(!result.definition.includes('click'));
+  for (const directive of ['click T1 "https://example.com"', 'click T1 callback', 'click T1 call callback()',
+    'click T1 "javascript:alert(1)"', 'click T1 "#<img>"', 'click T1 "#%00"', 'click X "#heading"',
+    'T1["click T1 #heading"]', 'click T1 "#heading" "tooltip"']) {
+    assert.equal(boardLinks('flowchart TB\n' + directive).links.size, 0);
+  }
+  assert.equal(boardLinks('sequenceDiagram\nclick T1 "#heading"').links.size, 0);
+});
 const render = text => createRenderer().render(withoutFrontmatter(text), { context: 'test' });
 test('変更行は追加と書換えだけで移動と削除は光らせない', () => {
   const entries = values => values.map(key => ({ key }));

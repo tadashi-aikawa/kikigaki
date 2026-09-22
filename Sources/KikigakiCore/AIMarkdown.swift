@@ -77,7 +77,12 @@ public enum AIMarkdown {
                 lines.append("- 送信: " + date(sent, timeZone: timeZone) + (request.trigger == .scheduled ? " (自動)" : ""))
             }
             lines.append("- 宛先: " + oneLine(participant.participantName))
-            lines.append("- 送信文: 「" + oneLine(request.displayQuestion.isEmpty ? "会話末尾の送信文" : request.displayQuestion) + "」")
+            if request.trigger == .scheduled, let heading = participant.boardHeading {
+                lines.append("- 送信文: 「" + oneLine(BoardPrompt.summary(heading: heading)) + "」")
+                lines.append("- プロンプト: KIKIGAKI docs/board.md。差し替え時の全文は保存済みrequestを参照")
+            } else {
+                lines.append("- 送信文: 「" + oneLine(request.displayQuestion.isEmpty ? "会話末尾の送信文" : request.displayQuestion) + "」")
+            }
             let range = envelope.readLineCount == 0 ? "読む行数0" : "\(envelope.readStartLine)〜\(envelope.totalLineCount)行"
             let times = request.timeRange.map { "(\($0.start)〜\($0.end))" } ?? ""
             lines.append("- 対象: \(range)\(times)" + (participant.tentativeTail == nil ? "" : "。暫定末尾を含む"))

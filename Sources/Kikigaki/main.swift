@@ -13,6 +13,10 @@ catch {
 if CommandLine.arguments.contains("--smoke") {
     do {
         let config = try AppDelegate.loadConfig()
+        if let name = replayDebug.automaticProfile {
+            guard let profile = config.aiProfiles.first(where: { $0.name == name }) else { throw AIError.invalid("unknown automatic profile") }
+            if profile.board != nil, replayDebug.minutesPath == nil { throw AIError.invalid("board requires minutes path") }
+        }
         print("Kikigaki (smoke): outputDir=\(config.outputDir.path) saveRecording=\(config.saveRecording)")
         if CommandLine.arguments.contains("--replay") {
             print("Kikigaki (replay debug): questions=\(replayDebug.questions.count) hold=\(replayDebug.hold) rename=\(replayDebug.rename != nil) typed=\(replayDebug.typedEntries.count) verifyTyped=\(replayDebug.verifyTyped) automatic=\(replayDebug.automatic != nil)")

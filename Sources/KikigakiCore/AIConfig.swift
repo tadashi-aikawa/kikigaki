@@ -42,6 +42,8 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var notifySound: Bool?
     public var allowWork: Bool?
     public var autoPrompt: String?
+    public var board: String?
+    public var boardPrompt: String?
     public var autoIntervalMinutes: Int?
     /// 録音開始で自動送信を始める。配列全体で1つまで
     public var autoStart: Bool?
@@ -51,7 +53,9 @@ public struct AIConfig: Codable, Equatable, Sendable {
                 displayAgent: String? = nil,
                 extraArgs: [String]? = nil, prompt: String? = nil, notifySound: Bool? = nil,
                 allowWork: Bool? = nil,
-                autoPrompt: String? = nil, autoIntervalMinutes: Int? = nil, autoStart: Bool? = nil) {
+                autoPrompt: String? = nil, autoIntervalMinutes: Int? = nil, autoStart: Bool? = nil,
+                board: String? = nil, boardPrompt: String? = nil) {
+        self.board = board; self.boardPrompt = boardPrompt
         self.name = name
         self.cli = cli; self.command = command; self.herdrCommand = herdrCommand; self.model = model; self.effort = effort
         self.address = address; self.avatar = avatar
@@ -112,7 +116,12 @@ public struct AIConfig: Codable, Equatable, Sendable {
         if let autoIntervalMinutes, !(1...60).contains(autoIntervalMinutes) {
             throw invalid("autoIntervalMinutes must be 1...60")
         }
-        if autoStart == true, (autoPrompt ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let board { try BoardHeading.validate(board) }
+        if let boardPrompt {
+            guard board != nil else { throw invalid("boardPrompt requires board") }
+            try AIValidation.text(boardPrompt, limit: AILimits.questionBytes, nonempty: true)
+        }
+        if autoStart == true, board == nil, (autoPrompt ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw invalid("autoStart requires a non-empty autoPrompt")
         }
     }
@@ -145,8 +154,12 @@ public struct AIProfileList: Codable, Equatable, Sendable {
         func invalid(_ message: String) -> ConfigError { .invalid(description: "ai: " + message) }
         guard !profiles.isEmpty else { throw invalid("must contain at least one profile") }
         var names = Set<String>()
+        var boards = Set<String>()
         for (index, profile) in profiles.enumerated() {
             try profile.validate(label: isArrayForm ? "ai[\(index)]" : "ai")
+            if let board = profile.board, !boards.insert(board).inserted {
+                throw invalid("board must be unique: \(board)")
+            }
             guard names.insert(profile.resolvedName).inserted else {
                 throw invalid("name must be unique: \(profile.resolvedName)")
             }
@@ -181,6 +194,9 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public let notifySound: Bool
     public let allowWork: Bool
     public let autoPrompt: String
+    public let board: String?
+    public let boardPrompt: String?
+    public var scheduledPrompt: String { board == nil ? autoPrompt : (boardPrompt ?? BoardPrompt.builtIn) }
     public let autoIntervalMinutes: Int
     public let autoStart: Bool
     public var participantName: String { address.hasSuffix("へ") ? String(address.dropLast()) : address }
@@ -202,12 +218,13 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         notifySound = config.notifySound ?? false
         allowWork = config.allowWork ?? true
         autoPrompt = config.autoPrompt ?? ""; autoIntervalMinutes = config.autoIntervalMinutes ?? 3
+        board = config.board; boardPrompt = config.boardPrompt
         autoStart = config.autoStart ?? false
     }
 
     private enum CodingKeys: String, CodingKey {
         case cli, command, herdrCommand, model, address, cwd, extraArgs, prompt, notifySound, allowWork
-        case autoPrompt, autoIntervalMinutes
+        case autoPrompt, autoIntervalMinutes, board, boardPrompt
         case slot, name, effort, autoStart, avatar
     }
     public init(from decoder: Decoder) throws {
@@ -225,6 +242,8 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         // 旧会議のmanifestにこのキーが無い場合だけ、以前の作業可能な契約を引き継ぐ。
         allowWork = try values.contains(.allowWork) ? values.decode(Bool.self, forKey: .allowWork) : true
         autoPrompt = try values.contains(.autoPrompt) ? values.decode(String.self, forKey: .autoPrompt) : ""
+        board = try values.contains(.board) ? values.decode(String.self, forKey: .board) : nil
+        boardPrompt = try values.contains(.boardPrompt) ? values.decode(String.self, forKey: .boardPrompt) : nil
         autoIntervalMinutes = try values.contains(.autoIntervalMinutes) ? values.decode(Int.self, forKey: .autoIntervalMinutes) : 3
         // 複数プロファイル以前のmanifestは1つ目の新規起動プロファイルとして読む。
         slot = try values.contains(.slot) ? values.decode(Int.self, forKey: .slot) : 1
@@ -237,7 +256,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         // 長い宛名の会議が復号できなくなると未完了の回収まで止まる。
         // 明示された `name` は設定の解析時と同じ基準で検証する。
         try AIConfig(name: name == fallbackName ? nil : name, cli: cli, effort: effort, avatar: avatar,
-                     autoPrompt: autoPrompt, autoIntervalMinutes: autoIntervalMinutes).validate()
+                     autoPrompt: autoPrompt, autoIntervalMinutes: autoIntervalMinutes, board: board, boardPrompt: boardPrompt).validate()
     }
 }
 

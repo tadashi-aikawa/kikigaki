@@ -164,7 +164,7 @@ final class MeetingSession {
     private var scheduleDrafts: [Int: AIScheduleSheet.Draft] = [:]
     func updateScheduleDraft(_ value: AIScheduleSheet.Draft, slot: Int) { scheduleDrafts[slot] = value }
     func scheduleDraft(for profile: ResolvedAIConfig) -> AIScheduleSheet.Draft {
-        scheduleDrafts[profile.slot] ?? .init(prompt: profile.autoPrompt, minutes: profile.autoIntervalMinutes,
+        scheduleDrafts[profile.slot] ?? .init(prompt: profile.scheduledPrompt, minutes: profile.autoIntervalMinutes,
                                              workAllowed: profile.allowWork)
     }
     private enum AIPhase { case confirmationWait, preparingAndSending }
@@ -829,7 +829,14 @@ final class MeetingSession {
         // 確定待ち後のprepareでは遅い。人の書き先を送信操作の入口で固定する。
         // AI通知は表示対象だけを変えるので、この値へ混ぜない。
         let minutesPath: String?
-        do { minutesPath = try aiStore.minutesStores.store(meetingID: meetingID, markdownURL: url).state.humanMinutesPath }
+        let boardHeading: String?
+        do {
+            let state = try aiStore.minutesStores.store(meetingID: meetingID, markdownURL: url).state
+            minutesPath = state.humanMinutesPath
+            // 板を持たない宛先の自動送信を、板の更新として記録・解釈しない。
+            // 手動は宛先を問わず会議の板を保護する。
+            boardHeading = trigger == .scheduled ? config.board : state.boardHeading
+        }
         catch { aiWarning = "議事録の書き先を確認できません"; emit(); return }
         let names = snapshot.names, timeline = snapshot.timeline, typed = typedEntries
         let exclusion = audioExclusion
@@ -892,7 +899,8 @@ final class MeetingSession {
                 aiPhases[slot] = .preparingAndSending
                 let fixed = try record.controller.prepare(lines: capture.lines, question: question, voiceQuestion: capture.voice,
                     capturedAt: capturedAt, cutoff: cutoff, tail: capture.tail, config: config, helper: helper, parent: parent, full: full,
-                    workAllowed: workAllowed, voiceUtteranceStart: capture.voiceUtteranceStart, trigger: trigger, minutesPath: minutesPath)
+                    workAllowed: workAllowed, voiceUtteranceStart: capture.voiceUtteranceStart, trigger: trigger,
+                    minutesPath: minutesPath, boardHeading: boardHeading)
                 request = fixed
                 aiRequestOwners[fixed.id] = owner
                 if trigger == .scheduled, let scheduleRun {
@@ -1176,7 +1184,7 @@ extension MeetingSession {
             workAllowed = options.workAllowed; sendFinal = options.sendFinal
         } else {
             guard let configured = meetingAIProfiles.first(where: \.autoStart) else { return }
-            profile = configured; prompt = configured.autoPrompt
+            profile = configured; prompt = configured.scheduledPrompt
             interval = Double(configured.autoIntervalMinutes) * 60
             workAllowed = configured.allowWork; sendFinal = true
         }
@@ -1186,7 +1194,8 @@ extension MeetingSession {
                                                 workAllowed: workAllowed, sendFinal: sendFinal)
             try startAISchedule(options: options, helper: helper, now: now, profile: profile)
         } catch {
-            aiScheduleWarning = "自動送信を開始できません。宛先と依頼を確認してください"
+            if case AIError.invalid(let reason) = error { aiScheduleWarning = reason }
+            else { aiScheduleWarning = "自動送信を開始できません。宛先と依頼を確認してください" }
             log("自動送信を開始できません: \(error)")
         }
     }
@@ -1196,6 +1205,16 @@ extension MeetingSession {
             throw AIError.invalid("schedule recording state")
         }
         if let profile { scheduleAI = profile }
+        var options = options
+        if let profile = aiScheduleConfiguration, let heading = profile.board {
+            guard let url = snapshot.markdownURL, let aiStore else { throw AIError.invalid("議事録の書き先を確認できません") }
+            let store = try aiStore.minutesStores.store(meetingID: aiMeetingID, markdownURL: url)
+            guard store.state.humanMinutesPath != nil else { throw AIError.invalid("板の自動送信には議事録のパスが必要です") }
+            try store.bindBoard(heading)
+            // 板の全文差し替えは設定だけで行う。シートの古い下書きで内蔵規則を上書きしない。
+            options = try AIScheduleOptions(prompt: profile.scheduledPrompt, interval: options.interval,
+                                            workAllowed: options.workAllowed, sendFinal: options.sendFinal)
+        }
         var next = aiSchedule ?? AIScheduleState(meetingID: aiMeetingID)
         try next.start(options: options, now: now, runID: UUID())
         if let record = aiRecord, let slot = aiScheduleConfiguration?.slot { aiStore?.setAutomaticSlot(slot, for: record) }

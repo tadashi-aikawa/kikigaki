@@ -87,12 +87,20 @@ public struct MinutesState: Codable, Equatable, Sendable {
     public let meetingID: UUID
     public private(set) var minutesPath: String?
     public private(set) var humanMinutesPath: String?
+    public private(set) var boardHeading: String?
     public private(set) var targetChangedAt: Date?
     public private(set) var targetSource: Source?
     public private(set) var lastEvent: MinutesEventPosition?
     public private(set) var revision: Int
 
     public init(meetingID: UUID) { schemaVersion = 1; self.meetingID = meetingID; revision = 0 }
+
+    /// 初回の板の自動送信で固定する。停止・再開や別プロファイルで会議の区切りを変えない。
+    public mutating func bindBoard(_ heading: String) throws {
+        try BoardHeading.validate(heading)
+        guard boardHeading == nil || boardHeading == heading else { throw AIError.invalid("この会議の板の見出しは既に固定されています") }
+        boardHeading = heading
+    }
 
     public mutating func select(_ path: String?, at date: Date) throws {
         if let path { try MinutesPath.validate(path) }
@@ -129,12 +137,14 @@ public struct MinutesState: Codable, Equatable, Sendable {
               targetChangedAt?.timeIntervalSince1970.isFinite ?? true else { throw AIError.invalid("minutes state") }
         if let minutesPath { try MinutesPath.validate(minutesPath) }
         if let humanMinutesPath { try MinutesPath.validate(humanMinutesPath) }
+        if let boardHeading { try BoardHeading.validate(boardHeading) }
         try lastEvent?.validate()
     }
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version", meetingID = "meeting_id", minutesPath = "minutes_path"
         case humanMinutesPath = "human_minutes_path", targetChangedAt = "target_changed_at"
+        case boardHeading = "board_heading"
         case targetSource = "target_source", lastEvent = "last_event", revision
     }
     public init(from decoder: any Decoder) throws {
@@ -143,6 +153,7 @@ public struct MinutesState: Codable, Equatable, Sendable {
         meetingID = try values.decode(UUID.self, forKey: .meetingID)
         minutesPath = try values.contains(.minutesPath) ? values.decode(String.self, forKey: .minutesPath) : nil
         humanMinutesPath = try values.contains(.humanMinutesPath) ? values.decode(String.self, forKey: .humanMinutesPath) : nil
+        boardHeading = try values.contains(.boardHeading) ? values.decode(String.self, forKey: .boardHeading) : nil
         targetChangedAt = try values.contains(.targetChangedAt) ? values.decode(Date.self, forKey: .targetChangedAt) : nil
         targetSource = try values.contains(.targetSource) ? values.decode(Source.self, forKey: .targetSource) : nil
         lastEvent = try values.contains(.lastEvent) ? values.decode(MinutesEventPosition.self, forKey: .lastEvent) : nil

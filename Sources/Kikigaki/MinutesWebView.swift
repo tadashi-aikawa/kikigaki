@@ -149,6 +149,8 @@ actor MinutesImageReader {
     private(set) var renderedText = ""
     var onRendered: ((String) -> Void)?
     var onError: ((String) -> Void)?
+    var onBoardAnchor: ((String) -> Void)?
+    var boardLinksEnabled = false
     /// 本文のリンクとwikilinkの開き先。既定はシステム。テストが実クリックの行き先を確かめるために差し替える。
     var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
     override init(frame: NSRect) {
@@ -196,9 +198,9 @@ actor MinutesImageReader {
         guard ready, let (source, reset, current) = pending else { return }
         pending = nil
         resources.beginImages()
-        webView.callAsyncJavaScript("return await window.minutes.render(source, context, reset, ticket, vault);",
+        webView.callAsyncJavaScript("return await window.minutes.render(source, context, reset, ticket, vault, boardLinksEnabled);",
             arguments: ["source": source, "context": resources.context, "reset": reset, "ticket": current,
-                        "vault": vault ?? NSNull()],
+                        "vault": vault ?? NSNull(), "boardLinksEnabled": boardLinksEnabled],
             in: nil, in: .page) { [weak self] result in
                 guard let self, self.ticket == current else { return }
                 if case .failure = result { self.onError?("議事録を描画できません。再読込してください") }
@@ -220,6 +222,9 @@ actor MinutesImageReader {
             guard let href = value["href"] as? String, let url = URL(string: href),
                   ["https", "http", "mailto"].contains(url.scheme?.lowercased() ?? "") else { return }
             openURL(url)
+        case "boardAnchor":
+            guard let target = value["target"] as? String, !target.isEmpty else { return }
+            onBoardAnchor?(target)
         case "wiki":
             // Vault内の議事録だけがwikilinkを描く。判定前の後着クリックは開かない。
             guard let vault, let target = value["target"] as? String,
@@ -245,6 +250,10 @@ actor MinutesImageReader {
                     completion(data["current"] as? Int ?? 0, data["count"] as? Int ?? 0)
                 } else { completion(0, 0) }
             }
+    }
+    func jump(to heading: String) {
+        guard ready else { return }
+        webView.callAsyncJavaScript("return window.minutes.jump(heading);", arguments: ["heading": heading], in: nil, in: .page) { _ in }
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {

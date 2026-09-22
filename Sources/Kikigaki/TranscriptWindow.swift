@@ -143,7 +143,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         let visible = minutesSplit.isPreviewVisible
         minutesStore?.isVisible = visible && window?.isVisible == true
         minutesSplit.preview.update(path: minutesStore?.state.minutesPath ?? (minutesStore == nil ? waitingMinutesPath : nil),
-            source: minutesStore?.state.targetSource, active: visible && window?.isVisible == true, warning: minutesStore?.warning)
+            source: minutesStore?.state.targetSource, active: visible && window?.isVisible == true, warning: minutesStore?.warning,
+            boardHeading: minutesStore?.state.boardHeading)
         minutesButton.toolTip = visible ? "議事録を隠す" : "議事録を表示"
         minutesButton.setAccessibilityLabel(minutesButton.toolTip)
         minutesButton.setAccessibilityValue(visible ? "ON" : "OFF")
