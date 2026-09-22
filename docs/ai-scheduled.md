@@ -1,6 +1,6 @@
 # AIへの定期自動送信
 
-`board` を指定したプロファイルは自動送信で内蔵の板プロンプトを使い、議事録パスか `boardLocation` があれば開始できる。パスが無い送信には書き先の作成・通知指示を付け、AIの `minutes` 通知後は同じファイルへ更新を続ける。`boardPrompt` による全文差し替えと手動の `autoPrompt` の扱いは [議論の板](board.md) を参照。
+`board` を指定したプロファイルは自動送信で内蔵のボードプロンプトを使い、議事録パスか `boardLocation` があれば開始できる。パスが無い送信には書き先の作成・通知指示を付け、AIの `minutes` 通知後は同じファイルへ更新を続ける。`boardPrompt` による全文差し替えと手動の `autoPrompt` の扱いは [議論のボード](board.md) を参照。
 
 本人レビューで採用した設計と実装の記録。Core、アプリ、replayと実herdrの順で実装する。会議参加モードの既存契約は [ai-participant.md](ai-participant.md) を引き継ぐ。
 

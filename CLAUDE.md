@@ -70,9 +70,9 @@ cwd = "~/work/minutes"    # 起動時の作業ディレクトリ。省略時は�
 autoStart = true          # 録音開始シートの宛先の既定になる。配列で1つまで
 # 手動・自動実行シートと録音開始シートのプロンプト初期値
 autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください" # 省略時は空欄
-# board = "## 板"          # 自動はこの見出しだけ更新。autoPromptは手動の初期値
+# board = "## ボード"          # 自動はこの見出しだけ更新。autoPromptは手動の初期値
 # boardLocation = "~/Documents/minutes/${yyyyMMdd_HHmmss}.md として作成し、変数は現在日時" # パス未指定時の作成指示
-# boardPrompt = "独自の板のプロンプト全文" # board指定時のみ。省略時は内蔵
+# boardPrompt = "独自のボードのプロンプト全文" # board指定時のみ。省略時は内蔵
 autoIntervalMinutes = 3 # 1〜60分、省略時は3分
 
 [[ai]]
@@ -100,7 +100,9 @@ Claudeの同梱CLI限定allowは変えず、cwd外の編集は設定により承
 
 通常の手動実行の入力欄も、宛先の `autoPrompt` を初期表示します。編集した文面は空欄も含めて宛先ごとに会議内で保持し、送信後やシートを開き直したときに復元します。自動実行の下書きとは独立し、新しい録音で初期値へ戻ります。確認質問への返答と失敗した依頼の再送は従来の入力復元を使います。
 
-`board = "## 板"` がある宛先の自動送信は、内蔵プロンプトで議事録の板の見出しだけを更新します。`boardPrompt` で全文を差し替えられます。開始には議事録パスか、書き先の作り方を伝える自由文 `boardLocation` が必要です。パスが無い送信だけ、内蔵文面またはboardPromptの末尾へ作成・通知指示を付けます。変数はAIが解釈し、アプリでは展開しません。AIが作成後に `minutes` で通知したパスは、板の会議の以後の手動・自動送信へ渡します。人の指定がある場合はそちらを優先します。board無しのboardLocationは設定エラーです。「議事録」「板」の別タブで表示し、議事録本文と目次からは板を外します。見出しは会議ごとに固定して保存し、手動更新にも渡して保護します。設定・内蔵文面・限界は [議論の板](docs/board.md) を参照してください。
+`board = "## ボード"` がある宛先の自動送信は、内蔵プロンプトで議事録のボードの見出しだけを更新します。`boardPrompt` で全文を差し替えられます。開始には議事録パスか、書き先の作り方を伝える自由文 `boardLocation` が必要です。パスが無い送信だけ、内蔵文面またはboardPromptの末尾へ作成・通知指示を付けます。変数はAIが解釈し、アプリでは展開しません。AIが作成後に `minutes` で通知したパスは、ボードの会議の以後の手動・自動送信へ渡します。人の指定がある場合はそちらを優先します。board無しのboardLocationは設定エラーです。「議事録」「ボード」の別タブで表示し、議事録本文と目次からはボードを外します。見出しは会議ごとに固定して保存し、手動更新にも渡して保護します。設定・内蔵文面・限界は [議論のボード](docs/board.md) を参照してください。
+
+ボードの見出し行は毎回 `## ボード(17:48 更新)` のように実時刻を併記して更新します。設定の `board` は時刻なしで固定し、切り出しでは時刻の飾りだけを許します。ボードタブは図から始まり、立場、直近の動きの順です。概要行・「論点」見出し・版数は出しません。
 
 詳細は [AI設定の複数プロファイル](docs/ai-profiles.md) を参照してください。稼働中のherdrペインへ接続する `attach` と `displayAgent` は取り下げたため、書くと設定エラーになります。会議に紐づかない「準備済みAIセッション」も取り下げ、実装ごと撤去しました。利用者の台帳 `~/Library/Application Support/KIKIGAKI/ai-prepared.json` と準備用の置き場は読まず、消しません。
 
@@ -180,7 +182,7 @@ Claudeの同梱CLI限定allowは変えず、cwd外の編集は設定により承
 
 Claudeのフック設定はセッション専用の `--settings` JSONへ生成し、同梱CLIの絶対パスだけをallowします。利用者のグローバルsettingsは編集しません。Codexのnotifyはセッション限定で差し替え、TOMLで読める配列を渡します。フックは回答の正本にせず、未返送の補助表示に留めます。
 
-議事録の受け渡しでは `participant.minutes_path` に人の指定した書き先を優先して固定します。AIが作成・更新した場所は同梱CLIの `minutes --session ... --request ... --token ... --path ...` で通知します。板の会議では人の指定が無い場合に通知パスを次の手動・自動送信へ渡し、板のない会議では伝播させません。議事録の既定パスは設けず、板の自動作成はboardLocationの指示に従います。会議ごとの対象は `ai/minutes.json` へ保存し、古い後着通知は人の指定や対象解除を巻き戻しません。ヘッダーの「議事録」か「表示」メニューで右ペインを開けます。録音開始シートで指定した場合は、開始と同時にペインを開いて人の指定として扱います。パス欄はReturnで確定し、Escapeで取り消します。指定ファイルの更新は自動で表示します。詳細は [議事録プレビューの設計](docs/minutes-preview.md) を参照してください。
+議事録の受け渡しでは `participant.minutes_path` に人の指定した書き先を優先して固定します。AIが作成・更新した場所は同梱CLIの `minutes --session ... --request ... --token ... --path ...` で通知します。ボードの会議では人の指定が無い場合に通知パスを次の手動・自動送信へ渡し、ボードのない会議では伝播させません。議事録の既定パスは設けず、ボードの自動作成はboardLocationの指示に従います。会議ごとの対象は `ai/minutes.json` へ保存し、古い後着通知は人の指定や対象解除を巻き戻しません。ヘッダーの「議事録」か「表示」メニューで右ペインを開けます。録音開始シートで指定した場合は、開始と同時にペインを開いて人の指定として扱います。パス欄はReturnで確定し、Escapeで取り消します。指定ファイルの更新は自動で表示します。詳細は [議事録プレビューの設計](docs/minutes-preview.md) を参照してください。
 
 議事録本文は専用WebKitでペイン幅に追従し、脚注・callout・画像・Mermaid・数式・SVGを描画します。議事録がObsidianのVault内にあるときは `[[ノート]]` をリンクとして描き、クリックでObsidianの同名ノートを開きます。Vault外では従来どおり文字のままです。⌘Fは焦点のあるペインを検索します。パス欄の右にNeovim・Obsidianで開くアイコンボタンがあります。対応記法と配布資産の再生成は [議事録の描画と検索](docs/minutes-rendering.md) を参照してください。
 
@@ -235,9 +237,9 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - 環境変数 `KIKIGAKI_DEBUG_AI_ASK="40:;100:問い"`: replayの音声経過秒に達したら本番のsubmitAIで送信する。空の問いは声の末尾を使い、返事待ちは順番を保つ。前問がfailed/cancelledで接続が送信不可なら次問のために新世代へ作り直す。期限に達していない問いや失敗した問いの再送は行わない
 - 環境変数 `KIKIGAKI_DEBUG_AI_AUTO="3:議事録を更新してください"`: replay開始時に本番の自動送信を開始し、直後に1回判定する。変更があれば即送信、空会話を含む変更なしなら開始から1間隔待つ。間隔は有限の正の秒数、プロンプトは必須。最初のコロンだけで分割し、以後のコロン・改行を保持する。作業許可は設定値、停止時の最後の1回はON。返事待ちをスキップし、自動で世代を再作成しない。判定時の効果・接続可否・変更の有無・request数をstderrへ出す。ASKと併用でき、停止後の最終待機と返送回収にはHOLDを設定する。通常起動では無視し、`--smoke --replay <wav>` は形式だけを検証する
 - 環境変数 `KIKIGAKI_DEBUG_AI_AUTO_SECONDS=20`: 設定の `autoStart` の送信間隔を秒へ上書きする。0より大きく3600秒以下。分単位の設定値ではreplayの実行時間に収まらないため。開始そのものは本番の経路を通る
-- 環境変数 `KIKIGAKI_DEBUG_AI_AUTO_PROFILE="板"`: replayの自動送信先を固定し、宛先の内蔵板プロンプトまたは設定のプロンプトを本番の開始経路から送る。間隔は `KIKIGAKI_DEBUG_AI_AUTO_SECONDS` で上書きできる。AI登録先もoutputDir内へ隔離する。
-- 環境変数 `KIKIGAKI_DEBUG_MINUTES_PATH="/absolute/minutes.md"`: replay開始前に議事録パスを渡す。板のプロファイルではこれかboardLocationが必要。通常起動では無視する。
-- DEBUGの `--preview-minutes <path>` に `KIKIGAKI_DEBUG_BOARD_HEADING="## 板"` と `KIKIGAKI_DEBUG_BOARD_CAPTURE=<出力先>` を添えると、両タブをPNGへ撮影して終了する。
+- 環境変数 `KIKIGAKI_DEBUG_AI_AUTO_PROFILE="ボード"`: replayの自動送信先を固定し、宛先の内蔵ボードプロンプトまたは設定のプロンプトを本番の開始経路から送る。間隔は `KIKIGAKI_DEBUG_AI_AUTO_SECONDS` で上書きできる。AI登録先もoutputDir内へ隔離する。
+- 環境変数 `KIKIGAKI_DEBUG_MINUTES_PATH="/absolute/minutes.md"`: replay開始前に議事録パスを渡す。ボードのプロファイルではこれかboardLocationが必要。通常起動では無視する。
+- DEBUGの `--preview-minutes <path>` に `KIKIGAKI_DEBUG_BOARD_HEADING="## ボード"` と `KIKIGAKI_DEBUG_BOARD_CAPTURE=<出力先>` を添えると、両タブをPNGへ撮影して終了する。
 - 環境変数 `KIKIGAKI_DEBUG_AI_ASK_PROFILE="相談"`: `KIKIGAKI_DEBUG_AI_ASK` の送信先プロファイルを名前で固定する。`autoStart` と別のプロファイルを指定すると、手動と自動が同時に別のAIへ飛ぶことを確かめられる。設定に無い名前なら起動時に止まる
 - 環境変数 `KIKIGAKI_DEBUG_REPLAY_HOLD=180`: replayの停止・保存後に指定秒だけ終了を遅らせる。0〜86400秒、既定0。到達済みの送信待ちと回答回収を継続する。停止後にペインを閉じるところまで見るときも、返事が届くまでの時間をここで確保する
 - DEBUGビルドで `KIKIGAKI_DEBUG_AI_PROGRESS_REPLAY=/path/to/evidence` を指定すると、replayの本番画面更新直後にAI進行の変化をPNGと `evidence.json` へ記録する。AI登録簿は保存先の `.typed-test-support/` へ隔離し、request・受信箱・保存形式は変更しない。実herdrを使うため同梱CLIのある `.app` から起動する

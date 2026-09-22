@@ -80,7 +80,7 @@ public struct MinutesEventPosition: Codable, Equatable, Comparable, Sendable {
     enum CodingKeys: String, CodingKey { case recordedAt = "recorded_at", eventID = "event_id" }
 }
 
-/// 表示対象と人が指定した書き先を分離する。板の会議のみ通知先を共有の書き先に使う。
+/// 表示対象と人が指定した書き先を分離する。ボードの会議のみ通知先を共有の書き先に使う。
 public struct MinutesState: Codable, Equatable, Sendable {
     public enum Source: String, Codable, Sendable { case human, ai }
     public let schemaVersion: Int
@@ -93,17 +93,17 @@ public struct MinutesState: Codable, Equatable, Sendable {
     public private(set) var lastEvent: MinutesEventPosition?
     public private(set) var revision: Int
 
-    /// 板の会議だけ、未指定の書き先をAI通知から引き継ぐ。人の指定は常に優先する。
+    /// ボードの会議だけ、未指定の書き先をAI通知から引き継ぐ。人の指定は常に優先する。
     public var participantMinutesPath: String? {
         humanMinutesPath ?? (boardHeading == nil ? nil : minutesPath)
     }
 
     public init(meetingID: UUID) { schemaVersion = 1; self.meetingID = meetingID; revision = 0 }
 
-    /// 初回の板の自動送信で固定する。停止・再開や別プロファイルで会議の区切りを変えない。
+    /// 初回のボードの自動送信で固定する。停止・再開や別プロファイルで会議の区切りを変えない。
     public mutating func bindBoard(_ heading: String) throws {
         try BoardHeading.validate(heading)
-        guard boardHeading == nil || boardHeading == heading else { throw AIError.invalid("この会議の板の見出しは既に固定されています") }
+        guard boardHeading == nil || boardHeading == heading else { throw AIError.invalid("この会議のボードの見出しは既に固定されています") }
         boardHeading = heading
     }
 

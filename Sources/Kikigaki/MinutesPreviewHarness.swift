@@ -51,7 +51,7 @@ import KikigakiCore
             if !preview.boardDocument.renderedText.isEmpty && !preview.minutesDocument.renderedText.isEmpty { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        guard !preview.boardDocument.renderedText.isEmpty else { throw AIError.invalid("板の描画が完了しません") }
+        guard !preview.boardDocument.renderedText.isEmpty else { throw AIError.invalid("ボードの描画が完了しません") }
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         for (board, name) in [(false, "minutes"), (true, "board")] {
             preview.selectBoard(board); preview.layoutSubtreeIfNeeded()

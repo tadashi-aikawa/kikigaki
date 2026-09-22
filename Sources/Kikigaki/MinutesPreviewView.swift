@@ -52,7 +52,7 @@ private final class MinutesPathField: NSTextField {
     let minutesDocument = MinutesWebView(frame: .zero)
     let boardDocument = MinutesWebView(frame: .zero)
     var document: MinutesWebView { selectedBoard ? boardDocument : minutesDocument }
-    let tabs = NSSegmentedControl(labels: ["議事録", "板"], trackingMode: .selectOne, target: nil, action: nil)
+    let tabs = NSSegmentedControl(labels: ["議事録", "ボード"], trackingMode: .selectOne, target: nil, action: nil)
     private let tabBar = NSStackView()
     private(set) var selectedBoard = false
     private var boardHeading: String?
@@ -380,7 +380,7 @@ private final class MinutesPathField: NSTextField {
         let minutes = parts?.minutes ?? body, board = parts?.board
         let updateMinutes = reset || minutesBody != minutes
         let updateBoard = reset || boardBody != board
-        // 板の自動更新で、読んでいる議事録の選択・スクロール・画像モーダルを作り直さない。
+        // ボードの自動更新で、読んでいる議事録の選択・スクロール・画像モーダルを作り直さない。
         minutesBody = minutes; boardBody = board
         rendering = selectedBoard ? updateBoard : updateMinutes
         if updateMinutes { minutesDocument.render(minutes, reset: reset) }

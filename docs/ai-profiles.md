@@ -1,6 +1,6 @@
 # AI設定の複数プロファイル
 
-`board` を指定した宛先は、自動だけ内蔵の板プロンプトを使い、`autoPrompt` は手動の初期値に残す。`boardPrompt` で全文差し替えが可能。`autoStart` はboardがあればautoPromptの省略を許す。詳細は [議論の板](board.md)。
+`board` を指定した宛先は、自動だけ内蔵のボードプロンプトを使い、`autoPrompt` は手動の初期値に残す。`boardPrompt` で全文差し替えが可能。`autoStart` はboardがあればautoPromptの省略を許す。詳細は [議論のボード](board.md)。
 
 `[ai]` を複数持ち、送信ごとに宛先を選べる設計。会議参加モードの契約は [ai-participant.md](ai-participant.md)、定期自動送信は [ai-scheduled.md](ai-scheduled.md) を引き継ぐ。既存docの「複数AIは対象外」はこの文書で改める。
 

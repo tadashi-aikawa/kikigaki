@@ -1,6 +1,6 @@
 import Foundation
 
-/// 板の見出しはMarkdownのATX見出し行そのもの。文字列比較はNFC/NFDを同一視する。
+/// ボードの見出しはMarkdownのATX見出し行そのもの。文字列比較はNFC/NFDを同一視する。
 public enum BoardHeading {
     public static func level(_ heading: String) -> Int? {
         guard !heading.contains(where: \.isNewline), !heading.contains("\0") else { return nil }
@@ -11,6 +11,12 @@ public enum BoardHeading {
     }
     public static func validate(_ heading: String) throws {
         guard level(heading) != nil else { throw AIError.invalid("board must be a single Markdown heading (# through ######)") }
+    }
+    /// Swiftの文字単位の前方一致で正規等価性を保ち、時刻以外の接尾辞は許さない。
+    public static func matches(_ line: String, heading: String) -> Bool {
+        guard line.hasPrefix(heading) else { return false }
+        let suffix = String(line.dropFirst(heading.count))
+        return suffix.isEmpty || suffix.range(of: #"\A\((?:[01][0-9]|2[0-3]):[0-5][0-9] 更新\)\z"#, options: .regularExpression) != nil
     }
 }
 
@@ -52,7 +58,7 @@ public enum BoardSection {
             if fence == nil, indent <= 3, isHeading {
                 let found = hashes
                 if let start, let bodyStart, found <= level { return (start..<cursor, bodyStart..<cursor) }
-                if start == nil, String(trimmed) == heading { start = cursor; bodyStart = next }
+                if start == nil, BoardHeading.matches(String(trimmed), heading: heading) { start = cursor; bodyStart = next }
             }
             cursor = next
         }
@@ -63,38 +69,43 @@ public enum BoardSection {
         guard let (whole, body) = section(text, heading: heading) else { return Parts(minutes: text, board: nil) }
         return Parts(minutes: String(text[..<whole.lowerBound]) + text[whole.upperBound...], board: String(text[body]))
     }
-    public static func replacing(_ text: String, heading: String, body: String) throws -> String {
+    public static func replacing(_ text: String, heading: String, body: String, headingLine: String? = nil) throws -> String {
         try BoardHeading.validate(heading)
-        let replacement = body.isEmpty || body.hasSuffix("\n") ? body : body + "\n"
-        if let (_, range) = section(text, heading: heading) {
+        if let headingLine {
+            guard BoardHeading.matches(headingLine, heading: heading) else { throw AIError.invalid("board heading line must match board with an optional update time") }
+        }
+        let replacement = body.isEmpty || body.last?.isNewline == true ? body : body + "\n"
+        if let (whole, range) = section(text, heading: heading) {
+            if let headingLine {
+                let oldHeading = text[whole.lowerBound..<range.lowerBound]
+                let newline = oldHeading.hasSuffix("\r\n") ? "\r\n" : "\n"
+                return text[..<whole.lowerBound] + headingLine + newline + replacement + text[whole.upperBound...]
+            }
             let prefix = String(text[..<range.lowerBound])
             return prefix + (prefix.last?.isNewline == true ? "" : "\n") + replacement + text[range.upperBound...]
         }
-        return text + (text.isEmpty || text.last?.isNewline == true ? "" : "\n") + heading + "\n" + replacement
+        return text + (text.isEmpty || text.last?.isNewline == true ? "" : "\n") + (headingLine ?? heading) + "\n" + replacement
     }
 }
 
 public enum BoardPrompt {
-    public static let missingLocation = "板の自動送信には議事録のパスか boardLocation が必要です"
+    public static let missingLocation = "ボードの自動送信には議事録のパスか boardLocation が必要です"
     public static func compose(base: String, location: String) -> String {
         base + "\n\n" + locationInstruction + "\n" + location
     }
     public static let locationInstruction = """
     書き先が無いときの作り方:
-    participant.minutes_path が無いので、次の指示に従って書き先を決め、板を含む議事録ファイルを作成してください。変数はAIが解釈してください。保存成功後、answeredの前に同梱CLIの minutes --path で実際の絶対パスを通知してください。以後は通知したファイルが participant.minutes_path として渡されます。
+    participant.minutes_path が無いので、次の指示に従って書き先を決め、ボードを含む議事録ファイルを作成してください。変数はAIが解釈してください。保存成功後、answeredの前に同梱CLIの minutes --path で実際の絶対パスを通知してください。以後は通知したファイルが participant.minutes_path として渡されます。
     """
-    public static func summary(heading: String) -> String { "板を更新(\(heading))" }
+    public static func summary(heading: String) -> String { "ボードを更新(\(heading))" }
     public static let builtIn = """
-    議論の板を更新してください。「いま何を話しているか」を1画面で見せる板です。
+    議論のボードを更新してください。「いま何を話しているか」を1画面で見せるボードです。
 
-    書き先は participant.minutes_path のファイル内の participant.board_heading です。必ず既存ファイルを読んでから、その見出しの直後から次の同階層以上の見出しの直前までだけを差し替えてください。他の見出しと本文は一切触りません。コードブロック内の見出しは区切りではありません。NFC/NFDの違いは同じ見出しとして扱います。見出しが無ければ末尾に見出しごと追加し、ファイルが無ければ作成してください。書き先が無ければ末尾の「書き先が無いときの作り方」に従って作成してください。その指示も無い場合、または participant.board_heading が無い場合は作業を止めて理由を返してください。
+    書き先は participant.minutes_path のファイル内の participant.board_heading です。必ず既存ファイルを読んでから、その見出し行から次の同階層以上の見出しの直前までだけを差し替えてください。他の見出しと本文は一切触りません。コードブロック内の見出しは区切りではありません。設定の見出し行と完全一致する行、または直後に (HH:MM 更新) だけが付いた行を対象にし、任意の続きは認めません。NFC/NFDの違いは同じ見出しとして扱い、他の節の改行を保ってください。見出しが無ければ末尾に見出しごと追加し、ファイルが無ければ作成してください。書き先が無ければ末尾の「書き先が無いときの作り方」に従って作成してください。その指示も無い場合、または participant.board_heading が無い場合は作業を止めて理由を返してください。
 
-    型は次の4ブロックと順序を守ります。見出し行は participant.board_heading をそのまま使い、その配下に置きます。「論点」「立場」「直近の動き」は板より1段深い見出しにし、板が第6階層なら太字の段落にします。
+    毎回、実際の現在時刻を確認し、見出し行を <participant.board_heading>(HH:MM 更新) で書き直してください。例: ## ボード(17:48 更新)。設定の見出し自体は変えません。
 
-    - 現在地: <ID> <論点名>
-    - 更新: <HH:MM> / 第<n>版
-
-    ### 論点
+    型はMermaid図、立場、直近の動きの順序を守ります。ボードの見出し直後からMermaid図を置き、概要行と「論点」見出しは置きません。版数は本文にも返答にも出しません。「立場」「直近の動き」はボードより1段深い見出しにし、ボードが第6階層なら太字の段落にします。
 
     ```mermaid
     flowchart TB
@@ -139,8 +150,8 @@ public enum BoardPrompt {
     - 派生関係は T1 --> T3 の矢印を追加順で並べます。
     - 議事録本文に論点と対応する見出しがあれば、単独行の click Tn "#見出し" で結びます。見出しに {#id} があれば "#id" を使います。存在しない見出しを作ったり、外部URLやJavaScript callbackを指定したりしません。
     - 立場の表は意見が割れている論点だけにし、全員一致と未表明は書きません。話者名は会話のまま、立場は10字以内。割れていなければ表の代わりに「まだ割れていない」と書きます。
-    - 直近の動きは3行まで。古い行は消します。論点は12個までです。
+    - 直近の動きはデバッグ用として最下部に残し、3行まで。古い行は消します。論点は12個までです。
 
-    participant.minutes_path がある場合は、保存後にminutesで通知しないでください。書き先が無く指示に従って作成した場合は、保存成功後に同梱CLIの minutes --path で実際の絶対パスを通知してください。accept、progress --editing、保存、必要なminutes通知、progress --replying、reply --kind answeredの順に進め、answeredは「第n版: 動いた点」の1〜2行だけにしてください。
+    participant.minutes_path がある場合は、保存後にminutesで通知しないでください。書き先が無く指示に従って作成した場合は、保存成功後に同梱CLIの minutes --path で実際の絶対パスを通知してください。accept、progress --editing、保存、必要なminutes通知、progress --replying、reply --kind answeredの順に進め、answeredは動いた点の1〜2行だけにしてください。
     """
 }

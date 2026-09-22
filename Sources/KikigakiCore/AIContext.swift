@@ -98,7 +98,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     public let profile: String?
     /// 送信先プロファイルの通し番号。session recordの枝名になる。旧requestには無い
     public let profileSlot: Int?
-    /// 議事録の書き先。板の会議では人の指定が無い場合にAI通知のパスを引き継ぐ。
+    /// 議事録の書き先。ボードの会議では人の指定が無い場合にAI通知のパスを引き継ぐ。
     public let minutesPath: String?
     public let boardHeading: String?
 

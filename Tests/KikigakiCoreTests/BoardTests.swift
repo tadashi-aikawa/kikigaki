@@ -3,12 +3,41 @@ import Testing
 @testable import KikigakiCore
 
 @Suite struct BoardTests {
+    @Test(arguments: ["", "(00:00 更新)", "(17:48 更新)", "(23:59 更新)"])
+    func 時刻付き見出しも同じ範囲を切り出す(_ suffix: String) {
+        let source = "前\n## ボード\(suffix)\r\n```mermaid\r\nflowchart TB\r\n```\r\n### 立場\r\n未表明\r\n## 次\r\n後"
+        let parts = BoardSection.split(source, heading: "## ボード")
+        #expect(parts.minutes == "前\n## 次\r\n後")
+        #expect(parts.board == "```mermaid\r\nflowchart TB\r\n```\r\n### 立場\r\n未表明\r\n")
+    }
+    @Test(arguments: ["2", "補足", " (17:48 更新)", "(7:48 更新)", "(24:00 更新)", "(17:60 更新)", "(１７:４８ 更新)", "(17:48 更新)追記", "(17:48 更新)\n"])
+    func 任意の続きと不正時刻を拒否する(_ suffix: String) {
+        #expect(!BoardHeading.matches("## ボード" + suffix, heading: "## ボード"))
+        if !suffix.contains("\n") {
+            let source = "## ボード\(suffix)\n対象外"
+            #expect(BoardSection.split(source, heading: "## ボード").minutes == source)
+            #expect(BoardSection.split(source, heading: "## ボード").board == nil)
+        }
+    }
+    @Test func 見出し行ごと更新し境界と改行を保つ() throws {
+        let original = "---\r\n## ボード(17:47 更新)\r\n---\r\n```md\r\n## ボード(17:47 更新)\r\n```\r\n## ボード(17:48 更新)\r\n旧\r\n## 次\r\nそのまま"
+        let updated = try BoardSection.replacing(original, heading: "## ボード", body: "図\r\n", headingLine: "## ボード(17:49 更新)")
+        #expect(updated.utf8.elementsEqual(original.replacingOccurrences(of: "## ボード(17:48 更新)\r\n旧", with: "## ボード(17:49 更新)\r\n図").utf8))
+        #expect(BoardSection.split(updated, heading: "## ボード").board == "図\r\n")
+        for old in ["", "## ボード", "## ボード(17:48 更新)"] {
+            #expect(try BoardSection.replacing(old, heading: "## ボード", body: "図", headingLine: "## ボード(17:49 更新)") == "## ボード(17:49 更新)\n図\n")
+        }
+        #expect(try BoardSection.replacing("前文", heading: "## ボード", body: "図", headingLine: "## ボード(17:49 更新)") == "前文\n## ボード(17:49 更新)\n図\n")
+        #expect(throws: (any Error).self) {
+            try BoardSection.replacing(original, heading: "## ボード", body: "図", headingLine: "## ボード2")
+        }
+    }
     @Test func 書き先指示は未展開で保存されパスがない時だけ末尾に付く() throws {
         let location = "~/Documents/minutes/${yyyyMMdd_HHmmss}.md として作成し、変数は現在日時"
-        for custom: String? in [nil, "独自の板"] {
+        for custom: String? in [nil, "独自のボード"] {
             let parsed = try ConfigLoader.parse(toml: """
             [ai]
-            board = '## 板'
+            board = '## ボード'
             boardLocation = '\(location)'
             \(custom.map { "boardPrompt = '\($0)'" } ?? "")
             """)
@@ -20,19 +49,19 @@ import Testing
         }
     }
     @Test func 書き先指示の孤立と不正値と組み立て後の上限を拒否する() {
-        for toml in ["[ai]\nboardLocation = '作成'", "[ai]\nboard = '## 板'\nboardLocation = 1",
-                     "[ai]\nboard = '## 板'\nboardLocation = ''", "[ai]\nboard = '## 板'\nboardLocation = '  '"] {
+        for toml in ["[ai]\nboardLocation = '作成'", "[ai]\nboard = '## ボード'\nboardLocation = 1",
+                     "[ai]\nboard = '## ボード'\nboardLocation = ''", "[ai]\nboard = '## ボード'\nboardLocation = '  '"] {
             #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: toml) }
         }
-        #expect(throws: (any Error).self) { try AIConfig(board: "## 板", boardLocation: "\0").validate() }
+        #expect(throws: (any Error).self) { try AIConfig(board: "## ボード", boardLocation: "\0").validate() }
         #expect(throws: (any Error).self) {
-            try AIConfig(board: "## 板", boardPrompt: String(repeating: "a", count: AILimits.questionBytes), boardLocation: "作成").validate()
+            try AIConfig(board: "## ボード", boardPrompt: String(repeating: "a", count: AILimits.questionBytes), boardLocation: "作成").validate()
         }
     }
-    @Test func 設定は板と手動プロンプトを共存させる() throws {
+    @Test func 設定はボードと手動プロンプトを共存させる() throws {
         let parsed = try ConfigLoader.parse(toml: """
         [[ai]]
-        board = "## 板"
+        board = "## ボード"
         autoPrompt = "議事録を更新"
         autoStart = true
         """)
@@ -40,42 +69,42 @@ import Testing
         #expect(profile.scheduledPrompt == BoardPrompt.builtIn)
         #expect(profile.autoPrompt == "議事録を更新")
         #expect(try AIJSON.decode(ResolvedAIConfig.self, from: AIJSON.encode(profile)) == profile)
-        let custom = ResolvedAIConfig(config: AIConfig(board: "# 板", boardPrompt: "独自の板"), home: URL(fileURLWithPath: "/tmp"))
-        #expect(custom.scheduledPrompt == "独自の板")
-        try AIConfig(autoStart: true, board: "# 板").validate()
+        let custom = ResolvedAIConfig(config: AIConfig(board: "# ボード", boardPrompt: "独自のボード"), home: URL(fileURLWithPath: "/tmp"))
+        #expect(custom.scheduledPrompt == "独自のボード")
+        try AIConfig(autoStart: true, board: "# ボード").validate()
     }
-    @Test(arguments: ["", "板", "##", "## ", "####### 板", "##板", "## 板\n## 板", " ## 板", "## \0"])
+    @Test(arguments: ["", "ボード", "##", "## ", "####### ボード", "##ボード", "## ボード\n## ボード", " ## ボード", "## \0"])
     func 不正見出しを拒否する(_ heading: String) {
         #expect(throws: (any Error).self) { try AIConfig(board: heading).validate() }
     }
     @Test func 設定の孤立プロンプトと重複と型違いを拒否する() {
-        for toml in ["[ai]\nboardPrompt = '更新'", "[ai]\nboard = 3", "[ai]\nboard = '## 板'\nboardPrompt = ''",
+        for toml in ["[ai]\nboardPrompt = '更新'", "[ai]\nboard = 3", "[ai]\nboard = '## ボード'\nboardPrompt = ''",
                      "[[ai]]\nname = 'a'\nboard = '## カード'\n[[ai]]\nname = 'b'\nboard = '## カード'"] {
             #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: toml) }
         }
     }
     @Test func 節の境界は同階層以上でコードとfrontmatterを除く() throws {
-        let source = "---\n## 板\n---\n# 会議\n前文\n```md\n## 板\n```\n## 板\n現在地\n### 論点\n~~~\n# 偽の境界\n~~~\n図\n## 次\n不変\n"
-        let parts = BoardSection.split(source, heading: "## 板")
+        let source = "---\n## ボード\n---\n# 会議\n前文\n```md\n## ボード\n```\n## ボード\n現在地\n### 論点\n~~~\n# 偽の境界\n~~~\n図\n## 次\n不変\n"
+        let parts = BoardSection.split(source, heading: "## ボード")
         #expect(parts.board == "現在地\n### 論点\n~~~\n# 偽の境界\n~~~\n図\n")
-        #expect(parts.minutes == "---\n## 板\n---\n# 会議\n前文\n```md\n## 板\n```\n## 次\n不変\n")
-        let updated = try BoardSection.replacing(source, heading: "## 板", body: "新版")
-        #expect(updated == "---\n## 板\n---\n# 会議\n前文\n```md\n## 板\n```\n## 板\n新版\n## 次\n不変\n")
-        #expect(BoardSection.split("## 板\n中\n# 後\n外", heading: "## 板").board == "中\n")
-        #expect(BoardSection.split("\u{FEFF}---\r\n## 板\r\n---\r\n## 板\r\n中\r\n#\t後\r\n外", heading: "## 板").board == "中\r\n")
-        #expect(BoardSection.split("## 板\n中\n##\n外", heading: "## 板").board == "中\n")
+        #expect(parts.minutes == "---\n## ボード\n---\n# 会議\n前文\n```md\n## ボード\n```\n## 次\n不変\n")
+        let updated = try BoardSection.replacing(source, heading: "## ボード", body: "新版")
+        #expect(updated == "---\n## ボード\n---\n# 会議\n前文\n```md\n## ボード\n```\n## ボード\n新版\n## 次\n不変\n")
+        #expect(BoardSection.split("## ボード\n中\n# 後\n外", heading: "## ボード").board == "中\n")
+        #expect(BoardSection.split("\u{FEFF}---\r\n## ボード\r\n---\r\n## ボード\r\n中\r\n#\t後\r\n外", heading: "## ボード").board == "中\r\n")
+        #expect(BoardSection.split("## ボード\n中\n##\n外", heading: "## ボード").board == "中\n")
     }
     @Test func 無ければ末尾へ追加しNFCとNFDを同一視する() throws {
-        #expect(try BoardSection.replacing("前文", heading: "## 板", body: "初版") == "前文\n## 板\n初版\n")
-        #expect(try BoardSection.replacing("", heading: "## 板", body: "初版") == "## 板\n初版\n")
-        #expect(try BoardSection.replacing("## 板", heading: "## 板", body: "初版") == "## 板\n初版\n")
+        #expect(try BoardSection.replacing("前文", heading: "## ボード", body: "初版") == "前文\n## ボード\n初版\n")
+        #expect(try BoardSection.replacing("", heading: "## ボード", body: "初版") == "## ボード\n初版\n")
+        #expect(try BoardSection.replacing("## ボード", heading: "## ボード", body: "初版") == "## ボード\n初版\n")
         let nfd = "## カード\n内容\n## 外\n維持"
         #expect(BoardSection.split(nfd, heading: "## カード").board == "内容\n")
         #expect(try BoardSection.replacing(nfd, heading: "## カード", body: "新版").utf8.elementsEqual("## カード\n新版\n## 外\n維持".utf8))
-        #expect(try BoardSection.replacing("## 板\r\n旧\r\n## 外\r\n維持", heading: "## 板", body: "新版") == "## 板\r\n新版\n## 外\r\n維持")
+        #expect(try BoardSection.replacing("## ボード\r\n旧\r\n## 外\r\n維持", heading: "## ボード", body: "新版") == "## ボード\r\n新版\n## 外\r\n維持")
     }
     private func participant(trigger: AIParticipantContext.Trigger? = nil, heading: String? = nil) -> AIParticipantContext {
-        AIParticipantContext(streamID: UUID(), requestID: UUID(), sessionGeneration: 1, participantName: "板",
+        AIParticipantContext(streamID: UUID(), requestID: UUID(), sessionGeneration: 1, participantName: "ボード",
             cliPath: "/tmp/helper", sessionPath: "/tmp/session.json", requestToken: "token", question: BoardPrompt.builtIn,
             capturedAt: Date(timeIntervalSince1970: 100), audioCutoffSeconds: 1, trigger: trigger, boardHeading: heading)
     }
@@ -84,9 +113,9 @@ import Testing
         let bytes = try AIJSON.encode(old)
         let encoded = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
         #expect(encoded["board_heading"] == nil)
-        let new = participant(heading: "## 板")
+        let new = participant(heading: "## ボード")
         #expect(try AIJSON.decode(AIParticipantContext.self, from: AIJSON.encode(new)) == new)
-        for value: Any in [NSNull(), 1, true, "", "板", "## 板\n## 他"] {
+        for value: Any in [NSNull(), 1, true, "", "ボード", "## ボード\n## 他"] {
             var json = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
             json["board_heading"] = value
             let data = try JSONSerialization.data(withJSONObject: json)
@@ -96,11 +125,11 @@ import Testing
     @Test func 会議の固定見出しはパス変更と復元で残る() throws {
         var state = MinutesState(meetingID: UUID())
         try state.select("/tmp/minutes.md", at: Date())
-        try state.bindBoard("## 板")
-        try state.bindBoard("## 板")
-        #expect(throws: (any Error).self) { try state.bindBoard("## 別の板") }
+        try state.bindBoard("## ボード")
+        try state.bindBoard("## ボード")
+        #expect(throws: (any Error).self) { try state.bindBoard("## 別のボード") }
         try state.select(nil, at: Date())
-        #expect(try AIJSON.decode(MinutesState.self, from: AIJSON.encode(state)).boardHeading == "## 板")
+        #expect(try AIJSON.decode(MinutesState.self, from: AIJSON.encode(state)).boardHeading == "## ボード")
     }
     @Test func 内蔵文面と文書を機械照合する() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -118,14 +147,14 @@ import Testing
         let snapshot = try history.prepare(lines: ["会話"], outputDirectory: URL(fileURLWithPath: "/tmp"))
         for automatic in [true, false] {
             let p = AIParticipantContext(streamID: history.streamID, requestID: UUID(), sessionGeneration: 1,
-                participantName: "板", cliPath: "/tmp/helper", sessionPath: "/tmp/.kikigaki-context/\(meeting.uuidString)/ai/sessions/1.json",
+                participantName: "ボード", cliPath: "/tmp/helper", sessionPath: "/tmp/.kikigaki-context/\(meeting.uuidString)/ai/sessions/1.json",
                 requestToken: "token", question: BoardPrompt.builtIn, capturedAt: Date(), audioCutoffSeconds: 1,
-                trigger: automatic ? .scheduled : nil, boardHeading: "## 板")
+                trigger: automatic ? .scheduled : nil, boardHeading: "## ボード")
             let request = try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: p), number: 1)
             var conversation = AIConversation(meetingID: meeting)
             try conversation.append(request)
             let markdown = AIMarkdown.section(conversation)
-            #expect(markdown.contains("板を更新(## 板)") == automatic)
+            #expect(markdown.contains("ボードを更新(## ボード)") == automatic)
             #expect(markdown.contains("classDef now") == !automatic)
         }
     }
