@@ -158,7 +158,10 @@ import KikigakiAIIO
         await fake.setStatuses(["missing", "missing", "unknown", "idle"])
         let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
         let request = try prepare(controller, config)
-        try await controller.connect(config: config, label: "会議", executable: URL(fileURLWithPath: "/tmp/codex"), arguments: [], readinessTimeout: 2)
+        // 締切が60秒なのは、全体実行だと主スレッドの順番待ちで13秒ほど進まず、短い締切では待ちが実時刻で尽きるため
+        // (実測: 単独0.4秒に対し全体実行は13.4秒で締切2秒を超過)。ここは時間ではなく状態遷移を見るテストなので数字に意味はない。
+        // 実時刻への依存そのものは、待ちの締切をテストから差し込めるようにする別対応で外す。
+        try await controller.connect(config: config, label: "会議", executable: URL(fileURLWithPath: "/tmp/codex"), arguments: [], readinessTimeout: 60)
         #expect(controller.connectionStatus == .idle)
         #expect(await fake.commands.filter { $0.prefix(2) == ["pane", "run"] }.count == 1)
         try await controller.send(request, config: config)
