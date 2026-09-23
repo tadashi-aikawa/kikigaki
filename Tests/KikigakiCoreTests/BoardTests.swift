@@ -76,6 +76,17 @@ import Testing
         #expect(custom.scheduledPrompt == "独自のボード")
         try AIConfig(autoStart: true, board: "# ボード").validate()
     }
+    @Test func ボード開始には議事録パスか書き先指示が必要() {
+        let home = URL(fileURLWithPath: "/tmp")
+        let board = ResolvedAIConfig(config: AIConfig(board: "## ボード"), home: home)
+        let locatedBoard = ResolvedAIConfig(config: AIConfig(board: "## ボード", boardLocation: "ここに作成"), home: home)
+        let plain = ResolvedAIConfig(config: AIConfig(), home: home)
+
+        #expect(board.boardStartIssue(minutesPath: "/tmp/minutes.md") == nil)
+        #expect(locatedBoard.boardStartIssue(minutesPath: nil) == nil)
+        #expect(board.boardStartIssue(minutesPath: nil) == BoardPrompt.missingLocation)
+        #expect(plain.boardStartIssue(minutesPath: nil) == nil)
+    }
     @Test(arguments: ["", "ボード", "##", "## ", "####### ボード", "##ボード", "## ボード\n## ボード", " ## ボード", "## \0"])
     func 不正見出しを拒否する(_ heading: String) {
         #expect(throws: (any Error).self) { try AIConfig(board: heading).validate() }

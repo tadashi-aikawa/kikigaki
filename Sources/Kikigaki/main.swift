@@ -15,7 +15,7 @@ if CommandLine.arguments.contains("--smoke") {
         let config = try AppDelegate.loadConfig()
         if let name = replayDebug.automaticProfile {
             guard let profile = config.aiProfiles.first(where: { $0.name == name }) else { throw AIError.invalid("unknown automatic profile") }
-            if profile.board != nil, replayDebug.minutesPath == nil { throw AIError.invalid("board requires minutes path") }
+            if let issue = profile.boardStartIssue(minutesPath: replayDebug.minutesPath) { throw AIError.invalid(issue) }
         }
         print("Kikigaki (smoke): outputDir=\(config.outputDir.path) saveRecording=\(config.saveRecording)")
         if CommandLine.arguments.contains("--replay") {
