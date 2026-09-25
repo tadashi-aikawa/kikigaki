@@ -39,7 +39,7 @@ enum Washi {
                         SpeakerColor(background: color(0x3E706C), foreground: paper)]
     static func speakerColor(for slot: Int?) -> SpeakerColor {
         guard let slot, slot >= 0 else { return SpeakerColor(background: muted, foreground: paper) }
-        // パレットはエンジンの枡数とは独立。5枡目以降の色はここへ足せる。
+        // パレットはエンジンの枡数とは独立。E〜Hは A〜Dの色を循環し、記号と名前で見分ける。
         // 未定義の枡も、黙って不明話者の色にせず既存の色を循環させる。
         return slots[slot % slots.count]
     }

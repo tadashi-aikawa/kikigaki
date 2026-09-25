@@ -22,7 +22,7 @@ public struct TimedToken: Equatable, Sendable {
     public var duration: Double { end - start }
 }
 
-/// 話者判別が返す区間。話者は Sortformer の出力スロット(0〜3)
+/// 話者判別が返す区間。話者は Nemotron 3 の出力スロット(0〜7)
 public struct SpeakerSegment: Equatable, Sendable {
     public var speaker: Int
     public var start: Double

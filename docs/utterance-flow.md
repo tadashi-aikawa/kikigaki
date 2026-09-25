@@ -52,7 +52,7 @@ flowchart TD
 
 話者エンジンの出力は `TranscriptMerge` へ入らず、合成された文字と `Aligner` で合流する。速報の準備に失敗した会議では `CombinedStore.snapshot` が高精度の確定・暫定をそのまま返し、`TranscriptMerge.combine` を通らない。
 
-停止時の `SpeakerDiarizer.finish` は、既定のHigh Contextで未処理の末尾チャンクを判定できるよう話者エンジンだけに無音を足す。WAV・文字起こし・会議時間は延長せず、返す話者区間を実音声の終端で切る。全体再判定は取得済みトークンと話者区間の再突き合わせであり、全録音をモデルへ再投入する処理ではない。
+停止時の `SpeakerDiarizer.finish` は、FluidAudio の `finishStream` で未処理の末尾チャンクを詰めて判定する。WAV・文字起こし・会議時間は延長せず、返す話者区間を実音声の終端で切る。全体再判定は取得済みトークンと話者区間の再突き合わせであり、全録音をモデルへ再投入する処理ではない。
 
 ## 1つの発話が辿る状態遷移
 
@@ -130,7 +130,7 @@ stateDiagram-v2
 | 受付・投入・更新周期 | `PauseFlag.accept`、`MeetingSession.start` / `makeConsumer` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)。受付時に一時停止を除外し、単一消費タスクで処理 |
 | 速報・高精度の結果保管 | `AppleTranscriber.Engine`、`ResultStore.apply`、`CombinedStore.apply` / `snapshot` | [AppleTranscriber.swift](../Sources/Kikigaki/AppleTranscriber.swift)。`isFinal` は確定列へ追記、非finalは最新の暫定列へ置換 |
 | 文字の合流 | `TranscriptMerge.combine`、`Snapshot.finalCount` / `accurateFinalCount` | [TranscriptMerge.swift](../Sources/KikigakiCore/TranscriptMerge.swift)。高精度確定prefixの終端以降に開始する速報だけ採用 |
-| 話者区間・確定予測範囲 | `SortformerModelStore.config`、`SpeakerDiarizer.process` / `segments` / `finalizedDuration` | [SpeakerDiarizer.swift](../Sources/Kikigaki/SpeakerDiarizer.swift)。既定High Context、確定と暫定の区間を返す |
+| 話者区間・確定予測範囲 | `DiarizationModels.config`、`SpeakerDiarizer.process` / `segments` / `finalizedDuration`、`SpeakerRuns` | [SpeakerDiarizer.swift](../Sources/Kikigaki/SpeakerDiarizer.swift)、[SpeakerRuns.swift](../Sources/KikigakiCore/SpeakerRuns.swift)。Nemotron 3 fast128。閉じた区間と、判定済み末尾で切った発話中の区間を返す。区間が進んだときだけ消費位置と同じ更新でMainActorへ渡す |
 | 時刻の突き合わせ | `Aligner.speakers` / `speaker` / `smoothSpeakers` / `phraseRanges` | [Aligner.swift](../Sources/KikigakiCore/Aligner.swift)。窓判定、語内補正、フレーズ多数決、短い別話者区間の扱い |
 | 長い語頭の補正 | `SpeechTail.speakers` / `evidenceWeights` | [SpeechTail.swift](../Sources/KikigakiCore/SpeechTail.swift)。トークン中央の窓判定を基に、長い1文字の末尾の声と後続文字を照合 |
 | 語境界・短い返答の保持 | `WordBoundaries.init`、`tokenRanges`、`containsWholeWords` / `containsMeaningfulReply` / `isBackchannel` | [WordBoundaries.swift](../Sources/KikigakiCore/WordBoundaries.swift)。フレーズ全文の語境界を使い、ASRトークン自体は分割しない |
@@ -140,7 +140,7 @@ stateDiagram-v2
 | 話者統合の反映 | `SpeakerMapping.apply`、`MeetingSession.refreshLive` | [SpeakerMapping.swift](../Sources/KikigakiCore/SpeakerMapping.swift)、[MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)。録音中は推定・凍結後のラベルへ統合設定を適用 |
 | 手入力の併合 | `TranscriptEntries.merge` | [TranscriptEntries.swift](../Sources/KikigakiCore/TranscriptEntries.swift)。声の判定・行生成後に手入力を混ぜ、未凍結行の添字を更新 |
 | 画面の更新 | `MeetingSession.publishLive` / `refreshLive`、`TranscriptWindow.updateRows`、`TranscriptRow.update` / `updateTentative`、`TranscriptDocument.setRows` / `reflow` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[TranscriptWindow.swift](../Sources/Kikigaki/TranscriptWindow.swift)、[TranscriptRow.swift](../Sources/Kikigaki/TranscriptRow.swift)、[TranscriptDocument.swift](../Sources/Kikigaki/TranscriptDocument.swift)。状態はSessionから渡し、Documentは行を配置 |
-| 停止・エンジン最終化 | `MeetingSession.stop`、`AppleTranscriber.finish` / `tokens`、`SpeakerDiarizer.finish` / `cleanup` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[AppleTranscriber.swift](../Sources/Kikigaki/AppleTranscriber.swift)、[SpeakerDiarizer.swift](../Sources/Kikigaki/SpeakerDiarizer.swift)。消費完了後に高精度、話者の順で最終化 |
+| 停止・エンジン最終化 | `MeetingSession.stop`、`AppleTranscriber.finish` / `tokens`、`SpeakerDiarizer.finish` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[AppleTranscriber.swift](../Sources/Kikigaki/AppleTranscriber.swift)、[SpeakerDiarizer.swift](../Sources/Kikigaki/SpeakerDiarizer.swift)。消費完了後に高精度、話者の順で最終化 |
 | 全体再判定・最終行 | `MeetingResult.make` / `withoutDiarization` | [MeetingResult.swift](../Sources/KikigakiCore/MeetingResult.swift)。オンは凍結なしでAlignerを呼び、統合設定を反映。オフは話者なし行を生成 |
 | 繰り返し相槌の省略 | `RepeatedBackchannels.candidates` / `utterances` | [RepeatedBackchannels.swift](../Sources/KikigakiCore/RepeatedBackchannels.swift)。有効時だけ候補を省いた行を別に作る |
 | 原文保護・Markdown保存 | `MeetingSession.save`、`MeetingArchive.save`、`MeetingMarkdown.render` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[MeetingArchive.swift](../Sources/KikigakiCore/MeetingArchive.swift)、[MeetingMarkdown.swift](../Sources/KikigakiCore/MeetingMarkdown.swift)。保存結果の行を停止後の画面へ返す |
@@ -155,12 +155,12 @@ stateDiagram-v2
 | --- | --- | --- |
 | 速報の結果 | 1〜3秒 | [AppleTranscriberの冒頭コメント](../Sources/Kikigaki/AppleTranscriber.swift)の実測記述。すべての発話に対する保証値ではない |
 | 高精度の結果 | 約11.6秒分を蓄積、発話から6〜13秒遅れる | 同じコードコメントの実測記述。約11.6秒は各発話の固定の確定待ち時間ではない。現行の [fast-transcription.md](fast-transcription.md) にはこの秒数の記載がないため、出典をコードコメントとして明記する |
-| 話者エンジン | 約30.4秒の出力遅延 | [SortformerModelStore.configのコメント](../Sources/Kikigaki/SpeakerDiarizer.swift)。既定のHigh Contextに関する値 |
+| 話者エンジン | chunk先頭から10.56秒ぶんの入力で判定 | [DiarizationModels.configのコメント](../Sources/Kikigaki/SpeakerDiarizer.swift)。fast128の設定値。試作の実測でフレームごとの待ちは中央値5.7秒・最大11.06秒 |
 | 話者の凍結猶予 | トークン終端が消費済み音声時刻より30秒超前 | [SpeakerFreeze.advance](../Sources/KikigakiCore/SpeakerFreeze.swift)。さらに高精度確定とモデル確定範囲、長い1文字の保留条件を満たす必要がある |
 | オン時の画面反映 | 消費ループで前回更新から0.5秒以上経過したとき | [MeetingSession.makeConsumer](../Sources/Kikigaki/MeetingSession.swift)。独立タイマーではなく、チャンク処理後の判定。処理遅延もあり、表示までの上限ではない |
 | オフ時の画面反映 | 確定数の増加は直ちに反映、その他の変化は0.5秒間隔へ集約 | [MeetingSession.publishUndiarized](../Sources/Kikigaki/MeetingSession.swift)、[話者判別の切替](diarization-toggle.md)。結果通知起点なので入力停止中も反映できる |
 
-話者エンジンの約30.4秒と凍結猶予30秒を足して「発話後60.4秒で確定」とはしない。両方とも音声上の範囲に関わる別の条件で、コードはその条件が揃った先頭部分を凍結する。結果の受信時刻や凍結までの発話別実測値は、この文書では新たに測っていない。
+話者エンジンの待ちと凍結猶予30秒を足した時刻で確定するとはしない。両方とも音声上の範囲に関わる別の条件で、コードはその条件が揃った先頭部分を凍結する。結果の受信時刻や凍結までの発話別実測値は、この文書では新たに測っていない。
 
 行分割の秒数も待ち時間とは別である。オン時は話者の変化かトークン間1秒以上の間で行を分ける。オフ時は1秒以上の間、文末記号、または既に30秒以上ある行の次の結果ID境界で分ける。多数決に使うフレーズ境界はさらに別で、0.35秒以上の間、文末記号、または結果IDの変化と0.2秒以上の間で区切る。
 

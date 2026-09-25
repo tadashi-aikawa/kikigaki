@@ -5,7 +5,7 @@ import KikigakiCore
 @MainActor
 final class SpeakerCountButton: HoverButton {
     override var isFlipped: Bool { false }
-    private(set) var countText = "0/4"
+    private(set) var countText = "0/\(SpeakerNames.slotCount)"
     private var diarizationEnabled = true
     let countFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
     override var intrinsicContentSize: NSSize { NSSize(width: 36, height: 38) }

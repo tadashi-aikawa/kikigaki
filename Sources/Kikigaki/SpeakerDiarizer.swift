@@ -2,78 +2,73 @@ import FluidAudio
 import Foundation
 import KikigakiCore
 
-/// Sortformer(FluidAudio)のモデル。初回は HuggingFace から
-/// ~/Library/Application Support/FluidAudio/Models へ落ちる。有効なときだけ先読みして使い回す
-enum SortformerModelStore {
-    /// 品質を優先し、既定は High Context(出力遅延 ≈30.4秒)。
-    /// 環境変数で比較用モデルを選ぶ。各モデルは初回に HuggingFace から取得する。
-    static let config: SortformerConfig = {
-        switch ProcessInfo.processInfo.environment["KIKIGAKI_SORTFORMER"] {
-        case "balanced": return .balancedV2_1
-        case "fast": return .fastV2_1
-        default: return .highContextV2_1
-        }
-    }()
+/// Nemotron 3 Diarization(FluidAudio)の fast128。初回は HuggingFace から
+/// ~/Library/Application Support/FluidAudio/Models へ約193MB落ちる。有効なときだけ先読みして使い回す
+enum DiarizationModels {
+    /// 10.24秒の chunk と0.32秒の右文脈。chunk の先頭から10.56秒ぶんの入力が溜まると、その chunk の判定が出る。
+    /// 出た判定は後から変わらない。アプリの話者固定猶予とは別の値
+    static let config = Nemotron3Config.fast128
 
-    /// 読み込んだモデル。SortformerModels は Sendable でないが読み込み後は不変なので、Task の
+    /// 読み込んだモデル。Nemotron3Models は Sendable でないが読み込み後は不変なので、Task の
     /// 境界をまたいで渡すための箱
     struct Loaded: @unchecked Sendable {
-        let models: SortformerModels
+        let models: Nemotron3Models
     }
 
     static func load() async throws -> Loaded {
-        Loaded(models: try await SortformerModels.loadFromHuggingFace(config: config))
+        Loaded(models: try await Nemotron3Models.loadFromHuggingFace(config: config))
     }
 }
 
-/// 話者判別。会議1本につき1インスタンス(スロット A〜D は会議ごとに振り直される)
+/// 話者判別。会議1本につき1インスタンス(スロット A〜H は会議ごとに振り直される)
 final class SpeakerDiarizer {
-    private let diarizer: SortformerDiarizer
+    private let diarizer: Nemotron3Diarizer
+    private var runs: SpeakerRuns
     private var receivedSamples = 0
     private var finished = false
+    /// 最初の失敗。FluidAudio は入力位置を進めてから推論するので、失敗した chunk を飛ばして続けると
+    /// 以後の判定が chunk 単位で前へずれる。失敗後はエンジンを呼ばず、判定済みの区間だけを使う
+    private var failure: Error?
 
-    /// モデルが確定予測を返した範囲。アプリの固定猶予とは独立して扱う。
-    var finalizedDuration: Double { Double(diarizer.timeline.finalizedDuration) }
+    private var receivedDuration: Double { Double(receivedSamples) / 16000 }
+    /// 判定済みの範囲。受け取った音声の長さを超えない
+    var finalizedDuration: Double { min(runs.judgedSeconds, receivedDuration) }
 
-    init(models: SortformerModelStore.Loaded) {
-        diarizer = SortformerDiarizer(config: SortformerModelStore.config)
-        diarizer.initialize(models: models.models)
+    init(models: DiarizationModels.Loaded) {
+        diarizer = Nemotron3Diarizer(config: DiarizationModels.config, models: models.models)
+        runs = SpeakerRuns(speakerCount: DiarizationModels.config.numSpeakers)
     }
 
+    /// 失敗したときだけ投げる。投げるのは最初の1回で、以後は何もしない
     func process(_ samples: [Float]) throws {
-        guard !finished else { return }
+        guard !finished, failure == nil else { return }
         receivedSamples += samples.count
-        _ = try diarizer.process(samples: samples)
+        diarizer.appendAudio(samples)
+        try run { try diarizer.processBufferedAudio() }
     }
 
-    /// 残りの暫定区間を確定させる。停止時に一度だけ呼ぶ
+    /// 末尾の chunk を詰めて判定する。停止時に一度だけ呼ぶ。録音中に失敗していたらその失敗を投げる
     func finish() throws {
         guard !finished else { return }
-        // FluidAudio 0.15.6は末尾の不完全なチャンクを推論せず最終化する。
-        // High Contextでは数十秒が未判定になり得るため、話者エンジンだけへ無音を足す。
-        // WAV・ASR・録音時間には加えず、返す区間も実音声の終端で切る。
-        let config = SortformerModelStore.config
-        if config.chunkLen == SortformerConfig.highContextV2_1.chunkLen, receivedSamples > 0 {
-            let padding = (config.chunkLen + config.chunkRightContext + 1) * config.subsamplingFactor * config.melStride + config.melWindow
-            _ = try diarizer.process(samples: [Float](repeating: 0, count: padding))
-        }
-        _ = try diarizer.finalizeSession()
         finished = true
+        if let failure { throw failure }
+        // 空の入力の末尾処理を FluidAudio の契約に頼らない
+        guard receivedSamples > 0 else { return }
+        try run { try diarizer.finishStream() }
     }
 
-    /// 確定区間+暫定区間。暫定区間は連続発話の長さぶん過去へ届くので、表示側で凍結して扱う
-    func segments() -> [SpeakerSegment] {
-        let duration = Double(receivedSamples) / 16000
-        return diarizer.timeline.speakers.values.flatMap { speaker in
-            (speaker.finalizedSegments + speaker.tentativeSegments).compactMap { segment -> SpeakerSegment? in
-                let start = Double(segment.startTime), end = min(duration, Double(segment.endTime))
-                guard start < end else { return nil }
-                return SpeakerSegment(speaker: segment.speakerIndex, start: start, end: end)
-            }
+    private func run(_ produce: () throws -> [Nemotron3ChunkResult]) throws {
+        do {
+            let chunks = try produce().map { ($0.probabilities, $0.frameCount, $0.numSpeakers) }
+            try runs.append(chunks: chunks, totalFrames: diarizer.streamedFrameCount)
+        } catch {
+            failure = error
+            throw error
         }
     }
 
-    func cleanup() {
-        diarizer.cleanup()
+    /// 閉じた区間と、判定済みの末尾で切った発話中の区間
+    func segments() -> [SpeakerSegment] {
+        runs.segments(until: receivedDuration)
     }
 }

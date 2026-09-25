@@ -118,8 +118,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: TranscriptWindowController?
     private var session: MeetingSession?
     private var config: ResolvedConfig?
-    /// Sortformer モデルの先読み。開始操作を待たせないよう起動直後に走らせる
-    private var modelsTask: Task<SortformerModelStore.Loaded, Error>?
+    /// 話者判別モデルの先読み。開始操作を待たせないよう起動直後に走らせる
+    private var modelsTask: Task<DiarizationModels.Loaded, Error>?
     /// `--replay <wav>`: マイクの代わりに音声ファイルを流し、流し終えたら保存して終了する(開発用)
     private var replayURL: URL?
     /// 停止処理(最終判定と保存)の最中に終了操作を受けたら、保存が終わってから終了する
@@ -557,10 +557,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// 有効なら先読みし、開始要求と同じTaskを共有する。失敗を永続キャッシュしない。
-    private func loadModels() async throws -> SortformerModelStore.Loaded {
+    private func loadModels() async throws -> DiarizationModels.Loaded {
         if let modelsTask { return try await modelsTask.value }
         Self.log("話者モデルを準備中...")
-        let task = Task { try await SortformerModelStore.load() }
+        let task = Task { try await DiarizationModels.load() }
         modelsTask = task
         do { return try await task.value }
         catch { modelsTask = nil; throw error }

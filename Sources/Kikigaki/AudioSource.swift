@@ -72,7 +72,7 @@ final class FileSource: AudioSource {
             while i < samples.count, !Task.isCancelled {
                 onSamples(Array(samples[i..<min(i + step, samples.count)]))
                 i += step
-                // 消費側(Sortformer + SpeechTranscriber)に追いつかれないよう軽く間を置く。
+                // 消費側(話者判別 + SpeechTranscriber)に追いつかれないよう軽く間を置く。
                 // 実時間の 1/10 程度で、10分の音声なら1分で流し終える
                 try? await Task.sleep(for: .milliseconds(realtime ? 500 : 50))
             }

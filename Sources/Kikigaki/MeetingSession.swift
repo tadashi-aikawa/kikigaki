@@ -42,7 +42,7 @@ final class MeetingSession {
     var onChange: ((SessionSnapshot) -> Void)?
 
     private var config: ResolvedConfig
-    private let models: () async throws -> SortformerModelStore.Loaded
+    private let models: () async throws -> DiarizationModels.Loaded
     private let log: (String) -> Void
     static let diarizationDefaultsKey = "KikigakiDiarizationEnabled"
     private let diarizationDefaults: UserDefaults?
@@ -76,7 +76,9 @@ final class MeetingSession {
     private var pendingUndiarizedDraw: Task<Void, Never>?
     private var typedEntries: [Utterance] = []
     private var finalTokens: [TimedToken] = []
-    private var finalSegments: [SpeakerSegment] = []
+    /// 話者区間。録音中は消費タスクが判定を進めたときに `consumedAudioTime` と同じ更新で受け取り、
+    /// 停止後は最終判定を持つ。MainActor から話者判別のエンジンへ直接触れないための置き場
+    private var speakerSegments: [SpeakerSegment] = []
     private var preparationID = UUID()
     private var handoff = HandoffHistory()
     private let diagnostics = Diagnostics()
@@ -235,7 +237,7 @@ final class MeetingSession {
         aiWorkAllowed = meetingConfig.ai?.allowWork ?? true
     }
 
-    init(config: ResolvedConfig, models: @escaping () async throws -> SortformerModelStore.Loaded, log: @escaping (String) -> Void,
+    init(config: ResolvedConfig, models: @escaping () async throws -> DiarizationModels.Loaded, log: @escaping (String) -> Void,
          aiStore: AIRecordStore? = nil, diarizationDefaults: UserDefaults? = nil) {
         self.config = config
         self.aiStore = aiStore; meetingAIProfiles = config.aiProfiles
@@ -310,7 +312,7 @@ final class MeetingSession {
         lastUndiarizedDraw = -Double.infinity; lastUndiarizedFinalCount = 0
         typedEntries = []
         finalTokens = []
-        finalSegments = []
+        speakerSegments = []
         handoff = HandoffHistory()
         archive = nil
         emit()
@@ -342,8 +344,8 @@ final class MeetingSession {
             self.diarizer = diarizer
 
             // バッファは無制限のまま。実時間より遅れると溜まるが、音声を捨てると時刻がずれて
-            // 書き起こしが壊れるので、遅れは受け入れて停止時に全部処理する(M4 Pro で Sortformer fast +
-            // SpeechTranscriber は実時間に十分追いつく。プロトで実測)
+            // 書き起こしが壊れるので、遅れは受け入れて停止時に全部処理する(M4 Pro で Nemotron 3 fast128 は
+            // 実時間の約350倍、SpeechTranscriber も実時間に十分追いつく。試作で実測)
             let (stream, continuation) = AsyncStream<[Float]>.makeStream()
             samplesIn = continuation
             consumer = makeConsumer(stream: stream, transcriber: transcriber, diarizer: diarizer, wav: wav, generation: preparation)
@@ -417,12 +419,10 @@ final class MeetingSession {
             do { try diarizer.finish() } catch { finalizationSucceeded = false; log("話者判別の終了に失敗: \(error)") }
             segments = diarizer.segments()
             receiveSpeakerState(segments: segments)
-            diarizer.cleanup()
         }
         transcriber = nil
         diarizer = nil
         finalTokens = tokens
-        finalSegments = segments
 
         diagnostics.liveLines(snapshot.utterances, names: snapshot.names).forEach(log)
         let final = snapshot.names.diarizationEnabled
@@ -560,7 +560,7 @@ final class MeetingSession {
         speakerMapping.overrides[source] = target
         refreshSpeakerMapping()
         if archive != nil {
-            let result = MeetingResult.make(tokens: finalTokens, segments: finalSegments,
+            let result = MeetingResult.make(tokens: finalTokens, segments: speakerSegments,
                 dropRepeatedBackchannels: dropRepeatedBackchannels, mapping: speakerMapping)
             archive?.replaceResult(result)
             save()
@@ -874,15 +874,16 @@ final class MeetingSession {
                     if let transcriber = self.transcriber {
                         let latest = await transcriber.snapshot()
                         let tokens = latest.tokens, count = latest.finalCount
+                        // 区間は processedUntil と同じ時点に消費タスクから受け取ったもの
                         let speakers = names.diarizationEnabled
-                            ? self.speakerMapping.apply(Aligner.speakers(for: tokens, segments: self.diarizer?.segments() ?? []))
+                            ? self.speakerMapping.apply(Aligner.speakers(for: tokens, segments: self.speakerSegments))
                             : Array<Int?>(repeating: nil, count: tokens.count)
                         return try AICapture(tokens: tokens, speakers: speakers, finalCount: count, processedUntil: self.consumedAudioTime,
                             cutoff: cutoff, names: names, timeline: timeline, typed: typed,
                             audioExclusion: exclusion, audioLevels: self.audioLevelMeter?.track())
                     } else {
                         let speakers = names.diarizationEnabled
-                            ? self.speakerMapping.apply(Aligner.speakers(for: self.finalTokens, segments: self.finalSegments))
+                            ? self.speakerMapping.apply(Aligner.speakers(for: self.finalTokens, segments: self.speakerSegments))
                             : Array<Int?>(repeating: nil, count: self.finalTokens.count)
                         return try AICapture(tokens: self.finalTokens, speakers: speakers,
                             finalCount: self.finalTokens.count, processedUntil: self.snapshot.elapsed, cutoff: cutoff, names: names, timeline: timeline, typed: typed,
@@ -1002,10 +1003,9 @@ final class MeetingSession {
     func publishForTesting(tokens: [TimedToken], speakers: [Int?], elapsed: Double,
                            finalCount: Int? = nil, accurateFinalCount: Int? = nil, frozenCount: Int = 0) {
         finalTokens = tokens
-        finalSegments = zip(tokens, speakers).compactMap { token, slot in
+        receiveSpeakerState(segments: zip(tokens, speakers).compactMap { token, slot in
             slot.map { SpeakerSegment(speaker: $0, start: token.start, end: token.end) }
-        }
-        receiveSpeakerState(segments: finalSegments)
+        })
         consumedAudioTime = elapsed
         publishLive(SpeakerTranscript(tokens: tokens, speakers: speakers, finalCount: finalCount ?? tokens.count,
                                      accurateFinalCount: accurateFinalCount ?? tokens.count, frozenCount: frozenCount), elapsed: elapsed)
@@ -1022,7 +1022,6 @@ final class MeetingSession {
         consumer = nil
         wav?.close()
         wav = nil
-        diarizer?.cleanup()
         diarizer = nil
         transcriber = nil
     }
@@ -1037,17 +1036,28 @@ final class MeetingSession {
         return Task.detached(priority: .userInitiated) {
             var result = PipelineResult()
             var lastDraw = Date.distantPast
+            var segments: [SpeakerSegment] = []
+            var judgedUntil = 0.0
             for await chunk in stream {
                 result.fedSamples += chunk.count
                 do { try wav?.write(chunk) } catch { log("WAV書き出しに失敗: \(error)") }
-                do { try diarizer?.process(chunk) } catch { log("話者判別に失敗: \(error)") }
+                do { try diarizer?.process(chunk) } catch { log("話者判別に失敗。以後は判定済みの区間だけを使う: \(error)") }
                 do { try transcriber.feed(chunk) } catch { log("文字起こしへの入力に失敗: \(error)") }
                 let consumed = Double(result.fedSamples) / 16000
+                // 区間は判定が進んだときだけ変わる。描画の間引きとは独立に、消費位置と同じ更新で渡す。
+                // AI送信が別々の時点の区間と消費位置を組み合わせないようにするため
+                let advanced = diarizer.map { $0.finalizedDuration > judgedUntil } ?? false
+                if let diarizer, advanced {
+                    judgedUntil = diarizer.finalizedDuration
+                    segments = diarizer.segments()
+                }
+                let judged = advanced ? segments : nil
                 // 既存の供給後の更新へ計測を併せる。OFF時に供給前のMainActor待ちを増やさない。
                 await MainActor.run {
                     guard self.preparationID == generation else { return }
                     self.audioLevelMeter?.append(chunk)
                     self.consumedAudioTime = consumed
+                    if let judged { self.receiveSpeakerState(segments: judged) }
                 }
 
                 guard Date().timeIntervalSince(lastDraw) >= 0.5 else { continue }
@@ -1064,16 +1074,14 @@ final class MeetingSession {
                 }
                 let latest = await transcriber.snapshot()
                 let tokens = latest.tokens, finalCount = latest.finalCount
-                let segments = diarizer.segments()
                 let elapsed = Double(result.fedSamples) / 16000
                 let speakers = Aligner.speakers(for: tokens, segments: segments, frozen: result.frozen)
                 result.frozen = SpeakerFreeze.advance(
                     frozen: result.frozen, speakers: speakers, tokens: tokens, elapsed: elapsed, finalCount: latest.accurateFinalCount,
-                    judgedUntil: diarizer.finalizedDuration)
+                    judgedUntil: judgedUntil)
                 let live = SpeakerTranscript(tokens: tokens, speakers: speakers, finalCount: finalCount,
                                              accurateFinalCount: latest.accurateFinalCount, frozenCount: result.frozen.count)
                 await MainActor.run {
-                    self.receiveSpeakerState(segments: segments)
                     self.publishLive(live, elapsed: elapsed)
                 }
             }
@@ -1125,9 +1133,10 @@ final class MeetingSession {
     }
 
     private func receiveSpeakerState(segments: [SpeakerSegment]) {
-        // 暫定区間が消えても、手動で指定した統合先を画面から確認・解除できるよう保持する。
+        speakerSegments = segments
+        // 一度検出した枠は、手動で指定した統合先を画面から確認・解除できるよう保持する。
         snapshot.detectedSpeakerSlots = Set(snapshot.detectedSpeakerSlots)
-            .union(segments.map(\.speaker).filter { (0..<4).contains($0) }).sorted()
+            .union(segments.map(\.speaker).filter { (0..<SpeakerNames.slotCount).contains($0) }).sorted()
         refreshSpeakerMapping()
     }
 

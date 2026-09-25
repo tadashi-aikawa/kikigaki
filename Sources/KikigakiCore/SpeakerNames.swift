@@ -1,9 +1,10 @@
 import Foundation
 
-/// 話者スロット(Sortformer の出力 0〜3 = 枡 A〜D)に付ける名前。
-/// 名前を付けていない枡は「話者A」のように枡の記号で表示する
+/// 話者スロット(話者判別の出力 0〜7 = 枡 A〜H)に付ける名前。
+/// 名前を付けていない枡は「話者A」のように枡の記号で表示する。
+/// 旧版の4枠の会議も枠番号の辞書なので、そのまま読める
 public struct SpeakerNames: Codable, Equatable, Sendable {
-    public static let letters = ["A", "B", "C", "D"]
+    public static let letters = ["A", "B", "C", "D", "E", "F", "G", "H"]
     public static var slotCount: Int { letters.count }
 
     private var names: [Int: String] = [:]
@@ -16,7 +17,7 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
         for (slot, name) in names { set(name, for: slot) }
     }
 
-    /// 枡の記号。Sortformer は最大4話者だが、想定外のスロットが来ても落ちないよう番号で返す
+    /// 枡の記号。話者判別は最大8話者だが、想定外のスロットが来ても落ちないよう番号で返す
     public static func letter(for slot: Int) -> String {
         letters.indices.contains(slot) ? letters[slot] : String(slot + 1)
     }

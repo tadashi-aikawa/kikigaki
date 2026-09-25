@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
@@ -11,8 +11,10 @@ let package = Package(
         .package(url: "https://github.com/swiftlang/swift-testing.git", exact: "0.12.0"),
         // 設定ファイル(~/.config/kikigaki/config.toml)のパース用
         .package(url: "https://github.com/LebJe/TOMLKit.git", exact: "0.6.0"),
-        // 話者判別(Sortformer)のためだけに使う。文字起こしは Apple SpeechTranscriber
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.15.6"),
+        // 話者判別(Nemotron 3 Diarization)のためだけに使う。文字起こしは Apple SpeechTranscriber。
+        // TTS・逆テキスト正規化用のバイナリ依存 NemoTextProcessing は使わないので trait で外す。
+        // FluidAudio でこのバイナリ依存を外すには tools 6.2 以上が要る(6.2 未満では常にリンクされる)
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.17.4", traits: []),
     ],
     targets: [
         .target(name: "KikigakiAIIO", dependencies: ["KikigakiCore"]),

@@ -36,7 +36,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     private(set) var selectedSlot: Int?
 
     private let stack = NSStackView()
-    let diarizeOn = NSButton(radioButtonWithTitle: "区別する(最大4人)", target: nil, action: nil)
+    let diarizeOn = NSButton(radioButtonWithTitle: "区別する(最大8人)", target: nil, action: nil)
     let diarizeOff = NSButton(radioButtonWithTitle: "区別しない", target: nil, action: nil)
     let exclusionSwitch = NSSwitch()
     private let exclusionText = Washi.label(size: 13)

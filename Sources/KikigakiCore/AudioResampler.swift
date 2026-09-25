@@ -2,7 +2,7 @@
 // Swift 6 モードの Sendable 検査を通すため、AVFoundation は @preconcurrency で取り込む
 @preconcurrency import AVFoundation
 
-/// 音源のバッファを、Sortformer と Apple Speech が受け取る 16kHz mono Float32 へ変換する。
+/// 音源のバッファを、話者判別と Apple Speech が受け取る 16kHz mono Float32 へ変換する。
 ///
 /// バッファごとに `AVAudioConverter` を作り直す無状態の変換は、リサンプリングのフィルタ状態が
 /// 毎回初期化されるため、48kHz・4096フレームなら 85ms ごとに立ち上がりと立ち下がりが入る。

@@ -23,7 +23,7 @@ import KikigakiCore
         let range = try #require(views.compactMap { $0 as? NSTextField }.first { $0.stringValue == expected })
         let speakers = try #require(views.compactMap { $0 as? SpeakerCountButton }.first)
         #expect(range.font?.pointSize == 11 && speakers.countFont.pointSize == 11)
-        #expect(speakers.countText == "3/4")
+        #expect(speakers.countText == "3/8")
         #expect(range.frame.width >= range.intrinsicContentSize.width)
         #expect((speakers.countText as NSString).size(withAttributes: [.font: speakers.countFont]).width <= speakers.bounds.width)
         #expect(content.convert(range.bounds, from: range).maxX <= content.convert(speakers.bounds, from: speakers).minX)

@@ -78,7 +78,7 @@ import KikigakiCore
         snapshot.names.diarizationEnabled = true; snapshot.detectedSpeakerSlots = [0, 1]
         snapshot.nextDiarizationEnabled = false
         popover.update(snapshot: snapshot); button.update(snapshot: snapshot)
-        #expect(button.countText == "2/4")
+        #expect(button.countText == "2/8")
         try capture("stopped-on-next-off", popover.contentView)
         snapshot.names.diarizationEnabled = false; snapshot.nextDiarizationEnabled = true
         popover.update(snapshot: snapshot); button.update(snapshot: snapshot)
@@ -150,6 +150,42 @@ import KikigakiCore
         #expect(session.snapshot.utterances == after)
         session = nil
     }
+
+    @Test func E以降の枠も検出して改名と統合ができる() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: try config(root),
+            aiStore: AIRecordStore(directory: root))
+        let tokens = (0..<8).map { TimedToken(text: "発言\($0)。", phraseId: $0, start: Double($0 * 3), end: Double($0 * 3) + 1) }
+        session.publishForTesting(tokens: tokens, speakers: Array(0..<8), elapsed: 30)
+        #expect(session.snapshot.detectedSpeakerSlots == Array(0..<8))
+        session.rename(slot: 7, to: "鈴木")
+        session.setSpeakerMapping(source: 5, target: 4)
+        #expect(session.snapshot.names.name(for: 7) == "鈴木")
+        #expect(session.snapshot.speakerMapping[5] == 4)
+        #expect(session.snapshot.utterances.map(\.speaker) == [0, 1, 2, 3, 4, 4, 6, 7])
+        await session.stop()
+    }
+
+    @Test func 統合のポップオーバーは8枠を既存の配置のまま並べる() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        var snapshot = SessionSnapshot(state: .recording)
+        snapshot.detectedSpeakerSlots = Array(0..<8)
+        snapshot.names.set("鈴木", for: 7)
+        let popover = SpeakerSettingsPopover(snapshot: snapshot)
+        defer { popover.close() }
+        let choices = descendants(popover.contentView).compactMap { $0 as? NSPopUpButton }.filter { !$0.isHiddenOrHasHiddenAncestor }
+        #expect(choices.map(\.tag) == Array(0..<8))
+        #expect(choices.allSatisfy { $0.numberOfItems == 8 })
+        #expect(choices[0].itemTitles.last == "鈴木")
+        guard let output = ProcessInfo.processInfo.environment["KIKIGAKI_UI_CAPTURE"] else { return }
+        let view = popover.contentView
+        try FileManager.default.createDirectory(atPath: output, withIntermediateDirectories: true)
+        let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        try #require(bitmap.representation(using: .png, properties: [:]))
+            .write(to: URL(fileURLWithPath: output).appendingPathComponent("speaker-popover-8.png"))
+    }
+    private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
 
     /// オンデバイスSpeechを使う結合検証。通常のテストではモデル・言語アセットを要求しない。
     @Test func 本番の開始停止でモデルを読み込まず相槌省略ファイルを作らない() async throws {

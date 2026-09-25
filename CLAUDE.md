@@ -5,7 +5,7 @@
 KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付きでリアルタイムに文字起こしし、Markdown で残す macOS ネイティブアプリ (Swift) です。
 
 - 文字起こし: Apple の Speech フレームワーク `SpeechTranscriber` (macOS 26 以降、端末内処理)
-- 話者判別: FluidAudio の Sortformer (ストリーミング、最大4話者)。FluidAudio への依存はこのためだけ
+- 話者判別: FluidAudio の Nemotron 3 Diarization fast128 (ストリーミング、最大8話者)。FluidAudio への依存はこのためだけ。設計は [Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md)
 - 音源は MVP ではマイクのみ。`AudioSource` プロトコルで差し替えられるようにしてあり、システム音声は次の段で足す
 
 ## リポジトリ構成
@@ -15,6 +15,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
   - `SpeechTail.swift`: 長い1文字の末尾の声と後続文字を使う語頭補正。長い文字の多数決の重みを検出された発話時間へ絞る
   - `WordBoundaries.swift`: 日本語の語境界を確認し、短くても語として完結した返答を多数派へ吸収しない
   - `SpeakerFreeze.swift`: 文字起こしの確定結果に属する、30秒より古いトークンの話者判定を凍結。暫定結果は凍結しない
+  - `SpeakerRuns.swift`: 話者判別の10ms確率を届いた分から話者区間へ畳む。確率の履歴は持たず、食い違った出力は取り込まない
   - `RepeatedBackchannels.swift` / `MeetingArchive.swift`: 停止時の繰り返し相槌の省略と、省略前後の保存。原文が保存できないときは省略しない
   - `SpeakerNames.swift` / `TranscriptRenderer.swift` / `MeetingMarkdown.swift` / `MeetingFiles.swift`: 話者名の枡・行の整形・Markdown 生成・ファイル命名
   - `Config.swift`: 設定ファイルのパースと既定値
@@ -126,7 +127,7 @@ Claudeの同梱CLI限定allowは変えず、cwd外の編集は設定により承
 
 ウィンドウ上部の人型アイコンと使用枠数で話者を手動統合し、「統合しない」で元の話者へ戻せます。停止後の変更は通常Markdownと省略前Markdownにも反映します。話者名と統合先は新しい録音の開始時にリセットします。詳しい条件は [話者の手動統合](docs/speaker-mapping.md) を参照してください。
 
-話者判別は録音開始シートの「話者判別」で切り替えます。初期値は有効で、UserDefaultsへ前回の選択を保存します。録音開始で会議のSpeakerNamesへモードを固定するため、始めてからは変えられません。無効設定での起動時はSortformerを読み込まず、無効会議には生成・音声処理・最終判定を行いません。有効時の先読みとモデル再利用は維持し、シートで「区別する」を選んだ時点でも先読みします。
+話者判別は録音開始シートの「話者判別」で切り替えます。初期値は有効で、UserDefaultsへ前回の選択を保存します。録音開始で会議のSpeakerNamesへモードを固定するため、始めてからは変えられません。無効設定での起動時は話者判別モデルを読み込まず、無効会議には生成・音声処理・最終判定を行いません。有効時の先読みとモデル再利用は維持し、シートで「区別する」を選んだ時点でも先読みします。
 
 無効時は全員共通の「発言」とマイク記号を使い、ASR結果の通知から確定表示します。話者待ち・改名・統合・相槌省略は適用しません。文末と1秒以上の無音で区切り、長い独話では30秒を超えた次の確定結果境界で分けます。画面・保存・AIは同じ分割処理を使い、旧archiveの不明話者は従来の「?」のままです。停止後のヘッダーは表示中の会議を表し、次回設定を変えても過去の内容は変わりません。詳細は [話者判別の切替](docs/diarization-toggle.md) を参照してください。
 
@@ -138,7 +139,7 @@ Claudeの同梱CLI限定allowは変えず、cwd外の編集は設定により承
 
 画面の時刻も、発話・手入力・AIの行・送信の細い1行をすべて `HH:MM:SS` で表示します。
 
-本文下の複数行入力欄から、録音中・一時停止中だけ⌘Enterで投稿できます。Enter・Shift+Enterで改行し、長文は折り返して縦スクロールします。画面・archive・Markdownは改行を保持し、コピー・AI送信は1発話1行へまとめます。固定名「手入力」は4話者とは別で、改名・統合・相槌省略の対象外です。IMEのEnterは変換確定を優先し、Escでは下書きを残します。手入力のURLはクリックで開け、名前と本文は検索対象です。
+本文下の複数行入力欄から、録音中・一時停止中だけ⌘Enterで投稿できます。Enter・Shift+Enterで改行し、長文は折り返して縦スクロールします。画面・archive・Markdownは改行を保持し、コピー・AI送信は1発話1行へまとめます。固定名「手入力」は8話者とは別で、改名・統合・相槌省略の対象外です。IMEのEnterは変換確定を優先し、Escでは下書きを残します。手入力のURLはクリックで開け、名前と本文は検索対象です。
 
 `MeetingSession.typedEntries` を音声処理から独立して保持し、`TranscriptEntries.merge` で音声位置順に併合します。typedは必須のpostedAtを持ち、画面・Markdown・AI文脈は `TranscriptRenderer.clock` で投稿日時を表示します。AI送信のtypedは最初のawaitより前に固定します。詳細は [手入力の設計](docs/typed-entry.md)。
 
@@ -252,10 +253,11 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - 環境変数 `KIKIGAKI_DEBUG_LIVE_TRACE=1`: 録音中の表示更新時に、音声経過秒と全文を stderr に出す。診断ログに会話本文を含む
 - 環境変数 `KIKIGAKI_DEBUG_PHRASES=1`: 停止時のフレーズごとに、トークンの時刻と窓判定から多数決後への話者の変化を stderr に出す
   - `[segment]` は窓集計前の音声側の話者区間。発話が重なる場合は複数話者の区間も重なる
-- 話者判別の既定は `highContextV2_1`。長いチャンクを使い、採用版の出力遅延は約30.4秒。アプリの話者固定猶予とは別の値
-- 環境変数 `KIKIGAKI_SORTFORMER=fast` または `balanced`: 比較用に `fastV2_1` または `balancedV2_1` へ切り替える。モデルは初回に HuggingFace から取得する。`high-context` の明示指定も既定と同じ動作になる
-
-通常起動でHigh Contextを使います。Fastを比較する場合は、起動中のKIKIGAKIを終了してから `open --env KIKIGAKI_SORTFORMER=fast .build/KIKIGAKI.app` で起動します。High Contextでは停止時に話者エンジンだけへ無音を補い、不完全な末尾チャンクも判定します。保存する録音と会議時間は延長せず、話者区間も実音声の終端で切ります。
+- 話者判別は Nemotron 3 の `fast128` だけを使う。chunk の先頭から10.56秒ぶん入力が溜まると判定が出て、出た判定は後から変わらない。アプリの話者固定猶予とは別の値
+  - 停止時は `finishStream` が末尾の chunk を詰めて判定する。保存する録音と会議時間は延長せず、話者区間も実音声の終端で切る
+  - 録音中に推論が失敗したら、その会議ではエンジンを呼ばず判定済みの区間だけを使う。失敗後の続行は時刻をずらすため
+- 他のモデルとの比較は `experiments/nemotron` の独立CLIで行う。アプリにはエンジンの切替を置かない
+- 環境変数 `KIKIGAKI_TEST_DIARIZATION=1 swift test --filter SpeakerDiarizerTests`: 実モデルで短い入力とchunk境界の末尾処理を確かめる。初回はモデルを取得する
 
 ### 表示品質の検証
 
@@ -279,7 +281,7 @@ AI送信は速報エンジンの生成に成功した会議では文字の確定
 - `KIKIGAKI_DEBUG_PHRASES` の変更前の話者も、前後0.5秒の窓で集計した推定値です。実際の発話者の正解ラベルではありません。相槌の除去を評価するときは、原音と突き合わせ、本文の誤削除も確認します
 - 修正前後を比べるときは、入力音声を揃え、出力先をそれぞれ別の検証用ディレクトリにします。ビルドの終了コードが成功であることを確認してから実行します
 
-FluidAudio の Sortformer モデルは初回起動時に HuggingFace から `~/Library/Application Support/FluidAudio/Models` へ落ちます。Apple Speech の日本語アセットも初回に自動取得されます。
+FluidAudio の Nemotron 3 fast128 モデル(約193MB)は初回起動時に HuggingFace から `~/Library/Application Support/FluidAudio/Models/nemotron-3-diarization` へ落ちます。旧版の `sortformer` は使わなくなりましたが、アプリからは消しません。Apple Speech の日本語アセットも初回に自動取得されます。
 
 ## リリース方法
 
