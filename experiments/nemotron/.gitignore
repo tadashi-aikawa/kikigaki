@@ -1,0 +1,4 @@
+.build/
+.swiftpm/
+# モデル・録音由来の出力・ログ。gitへ入れない
+work/
