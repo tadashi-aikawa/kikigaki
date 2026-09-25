@@ -2,6 +2,13 @@ import AppKit
 import Foundation
 import KikigakiCore
 
+#if DEBUG
+// 話者補正の試験の比較。UIもモデルも起動せず、書き出した入力だけを読む
+if let index = CommandLine.arguments.firstIndex(of: "--align-compare") {
+    exit(SpeakerTrialCompare.run(arguments: Array(CommandLine.arguments[(index + 1)...])))
+}
+#endif
+
 let replayDebug: ReplayDebugOptions
 do { replayDebug = try ReplayDebugOptions.load() }
 catch {

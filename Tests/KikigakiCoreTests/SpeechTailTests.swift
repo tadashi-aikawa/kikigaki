@@ -4,19 +4,8 @@ import Testing
 @Suite struct SpeechTailTests {
     @Test func 発話前の間を含むいと僕を後続話者へつなぐ() {
         // 原音をユーザーが確認。「いや」「僕の場合は」はともに話者2。
-        let tokens = [
-            TimedToken(text: "い", phraseId: 1, start: 38.46, end: 40.56),
-            TimedToken(text: "や", phraseId: 1, start: 40.56, end: 40.68),
-            TimedToken(text: "僕", phraseId: 2, start: 185.46, end: 187.20),
-            TimedToken(text: "の", phraseId: 2, start: 187.20, end: 188.04),
-        ]
-        let segments = [
-            SpeakerSegment(speaker: 1, start: 30.32, end: 38.88),
-            SpeakerSegment(speaker: 2, start: 40.32, end: 41.28),
-            SpeakerSegment(speaker: 1, start: 185.36, end: 185.84),
-            SpeakerSegment(speaker: 2, start: 186.96, end: 187.60),
-            SpeakerSegment(speaker: 2, start: 187.92, end: 188.88),
-        ]
+        let tokens = RecordedSpeakerFixtures.iBoku.tokens
+        let segments = RecordedSpeakerFixtures.iBoku.segments
         #expect(SpeechTail.speakers(tokens: tokens, segments: segments) == [2, 2, 2, 2])
         #expect(Aligner.speakers(for: tokens, segments: segments, frozen: [1])[0] == 1)
     }

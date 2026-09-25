@@ -172,6 +172,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         open(url: text)
     }
 
+    /// `KIKIGAKI_TRIAL=1 ./scripts/make-app.sh` が組む試験用 `.app` の識別子
+    nonisolated static let trialBundleIdentifier = "com.tadashi-aikawa.kikigaki.trial"
+
+    /// AI会議の登録先。起動時に `recover()` するので、試験用 `.app` は本体の会議を拾わない別の固定先にする。
+    /// 識別子を分けてもUserDefaultsが別になるだけで、この置き場は変わらないため
+    nonisolated static func aiSupportDirectory(isolatedReplay: Bool, bundleIdentifier: String?, outputDir: URL, home: URL) -> URL {
+        if isolatedReplay { return outputDir.appendingPathComponent(".typed-test-support") }
+        let name = bundleIdentifier == trialBundleIdentifier ? "KIKIGAKI-Trial" : "KIKIGAKI"
+        return home.appendingPathComponent("Library/Application Support/\(name)")
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = ApplicationMenu.make()
         let config: ResolvedConfig
@@ -189,10 +200,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.config = config
         replayURL = Self.argument(after: "--replay").map { URL(fileURLWithPath: $0) }
 
-        let support = replayURL != nil && (replayDebug.verifyTyped || replayDebug.verifyMinutes != nil || replayDebug.automaticProfile != nil
-            || ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_PROGRESS_REPLAY"] != nil)
-            ? config.outputDir.appendingPathComponent(".typed-test-support")
-            : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/KIKIGAKI")
+        let support = Self.aiSupportDirectory(
+            isolatedReplay: replayURL != nil && (replayDebug.verifyTyped || replayDebug.verifyMinutes != nil || replayDebug.automaticProfile != nil
+                || ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_PROGRESS_REPLAY"] != nil),
+            bundleIdentifier: Bundle.main.bundleIdentifier, outputDir: config.outputDir,
+            home: FileManager.default.homeDirectoryForCurrentUser)
         do { try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true) }
         catch { Self.log("AI会議の登録先を作成できません") }
         // herdrはPATHか既知の置き場で探し、設定 `[ai] herdrCommand` があればそれを使う(GUI起動のPATH不足への備え)。

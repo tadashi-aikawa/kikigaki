@@ -4,10 +4,8 @@ import Testing
 @Suite struct SpeakerBoundaryTests {
     @Test func 実録のじゃあを戻しそうの語頭を次の話者へ返す() {
         // 2026-09-05_1529.wav の観測トークンと窓判定。長い同話者部分だけ集約。
-        let text = [" 11日目", "じ", "ゃ", "あ", "も", "う", " 10", "分", "の", " 1", "そ", "う", "なんですよ。"]
-        let times = [187.26, 188.34, 188.76, 188.82, 188.94, 189.06, 189.18, 189.36, 189.48, 189.54, 189.66, 190.20, 190.26, 190.80]
-        let tokens = text.enumerated().map { TimedToken(text: $0.element, phraseId: 1220, start: times[$0.offset], end: times[$0.offset + 1]) }
-        let raw: [Int?] = [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0]
+        let tokens = RecordedSpeakerFixtures.jaa.tokens
+        let raw = RecordedSpeakerFixtures.jaa.raw
         let result = Aligner.smoothSpeakers(tokens: tokens, speakers: raw)
         #expect(result == [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0])
         #expect(Aligner.utterances(tokens: tokens, speakers: result).map(\.text) == ["11日目", "じゃあもう 10分の 1", "そうなんですよ。"])

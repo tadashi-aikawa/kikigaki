@@ -34,4 +34,45 @@ public enum SpeakerFreeze {
         }
         return Array(speakers.prefix(count))
     }
+
+    /// 録音中の凍結方式。`grace30` が本番。`phrase` は試験用
+    public enum Mode: String, Sendable, CaseIterable {
+        case grace30, phrase
+    }
+
+    /// フレーズ確定条件での凍結(試験)。凍結済みの末尾から始まるフレーズを、判定に読む入力が
+    /// 全て確定したときだけ丸ごと凍結する。満たさないフレーズで止め、後ろも凍結しない。
+    ///
+    /// 1. フレーズの全トークンが高精度側で確定済み
+    /// 2. 終端が確定: 文末記号で終わるか、次のトークンも高精度側で確定済み。
+    ///    速報側のトークンは `phraseId` が負で必ず結果境界になり、後で差し替わるため根拠にしない
+    /// 3. `options.tail` のときだけ、長い1文字の後続の有意文字がフレーズ外なら、それも確定済み。
+    ///    後続がまだ無ければ保留する。語頭の付け替えが後続の割当を読むため
+    /// 4. 判定済み末尾が、読む区間の範囲(各トークンの終端と、中央+窓の半幅)以上。
+    ///    `SpeakerRuns` は判定済み範囲の中を後から変えないので、窓・尾部・覆いの判定がこれで固まる
+    ///
+    /// 停止時はどちらの方式でも凍結を外して全体を判定し直す。
+    public static func advanceByPhrase(
+        frozen: [Int?], speakers: [Int?], tokens: [TimedToken], accurateFinalCount: Int,
+        judgedUntil: Double, options: Aligner.Options = .current
+    ) -> [Int?] {
+        let limit = min(tokens.count, speakers.count, max(accurateFinalCount, 0))
+        var count = min(frozen.count, limit)
+        for phrase in Aligner.phraseRanges(tokens) where phrase.upperBound > count {
+            guard phrase.lowerBound == count, phrase.upperBound <= limit,
+                  Aligner.endsSentence(tokens[phrase.upperBound - 1]) || phrase.upperBound < limit else { break }
+            var horizon = phrase.map { max(tokens[$0].end, tokens[$0].midpoint + options.lookahead) }.max() ?? 0
+            var held = false
+            if options.tail {
+                for k in phrase where SpeechTail.isLongSingle(tokens[k]) {
+                    guard let next = tokens.indices.dropFirst(k + 1).first(where: { SpeechTail.hasLetter(tokens[$0]) }),
+                          next < limit else { held = true; break }
+                    horizon = max(horizon, tokens[next].end, tokens[next].midpoint + options.lookahead)
+                }
+            }
+            guard !held, horizon <= judgedUntil else { break }
+            count = phrase.upperBound
+        }
+        return Array(speakers.prefix(count))
+    }
 }

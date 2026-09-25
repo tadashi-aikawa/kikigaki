@@ -2,7 +2,7 @@ import Foundation
 
 /// 文字起こしエンジンが返す時刻付きトークン。エンジン固有の型(FluidAudio の TokenTiming 等)を
 /// Core 層へ持ち込まないための自前の型
-public struct TimedToken: Equatable, Sendable {
+public struct TimedToken: Codable, Equatable, Sendable {
     public var text: String
     /// エンジンのフレーズ id。同じ確定結果に属するトークンは同じ値を持ち、話者の突き合わせで
     /// フレーズ境界として使う(Apple の確定結果は10秒超で複数の発話交代をまたぐため、
@@ -23,7 +23,7 @@ public struct TimedToken: Equatable, Sendable {
 }
 
 /// 話者判別が返す区間。話者は Nemotron 3 の出力スロット(0〜7)
-public struct SpeakerSegment: Equatable, Sendable {
+public struct SpeakerSegment: Codable, Equatable, Sendable {
     public var speaker: Int
     public var start: Double
     public var end: Double

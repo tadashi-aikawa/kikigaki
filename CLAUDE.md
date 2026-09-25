@@ -257,6 +257,7 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
   - 停止時は `finishStream` が末尾の chunk を詰めて判定する。保存する録音と会議時間は延長せず、話者区間も実音声の終端で切る
   - 録音中に推論が失敗したら、その会議ではエンジンを呼ばず判定済みの区間だけを使う。失敗後の続行は時刻をずらすため
 - 他のモデルとの比較は `experiments/nemotron` の独立CLIで行う。アプリにはエンジンの切替を置かない
+- DEBUGの `KIKIGAKI_TRIAL_ALIGNER` / `KIKIGAKI_TRIAL_FREEZE` / `KIKIGAKI_TRIAL_DUMP` で話者補正を外した条件とフレーズ固定を試し、`--align-compare` で同じ入力へ全条件を当てて比べる。試験用 `.app` は `KIKIGAKI_TRIAL=1 ./scripts/make-app.sh` で別の場所・別の識別子に組む。手順と結果は [話者補正の除外比較とフレーズ固定の試験](docs/speaker-correction-trial.md)
 - 環境変数 `KIKIGAKI_TEST_DIARIZATION=1 swift test --filter SpeakerDiarizerTests`: 実モデルで短い入力とchunk境界の末尾処理を確かめる。初回はモデルを取得する
 
 ### 表示品質の検証

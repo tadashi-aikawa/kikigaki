@@ -4,18 +4,9 @@ import Testing
 @Suite struct ShortSpeakerTurnsTests {
     // 2026-09-05_1529.wavの再処理ログ。rawは窓判定の観測値で、正解ラベルではない。
     @Test func 実録のはいとすごいねを多数派へ吸収しない() {
-        let tokens: [TimedToken] = [
-            .init(text: "一応経過報告させていただきますと", phraseId: 1146, start: 180.12, end: 182.82),
-            .init(text: "は", phraseId: 1146, start: 182.82, end: 183.06),
-            .init(text: "い", phraseId: 1146, start: 183.06, end: 183.18),
-            .init(text: "それから毎日続いてまして", phraseId: 1146, start: 183.18, end: 185.22),
-            .init(text: "す", phraseId: 1146, start: 185.22, end: 185.58),
-            .init(text: "ご", phraseId: 1146, start: 185.58, end: 185.70),
-            .init(text: "い", phraseId: 1146, start: 185.70, end: 185.76),
-            .init(text: "ね", phraseId: 1146, start: 185.76, end: 185.88),
-            .init(text: "。", phraseId: 1146, start: 185.88, end: 186.06),
-        ]
+        let tokens = RecordedSpeakerFixtures.haiSugoine.tokens
         let raw: [Int?] = [0, 1, 1, 0, 1, 1, 1, 1, 1]
+        #expect(RecordedSpeakerFixtures.haiSugoine.raw == raw)
         let speakers = Aligner.smoothSpeakers(tokens: tokens, speakers: raw)
         #expect(speakers == raw)
         #expect(Aligner.utterances(tokens: tokens, speakers: speakers).map(\.text)
@@ -70,17 +61,9 @@ import Testing
 
     // 2026-09-06_1416_2.wav の再処理ログ(24.60〜26.82秒)。相槌が重なり、音声側の区間が交互に出る場面。
     // 「代表」(25.62〜25.92)は多数派(1)の区間 25.44〜25.92 に収まるのに、窓判定は 0 に倒れていた
-    private static let overlapTokens: [TimedToken] = {
-        let texts = ["は", "い", "管", "理", "の", "プ", "ロ", "代", "表", "の", "松", "村", "で", "す", "。"]
-        let times = [24.60, 24.78, 24.90, 25.14, 25.32, 25.44, 25.56, 25.62, 25.80, 25.92, 26.10, 26.28, 26.46, 26.64, 26.70, 26.82]
-        return texts.enumerated().map { TimedToken(text: $0.element, phraseId: 81, start: times[$0.offset], end: times[$0.offset + 1]) }
-    }()
-    private static let overlapSegments = [
-        SpeakerSegment(speaker: 0, start: 20.32, end: 24.96), SpeakerSegment(speaker: 1, start: 24.96, end: 25.20),
-        SpeakerSegment(speaker: 0, start: 25.04, end: 25.44), SpeakerSegment(speaker: 1, start: 25.44, end: 25.92),
-        SpeakerSegment(speaker: 0, start: 25.92, end: 26.40), SpeakerSegment(speaker: 1, start: 26.40, end: 26.88),
-    ]
-    private static let overlapRaw: [Int?] = [0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1]
+    private static let overlapTokens = RecordedSpeakerFixtures.daihyou.tokens
+    private static let overlapSegments = RecordedSpeakerFixtures.daihyou.segments
+    private static let overlapRaw = RecordedSpeakerFixtures.daihyou.raw
 
     @Test func 実録の多数派に覆われた文中の1語は吸収する() {
         let speakers = Aligner.smoothSpeakers(tokens: Self.overlapTokens, speakers: Self.overlapRaw, segments: Self.overlapSegments)
