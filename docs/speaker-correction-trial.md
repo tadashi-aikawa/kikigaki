@@ -64,8 +64,9 @@ Nemotron fast128 の話者区間に対して、KIKIGAKI 側の話者補正がど
 
 ### 再比較
 
-- 入力の書き出しは今も `KIKIGAKI_TRIAL_DUMP` で行う。dump の形式は変えていない
-- `--align-compare` は本番の判定だけを当て、全文 `transcript.md` と集計を書く
+- 入力の書き出しは今も `KIKIGAKI_TRIAL_DUMP` で行う。`meta.json` に記録時の島の補正の段階 `islands` を足した。他は変えていない
+- `--align-compare` は本番の判定を当て、全文 `transcript.md` と集計を書く
+    - 島の補正の段階ごとの全文と集計も並べる。詳細は [被りの島の補正を段階的に強める試験](speaker-overlap-islands.md)
 - 補正を外した条件は `11d8733` のビルドで出す。scratch へ worktree を作って `swift build` し、同じ dump に当てる
     - 旧版の `transcripts/<条件>.md` と新版の `transcript.md` は同じ形式。`diff` で差分を見る
 - 以下の「補正の一覧と切替」から「手順」までは `11d8733` の試験経路の説明。環境変数 `KIKIGAKI_TRIAL_ALIGNER` / `KIKIGAKI_TRIAL_FREEZE` は廃止し、指定すると録音を始めずに止める

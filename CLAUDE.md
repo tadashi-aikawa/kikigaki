@@ -15,6 +15,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
   - `SpeechTail.swift`: 長い1文字の末尾の声と後続文字を使う語頭補正
   - `WordBoundaries.swift`: 日本語の語境界を調べ、語内補正の対象の語をASRトークンの範囲で返す
   - `SpeakerFreeze.swift`: 判定に読む入力が全て確定したフレーズを丸ごと凍結する。高精度側で未確定のトークンは凍結しない
+  - `SpeakerIslands.swift`: 話し手の声が重なった短い別話者の島を両隣の話者へ戻す、採用前の試験の補正。既定は `off`
   - `SpeakerRuns.swift`: 話者判別の10ms確率を届いた分から話者区間へ畳む。確率の履歴は持たず、食い違った出力は取り込まない
   - `RepeatedBackchannels.swift` / `MeetingArchive.swift`: 停止時の繰り返し相槌の省略と、省略前後の保存。原文が保存できないときは省略しない
   - `SpeakerNames.swift` / `TranscriptRenderer.swift` / `MeetingMarkdown.swift` / `MeetingFiles.swift`: 話者名の枡・行の整形・Markdown 生成・ファイル命名
@@ -258,6 +259,7 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
   - 録音中に推論が失敗したら、その会議ではエンジンを呼ばず判定済みの区間だけを使う。失敗後の続行は時刻をずらすため
 - 他のモデルとの比較は `experiments/nemotron` の独立CLIで行う。アプリにはエンジンの切替を置かない
 - DEBUGの `KIKIGAKI_TRIAL_DUMP` でreplayやマイクの入力を書き出し、`--align-compare` で本番の判定とフレーズ固定を当て直す。別のビルドとの差は出力の全文を `diff` で比べる。試験用 `.app` は `KIKIGAKI_TRIAL=1 ./scripts/make-app.sh` で別の場所・別の識別子に組む。補正を外した条件の比較は、廃止した試験変数を持つコミット `11d8733` のビルドで行う。手順と結果は [話者補正の除外比較とフレーズ固定の試験](docs/speaker-correction-trial.md)
+- DEBUGの `KIKIGAKI_TRIAL_ISLAND=off|cut|phrase|cross` で、被りの島の補正の段階を会議ごとに試す。未指定は `off` で、releaseでは読まない。`--align-compare` は全段階を同じ入力へ当てて並べる。条件・凍結との整合・比較結果は [被りの島の補正を段階的に強める試験](docs/speaker-overlap-islands.md)
 - 環境変数 `KIKIGAKI_TEST_DIARIZATION=1 swift test --filter SpeakerDiarizerTests`: 実モデルで短い入力とchunk境界の末尾処理を確かめる。初回はモデルを取得する
 
 ### 表示品質の検証

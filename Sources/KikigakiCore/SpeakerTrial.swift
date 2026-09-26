@@ -6,11 +6,14 @@ import Foundation
 public enum SpeakerTrial {
     /// 試験の環境変数。アプリはDEBUGビルドだけで読む
     /// - `KIKIGAKI_TRIAL_DUMP`: 比較用の入力を書き出す先。会話本文を含む
+    /// - `KIKIGAKI_TRIAL_ISLAND`: 島の補正の段階 `off|cut|phrase|cross`。未指定は `off`。
+    ///   設計: docs/speaker-overlap-islands.md
     ///
     /// 補正を外す `KIKIGAKI_TRIAL_ALIGNER` と固定方式の `KIKIGAKI_TRIAL_FREEZE` は廃止した。
     /// 指定されていたら止める。試したつもりで本番の判定のまま比べないため
     public struct Settings: Equatable, Sendable {
         public var dumpDirectory: String?
+        public var islands: SpeakerIslands
 
         public struct Invalid: Error, CustomStringConvertible {
             public let description: String
@@ -21,11 +24,18 @@ public enum SpeakerTrial {
                 throw Invalid(description: "\(retired) は廃止した。条件の比較はコミット 11d8733 のビルドで行う")
             }
             dumpDirectory = environment["KIKIGAKI_TRIAL_DUMP"].flatMap { $0.isEmpty ? nil : ($0 as NSString).expandingTildeInPath }
+            let island = environment["KIKIGAKI_TRIAL_ISLAND"] ?? ""
+            guard let islands = island.isEmpty ? .off : SpeakerIslands(rawValue: island) else {
+                throw Invalid(description: "KIKIGAKI_TRIAL_ISLAND は " + SpeakerIslands.allCases.map(\.rawValue).joined(separator: "|")
+                              + " のどれか: \(island)")
+            }
+            self.islands = islands
         }
     }
 
     /// 記録の由来。等倍と加速で待ちの意味が違うため、比較の表へ出す。
-    /// `preset` と `freeze` は旧版の比較CLIでも読めるよう残す。今の記録は `adopted` と `phrase`
+    /// `preset` と `freeze` は旧版の比較CLIでも読めるよう残す。今の記録は `adopted` と `phrase`。
+    /// `islands` は記録時の島の補正の段階。これより前の記録には無く、`off` とみなす
     public struct Meta: Codable, Equatable, Sendable {
         public static let adoptedPreset = "adopted"
         public static let phraseFreeze = "phrase"
@@ -33,11 +43,18 @@ public enum SpeakerTrial {
         public var pace: String
         public var preset: String
         public var freeze: String
+        public var islands: SpeakerIslands?
 
-        public init(pace: String, preset: String = adoptedPreset, freeze: String = phraseFreeze) {
+        public init(pace: String, preset: String = adoptedPreset, freeze: String = phraseFreeze, islands: SpeakerIslands = .off) {
             self.pace = pace
             self.preset = preset
             self.freeze = freeze
+            self.islands = islands
+        }
+
+        /// 記録時に本番と同じ判定とフレーズ固定だった場合の島の段階。旧版の条件の記録は nil
+        public var recordedIslands: SpeakerIslands? {
+            preset == Self.adoptedPreset && freeze == Self.phraseFreeze ? (islands ?? .off) : nil
         }
     }
 
@@ -292,7 +309,7 @@ public enum SpeakerTrial {
 
     /// 録音中の突き合わせループを本番の判定とフレーズ固定で再生する
     public static func simulate(snapshots: [Snapshot], final: FinalRecord, checksLatent: Bool = true,
-                                checksReproduction: Bool = false) -> LiveMetrics {
+                                checksReproduction: Bool = false, islands: SpeakerIslands = .off) -> LiveMetrics {
         var reproduced = true
         var frozen: [Int?] = []
         var freezeAt: [Double] = []
@@ -303,10 +320,10 @@ public enum SpeakerTrial {
         var lastConfirmed = 0
         for snapshot in snapshots {
             let tokens = snapshot.tokens
-            let speakers = Aligner.speakers(for: tokens, segments: snapshot.segments, frozen: frozen)
+            let speakers = Aligner.speakers(for: tokens, segments: snapshot.segments, frozen: frozen, islands: islands)
             let next = SpeakerFreeze.advanceByPhrase(frozen: frozen, speakers: speakers, tokens: tokens,
                                                      accurateFinalCount: snapshot.accurateFinalCount,
-                                                     judgedUntil: snapshot.judgedUntil)
+                                                     judgedUntil: snapshot.judgedUntil, islands: islands)
             let confirmed = min(max(snapshot.accurateFinalCount, 0), tokens.count)
             while confirmAt.count < confirmed { confirmAt.append(snapshot.elapsed) }
             lastConfirmed = confirmed
@@ -321,13 +338,13 @@ public enum SpeakerTrial {
             }
             frozen = next
             if checksLatent, !frozen.isEmpty {
-                let unfrozen = Aligner.speakers(for: tokens, segments: snapshot.segments)
+                let unfrozen = Aligner.speakers(for: tokens, segments: snapshot.segments, islands: islands)
                 for index in frozen.indices where unfrozen[index] != frozen[index] && latent[index] == nil {
                     latent[index] = change(index, tokens: tokens, frozen: frozen[index], other: unfrozen[index])
                 }
             }
         }
-        let finalSpeakers = Aligner.speakers(for: final.tokens, segments: final.segments)
+        let finalSpeakers = Aligner.speakers(for: final.tokens, segments: final.segments, islands: islands)
         let frozenCount = min(frozen.count, final.tokens.count)
         let unfrozen = final.tokens.dropFirst(frozenCount)
         return LiveMetrics(
@@ -380,21 +397,21 @@ public enum SpeakerTrial {
     }
 
     /// 本番の判定を停止時の入力へ当て、録音中の記録があればフレーズ固定で再生する。
-    /// 再生の照合は、記録時も採用後の判定だった場合だけ行う。旧版の条件で録った記録とは凍結列が一致しない
+    /// 再生の照合は、記録時も採用後の判定で、島の段階も同じだった場合だけ行う。別の条件で録った記録とは凍結列が一致しない
     public static func compare(source: String, final: FinalRecord, snapshots: [Snapshot], expectations: [Expectation],
-                               recorded: Meta? = nil, repeats: Int = 5) -> (Comparison, speakers: [Int?]) {
+                               recorded: Meta? = nil, repeats: Int = 5,
+                               islands: SpeakerIslands = .off) -> (Comparison, speakers: [Int?]) {
         var times: [Double] = []
         var speakers: [Int?] = []
         for _ in 0..<max(repeats, 1) {
             let begin = DispatchTime.now().uptimeNanoseconds
-            speakers = Aligner.speakers(for: final.tokens, segments: final.segments)
+            speakers = Aligner.speakers(for: final.tokens, segments: final.segments, islands: islands)
             times.append(Double(DispatchTime.now().uptimeNanoseconds - begin) / 1_000_000)
         }
         let metrics = finalMetrics(tokens: final.tokens, speakers: speakers, milliseconds: Stats(times)!.median,
                                    expectations: expectations)
         let live = snapshots.isEmpty ? nil : simulate(
-            snapshots: snapshots, final: final,
-            checksReproduction: recorded?.preset == Meta.adoptedPreset && recorded?.freeze == Meta.phraseFreeze)
+            snapshots: snapshots, final: final, checksReproduction: recorded?.recordedIslands == islands, islands: islands)
         let first = snapshots.first, last = snapshots.last
         return (Comparison(source: source, duration: final.duration, final: metrics, live: live,
                           liveWallSeconds: first.flatMap { f in last.map { $0.uptime - f.uptime } },

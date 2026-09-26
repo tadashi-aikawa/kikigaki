@@ -43,17 +43,33 @@ public enum Aligner {
     /// トークンごとに窓判定で区間から引き、長い1文字の語頭と語内の境界だけを補正する。
     /// フレーズの多数派へ短い別話者の塊を吸収する補正は置かない。短い返答は、語内補正など
     /// 残した補正を当てた後の話者のまま保持する。吸収を外した比較と採用の経緯: docs/speaker-correction-trial.md
-    public static func speakers(for tokens: [TimedToken], segments: [SpeakerSegment], frozen: [Int?] = []) -> [Int?] {
-        var speakers = Array(frozen.prefix(tokens.count))
-        let observed = SpeechTail.speakers(tokens: tokens, segments: segments, skippingPrefix: speakers.count)
-        speakers.append(contentsOf: observed.dropFirst(speakers.count))
-        return smoothSpeakers(tokens: tokens, speakers: speakers, frozenCount: frozen.count, segments: segments)
+    ///
+    /// `islands` は採用前の比較用の島の補正。既定の `off` は従来と同じ結果を返す。
+    /// 島は補正前のラベルで判定するので、凍結境界の手前も補正前のラベルを計算し直す
+    public static func speakers(for tokens: [TimedToken], segments: [SpeakerSegment], frozen: [Int?] = [],
+                                islands: SpeakerIslands = .off) -> [Int?] {
+        let frozenCount = min(frozen.count, tokens.count)
+        let recompute = islands.recomputeStart(tokens: tokens, frozenCount: frozenCount)
+        var speakers = Array(frozen.prefix(recompute))
+        let observed = SpeechTail.speakers(tokens: tokens, segments: segments, skippingPrefix: recompute)
+        speakers.append(contentsOf: observed.dropFirst(recompute))
+        let base = wordSpeakers(tokens: tokens, speakers: speakers, frozenCount: recompute, segments: segments)
+        let islanded = islands.apply(tokens: tokens, base: base, segments: segments, frozen: Array(frozen.prefix(frozenCount)))
+        return attachPunctuation(tokens: tokens, speakers: islanded, frozenCount: frozenCount)
     }
 
     /// 窓判定の観測値を回帰テストへ渡せるよう、音声区間との突き合わせと分ける。
     /// `segments` は長い語頭の付け替えだけが読む
     static func smoothSpeakers(tokens: [TimedToken], speakers initial: [Int?], frozenCount: Int = 0,
                                segments: [SpeakerSegment] = []) -> [Int?] {
+        attachPunctuation(tokens: tokens,
+                          speakers: wordSpeakers(tokens: tokens, speakers: initial, frozenCount: frozenCount, segments: segments),
+                          frozenCount: frozenCount)
+    }
+
+    /// 語内の境界の補正。`frozenCount` より前は書き換えない
+    static func wordSpeakers(tokens: [TimedToken], speakers initial: [Int?], frozenCount: Int,
+                             segments: [SpeakerSegment]) -> [Int?] {
         var speakers = initial
         for phrase in phraseRanges(tokens) {
             // 全体が凍結済みのフレーズは語内補正が書き込まない(`word.lowerBound >= frozenCount`)。
@@ -80,8 +96,13 @@ public enum Aligner {
                 }
             }
         }
-        // 句読点だけのトークンは直前のトークンの話者に付ける(凍結済みは触らない)。句点は直前の文の
-        // 一部で、時刻が次の発話の頭に食い込むと別話者に判定され「。」だけの行になる(実録で確認)
+        return speakers
+    }
+
+    /// 句読点だけのトークンは直前のトークンの話者に付ける(凍結済みは触らない)。句点は直前の文の
+    /// 一部で、時刻が次の発話の頭に食い込むと別話者に判定され「。」だけの行になる(実録で確認)
+    static func attachPunctuation(tokens: [TimedToken], speakers initial: [Int?], frozenCount: Int) -> [Int?] {
+        var speakers = initial
         for i in speakers.indices where i >= frozenCount && i > 0 && isPunctuationOnly(tokens[i]) {
             speakers[i] = speakers[i - 1]
         }

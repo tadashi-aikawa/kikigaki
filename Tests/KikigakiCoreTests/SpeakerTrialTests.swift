@@ -14,7 +14,16 @@ import Testing
         let meta = SpeakerTrial.Meta(pace: "replay-realtime")
         #expect(meta.preset == "adopted" && meta.freeze == "phrase")
         let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(meta)) as? [String: String]
-        #expect(json == ["pace": "replay-realtime", "preset": "adopted", "freeze": "phrase"])
+        // 旧版が読むキーはそのまま。島の補正の段階を足す
+        #expect(json == ["pace": "replay-realtime", "preset": "adopted", "freeze": "phrase", "islands": "off"])
+    }
+
+    @Test func 段階の無い記録はoffとして照合し旧版の条件の記録は照合しない() throws {
+        let adopted = try JSONDecoder().decode(SpeakerTrial.Meta.self,
+            from: Data(#"{"pace":"mic","preset":"adopted","freeze":"phrase"}"#.utf8))
+        #expect(adopted.recordedIslands == .off)
+        #expect(SpeakerTrial.Meta(pace: "mic", islands: .cross).recordedIslands == .cross)
+        #expect(SpeakerTrial.Meta(pace: "mic", preset: "current", freeze: "grace30").recordedIslands == nil)
     }
 }
 

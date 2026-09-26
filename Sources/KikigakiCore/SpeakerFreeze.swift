@@ -17,25 +17,58 @@ public enum SpeakerFreeze {
     ///    つまり同じフレーズの中だけを読むので、1で足りる
     /// 4. 判定済み末尾 `judgedUntil` が、読む区間の範囲(各トークンの終端と、中央+窓の半幅)以上。
     ///    `SpeakerRuns` は判定済み範囲の中を後から変えないので、窓・尾部の判定がこれで固まる
+    ///
+    /// 島の補正 `SpeakerIslands.cross` は、フレーズの末尾の島を、間の無い後続のトークンとその次の有意文字で判定する。
+    /// その隣の話者は語内補正後の値で、隣のフレーズ全体に依存する。そこで間の無い後続のフレーズを、
+    /// 終端から `SpeakerIslands.limitSeconds` を超えた有意文字を含むフレーズまで、1〜4で確定済みにしてから凍結する。
+    /// 間の有無は、次のフレーズの先頭が高精度側で確定してから判定する。`cut` と `phrase` は同じフレーズだけを読む
     public static func advanceByPhrase(
-        frozen: [Int?], speakers: [Int?], tokens: [TimedToken], accurateFinalCount: Int, judgedUntil: Double
+        frozen: [Int?], speakers: [Int?], tokens: [TimedToken], accurateFinalCount: Int, judgedUntil: Double,
+        islands: SpeakerIslands = .off
     ) -> [Int?] {
         let limit = min(tokens.count, speakers.count, max(accurateFinalCount, 0))
         var count = min(frozen.count, limit)
         func horizon(_ token: TimedToken) -> Double { max(token.end, token.midpoint + Aligner.windowHalfSeconds) }
-        for phrase in Aligner.phraseRanges(tokens) where phrase.upperBound > count {
-            guard phrase.lowerBound == count, phrase.upperBound <= limit,
-                  Aligner.endsSentence(tokens[phrase.upperBound - 1]) || phrase.upperBound < limit else { break }
+        let phrases = Aligner.phraseRanges(tokens)
+        // フレーズの割当が読む区間の範囲。入力が未確定なら nil
+        func reach(of phrase: Range<Int>) -> Double? {
+            guard phrase.upperBound <= limit,
+                  Aligner.endsSentence(tokens[phrase.upperBound - 1]) || phrase.upperBound < limit else { return nil }
             var reach = phrase.map { horizon(tokens[$0]) }.max() ?? 0
-            var held = false
             for k in phrase where SpeechTail.isLongSingle(tokens[k]) {
                 guard let next = tokens.indices.dropFirst(k + 1).first(where: { SpeechTail.hasLetter(tokens[$0]) }),
-                      next < limit else { held = true; break }
+                      next < limit else { return nil }
                 reach = max(reach, horizon(tokens[next]))
             }
-            guard !held, reach <= judgedUntil else { break }
+            return reach
+        }
+        for (n, phrase) in phrases.enumerated() where phrase.upperBound > count {
+            guard phrase.lowerBound == count, var needed = reach(of: phrase) else { break }
+            if islands == .cross {
+                guard let following = reachOfFollowing(n, phrases: phrases, tokens: tokens, limit: limit, reach: reach) else { break }
+                needed = max(needed, following)
+            }
+            guard needed <= judgedUntil else { break }
             count = phrase.upperBound
         }
         return Array(speakers.prefix(count))
+    }
+
+    /// `cross` で n 番目のフレーズの末尾の島が読む、後続のフレーズの範囲。未確定なら nil
+    private static func reachOfFollowing(_ n: Int, phrases: [Range<Int>], tokens: [TimedToken], limit: Int,
+                                         reach: (Range<Int>) -> Double?) -> Double? {
+        let end = tokens[phrases[n].upperBound - 1].end
+        var result = 0.0
+        for next in phrases.dropFirst(n + 1) {
+            guard next.lowerBound < limit else { return nil }
+            if tokens[next.lowerBound].start - tokens[next.lowerBound - 1].end >= Aligner.phraseGapSeconds { return result }
+            guard let r = reach(next) else { return nil }
+            result = max(result, r)
+            if next.contains(where: { SpeechTail.hasLetter(tokens[$0]) && tokens[$0].start > end + SpeakerIslands.limitSeconds }) {
+                return result
+            }
+        }
+        // 後続がまだ無い。間なしで続くかは次のトークンが来るまで分からない
+        return nil
     }
 }

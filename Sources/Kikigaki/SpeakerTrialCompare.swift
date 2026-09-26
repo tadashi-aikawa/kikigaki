@@ -2,8 +2,9 @@
 import Foundation
 import KikigakiCore
 
-/// `--align-compare <dumpDir>`: 書き出した入力へ本番の判定とフレーズ固定を当て、Markdown・JSON・全文を書く。
-/// UIもモデルも起動しない。別のビルドとの比較は全文の `diff` で行う。使い方は docs/speaker-correction-trial.md
+/// `--align-compare <dumpDir>`: 書き出した入力へ本番の判定とフレーズ固定を島の補正の段階ごとに当て、
+/// Markdown・JSON・全文を書く。UIもモデルも起動しない。別のビルドとの比較は全文の `diff` で行う。
+/// 使い方は docs/speaker-correction-trial.md と docs/speaker-overlap-islands.md
 enum SpeakerTrialCompare {
     static let usage = """
         usage: Kikigaki --align-compare <dumpDir> [--out <dir>] [--source <名前>]
@@ -58,16 +59,21 @@ enum SpeakerTrialCompare {
                 // 確定済み接頭辞が変わった記録は比較を無効にする
                 snapshots = try SpeakerTrial.snapshots(from: records, final: final)
             }
-            let (comparison, speakers) = SpeakerTrial.compare(source: source, final: final, snapshots: snapshots,
-                                                              expectations: expectations, recorded: meta)
-            try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+            let (comparison, speakers) = SpeakerTrial.compareStages(source: source, final: final, snapshots: snapshots,
+                                                                    expectations: expectations, recorded: meta)
+            try FileManager.default.createDirectory(at: out.appendingPathComponent("transcripts"), withIntermediateDirectories: true)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(comparison).write(to: out.appendingPathComponent("comparison.json"), options: .atomic)
-            try SpeakerTrial.markdown(comparison, names: names, meta: meta)
+            try SpeakerTrial.stageMarkdown(comparison, names: names, meta: meta)
                 .write(to: out.appendingPathComponent("comparison.md"), atomically: true, encoding: .utf8)
-            try SpeakerTrial.transcript(tokens: final.tokens, speakers: speakers, names: names)
+            // transcript.md は本番の既定 `off`。前の版の出力と `diff` で比べられる
+            try SpeakerTrial.transcript(tokens: final.tokens, speakers: speakers[.off]!, names: names)
                 .write(to: out.appendingPathComponent("transcript.md"), atomically: true, encoding: .utf8)
+            for islands in SpeakerIslands.allCases {
+                try SpeakerTrial.transcript(tokens: final.tokens, speakers: speakers[islands]!, names: names)
+                    .write(to: out.appendingPathComponent("transcripts/\(islands.rawValue).md"), atomically: true, encoding: .utf8)
+            }
             print("Kikigaki (align-compare): \(out.path)/comparison.md")
             return 0
         } catch {
