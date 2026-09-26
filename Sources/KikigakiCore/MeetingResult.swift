@@ -20,9 +20,8 @@ public struct MeetingResult: Equatable, Sendable {
     }
 
     public static func make(tokens: [TimedToken], segments: [SpeakerSegment],
-                            dropRepeatedBackchannels: Bool, mapping: SpeakerMapping = SpeakerMapping(),
-                            islands: SpeakerIslands = .off) -> MeetingResult {
-        let speakers = mapping.apply(Aligner.speakers(for: tokens, segments: segments, islands: islands))
+                            dropRepeatedBackchannels: Bool, mapping: SpeakerMapping = SpeakerMapping()) -> MeetingResult {
+        let speakers = mapping.apply(Aligner.speakers(for: tokens, segments: segments))
         let utterances = Aligner.utterances(tokens: tokens, speakers: speakers)
         guard dropRepeatedBackchannels else {
             return MeetingResult(speakers: speakers, utterances: utterances, processed: nil, candidates: [])

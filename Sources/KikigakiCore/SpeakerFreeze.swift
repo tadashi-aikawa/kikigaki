@@ -17,14 +17,12 @@ public enum SpeakerFreeze {
     ///    つまり同じフレーズの中だけを読むので、1で足りる
     /// 4. 判定済み末尾 `judgedUntil` が、読む区間の範囲(各トークンの終端と、中央+窓の半幅)以上。
     ///    `SpeakerRuns` は判定済み範囲の中を後から変えないので、窓・尾部の判定がこれで固まる
-    ///
-    /// 島の補正 `SpeakerIslands.cross` は、フレーズの末尾の島を、間の無い後続のトークンとその次の有意文字で判定する。
-    /// その隣の話者は語内補正後の値で、隣のフレーズ全体に依存する。そこで間の無い後続のフレーズを、
-    /// 終端から `SpeakerIslands.limitSeconds` を超えた有意文字を含むフレーズまで、1〜4で確定済みにしてから凍結する。
-    /// 間の有無は、次のフレーズの先頭が高精度側で確定してから判定する。`cut` と `phrase` は同じフレーズだけを読む
+    /// 5. 間の無い後続のフレーズも、終端から `SpeakerIslands.limitSeconds` を超えた有意文字を含むフレーズまで、
+    ///    1〜4を満たす。島の補正は、フレーズの末尾の島を間の無い後続のトークンとその次の有意文字で判定し、
+    ///    その隣の話者は語内補正後の値で隣のフレーズ全体に依存するため。
+    ///    間の有無は、次のフレーズの先頭が高精度側で確定してから判定する
     public static func advanceByPhrase(
-        frozen: [Int?], speakers: [Int?], tokens: [TimedToken], accurateFinalCount: Int, judgedUntil: Double,
-        islands: SpeakerIslands = .off
+        frozen: [Int?], speakers: [Int?], tokens: [TimedToken], accurateFinalCount: Int, judgedUntil: Double
     ) -> [Int?] {
         let limit = min(tokens.count, speakers.count, max(accurateFinalCount, 0))
         var count = min(frozen.count, limit)
@@ -43,18 +41,15 @@ public enum SpeakerFreeze {
             return reach
         }
         for (n, phrase) in phrases.enumerated() where phrase.upperBound > count {
-            guard phrase.lowerBound == count, var needed = reach(of: phrase) else { break }
-            if islands == .cross {
-                guard let following = reachOfFollowing(n, phrases: phrases, tokens: tokens, limit: limit, reach: reach) else { break }
-                needed = max(needed, following)
-            }
-            guard needed <= judgedUntil else { break }
+            guard phrase.lowerBound == count, let own = reach(of: phrase),
+                  let following = reachOfFollowing(n, phrases: phrases, tokens: tokens, limit: limit, reach: reach),
+                  max(own, following) <= judgedUntil else { break }
             count = phrase.upperBound
         }
         return Array(speakers.prefix(count))
     }
 
-    /// `cross` で n 番目のフレーズの末尾の島が読む、後続のフレーズの範囲。未確定なら nil
+    /// n 番目のフレーズの末尾の島が読む、後続のフレーズの範囲。未確定なら nil
     private static func reachOfFollowing(_ n: Int, phrases: [Range<Int>], tokens: [TimedToken], limit: Int,
                                          reach: (Range<Int>) -> Double?) -> Double? {
         let end = tokens[phrases[n].upperBound - 1].end

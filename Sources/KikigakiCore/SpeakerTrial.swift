@@ -6,55 +6,55 @@ import Foundation
 public enum SpeakerTrial {
     /// 試験の環境変数。アプリはDEBUGビルドだけで読む
     /// - `KIKIGAKI_TRIAL_DUMP`: 比較用の入力を書き出す先。会話本文を含む
-    /// - `KIKIGAKI_TRIAL_ISLAND`: 島の補正の段階 `off|cut|phrase|cross`。未指定は `off`。
-    ///   設計: docs/speaker-overlap-islands.md
     ///
-    /// 補正を外す `KIKIGAKI_TRIAL_ALIGNER` と固定方式の `KIKIGAKI_TRIAL_FREEZE` は廃止した。
-    /// 指定されていたら止める。試したつもりで本番の判定のまま比べないため
+    /// 補正を外す `KIKIGAKI_TRIAL_ALIGNER` と固定方式の `KIKIGAKI_TRIAL_FREEZE`、島の補正の段階の
+    /// `KIKIGAKI_TRIAL_ISLAND` は廃止した。指定されていたら止める。試したつもりで本番の判定のまま比べないため
     public struct Settings: Equatable, Sendable {
         public var dumpDirectory: String?
-        public var islands: SpeakerIslands
 
         public struct Invalid: Error, CustomStringConvertible {
             public let description: String
         }
 
+        static let retired = [
+            "KIKIGAKI_TRIAL_ALIGNER": "11d8733",
+            "KIKIGAKI_TRIAL_FREEZE": "11d8733",
+            "KIKIGAKI_TRIAL_ISLAND": "66be821",
+        ]
+
         public init(environment: [String: String]) throws {
-            if let retired = ["KIKIGAKI_TRIAL_ALIGNER", "KIKIGAKI_TRIAL_FREEZE"].first(where: { environment[$0] != nil }) {
-                throw Invalid(description: "\(retired) は廃止した。条件の比較はコミット 11d8733 のビルドで行う")
+            if let name = Self.retired.keys.sorted().first(where: { environment[$0] != nil }) {
+                throw Invalid(description: "\(name) は廃止した。条件の比較はコミット \(Self.retired[name]!) のビルドで行う")
             }
             dumpDirectory = environment["KIKIGAKI_TRIAL_DUMP"].flatMap { $0.isEmpty ? nil : ($0 as NSString).expandingTildeInPath }
-            let island = environment["KIKIGAKI_TRIAL_ISLAND"] ?? ""
-            guard let islands = island.isEmpty ? .off : SpeakerIslands(rawValue: island) else {
-                throw Invalid(description: "KIKIGAKI_TRIAL_ISLAND は " + SpeakerIslands.allCases.map(\.rawValue).joined(separator: "|")
-                              + " のどれか: \(island)")
-            }
-            self.islands = islands
         }
     }
 
     /// 記録の由来。等倍と加速で待ちの意味が違うため、比較の表へ出す。
     /// `preset` と `freeze` は旧版の比較CLIでも読めるよう残す。今の記録は `adopted` と `phrase`。
-    /// `islands` は記録時の島の補正の段階。これより前の記録には無く、`off` とみなす
+    /// `islands` は島の補正の段階。今の記録は `cross`。`66be821` の試験版も同じキーで段階を残す
     public struct Meta: Codable, Equatable, Sendable {
         public static let adoptedPreset = "adopted"
         public static let phraseFreeze = "phrase"
+        public static let adoptedIslands = "cross"
 
         public var pace: String
         public var preset: String
         public var freeze: String
-        public var islands: SpeakerIslands?
+        public var islands: String?
 
-        public init(pace: String, preset: String = adoptedPreset, freeze: String = phraseFreeze, islands: SpeakerIslands = .off) {
+        public init(pace: String, preset: String = adoptedPreset, freeze: String = phraseFreeze,
+                    islands: String? = adoptedIslands) {
             self.pace = pace
             self.preset = preset
             self.freeze = freeze
             self.islands = islands
         }
 
-        /// 記録時に本番と同じ判定とフレーズ固定だった場合の島の段階。旧版の条件の記録は nil
-        public var recordedIslands: SpeakerIslands? {
-            preset == Self.adoptedPreset && freeze == Self.phraseFreeze ? (islands ?? .off) : nil
+        /// 記録時も今の本番の判定と固定だったか。違えば、再生がアプリの凍結列と一致しないので照合しない。
+        /// `islands` の無い記録は島の補正の採用前のもの
+        public var matchesAdopted: Bool {
+            preset == Self.adoptedPreset && freeze == Self.phraseFreeze && islands == Self.adoptedIslands
         }
     }
 
@@ -309,7 +309,7 @@ public enum SpeakerTrial {
 
     /// 録音中の突き合わせループを本番の判定とフレーズ固定で再生する
     public static func simulate(snapshots: [Snapshot], final: FinalRecord, checksLatent: Bool = true,
-                                checksReproduction: Bool = false, islands: SpeakerIslands = .off) -> LiveMetrics {
+                                checksReproduction: Bool = false) -> LiveMetrics {
         var reproduced = true
         var frozen: [Int?] = []
         var freezeAt: [Double] = []
@@ -320,10 +320,10 @@ public enum SpeakerTrial {
         var lastConfirmed = 0
         for snapshot in snapshots {
             let tokens = snapshot.tokens
-            let speakers = Aligner.speakers(for: tokens, segments: snapshot.segments, frozen: frozen, islands: islands)
+            let speakers = Aligner.speakers(for: tokens, segments: snapshot.segments, frozen: frozen)
             let next = SpeakerFreeze.advanceByPhrase(frozen: frozen, speakers: speakers, tokens: tokens,
                                                      accurateFinalCount: snapshot.accurateFinalCount,
-                                                     judgedUntil: snapshot.judgedUntil, islands: islands)
+                                                     judgedUntil: snapshot.judgedUntil)
             let confirmed = min(max(snapshot.accurateFinalCount, 0), tokens.count)
             while confirmAt.count < confirmed { confirmAt.append(snapshot.elapsed) }
             lastConfirmed = confirmed
@@ -338,13 +338,13 @@ public enum SpeakerTrial {
             }
             frozen = next
             if checksLatent, !frozen.isEmpty {
-                let unfrozen = Aligner.speakers(for: tokens, segments: snapshot.segments, islands: islands)
+                let unfrozen = Aligner.speakers(for: tokens, segments: snapshot.segments)
                 for index in frozen.indices where unfrozen[index] != frozen[index] && latent[index] == nil {
                     latent[index] = change(index, tokens: tokens, frozen: frozen[index], other: unfrozen[index])
                 }
             }
         }
-        let finalSpeakers = Aligner.speakers(for: final.tokens, segments: final.segments, islands: islands)
+        let finalSpeakers = Aligner.speakers(for: final.tokens, segments: final.segments)
         let frozenCount = min(frozen.count, final.tokens.count)
         let unfrozen = final.tokens.dropFirst(frozenCount)
         return LiveMetrics(
@@ -397,21 +397,21 @@ public enum SpeakerTrial {
     }
 
     /// 本番の判定を停止時の入力へ当て、録音中の記録があればフレーズ固定で再生する。
-    /// 再生の照合は、記録時も採用後の判定で、島の段階も同じだった場合だけ行う。別の条件で録った記録とは凍結列が一致しない
+    /// 再生の照合は、記録時も今の本番の判定だった場合だけ行う。旧版の条件で録った記録とは凍結列が一致しない
     public static func compare(source: String, final: FinalRecord, snapshots: [Snapshot], expectations: [Expectation],
-                               recorded: Meta? = nil, repeats: Int = 5,
-                               islands: SpeakerIslands = .off) -> (Comparison, speakers: [Int?]) {
+                               recorded: Meta? = nil, repeats: Int = 5) -> (Comparison, speakers: [Int?]) {
         var times: [Double] = []
         var speakers: [Int?] = []
         for _ in 0..<max(repeats, 1) {
             let begin = DispatchTime.now().uptimeNanoseconds
-            speakers = Aligner.speakers(for: final.tokens, segments: final.segments, islands: islands)
+            speakers = Aligner.speakers(for: final.tokens, segments: final.segments)
             times.append(Double(DispatchTime.now().uptimeNanoseconds - begin) / 1_000_000)
         }
         let metrics = finalMetrics(tokens: final.tokens, speakers: speakers, milliseconds: Stats(times)!.median,
                                    expectations: expectations)
         let live = snapshots.isEmpty ? nil : simulate(
-            snapshots: snapshots, final: final, checksReproduction: recorded?.recordedIslands == islands, islands: islands)
+            snapshots: snapshots, final: final,
+            checksReproduction: recorded?.matchesAdopted == true)
         let first = snapshots.first, last = snapshots.last
         return (Comparison(source: source, duration: final.duration, final: metrics, live: live,
                           liveWallSeconds: first.flatMap { f in last.map { $0.uptime - f.uptime } },
@@ -429,7 +429,7 @@ public enum SpeakerTrial {
             case "replay-accelerated": "加速replay (約10倍)。待ちの値は代表値にしない"
             default: "マイク"
             }
-            lines.append("- 録音中の記録: \(pace)。記録時の設定は `\(meta.preset)` / `\(meta.freeze)`")
+            lines.append("- 録音中の記録: \(pace)。記録時の設定は `\(meta.preset)` / `\(meta.freeze)` / 島 `\(meta.islands ?? "なし")`")
         }
         lines.append("- 本番の話者の割当とフレーズ固定を、記録したトークン・時刻・話者区間へ当てた")
         lines.append("    - 繰り返し相槌の省略は無効。保存の `.md` と違う場合がある")
@@ -481,7 +481,7 @@ public enum SpeakerTrial {
             if let reproduced = live.reproduced {
                 lines.append("- 再生は、アプリの実際の凍結列と" + (reproduced ? "全描画で一致した" : "**一致しなかった**"))
             } else {
-                lines.append("- 記録時の条件が採用後の判定ではないため、アプリの凍結列との照合はしていない")
+                lines.append("- 記録時の条件が今の本番の判定ではないため、アプリの凍結列との照合はしていない")
             }
             if !live.mismatches.isEmpty || !live.latentChanges.isEmpty {
                 lines.append("")

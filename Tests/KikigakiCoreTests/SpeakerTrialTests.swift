@@ -8,22 +8,27 @@ import Testing
         #expect(try SpeakerTrial.Settings(environment: ["KIKIGAKI_TRIAL_DUMP": "/tmp/d"]).dumpDirectory == "/tmp/d")
         #expect(throws: SpeakerTrial.Settings.Invalid.self) { try SpeakerTrial.Settings(environment: ["KIKIGAKI_TRIAL_ALIGNER": "current"]) }
         #expect(throws: SpeakerTrial.Settings.Invalid.self) { try SpeakerTrial.Settings(environment: ["KIKIGAKI_TRIAL_FREEZE": "phrase"]) }
+        #expect(throws: SpeakerTrial.Settings.Invalid.self) { try SpeakerTrial.Settings(environment: ["KIKIGAKI_TRIAL_ISLAND": "cross"]) }
     }
 
     @Test func 旧版の比較CLIが読む記録時の条件を残す() throws {
         let meta = SpeakerTrial.Meta(pace: "replay-realtime")
         #expect(meta.preset == "adopted" && meta.freeze == "phrase")
         let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(meta)) as? [String: String]
-        // 旧版が読むキーはそのまま。島の補正の段階を足す
-        #expect(json == ["pace": "replay-realtime", "preset": "adopted", "freeze": "phrase", "islands": "off"])
+        // 旧版が読むキーはそのまま。島の補正の段階は試験版 66be821 と同じキーで残す
+        #expect(json == ["pace": "replay-realtime", "preset": "adopted", "freeze": "phrase", "islands": "cross"])
     }
 
-    @Test func 段階の無い記録はoffとして照合し旧版の条件の記録は照合しない() throws {
-        let adopted = try JSONDecoder().decode(SpeakerTrial.Meta.self,
+    @Test func 島の補正の採用前の記録と試験の別段階の記録は照合しない() throws {
+        #expect(SpeakerTrial.Meta(pace: "mic").matchesAdopted)
+        let beforeIslands = try JSONDecoder().decode(SpeakerTrial.Meta.self,
             from: Data(#"{"pace":"mic","preset":"adopted","freeze":"phrase"}"#.utf8))
-        #expect(adopted.recordedIslands == .off)
-        #expect(SpeakerTrial.Meta(pace: "mic", islands: .cross).recordedIslands == .cross)
-        #expect(SpeakerTrial.Meta(pace: "mic", preset: "current", freeze: "grace30").recordedIslands == nil)
+        #expect(!beforeIslands.matchesAdopted)
+        #expect(!SpeakerTrial.Meta(pace: "mic", islands: "phrase").matchesAdopted)
+        #expect(!SpeakerTrial.Meta(pace: "mic", preset: "current", freeze: "grace30").matchesAdopted)
+        let trialCross = try JSONDecoder().decode(SpeakerTrial.Meta.self,
+            from: Data(#"{"pace":"replay-realtime","preset":"adopted","freeze":"phrase","islands":"cross"}"#.utf8))
+        #expect(trialCross.matchesAdopted)
     }
 }
 
@@ -40,10 +45,13 @@ import Testing
 
     @Test func 文末で閉じたフレーズは窓の先まで判定済みになってから凍結する() {
         let tokens = self.tokens
-        // 最後の「晴れ。」の中央0.95+0.5秒まで区間が届く必要がある
+        // 最後の「晴れ。」の中央0.95+0.5秒まで区間が届く必要がある。
+        // 条件5: 次の「明日」が確定して、間があると分かる必要もある
         #expect(SpeakerFreeze.advanceByPhrase(frozen: [], speakers: speakers, tokens: tokens, accurateFinalCount: 3,
+                                              judgedUntil: 100).isEmpty)
+        #expect(SpeakerFreeze.advanceByPhrase(frozen: [], speakers: speakers, tokens: tokens, accurateFinalCount: 4,
                                               judgedUntil: 1.44).isEmpty)
-        #expect(SpeakerFreeze.advanceByPhrase(frozen: [], speakers: speakers, tokens: tokens, accurateFinalCount: 3,
+        #expect(SpeakerFreeze.advanceByPhrase(frozen: [], speakers: speakers, tokens: tokens, accurateFinalCount: 4,
                                               judgedUntil: 1.45).count == 3)
     }
 
@@ -64,8 +72,9 @@ import Testing
     }
 
     @Test func 語頭の付け替えが読む後続文字を待つ() {
+        // 後続の文とは0.4秒の間を空ける。間が無いと条件5で後続の文全体の確定も待ち、ここで見たい条件3が隠れる
         let tokens = [token("え", 10, 11.5), token("。", 11.5, 11.6),
-                      token("い", 11.7, 11.9, phrase: 2), token("や", 11.9, 12.0, phrase: 2), token("。", 12.0, 12.1, phrase: 2)]
+                      token("い", 12.0, 12.2, phrase: 2), token("や", 12.2, 12.3, phrase: 2), token("。", 12.3, 12.4, phrase: 2)]
         let speakers: [Int?] = [1, 1, 2, 2, 2]
         func freeze(_ accurate: Int, _ judged: Double, _ values: [TimedToken]? = nil) -> Int {
             let values = values ?? tokens
@@ -76,9 +85,9 @@ import Testing
         #expect(freeze(2, 100, Array(tokens.prefix(2))) == 0)
         // 後続はあるが高精度で未確定
         #expect(freeze(2, 100) == 0)
-        // 後続が確定しても、その中央+0.5秒(12.3)まで区間が届いていない
-        #expect(freeze(3, 12.29) == 0)
-        #expect(freeze(3, 12.3) == 2)
+        // 後続が確定しても、その中央+0.5秒(12.6)まで区間が届いていない
+        #expect(freeze(3, 12.59) == 0)
+        #expect(freeze(3, 12.6) == 2)
     }
 
     @Test func 窓の先の区間が届く前に凍結すると後で話者が変わる() {
@@ -245,10 +254,11 @@ private enum SyntheticSession {
     }
 
     @Test func 記録した凍結列と再生が一致するか照合する() {
-        let tokens = [token("はい。", 0)]
+        // 条件5: 次の文が確定して間があると分かってから「はい。」を凍結する
+        let tokens = [token("はい。", 0), token("次", 0.8, 2)]
         let covered = [SpeakerSegment(speaker: 0, start: 0, end: 1)]
         func run(_ recorded: [Int?]) -> Bool? {
-            var value = snapshot(tokens, accurate: 1, segments: covered)
+            var value = snapshot(tokens, accurate: 2, segments: covered)
             value.judgedUntil = 1
             value.recordedFrozen = recorded
             return SpeakerTrial.simulate(snapshots: [value], final: .init(tokens: tokens, segments: covered, duration: 1),
@@ -272,8 +282,10 @@ private enum SyntheticSession {
         let markdown = SpeakerTrial.markdown(comparison, names: [0: "司会"], meta: nil)
         #expect(markdown.contains("繰り返し相槌の省略は無効"))
         #expect(SpeakerTrial.transcript(tokens: tokens, speakers: speakers, names: [0: "司会"]) == "[00:00.00] 司会: そうです。\n")
-        // 旧版の条件で録った記録の凍結列とは照合しない
-        var snapshot = SpeakerTrial.Snapshot(elapsed: 3, uptime: 3, tokens: tokens, finalCount: 2, accurateFinalCount: 2,
+        // 旧版の条件で録った記録の凍結列とは照合しない。
+        // 録音中は間を空けた次の文も確定済みで、条件5を満たして最初の文が凍結される
+        let live = tokens + [TimedToken(text: "次", phraseId: 2, start: 2.2, end: 2.5)]
+        var snapshot = SpeakerTrial.Snapshot(elapsed: 3, uptime: 3, tokens: live, finalCount: 3, accurateFinalCount: 3,
                                              judgedUntil: 3, segments: segments, recordedFrozen: [1, 1])
         let old = SpeakerTrial.compare(source: "例", final: final, snapshots: [snapshot], expectations: [],
                                        recorded: .init(pace: "mic", preset: "current", freeze: "grace30"), repeats: 1).0

@@ -160,10 +160,12 @@ import Testing
         let judged = SpeakerFreeze.advanceByPhrase(frozen: [], speakers: Aligner.speakers(for: tokens, segments: early),
                                                    tokens: tokens, accurateFinalCount: tokens.count, judgedUntil: 46.88)
         #expect(judged.isEmpty)
-        let full = Aligner.speakers(for: tokens, segments: Self.omoiSegments)
-        let frozen = SpeakerFreeze.advanceByPhrase(frozen: [], speakers: full, tokens: tokens, accurateFinalCount: tokens.count,
+        // 条件5: 後続の文との間の有無を、次のトークンの確定で確かめる。ここでは間を空ける
+        let after = tokens + [TimedToken(text: "次", phraseId: 99, start: tokens.last!.end + 0.5, end: tokens.last!.end + 0.8)]
+        let full = Aligner.speakers(for: after, segments: Self.omoiSegments)
+        let frozen = SpeakerFreeze.advanceByPhrase(frozen: [], speakers: full, tokens: after, accurateFinalCount: after.count,
                                                    judgedUntil: 49.22)
-        #expect(frozen == full)
-        #expect(Aligner.speakers(for: tokens, segments: Self.omoiSegments, frozen: frozen) == full)
+        #expect(frozen == Array(full.prefix(tokens.count)))
+        #expect(Aligner.speakers(for: after, segments: Self.omoiSegments, frozen: frozen) == full)
     }
 }

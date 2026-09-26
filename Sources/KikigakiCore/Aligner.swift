@@ -40,21 +40,21 @@ public enum Aligner {
     /// 各トークンの話者を決める。`frozen` に入っている先頭部分はそのまま使い(確定済みの行を後から
     /// 塗り替えないため)、残りだけ区間から判定する。
     ///
-    /// トークンごとに窓判定で区間から引き、長い1文字の語頭と語内の境界だけを補正する。
-    /// フレーズの多数派へ短い別話者の塊を吸収する補正は置かない。短い返答は、語内補正など
-    /// 残した補正を当てた後の話者のまま保持する。吸収を外した比較と採用の経緯: docs/speaker-correction-trial.md
+    /// トークンごとに窓判定で区間から引き、長い1文字の語頭と語内の境界を補正する。その後、話し手の声が
+    /// 続く中で重なった別話者へ割れた短い島を両隣の話者へ戻す(`SpeakerIslands`)。
+    /// フレーズの多数派へ短い別話者の塊を吸収する補正は置かない。吸収を外した比較と採用の経緯:
+    /// docs/speaker-correction-trial.md。島の補正の段階の比較と採用: docs/speaker-overlap-islands.md
     ///
-    /// `islands` は採用前の比較用の島の補正。既定の `off` は従来と同じ結果を返す。
     /// 島は補正前のラベルで判定するので、凍結境界の手前も補正前のラベルを計算し直す
-    public static func speakers(for tokens: [TimedToken], segments: [SpeakerSegment], frozen: [Int?] = [],
-                                islands: SpeakerIslands = .off) -> [Int?] {
+    public static func speakers(for tokens: [TimedToken], segments: [SpeakerSegment], frozen: [Int?] = []) -> [Int?] {
         let frozenCount = min(frozen.count, tokens.count)
-        let recompute = islands.recomputeStart(tokens: tokens, frozenCount: frozenCount)
+        let recompute = SpeakerIslands.recomputeStart(tokens: tokens, frozenCount: frozenCount)
         var speakers = Array(frozen.prefix(recompute))
         let observed = SpeechTail.speakers(tokens: tokens, segments: segments, skippingPrefix: recompute)
         speakers.append(contentsOf: observed.dropFirst(recompute))
         let base = wordSpeakers(tokens: tokens, speakers: speakers, frozenCount: recompute, segments: segments)
-        let islanded = islands.apply(tokens: tokens, base: base, segments: segments, frozen: Array(frozen.prefix(frozenCount)))
+        let islanded = SpeakerIslands.apply(tokens: tokens, base: base, segments: segments,
+                                            frozen: Array(frozen.prefix(frozenCount)))
         return attachPunctuation(tokens: tokens, speakers: islanded, frozenCount: frozenCount)
     }
 

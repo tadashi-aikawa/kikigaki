@@ -58,14 +58,18 @@ import Testing
             fast: [token("粗い", 1, 2), token("速報。", 2, 3)], fastFinalCount: 2)
         let frozen = SpeakerFreeze.advanceByPhrase(frozen: [], speakers: [0, 1, 1], tokens: first.tokens,
                                                    accurateFinalCount: first.accurateFinalCount, judgedUntil: 100)
-        #expect(frozen == [0])
-        let corrected = TranscriptMerge.combine(accurate: accurate + [token("正確な文字。", 1, 3, phrase: 2)],
-            accurateFinalCount: 2, fast: [token("粗い", 1, 2), token("速報。", 2, 3)], fastFinalCount: 2)
+        // 速報は凍結しない。条件5で、次が速報のうちは間の有無が決まらないので「確定。」も待つ
+        #expect(frozen.isEmpty)
+        // 高精度が追いつき、間を空けた次の文も確定した
+        let corrected = TranscriptMerge.combine(
+            accurate: accurate + [token("正確な文字。", 1, 3, phrase: 2), token("次。", 3.5, 4, phrase: 3)],
+            accurateFinalCount: 3, fast: [token("粗い", 1, 2), token("速報。", 2, 3)], fastFinalCount: 2)
         let labels = Aligner.speakers(for: corrected.tokens,
-            segments: [.init(speaker: 2, start: 1, end: 3)], frozen: frozen)
-        #expect(labels == [0, 2])
+            segments: [.init(speaker: 0, start: 0, end: 1), .init(speaker: 2, start: 1, end: 4.2)], frozen: frozen)
+        #expect(labels == [0, 2, 2])
         let next = SpeakerFreeze.advanceByPhrase(frozen: frozen, speakers: labels, tokens: corrected.tokens,
                                                  accurateFinalCount: corrected.accurateFinalCount, judgedUntil: 100)
+        // 最後の文は後続がまだ無いので待つ
         #expect(next == [0, 2])
     }
 
