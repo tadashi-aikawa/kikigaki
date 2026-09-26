@@ -1,8 +1,8 @@
 @testable import KikigakiCore
 
-/// 実録由来の話者補正の回帰事例。既存テストと、補正を外した比較の行列テストが共有する。
-/// 区間と窓判定は Sortformer 時代のもので、Nemotron での補正の要否の根拠にはしない。
-/// 期待値は各テストが確かめてきた現行の出力で、話者の正解を全て人手で付けたものではない
+/// 実録由来の話者補正の回帰事例。区間と窓判定は Sortformer 時代のもので、Nemotron での補正の要否の根拠にはしない。
+/// 期待値は吸収の廃止前に各テストが確かめてきた出力で、話者の正解を全て人手で付けたものではない。
+/// 廃止後に保てない期待は、上書きせずに既知の退行として `withKnownIssue` で残す
 struct RecordedSpeakerFixture {
     let name: String
     let recording: String

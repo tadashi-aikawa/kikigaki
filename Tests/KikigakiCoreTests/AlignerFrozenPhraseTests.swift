@@ -4,7 +4,7 @@ import Testing
 
 /// 録音中の再判定で、全体が凍結済みのフレーズを解析ごと飛ばしても結果が変わらないことを見る。
 @Suite struct AlignerFrozenPhraseTests {
-    /// 3フレーズ。無音 0.5 秒で区切られ、各フレーズに多数派へ吸収される短い島がある
+    /// 3フレーズ。無音 0.5 秒で区切られ、各フレーズに短い別話者の島がある
     private static let texts = [
         "読", "みやすい", "し",
         "一応", "経過報告", "をさせていただきます",
@@ -23,9 +23,9 @@ import Testing
     /// フレーズの切れ目(トークン添字)
     private let boundaries = [0, 3, 6, 9]
 
-    @Test func 凍結なしでは各フレーズの短い島を多数派へ吸収する() {
+    @Test func 凍結なしでも各フレーズの短い島を多数派へ吸収しない() {
         #expect(Aligner.phraseRanges(tokens) == [0..<3, 3..<6, 6..<9])
-        #expect(Aligner.smoothSpeakers(tokens: tokens, speakers: raw) == [0, 0, 0, 1, 1, 1, 0, 0, 0])
+        #expect(Aligner.smoothSpeakers(tokens: tokens, speakers: raw) == raw)
     }
 
     @Test func 凍結がフレーズの切れ目にあれば凍結の有無で結果が変わらない() {
@@ -39,18 +39,10 @@ import Testing
     }
 
     @Test func 凍結済みフレーズの話者は塗り替えない() {
-        // 先頭フレーズだけ、吸収していない観測値のまま凍結する
-        let initial: [Int?] = raw
+        // 先頭フレーズを観測値と違う話者で凍結しても、そのまま残る
+        let initial: [Int?] = [2, 2, 2] + raw.dropFirst(3)
         let result = Aligner.smoothSpeakers(tokens: tokens, speakers: initial, frozenCount: 3)
-        #expect(Array(result.prefix(3)) == [0, 1, 0])
-        #expect(Array(result.dropFirst(3)) == [1, 1, 1, 0, 0, 0])
-    }
-
-    @Test func 凍結の切れ目をまたぐフレーズは従来通り処理する() {
-        // 2番目のフレーズの途中(添字4)まで凍結。凍結後の島は多数派へ吸収される
-        let initial = Array(([0, 0, 0, 1, 0] as [Int?])) + raw.dropFirst(5)
-        let result = Aligner.smoothSpeakers(tokens: tokens, speakers: initial, frozenCount: 5)
-        #expect(Array(result.prefix(5)) == [0, 0, 0, 1, 0])
-        #expect(Array(result.dropFirst(5)) == [1, 0, 0, 0])
+        #expect(Array(result.prefix(3)) == [2, 2, 2])
+        #expect(Array(result.dropFirst(3)) == Array(raw.dropFirst(3)))
     }
 }

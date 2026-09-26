@@ -1,7 +1,7 @@
 import Foundation
 import KikigakiCore
 
-/// 話者補正の試験用に、録音中の snapshot 列と停止時の入力を書き出す。会話本文を含むので、
+/// 話者の割当と固定の検証用に、録音中の snapshot 列と停止時の入力を書き出す。会話本文を含むので、
 /// 出力先は `KIKIGAKI_TRIAL_DUMP` で明示したときだけ作る。環境変数を読むのはDEBUGビルドだけ。
 /// 設計: docs/speaker-correction-trial.md
 final class SpeakerTrialDump: @unchecked Sendable {

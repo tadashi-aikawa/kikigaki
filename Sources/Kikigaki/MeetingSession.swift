@@ -70,9 +70,7 @@ final class MeetingSession {
     private(set) var audioLevelCalculationCount = 0
 #endif
     private var speakerMapping = SpeakerMapping()
-    /// 話者補正の試験。DEBUGの環境変数を録音開始で読んで会議ごとに固定する。未指定は本番と同じ
-    private var alignerOptions = Aligner.Options.current
-    private var freezeMode = SpeakerFreeze.Mode.grace30
+    /// 話者の割当と固定の検証用の書き出し。DEBUGの環境変数を録音開始で読んで会議ごとに固定する
     private var trialDump: SpeakerTrialDump?
     private var liveSource = SpeakerTranscript(accurateFinalCount: 0)
     private var lastUndiarizedDraw = -Double.infinity
@@ -432,8 +430,7 @@ final class MeetingSession {
         diagnostics.liveLines(snapshot.utterances, names: snapshot.names).forEach(log)
         let final = snapshot.names.diarizationEnabled
             ? MeetingResult.make(tokens: tokens, segments: segments,
-                                 dropRepeatedBackchannels: dropRepeatedBackchannels, mapping: speakerMapping,
-                                 options: alignerOptions)
+                                 dropRepeatedBackchannels: dropRepeatedBackchannels, mapping: speakerMapping)
             : MeetingResult.withoutDiarization(tokens: tokens)
         diagnostics.backchannelLines(tokens: tokens, candidates: final.candidates).forEach(log)
         diagnostics.phraseLines(tokens: tokens, segments: segments, speakers: final.speakers).forEach(log)
@@ -571,7 +568,7 @@ final class MeetingSession {
         refreshSpeakerMapping()
         if archive != nil {
             let result = MeetingResult.make(tokens: finalTokens, segments: speakerSegments,
-                dropRepeatedBackchannels: dropRepeatedBackchannels, mapping: speakerMapping, options: alignerOptions)
+                dropRepeatedBackchannels: dropRepeatedBackchannels, mapping: speakerMapping)
             archive?.replaceResult(result)
             save()
         } else {
@@ -886,16 +883,14 @@ final class MeetingSession {
                         let tokens = latest.tokens, count = latest.finalCount
                         // 区間は processedUntil と同じ時点に消費タスクから受け取ったもの
                         let speakers = names.diarizationEnabled
-                            ? self.speakerMapping.apply(Aligner.speakers(for: tokens, segments: self.speakerSegments,
-                                                                         options: self.alignerOptions))
+                            ? self.speakerMapping.apply(Aligner.speakers(for: tokens, segments: self.speakerSegments))
                             : Array<Int?>(repeating: nil, count: tokens.count)
                         return try AICapture(tokens: tokens, speakers: speakers, finalCount: count, processedUntil: self.consumedAudioTime,
                             cutoff: cutoff, names: names, timeline: timeline, typed: typed,
                             audioExclusion: exclusion, audioLevels: self.audioLevelMeter?.track())
                     } else {
                         let speakers = names.diarizationEnabled
-                            ? self.speakerMapping.apply(Aligner.speakers(for: self.finalTokens, segments: self.speakerSegments,
-                                                                         options: self.alignerOptions))
+                            ? self.speakerMapping.apply(Aligner.speakers(for: self.finalTokens, segments: self.speakerSegments))
                             : Array<Int?>(repeating: nil, count: self.finalTokens.count)
                         return try AICapture(tokens: self.finalTokens, speakers: speakers,
                             finalCount: self.finalTokens.count, processedUntil: self.snapshot.elapsed, cutoff: cutoff, names: names, timeline: timeline, typed: typed,
@@ -1024,27 +1019,21 @@ final class MeetingSession {
     }
 #endif
 
-    /// 話者補正の試験変数を読む。DEBUGビルドだけで効き、未指定なら本番と同じ。
-    /// 不正な値は録音を始めずに止める。試したつもりで本番の判定のまま比べないため
+    /// 検証用の書き出しの環境変数を読む。DEBUGビルドだけで効く。
+    /// 廃止した試験変数は録音を始めずに止める。試したつもりで本番の判定のまま比べないため
     private func configureSpeakerTrial(markdownURL: URL, diarizationEnabled: Bool) throws {
-        alignerOptions = .current
-        freezeMode = .grace30
         trialDump = nil
 #if DEBUG
         let trial = try SpeakerTrial.Settings(environment: ProcessInfo.processInfo.environment)
-        guard trial.isActive else { return }
-        guard diarizationEnabled else { log("[trial] 話者判別が無効の会議なので使わない"); return }
-        alignerOptions = trial.options
-        freezeMode = trial.freeze
-        if let dump = trial.dumpDirectory {
-            let replay = CommandLine.arguments.contains("--replay")
-            let pace = !replay ? "mic"
-                : ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_REPLAY_REALTIME"] == "1" ? "replay-realtime" : "replay-accelerated"
-            trialDump = try SpeakerTrialDump(
-                directory: URL(fileURLWithPath: dump).appendingPathComponent(markdownURL.deletingPathExtension().lastPathComponent),
-                meta: SpeakerTrial.Meta(pace: pace, preset: trial.preset, freeze: trial.freeze.rawValue))
-        }
-        log("[trial] aligner=\(trial.preset) freeze=\(trial.freeze.rawValue) dump=\(trialDump?.directory.path ?? "なし")")
+        guard let dump = trial.dumpDirectory else { return }
+        guard diarizationEnabled else { log("[trial] 話者判別が無効の会議なので書き出さない"); return }
+        let replay = CommandLine.arguments.contains("--replay")
+        let pace = !replay ? "mic"
+            : ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_REPLAY_REALTIME"] == "1" ? "replay-realtime" : "replay-accelerated"
+        trialDump = try SpeakerTrialDump(
+            directory: URL(fileURLWithPath: dump).appendingPathComponent(markdownURL.deletingPathExtension().lastPathComponent),
+            meta: SpeakerTrial.Meta(pace: pace))
+        log("[trial] dump=\(trialDump?.directory.path ?? "なし")")
 #endif
     }
 
@@ -1069,7 +1058,7 @@ final class MeetingSession {
         stream: AsyncStream<[Float]>, transcriber: AppleTranscriber, diarizer: SpeakerDiarizer?, wav: WavWriter?, generation: UUID
     ) -> Task<PipelineResult, Never> {
         let log = self.log
-        let options = alignerOptions, freezeMode = freezeMode, trialDump = trialDump
+        let trialDump = trialDump
         // self を強く持つ。stop() が消費タスクの終了を待つので、タスクの寿命は会議の間だけ
         return Task.detached(priority: .userInitiated) {
             var result = PipelineResult()
@@ -1114,17 +1103,10 @@ final class MeetingSession {
                 let tokens = latest.tokens, finalCount = latest.finalCount
                 let elapsed = Double(result.fedSamples) / 16000
                 let frozenBefore = result.frozen.count
-                let speakers = Aligner.speakers(for: tokens, segments: segments, frozen: result.frozen, options: options)
-                switch freezeMode {
-                case .grace30:
-                    result.frozen = SpeakerFreeze.advance(
-                        frozen: result.frozen, speakers: speakers, tokens: tokens, elapsed: elapsed, finalCount: latest.accurateFinalCount,
-                        judgedUntil: judgedUntil)
-                case .phrase:
-                    result.frozen = SpeakerFreeze.advanceByPhrase(
-                        frozen: result.frozen, speakers: speakers, tokens: tokens, accurateFinalCount: latest.accurateFinalCount,
-                        judgedUntil: judgedUntil, options: options)
-                }
+                let speakers = Aligner.speakers(for: tokens, segments: segments, frozen: result.frozen)
+                result.frozen = SpeakerFreeze.advanceByPhrase(
+                    frozen: result.frozen, speakers: speakers, tokens: tokens, accurateFinalCount: latest.accurateFinalCount,
+                    judgedUntil: judgedUntil)
                 trialDump?.record(SpeakerTrial.Snapshot(
                     elapsed: elapsed, uptime: ProcessInfo.processInfo.systemUptime, tokens: tokens, finalCount: finalCount,
                     accurateFinalCount: latest.accurateFinalCount, judgedUntil: judgedUntil, segments: segments),

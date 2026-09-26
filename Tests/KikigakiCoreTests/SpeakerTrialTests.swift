@@ -2,85 +2,19 @@ import Foundation
 import Testing
 @testable import KikigakiCore
 
-@Suite struct SpeakerTrialOptionsTests {
-    @Test func 点判定は中央を含む区間だけを見て同時発話は番号の小さい話者() {
-        let segments = [SpeakerSegment(speaker: 1, start: 0.5, end: 2), SpeakerSegment(speaker: 0, start: 0, end: 1)]
-        #expect(Aligner.pointSpeaker(at: 0.5, segments: segments) == 0)
-        // 半開区間。終端ちょうどは含まない
-        #expect(Aligner.pointSpeaker(at: 1.0, segments: segments) == 1)
-        #expect(Aligner.pointSpeaker(at: 2.0, segments: segments) == nil)
-        #expect(Aligner.pointSpeaker(at: -0.1, segments: segments) == nil)
-        // 窓判定は前後0.5秒の重なりで決まり、中央に区間が無くても話者を返す
-        let gap = [SpeakerSegment(speaker: 2, start: 0, end: 0.9)]
-        #expect(Aligner.pointSpeaker(at: 1.0, segments: gap) == nil)
-        #expect(Aligner.speaker(at: 1.0, segments: gap) == 2)
+@Suite struct SpeakerTrialSettingsTests {
+    @Test func 書き出し先だけを読み廃止した試験変数は止める() throws {
+        #expect(try SpeakerTrial.Settings(environment: [:]).dumpDirectory == nil)
+        #expect(try SpeakerTrial.Settings(environment: ["KIKIGAKI_TRIAL_DUMP": "/tmp/d"]).dumpDirectory == "/tmp/d")
+        #expect(throws: SpeakerTrial.Settings.Invalid.self) { try SpeakerTrial.Settings(environment: ["KIKIGAKI_TRIAL_ALIGNER": "current"]) }
+        #expect(throws: SpeakerTrial.Settings.Invalid.self) { try SpeakerTrial.Settings(environment: ["KIKIGAKI_TRIAL_FREEZE": "phrase"]) }
     }
 
-    @Test func プリセットの名前を解釈する() {
-        for name in Aligner.Options.presetNames { #expect(Aligner.Options.preset(name) != nil, "\(name)") }
-        #expect(Aligner.Options.preset("current") == .current)
-        #expect(Aligner.Options.preset("current-tail")?.tail == false)
-        #expect(Aligner.Options.preset("current-tail")?.word == true)
-        #expect(Aligner.Options.preset("current-foo") == nil)
-        #expect(Aligner.Options.preset("none") == nil)
-        let none = Aligner.Options.window
-        #expect(!none.tail && !none.evidence && !none.word && !none.absorb && !none.protect && !none.punct)
-        #expect(Aligner.Options.point.assignment == .point)
-    }
-
-    @Test func 試験変数が無ければ本番と同じで不正な値は止める() throws {
-        let empty = try SpeakerTrial.Settings(environment: [:])
-        #expect(!empty.isActive && empty.options == .current && empty.freeze == .grace30 && empty.dumpDirectory == nil)
-        let set = try SpeakerTrial.Settings(environment: ["KIKIGAKI_TRIAL_ALIGNER": "window", "KIKIGAKI_TRIAL_FREEZE": "phrase"])
-        #expect(set.isActive && set.options == .window && set.freeze == .phrase)
-        #expect(throws: SpeakerTrial.Settings.Invalid.self) { try SpeakerTrial.Settings(environment: ["KIKIGAKI_TRIAL_ALIGNER": "none"]) }
-        #expect(throws: SpeakerTrial.Settings.Invalid.self) { try SpeakerTrial.Settings(environment: ["KIKIGAKI_TRIAL_FREEZE": "30"]) }
-    }
-
-    @Test func 補正なしでは句読点も長い1文字も元の判定のまま() {
-        // 句点が次の発話の頭に食い込み、窓判定で別話者になる形
-        let tokens = [TimedToken(text: "そうです", phraseId: 1, start: 0, end: 1.0),
-                      TimedToken(text: "。", phraseId: 1, start: 1.0, end: 1.6)]
-        let segments = [SpeakerSegment(speaker: 0, start: 0, end: 1.0), SpeakerSegment(speaker: 1, start: 1.0, end: 3)]
-        #expect(Aligner.speakers(for: tokens, segments: segments) == [0, 0])
-        #expect(Aligner.speakers(for: tokens, segments: segments, options: .window) == [0, 1])
-        // 句読点の付替えだけを外しても、短い島の吸収が同じ句点を直前の話者へ戻す
-        #expect(Aligner.speakers(for: tokens, segments: segments, options: .preset("current-punct")!) == [0, 0])
-        #expect(Aligner.speakers(for: tokens, segments: segments, options: .preset("current-absorb")!) == [0, 0])
-        // 既定値の呼び出しは .current と同じ
-        let fixture = RecordedSpeakerFixtures.iBoku
-        #expect(Aligner.speakers(for: fixture.tokens, segments: fixture.segments)
-                == Aligner.speakers(for: fixture.tokens, segments: fixture.segments, options: .current))
-    }
-
-    /// 旧区間の実録事例で、補正を1つずつ外すと期待が保てなくなる箇所を固定する。
-    /// Sortformer 時代の区間なので、その補正が当時の事例に効いていたことだけを示す
-    @Test func 旧fixtureの補正ごとの効き目の行列() {
-        var table: [String: [String: Bool]] = [:]
-        for fixture in RecordedSpeakerFixtures.all {
-            for name in Aligner.Options.presetNames {
-                let options = Aligner.Options.preset(name)!
-                let result = fixture.segments.isEmpty
-                    ? (name == "point" ? nil : Aligner.smoothSpeakers(tokens: fixture.tokens, speakers: fixture.raw, options: options))
-                    : Aligner.speakers(for: fixture.tokens, segments: fixture.segments, options: options)
-                table[fixture.name, default: [:]][name] = result.map { $0 == fixture.expected }
-            }
-        }
-        var lines = ["| 事例 | 録音 | " + Aligner.Options.presetNames.joined(separator: " | ") + " |",
-                     "|---|---|" + String(repeating: "---|", count: Aligner.Options.presetNames.count)]
-        for fixture in RecordedSpeakerFixtures.all {
-            lines.append("| \(fixture.name) | \(fixture.recording) | " + Aligner.Options.presetNames.map {
-                table[fixture.name]?[$0].map { $0 ? "○" : "×" } ?? "—"
-            }.joined(separator: " | ") + " |")
-        }
-        if let path = ProcessInfo.processInfo.environment["KIKIGAKI_TRIAL_FIXTURE_REPORT"] {
-            try? (lines.joined(separator: "\n") + "\n").write(toFile: path, atomically: true, encoding: .utf8)
-        }
-        for fixture in RecordedSpeakerFixtures.all { #expect(table[fixture.name]?["current"] == true, "\(fixture.name)") }
-        #expect(table["じゃあ/そう"]?["current-word"] == false)
-        #expect(table["はい/すごいね。"]?["current-protect"] == false)
-        #expect(table["代表"]?["current-absorb"] == false)
-        #expect(table["い/僕"]?["current-tail"] == false)
+    @Test func 旧版の比較CLIが読む記録時の条件を残す() throws {
+        let meta = SpeakerTrial.Meta(pace: "replay-realtime")
+        #expect(meta.preset == "adopted" && meta.freeze == "phrase")
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(meta)) as? [String: String]
+        #expect(json == ["pace": "replay-realtime", "preset": "adopted", "freeze": "phrase"])
     }
 }
 
@@ -102,9 +36,6 @@ import Testing
                                               judgedUntil: 1.44).isEmpty)
         #expect(SpeakerFreeze.advanceByPhrase(frozen: [], speakers: speakers, tokens: tokens, accurateFinalCount: 3,
                                               judgedUntil: 1.45).count == 3)
-        // 点判定は窓の先を読まないので、終端まで判定済みなら足りる
-        #expect(SpeakerFreeze.advanceByPhrase(frozen: [], speakers: speakers, tokens: tokens, accurateFinalCount: 3,
-                                              judgedUntil: 1.2, options: .point).count == 3)
     }
 
     @Test func 間で閉じるフレーズは次のトークンが高精度で確定するまで待つ() {
@@ -123,25 +54,22 @@ import Testing
                                               judgedUntil: 100).count == 3)
     }
 
-    @Test func 語頭の付け替えが読む後続文字はtail有効のときだけ待つ() {
+    @Test func 語頭の付け替えが読む後続文字を待つ() {
         let tokens = [token("え", 10, 11.5), token("。", 11.5, 11.6),
                       token("い", 11.7, 11.9, phrase: 2), token("や", 11.9, 12.0, phrase: 2), token("。", 12.0, 12.1, phrase: 2)]
         let speakers: [Int?] = [1, 1, 2, 2, 2]
-        func freeze(_ accurate: Int, _ judged: Double, _ options: Aligner.Options = .current, _ values: [TimedToken]? = nil) -> Int {
+        func freeze(_ accurate: Int, _ judged: Double, _ values: [TimedToken]? = nil) -> Int {
             let values = values ?? tokens
             return SpeakerFreeze.advanceByPhrase(frozen: [], speakers: Array(speakers.prefix(values.count)), tokens: values,
-                                                 accurateFinalCount: accurate, judgedUntil: judged, options: options).count
+                                                 accurateFinalCount: accurate, judgedUntil: judged).count
         }
         // 後続の有意文字がまだ無い
-        #expect(freeze(2, 100, .current, Array(tokens.prefix(2))) == 0)
+        #expect(freeze(2, 100, Array(tokens.prefix(2))) == 0)
         // 後続はあるが高精度で未確定
         #expect(freeze(2, 100) == 0)
         // 後続が確定しても、その中央+0.5秒(12.3)まで区間が届いていない
         #expect(freeze(3, 12.29) == 0)
         #expect(freeze(3, 12.3) == 2)
-        // tailを外した条件では後続を待たない
-        #expect(freeze(2, 12.1, .preset("current-tail")!) == 2)
-        #expect(freeze(2, 12.1, .window) == 2)
     }
 
     @Test func 窓の先の区間が届く前に凍結すると後で話者が変わる() {
@@ -156,13 +84,10 @@ import Testing
 
     /// 話者判別を10.24秒のchunkで届け、区間を `SpeakerRuns` で畳み、文字の確定を結果ごとに遅らせた録音を再生する。
     /// chunk境界をまたぐ発話・長い語頭・重なった相槌・速報の差し替えを含む。
-    /// フレーズ固定の凍結は、どの補正条件でも後の判定・停止時の判定と食い違ってはならない
-    @Test(arguments: Aligner.Options.presetNames)
-    func chunk到着の境界でもフレーズ固定の後に話者が変わらない(preset: String) throws {
+    /// フレーズ固定の凍結は、後の判定・停止時の判定と食い違ってはならない
+    @Test func chunk到着の境界でもフレーズ固定の後に話者が変わらない() throws {
         let session = SyntheticSession.make()
-        let options = Aligner.Options.preset(preset)!
-        let metrics = SpeakerTrial.simulate(snapshots: session.snapshots, final: session.final, preset: preset,
-                                            options: options, mode: .phrase)
+        let metrics = SpeakerTrial.simulate(snapshots: session.snapshots, final: session.final)
         #expect(metrics.frozenTokens > session.final.tokens.count / 2)
         #expect(metrics.mismatches.isEmpty, "\(metrics.mismatches.prefix(3))")
         #expect(metrics.latentChanges.isEmpty, "\(metrics.latentChanges.prefix(3))")
@@ -304,7 +229,8 @@ private enum SyntheticSession {
         let snapshots = [snapshot(tokens, accurate: 1, segments: covered), snapshot(tokens, accurate: 1),
                          snapshot(tokens, accurate: 1, segments: covered)]
         let final = SpeakerTrial.FinalRecord(tokens: tokens, segments: covered, duration: 1)
-        let metrics = SpeakerTrial.simulate(snapshots: snapshots, final: final, preset: "point", options: .point, mode: .grace30)
+        // 判定済み末尾が0なので凍結は起きない
+        let metrics = SpeakerTrial.simulate(snapshots: snapshots, final: final)
         #expect(metrics.flipsBeforeFreeze == 2)
         #expect(metrics.frozenTokens == 0 && metrics.unfrozenTokens == 1 && metrics.heldConfirmedTokens == 1)
     }
@@ -317,27 +243,36 @@ private enum SyntheticSession {
             value.judgedUntil = 1
             value.recordedFrozen = recorded
             return SpeakerTrial.simulate(snapshots: [value], final: .init(tokens: tokens, segments: covered, duration: 1),
-                                         preset: "current", options: .current, mode: .phrase, checksReproduction: true).reproduced
+                                         checksReproduction: true).reproduced
         }
         #expect(run([0]) == true)
         #expect(run([1]) == false)
         #expect(run([]) == false)
     }
 
-    @Test func 比較のMarkdownに対象範囲と差分の本文を出す() {
+    @Test func 本番の判定の集計と全文を出し照合は採用後の記録だけで行う() {
         let tokens = [TimedToken(text: "そうです", phraseId: 1, start: 0, end: 1.0),
                       TimedToken(text: "。", phraseId: 1, start: 1.0, end: 1.6)]
         let segments = [SpeakerSegment(speaker: 0, start: 0, end: 1.0), SpeakerSegment(speaker: 1, start: 1.0, end: 3)]
-        let comparison = SpeakerTrial.compare(
-            source: "例", final: .init(tokens: tokens, segments: segments, duration: 3), snapshots: [],
-            presets: ["current", "window"], livePresets: [], expectations: [.init(start: 0, end: 2, speaker: 0)],
-            names: [0: "司会"], repeats: 1)
-        #expect(comparison.final.map(\.changedTokens) == [0, 1])
-        #expect(comparison.final.map { $0.expectations.first?.matchedLetters } == [4, 4])
+        let final = SpeakerTrial.FinalRecord(tokens: tokens, segments: segments, duration: 3)
+        let (comparison, speakers) = SpeakerTrial.compare(
+            source: "例", final: final, snapshots: [], expectations: [.init(start: 0, end: 2, speaker: 0)], repeats: 1)
+        #expect(speakers == [0, 0])
+        #expect(comparison.final.expectations.first?.matchedLetters == 4)
+        #expect(comparison.live == nil)
         let markdown = SpeakerTrial.markdown(comparison, names: [0: "司会"], meta: nil)
-        #expect(markdown.contains("繰り返し相槌の省略はこの比較では全条件で無効"))
-        #expect(markdown.contains("current: 司会: そうです。"))
-        #expect(markdown.contains("window: 司会: そうです / B: 。"))
+        #expect(markdown.contains("繰り返し相槌の省略は無効"))
+        #expect(SpeakerTrial.transcript(tokens: tokens, speakers: speakers, names: [0: "司会"]) == "[00:00.00] 司会: そうです。\n")
+        // 旧版の条件で録った記録の凍結列とは照合しない
+        var snapshot = SpeakerTrial.Snapshot(elapsed: 3, uptime: 3, tokens: tokens, finalCount: 2, accurateFinalCount: 2,
+                                             judgedUntil: 3, segments: segments, recordedFrozen: [1, 1])
+        let old = SpeakerTrial.compare(source: "例", final: final, snapshots: [snapshot], expectations: [],
+                                       recorded: .init(pace: "mic", preset: "current", freeze: "grace30"), repeats: 1).0
+        #expect(old.live?.reproduced == nil)
+        snapshot.recordedFrozen = [0, 0]
+        let adopted = SpeakerTrial.compare(source: "例", final: final, snapshots: [snapshot], expectations: [],
+                                           recorded: .init(pace: "mic"), repeats: 1).0
+        #expect(adopted.live?.reproduced == true)
         #expect(SpeakerTrial.Expectation(argument: "45.24-47.94=2") == .init(start: 45.24, end: 47.94, speaker: 2))
         #expect(SpeakerTrial.Expectation(argument: "47-45=2") == nil)
     }

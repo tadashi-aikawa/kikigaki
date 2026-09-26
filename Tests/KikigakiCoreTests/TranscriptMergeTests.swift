@@ -56,16 +56,16 @@ import Testing
         let accurate = [token("確定。", 0, 1)]
         let first = TranscriptMerge.combine(accurate: accurate, accurateFinalCount: 1,
             fast: [token("粗い", 1, 2), token("速報。", 2, 3)], fastFinalCount: 2)
-        let frozen = SpeakerFreeze.advance(frozen: [], speakers: [0, 1, 1], tokens: first.tokens,
-                                          elapsed: 100, finalCount: first.accurateFinalCount)
+        let frozen = SpeakerFreeze.advanceByPhrase(frozen: [], speakers: [0, 1, 1], tokens: first.tokens,
+                                                   accurateFinalCount: first.accurateFinalCount, judgedUntil: 100)
         #expect(frozen == [0])
         let corrected = TranscriptMerge.combine(accurate: accurate + [token("正確な文字。", 1, 3, phrase: 2)],
             accurateFinalCount: 2, fast: [token("粗い", 1, 2), token("速報。", 2, 3)], fastFinalCount: 2)
         let labels = Aligner.speakers(for: corrected.tokens,
             segments: [.init(speaker: 2, start: 1, end: 3)], frozen: frozen)
         #expect(labels == [0, 2])
-        let next = SpeakerFreeze.advance(frozen: frozen, speakers: labels, tokens: corrected.tokens,
-                                        elapsed: 100, finalCount: corrected.accurateFinalCount)
+        let next = SpeakerFreeze.advanceByPhrase(frozen: frozen, speakers: labels, tokens: corrected.tokens,
+                                                 accurateFinalCount: corrected.accurateFinalCount, judgedUntil: 100)
         #expect(next == [0, 2])
     }
 

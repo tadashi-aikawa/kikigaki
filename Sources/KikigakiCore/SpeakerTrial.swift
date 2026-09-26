@@ -1,49 +1,40 @@
 import Foundation
 
-/// 話者補正の除外比較とフレーズ固定の試験。本番の判定は変えない。
-/// 1回の録音(replay)で得た入力を保存し、全条件を同じ入力へ当てて差だけを見る。
+/// 話者の割当と固定の検証用に、録音の入力を保存して本番の判定を当て直す。本番の判定は変えない。
+/// 1回の録音(replay)で得た入力を保存し、別のビルドの結果とも同じ入力で比べられるようにする。
 /// 設計: docs/speaker-correction-trial.md
 public enum SpeakerTrial {
     /// 試験の環境変数。アプリはDEBUGビルドだけで読む
-    /// - `KIKIGAKI_TRIAL_ALIGNER`: `Aligner.Options.presetNames` のどれか
-    /// - `KIKIGAKI_TRIAL_FREEZE`: `grace30` / `phrase`
     /// - `KIKIGAKI_TRIAL_DUMP`: 比較用の入力を書き出す先。会話本文を含む
+    ///
+    /// 補正を外す `KIKIGAKI_TRIAL_ALIGNER` と固定方式の `KIKIGAKI_TRIAL_FREEZE` は廃止した。
+    /// 指定されていたら止める。試したつもりで本番の判定のまま比べないため
     public struct Settings: Equatable, Sendable {
-        public var preset: String
-        public var options: Aligner.Options
-        public var freeze: SpeakerFreeze.Mode
         public var dumpDirectory: String?
-        public var isActive: Bool
 
         public struct Invalid: Error, CustomStringConvertible {
             public let description: String
         }
 
         public init(environment: [String: String]) throws {
-            let preset = environment["KIKIGAKI_TRIAL_ALIGNER"] ?? "current"
-            guard let options = Aligner.Options.preset(preset) else {
-                throw Invalid(description: "KIKIGAKI_TRIAL_ALIGNER=\(preset) は不明。候補: \(Aligner.Options.presetNames.joined(separator: ", "))")
+            if let retired = ["KIKIGAKI_TRIAL_ALIGNER", "KIKIGAKI_TRIAL_FREEZE"].first(where: { environment[$0] != nil }) {
+                throw Invalid(description: "\(retired) は廃止した。条件の比較はコミット 11d8733 のビルドで行う")
             }
-            let freezeName = environment["KIKIGAKI_TRIAL_FREEZE"] ?? SpeakerFreeze.Mode.grace30.rawValue
-            guard let freeze = SpeakerFreeze.Mode(rawValue: freezeName) else {
-                throw Invalid(description: "KIKIGAKI_TRIAL_FREEZE=\(freezeName) は不明。候補: grace30, phrase")
-            }
-            let dump = environment["KIKIGAKI_TRIAL_DUMP"].flatMap { $0.isEmpty ? nil : ($0 as NSString).expandingTildeInPath }
-            self.preset = preset
-            self.options = options
-            self.freeze = freeze
-            dumpDirectory = dump
-            isActive = ["KIKIGAKI_TRIAL_ALIGNER", "KIKIGAKI_TRIAL_FREEZE", "KIKIGAKI_TRIAL_DUMP"].contains { environment[$0] != nil }
+            dumpDirectory = environment["KIKIGAKI_TRIAL_DUMP"].flatMap { $0.isEmpty ? nil : ($0 as NSString).expandingTildeInPath }
         }
     }
 
-    /// 記録の由来。等倍と加速で待ちの意味が違うため、比較の表へ出す
+    /// 記録の由来。等倍と加速で待ちの意味が違うため、比較の表へ出す。
+    /// `preset` と `freeze` は旧版の比較CLIでも読めるよう残す。今の記録は `adopted` と `phrase`
     public struct Meta: Codable, Equatable, Sendable {
+        public static let adoptedPreset = "adopted"
+        public static let phraseFreeze = "phrase"
+
         public var pace: String
         public var preset: String
         public var freeze: String
 
-        public init(pace: String, preset: String, freeze: String) {
+        public init(pace: String, preset: String = adoptedPreset, freeze: String = phraseFreeze) {
             self.pace = pace
             self.preset = preset
             self.freeze = freeze
@@ -208,12 +199,8 @@ public enum SpeakerTrial {
     }
 
     public struct FinalMetrics: Codable, Equatable, Sendable {
-        public var preset: String
         public var tokens: Int
         public var letters: Int
-        /// 基準(`current`)と話者が違うトークン数と文字数
-        public var changedTokens: Int
-        public var changedLetters: Int
         public var utterances: Int
         /// 有意文字を持つ隣り合うトークンの話者が変わる回数。不明も1つの値として数える
         public var switches: Int
@@ -229,16 +216,14 @@ public enum SpeakerTrial {
 
     static func letters(_ token: TimedToken) -> Int { token.text.filter { $0.isLetter || $0.isNumber }.count }
 
-    public static func finalMetrics(preset: String, tokens: [TimedToken], speakers: [Int?], base: [Int?],
-                                    milliseconds: Double, expectations: [Expectation]) -> FinalMetrics {
-        let changed = tokens.indices.filter { speakers[$0] != base[$0] }
+    public static func finalMetrics(tokens: [TimedToken], speakers: [Int?], milliseconds: Double,
+                                    expectations: [Expectation]) -> FinalMetrics {
         let lettered = tokens.indices.filter { letters(tokens[$0]) > 0 }
         let switches = zip(lettered, lettered.dropFirst()).filter { speakers[$0.0] != speakers[$0.1] }.count
         let ranges = Aligner.utteranceTokenRanges(tokens: tokens, speakers: speakers)
         let rowLetters = ranges.map { $0.reduce(0) { $0 + letters(tokens[$1]) } }
         return FinalMetrics(
-            preset: preset, tokens: tokens.count, letters: tokens.reduce(0) { $0 + letters($1) },
-            changedTokens: changed.count, changedLetters: changed.reduce(0) { $0 + letters(tokens[$1]) },
+            tokens: tokens.count, letters: tokens.reduce(0) { $0 + letters($1) },
             utterances: ranges.count, switches: switches,
             fragments: rowLetters.filter { (1...2).contains($0) }.count,
             punctuationOnly: rowLetters.filter { $0 == 0 }.count,
@@ -282,8 +267,6 @@ public enum SpeakerTrial {
     }
 
     public struct LiveMetrics: Codable, Equatable, Sendable {
-        public var preset: String
-        public var mode: String
         public var snapshots: Int
         public var finalTokens: Int
         public var frozenTokens: Int
@@ -307,8 +290,8 @@ public enum SpeakerTrial {
         public var reproduced: Bool?
     }
 
-    public static func simulate(snapshots: [Snapshot], final: FinalRecord, preset: String, options: Aligner.Options,
-                                mode: SpeakerFreeze.Mode, checksLatent: Bool = true,
+    /// 録音中の突き合わせループを本番の判定とフレーズ固定で再生する
+    public static func simulate(snapshots: [Snapshot], final: FinalRecord, checksLatent: Bool = true,
                                 checksReproduction: Bool = false) -> LiveMetrics {
         var reproduced = true
         var frozen: [Int?] = []
@@ -320,16 +303,10 @@ public enum SpeakerTrial {
         var lastConfirmed = 0
         for snapshot in snapshots {
             let tokens = snapshot.tokens
-            let speakers = Aligner.speakers(for: tokens, segments: snapshot.segments, frozen: frozen, options: options)
-            let next: [Int?] = switch mode {
-            case .grace30:
-                SpeakerFreeze.advance(frozen: frozen, speakers: speakers, tokens: tokens, elapsed: snapshot.elapsed,
-                                      finalCount: snapshot.accurateFinalCount, judgedUntil: snapshot.judgedUntil)
-            case .phrase:
-                SpeakerFreeze.advanceByPhrase(frozen: frozen, speakers: speakers, tokens: tokens,
-                                              accurateFinalCount: snapshot.accurateFinalCount,
-                                              judgedUntil: snapshot.judgedUntil, options: options)
-            }
+            let speakers = Aligner.speakers(for: tokens, segments: snapshot.segments, frozen: frozen)
+            let next = SpeakerFreeze.advanceByPhrase(frozen: frozen, speakers: speakers, tokens: tokens,
+                                                     accurateFinalCount: snapshot.accurateFinalCount,
+                                                     judgedUntil: snapshot.judgedUntil)
             let confirmed = min(max(snapshot.accurateFinalCount, 0), tokens.count)
             while confirmAt.count < confirmed { confirmAt.append(snapshot.elapsed) }
             lastConfirmed = confirmed
@@ -344,17 +321,17 @@ public enum SpeakerTrial {
             }
             frozen = next
             if checksLatent, !frozen.isEmpty {
-                let unfrozen = Aligner.speakers(for: tokens, segments: snapshot.segments, options: options)
+                let unfrozen = Aligner.speakers(for: tokens, segments: snapshot.segments)
                 for index in frozen.indices where unfrozen[index] != frozen[index] && latent[index] == nil {
                     latent[index] = change(index, tokens: tokens, frozen: frozen[index], other: unfrozen[index])
                 }
             }
         }
-        let finalSpeakers = Aligner.speakers(for: final.tokens, segments: final.segments, options: options)
+        let finalSpeakers = Aligner.speakers(for: final.tokens, segments: final.segments)
         let frozenCount = min(frozen.count, final.tokens.count)
         let unfrozen = final.tokens.dropFirst(frozenCount)
         return LiveMetrics(
-            preset: preset, mode: mode.rawValue, snapshots: snapshots.count, finalTokens: final.tokens.count,
+            snapshots: snapshots.count, finalTokens: final.tokens.count,
             frozenTokens: frozenCount, frozenLetters: final.tokens.prefix(frozenCount).reduce(0) { $0 + letters($1) },
             unfrozenTokens: unfrozen.count, unfrozenLetters: unfrozen.reduce(0) { $0 + letters($1) },
             heldConfirmedTokens: max(0, min(lastConfirmed, final.tokens.count) - frozenCount),
@@ -372,39 +349,11 @@ public enum SpeakerTrial {
                     frozen: frozen, other: other)
     }
 
-    // MARK: - 比較と報告
-
-    public struct Hunk: Codable, Equatable, Sendable {
-        public var start: Double
-        public var end: Double
-        public var base: String
-        public var variant: String
-    }
-
-    /// 話者の違うトークンを含むフレーズを、基準と比較先の両方の話者付き本文で並べる
-    public static func hunks(tokens: [TimedToken], base: [Int?], variant: [Int?], names: [Int: String]) -> [Hunk] {
-        var result: [Hunk] = []
-        for phrase in Aligner.phraseRanges(tokens) where phrase.contains(where: { base[$0] != variant[$0] }) {
-            result.append(Hunk(start: tokens[phrase.lowerBound].start, end: tokens[phrase.upperBound - 1].end,
-                               base: render(tokens: tokens, speakers: base, range: phrase, names: names),
-                               variant: render(tokens: tokens, speakers: variant, range: phrase, names: names)))
-        }
-        return result
-    }
+    // MARK: - 報告
 
     static func name(_ speaker: Int?, names: [Int: String]) -> String {
         guard let speaker else { return "?" }
         return names[speaker] ?? SpeakerNames.letter(for: speaker)
-    }
-
-    static func render(tokens: [TimedToken], speakers: [Int?], range: Range<Int>, names: [Int: String]) -> String {
-        var parts: [String] = []
-        var start = range.lowerBound
-        for index in range where index + 1 == range.upperBound || speakers[index + 1] != speakers[start] {
-            parts.append(name(speakers[start], names: names) + ": " + tokens[start...index].map(\.text).joined())
-            start = index + 1
-        }
-        return parts.joined(separator: " / ")
     }
 
     public static func clock(_ seconds: Double) -> String {
@@ -412,7 +361,7 @@ public enum SpeakerTrial {
         return String(format: "%02d:%05.2f", Int(value) / 60, value.truncatingRemainder(dividingBy: 60))
     }
 
-    /// 行ごとに時刻と話者を付けた全文。補正なしの結果を読み比べる用
+    /// 行ごとに時刻と話者を付けた全文。旧版の `transcripts/<条件>.md` と同じ形式で、`diff` で読み比べる
     public static func transcript(tokens: [TimedToken], speakers: [Int?], names: [Int: String]) -> String {
         Aligner.utteranceTokenRanges(tokens: tokens, speakers: speakers).map { range in
             "[\(clock(tokens[range.lowerBound].start))] \(name(speakers[range.lowerBound], names: names)): "
@@ -423,58 +372,38 @@ public enum SpeakerTrial {
     public struct Comparison: Codable, Equatable, Sendable {
         public var source: String
         public var duration: Double
-        public var final: [FinalMetrics]
-        public var live: [LiveMetrics]
-        public var hunks: [String: [Hunk]]
+        public var final: FinalMetrics
+        public var live: LiveMetrics?
         /// 最初と最後の描画の間の壁時計秒と音声秒。等倍なら比がほぼ1で、消費が遅れていないことを示す
         public var liveWallSeconds: Double?
         public var liveAudioSeconds: Double?
     }
 
-    public static func compare(source: String, final: FinalRecord, snapshots: [Snapshot], presets: [String],
-                               livePresets: [String], expectations: [Expectation], names: [Int: String],
-                               recorded: Meta? = nil, repeats: Int = 5) -> Comparison {
-        func judge(_ options: Aligner.Options) -> ([Int?], Double) {
-            var times: [Double] = []
-            var speakers: [Int?] = []
-            for _ in 0..<max(repeats, 1) {
-                let begin = DispatchTime.now().uptimeNanoseconds
-                speakers = Aligner.speakers(for: final.tokens, segments: final.segments, options: options)
-                times.append(Double(DispatchTime.now().uptimeNanoseconds - begin) / 1_000_000)
-            }
-            return (speakers, Stats(times)!.median)
+    /// 本番の判定を停止時の入力へ当て、録音中の記録があればフレーズ固定で再生する。
+    /// 再生の照合は、記録時も採用後の判定だった場合だけ行う。旧版の条件で録った記録とは凍結列が一致しない
+    public static func compare(source: String, final: FinalRecord, snapshots: [Snapshot], expectations: [Expectation],
+                               recorded: Meta? = nil, repeats: Int = 5) -> (Comparison, speakers: [Int?]) {
+        var times: [Double] = []
+        var speakers: [Int?] = []
+        for _ in 0..<max(repeats, 1) {
+            let begin = DispatchTime.now().uptimeNanoseconds
+            speakers = Aligner.speakers(for: final.tokens, segments: final.segments)
+            times.append(Double(DispatchTime.now().uptimeNanoseconds - begin) / 1_000_000)
         }
-        let (base, baseTime) = judge(.current)
-        var finals: [FinalMetrics] = []
-        var hunks: [String: [Hunk]] = [:]
-        for preset in presets {
-            guard let options = Aligner.Options.preset(preset) else { continue }
-            let (speakers, time) = preset == "current" ? (base, baseTime) : judge(options)
-            finals.append(finalMetrics(preset: preset, tokens: final.tokens, speakers: speakers, base: base,
-                                       milliseconds: time, expectations: expectations))
-            if preset != "current" {
-                hunks[preset] = Self.hunks(tokens: final.tokens, base: base, variant: speakers, names: names)
-            }
-        }
-        var live: [LiveMetrics] = []
-        if !snapshots.isEmpty {
-            for preset in livePresets {
-                guard let options = Aligner.Options.preset(preset) else { continue }
-                for mode in SpeakerFreeze.Mode.allCases {
-                    live.append(simulate(snapshots: snapshots, final: final, preset: preset, options: options, mode: mode,
-                                         checksReproduction: recorded?.preset == preset && recorded?.freeze == mode.rawValue))
-                }
-            }
-        }
+        let metrics = finalMetrics(tokens: final.tokens, speakers: speakers, milliseconds: Stats(times)!.median,
+                                   expectations: expectations)
+        let live = snapshots.isEmpty ? nil : simulate(
+            snapshots: snapshots, final: final,
+            checksReproduction: recorded?.preset == Meta.adoptedPreset && recorded?.freeze == Meta.phraseFreeze)
         let first = snapshots.first, last = snapshots.last
-        return Comparison(source: source, duration: final.duration, final: finals, live: live, hunks: hunks,
+        return (Comparison(source: source, duration: final.duration, final: metrics, live: live,
                           liveWallSeconds: first.flatMap { f in last.map { $0.uptime - f.uptime } },
-                          liveAudioSeconds: first.flatMap { f in last.map { $0.elapsed - f.elapsed } })
+                          liveAudioSeconds: first.flatMap { f in last.map { $0.elapsed - f.elapsed } }), speakers)
     }
 
     public static func markdown(_ comparison: Comparison, names: [Int: String], meta: Meta?) -> String {
         var lines: [String] = []
-        lines.append("# 話者補正の比較: \(comparison.source)")
+        lines.append("# 話者の割当と固定: \(comparison.source)")
         lines.append("")
         lines.append("- 音声: \(String(format: "%.1f", comparison.duration))秒")
         if let meta {
@@ -485,85 +414,65 @@ public enum SpeakerTrial {
             }
             lines.append("- 録音中の記録: \(pace)。記録時の設定は `\(meta.preset)` / `\(meta.freeze)`")
         }
-        lines.append("- 全条件は同じトークン・時刻・話者区間へ当てた。差は処理の差だけ")
-        lines.append("- 対象はトークンへの話者の割当と補正だけ。ASR自体と話者判別モデルの出力は全条件で同じ")
-        lines.append("    - 「補正なし」(`window` / `point`) でも、行の区切り(同じ話者で1秒以上の無音)は同じ規則を使う")
-        lines.append("    - 繰り返し相槌の省略はこの比較では全条件で無効。保存の `.md` と違う場合がある")
-        lines.append("    - 手動の話者統合・小音量の除外・速報と高精度の合流は対象外で、比較に含めない")
-        lines.append("- 基準 `current` との差は正誤ではない。正解があるのは「正解区間」の列だけ")
+        lines.append("- 本番の話者の割当とフレーズ固定を、記録したトークン・時刻・話者区間へ当てた")
+        lines.append("    - 繰り返し相槌の省略は無効。保存の `.md` と違う場合がある")
+        lines.append("    - 手動の話者統合・小音量の除外・速報と高精度の合流は対象外")
+        lines.append("- 別のビルドとの差は `transcript.md` の `diff` で見る。差は正誤ではない。正解があるのは「正解区間」だけ")
         if !names.isEmpty {
             lines.append("- 名前: " + names.keys.sorted().map { "\($0)=\(names[$0]!)" }.joined(separator: ", "))
         }
         lines.append("")
         lines.append("## 最終判定")
         lines.append("")
-        let hasExpectation = comparison.final.contains { !$0.expectations.isEmpty }
-        lines.append("| 条件 | 変更トークン | 変更文字 | 行 | 話者切替 | 断片行 | 句読点だけの行 | 不明文字 | 処理ms |"
-                     + (hasExpectation ? " 正解区間 |" : ""))
-        lines.append("|---|---|---|---|---|---|---|---|---|" + (hasExpectation ? "---|" : ""))
-        for metric in comparison.final {
-            let expected = metric.expectations.map { "\($0.matchedLetters)/\($0.totalLetters)" }.joined(separator: " ")
-            lines.append("| `\(metric.preset)` | \(metric.changedTokens) | \(metric.changedLetters) | \(metric.utterances) "
-                         + "| \(metric.switches) | \(metric.fragments) | \(metric.punctuationOnly) | \(metric.unknownLetters) "
-                         + "| \(String(format: "%.1f", metric.milliseconds)) |" + (hasExpectation ? " \(expected) |" : ""))
-        }
+        let metric = comparison.final
+        let hasExpectation = !metric.expectations.isEmpty
+        lines.append("| 行 | 話者切替 | 断片行 | 句読点だけの行 | 不明文字 | 処理ms |" + (hasExpectation ? " 正解区間 |" : ""))
+        lines.append("|---|---|---|---|---|---|" + (hasExpectation ? "---|" : ""))
+        let expected = metric.expectations.map { "\($0.matchedLetters)/\($0.totalLetters)" }.joined(separator: " ")
+        lines.append("| \(metric.utterances) | \(metric.switches) | \(metric.fragments) | \(metric.punctuationOnly) "
+                     + "| \(metric.unknownLetters) | \(String(format: "%.1f", metric.milliseconds)) |"
+                     + (hasExpectation ? " \(expected) |" : ""))
         lines.append("")
         lines.append("- 断片行: 有意文字1〜2字の行。相槌も含むので、多いこと自体を悪いとは断定しない")
         if hasExpectation {
-            let expectation = comparison.final.first!.expectations.map {
+            let expectation = metric.expectations.map {
                 "\(clock($0.expectation.start))〜\(clock($0.expectation.end)) を \(name($0.expectation.speaker, names: names))"
             }.joined(separator: "、")
             lines.append("- 正解区間: \(expectation)。区間内に中央がある文字のうち正解の話者に付いた数")
         }
-        if !comparison.live.isEmpty {
+        if let live = comparison.live {
             lines.append("")
             lines.append("## 録音中の固定")
             lines.append("")
-            lines.append("| 条件 | 方式 | 凍結 | 未凍結で停止 | うち確定済みで保留 | 固定待ち 中央/p90/最大 | 確定待ち 中央/p90/最大 | 停止時と不一致 | 後で判定が変わった | 固定前の揺れ |")
-            lines.append("|---|---|---|---|---|---|---|---|---|---|")
+            lines.append("| 凍結 | 未凍結で停止 | うち確定済みで保留 | 固定待ち 中央/p90/最大 | 確定待ち 中央/p90/最大 | 停止時と不一致 | 後で判定が変わった | 固定前の揺れ |")
+            lines.append("|---|---|---|---|---|---|---|---|")
             func stats(_ value: Stats?) -> String {
                 value.map { String(format: "%.1f / %.1f / %.1f", $0.median, $0.p90, $0.max) } ?? "—"
             }
-            for metric in comparison.live {
-                let ratio = metric.finalTokens == 0 ? 0 : Double(metric.unfrozenTokens) / Double(metric.finalTokens) * 100
-                lines.append("| `\(metric.preset)` | \(metric.mode) | \(metric.frozenTokens) "
-                             + "| \(metric.unfrozenTokens) (\(String(format: "%.1f", ratio))%) | \(metric.heldConfirmedTokens) "
-                             + "| \(stats(metric.freezeWait)) | \(stats(metric.confirmWait)) | \(metric.mismatches.count) "
-                             + "| \(metric.latentChanges.count) | \(metric.flipsBeforeFreeze) |")
-            }
+            let ratio = live.finalTokens == 0 ? 0 : Double(live.unfrozenTokens) / Double(live.finalTokens) * 100
+            lines.append("| \(live.frozenTokens) | \(live.unfrozenTokens) (\(String(format: "%.1f", ratio))%) | \(live.heldConfirmedTokens) "
+                         + "| \(stats(live.freezeWait)) | \(stats(live.confirmWait)) | \(live.mismatches.count) "
+                         + "| \(live.latentChanges.count) | \(live.flipsBeforeFreeze) |")
             lines.append("")
-            lines.append("- 単位はトークン数と音声秒。snapshot数: \(comparison.live.first!.snapshots)")
-            lines.append("- 確定待ち: トークン終端から高精度側の確定まで。どの方式も凍結はこれより早くならない")
+            lines.append("- 単位はトークン数と音声秒。snapshot数: \(live.snapshots)")
+            lines.append("- 確定待ち: トークン終端から高精度側の確定まで。凍結はこれより早くならない")
             lines.append("- 待ちは音声秒。文字起こしの確定待ちを含み、話者判別モデルの推論速度そのものではない")
             if let wall = comparison.liveWallSeconds, let audio = comparison.liveAudioSeconds, audio > 0 {
                 lines.append(String(format: "- 最初と最後の描画の間: 壁時計 %.1f秒 / 音声 %.1f秒 (比 %.2f)", wall, audio, wall / audio))
             }
             lines.append("- 停止時と不一致: 凍結した話者と停止時の全体判定の差。後で判定が変わった: 凍結後の snapshot で凍結なしに判定し直した値との差")
-            for metric in comparison.live {
-                guard let reproduced = metric.reproduced else { continue }
-                lines.append("- 記録時の条件 `\(metric.preset)` / \(metric.mode) の再生は、アプリの実際の凍結列と"
-                             + (reproduced ? "全描画で一致した" : "**一致しなかった**"))
+            if let reproduced = live.reproduced {
+                lines.append("- 再生は、アプリの実際の凍結列と" + (reproduced ? "全描画で一致した" : "**一致しなかった**"))
+            } else {
+                lines.append("- 記録時の条件が採用後の判定ではないため、アプリの凍結列との照合はしていない")
             }
-            let problems = comparison.live.filter { !$0.mismatches.isEmpty || !$0.latentChanges.isEmpty }
-            for metric in problems {
+            if !live.mismatches.isEmpty || !live.latentChanges.isEmpty {
                 lines.append("")
-                lines.append("### `\(metric.preset)` \(metric.mode) の不一致")
+                lines.append("### 不一致")
                 lines.append("")
-                for change in (metric.mismatches + metric.latentChanges).prefix(40) {
+                for change in (live.mismatches + live.latentChanges).prefix(40) {
                     lines.append("- \(clock(change.start))〜\(clock(change.end)) 「\(change.text)」 凍結 \(name(change.frozen, names: names)) → \(name(change.other, names: names))")
                 }
-            }
-        }
-        for metric in comparison.final where metric.preset != "current" {
-            let hunks = comparison.hunks[metric.preset] ?? []
-            lines.append("")
-            lines.append("## `current` → `\(metric.preset)` の差分 (\(hunks.count)フレーズ)")
-            if hunks.isEmpty { continue }
-            lines.append("")
-            for hunk in hunks {
-                lines.append("- \(clock(hunk.start))〜\(clock(hunk.end))")
-                lines.append("    - current: \(hunk.base)")
-                lines.append("    - \(metric.preset): \(hunk.variant)")
             }
         }
         return lines.joined(separator: "\n") + "\n"

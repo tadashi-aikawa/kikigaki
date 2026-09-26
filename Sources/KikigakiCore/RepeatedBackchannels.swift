@@ -4,6 +4,10 @@ import Foundation
 /// 話者の塊を丸ごと消すと「うんうん先週」の「先」まで巻き込むため、文字列から先に探す。
 /// 推定話者の誤りは残るので、呼び出し側は有効化を明示させ、必ず原文も保存する。
 public enum RepeatedBackchannels {
+    /// 候補にする反復の最大の長さ(秒)。これ以上続く反復は相槌とみなさない。
+    /// 旧来のフレーズ多数派への吸収と同じ長さで、吸収を廃止しても候補の範囲は変えていない
+    static let maxSeconds = 1.5
+
     public static func candidates(tokens: [TimedToken], rawSpeakers: [Int?], speakers: [Int?]) -> [Range<Int>] {
         guard tokens.count == rawSpeakers.count, tokens.count == speakers.count else { return [] }
         var result: [Range<Int>] = []
@@ -28,7 +32,7 @@ public enum RepeatedBackchannels {
                           speakers[j] == main, (i..<j).allSatisfy({ speakers[$0] == main }),
                           tokens[j].start - tokens[j - 1].end < Aligner.phraseGapSeconds,
                           tokens[j].text.contains(where: { !$0.isWhitespace && !$0.isPunctuation }),
-                          tokens[j - 1].end - tokens[i].start < Aligner.keepIslandSeconds else { continue }
+                          tokens[j - 1].end - tokens[i].start < maxSeconds else { continue }
                     var weights: [Int: Double] = [:]
                     var total = 0.0
                     var valid = true

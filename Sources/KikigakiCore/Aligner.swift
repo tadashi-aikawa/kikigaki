@@ -7,89 +7,15 @@ public enum Aligner {
     public static let utteranceGapSeconds = 1.0
     /// フレーズを切る無音の長さ(秒)
     public static let phraseGapSeconds = 0.35
-    /// フレーズ内で別話者がこの長さ以上続く塊は、多数決から独立させる(秒)。
-    /// より短くても相槌プリセットや、主話者に挟まれていない完全語・文末の塊は独立させる。
-    /// Apple のトークンは単語級で1個でも 0.5 秒を超えるため、本当の発話交代とみなせる 1.5 秒に
-    /// しないと語の分断が残る(実測)
-    public static let keepIslandSeconds = 1.5
-
-    /// 区間からトークンへの割当と、その後の補正の切替。既定の `.current` が本番の判定。
-    /// 補正を外した比較の試験だけが他の値を使う。設計: docs/speaker-correction-trial.md
-    public struct Options: Equatable, Sendable {
-        public enum Assignment: String, Sendable { case window, point }
-        public var assignment: Assignment
-        /// 長い1文字の語頭を後続話者へ付け替える
-        public var tail: Bool
-        /// 長い1文字の多数決の重みを検出された声の時間へ絞る
-        public var evidence: Bool
-        /// 語内で割れた話者を文字数の過半数へ揃える
-        public var word: Bool
-        /// フレーズ多数派と違う短い島と、語を切る不明の島を多数派へ吸収する
-        public var absorb: Bool
-        /// 吸収の例外(完結語・文末・相槌・応答末尾・修復した語頭の核)
-        public var protect: Bool
-        /// 句読点だけのトークンを直前の話者へ付ける
-        public var punct: Bool
-
-        public init(assignment: Assignment = .window, tail: Bool = true, evidence: Bool = true, word: Bool = true,
-                    absorb: Bool = true, protect: Bool = true, punct: Bool = true) {
-            self.assignment = assignment
-            self.tail = tail
-            self.evidence = evidence
-            self.word = word
-            self.absorb = absorb
-            self.protect = protect
-            self.punct = punct
-        }
-
-        public static let current = Options()
-        public static let window = Options(tail: false, evidence: false, word: false, absorb: false, protect: false, punct: false)
-        public static let point = Options(assignment: .point, tail: false, evidence: false, word: false,
-                                          absorb: false, protect: false, punct: false)
-
-        /// 比較する順。両端のあとに1つずつ外した条件を並べる
-        public static let presetNames = ["current", "window", "point", "current-tail", "current-evidence",
-                                         "current-word", "current-absorb", "current-protect", "current-punct"]
-
-        public static func preset(_ name: String) -> Options? {
-            switch name {
-            case "current": return .current
-            case "window": return .window
-            case "point": return .point
-            default:
-                guard name.hasPrefix("current-") else { return nil }
-                var options = Options.current
-                switch name.dropFirst("current-".count) {
-                case "tail": options.tail = false
-                case "evidence": options.evidence = false
-                case "word": options.word = false
-                case "absorb": options.absorb = false
-                case "protect": options.protect = false
-                case "punct": options.punct = false
-                default: return nil
-                }
-                return options
-            }
-        }
-
-        /// 判定に読む区間の範囲。トークン時刻からこの秒数先まで判定済みなら割当は後から変わらない
-        var lookahead: Double { assignment == .window ? 0.5 : 0 }
-
-        func speaker(at t: Double, segments: [SpeakerSegment]) -> Int? {
-            assignment == .window ? Aligner.speaker(at: t, segments: segments) : Aligner.pointSpeaker(at: t, segments: segments)
-        }
-    }
-
-    /// 点判定。t を含む区間 (start <= t < end) の話者で、複数あれば番号の小さい話者。無ければ nil。
-    /// 補正なしの比較の基準として単純さを優先する。同時発話では正しい話者を保証しない
-    public static func pointSpeaker(at t: Double, segments: [SpeakerSegment]) -> Int? {
-        segments.filter { $0.start <= t && t < $0.end }.map(\.speaker).min()
-    }
+    /// `speaker(at:)` の窓の半幅(秒)。この先まで区間が判定済みなら、窓判定は後から変わらない
+    public static let windowHalfSeconds = 0.5
+    /// 長い語頭の付け替えで、後続話者の区間が語頭の末尾を覆うべき長さ(秒)
+    static let headTailSeconds = 0.12
 
     /// 時刻 t の話者を決める。t の前後 `halfWindow` 秒の窓と各話者区間の重なり長を話者ごとに合計し、
     /// 最大の話者を採る(窓なしの点判定だと 0.3 秒程度の細切れ区間に引きずられて話者が飛び飛びになる)。
     /// 重なりが無ければ nil
-    public static func speaker(at t: Double, segments: [SpeakerSegment], halfWindow: Double = 0.5, tiesAreUnknown: Bool = false) -> Int? {
+    public static func speaker(at t: Double, segments: [SpeakerSegment], halfWindow: Double = windowHalfSeconds, tiesAreUnknown: Bool = false) -> Int? {
         var overlap: [Int: Double] = [:]
         let lo = t - halfWindow, hi = t + halfWindow
         for s in segments {
@@ -114,51 +40,28 @@ public enum Aligner {
     /// 各トークンの話者を決める。`frozen` に入っている先頭部分はそのまま使い(確定済みの行を後から
     /// 塗り替えないため)、残りだけ区間から判定する。
     ///
-    /// トークンごとに区間から引き、語内の境界を補正してからフレーズ単位で揃える。
-    /// フレーズの多数派は語内補正前に固定する。
-    /// トークン単位のままだと、相槌の重なりや話者区間の数百msのずれが語の途中に切れ目を作る
-    /// (「い / や本当に」のような分断。タダシの実録で確認)。フレーズの中で別話者が `keepIslandSeconds`
-    /// 以上続く塊と短い相槌は独立させる。主話者に挟まれた一般語は多数派へ戻す
-    public static func speakers(
-        for tokens: [TimedToken], segments: [SpeakerSegment], frozen: [Int?] = [],
-        gapSeconds: Double = phraseGapSeconds, keepIslandSeconds: Double = keepIslandSeconds,
-        options: Options = .current
-    ) -> [Int?] {
+    /// トークンごとに窓判定で区間から引き、長い1文字の語頭と語内の境界だけを補正する。
+    /// フレーズの多数派へ短い別話者の塊を吸収する補正は置かない。短い返答は、語内補正など
+    /// 残した補正を当てた後の話者のまま保持する。吸収を外した比較と採用の経緯: docs/speaker-correction-trial.md
+    public static func speakers(for tokens: [TimedToken], segments: [SpeakerSegment], frozen: [Int?] = []) -> [Int?] {
         var speakers = Array(frozen.prefix(tokens.count))
-        let observed = SpeechTail.speakers(tokens: tokens, segments: segments, skippingPrefix: speakers.count, options: options)
+        let observed = SpeechTail.speakers(tokens: tokens, segments: segments, skippingPrefix: speakers.count)
         speakers.append(contentsOf: observed.dropFirst(speakers.count))
-        return smoothSpeakers(tokens: tokens, speakers: speakers, frozenCount: frozen.count,
-                              gapSeconds: gapSeconds, keepIslandSeconds: keepIslandSeconds,
-                              evidenceWeights: options.evidence
-                                  ? SpeechTail.evidenceWeights(tokens: tokens, speakers: speakers, segments: segments) : nil,
-                              segments: segments, options: options)
+        return smoothSpeakers(tokens: tokens, speakers: speakers, frozenCount: frozen.count, segments: segments)
     }
 
     /// 窓判定の観測値を回帰テストへ渡せるよう、音声区間との突き合わせと分ける。
+    /// `segments` は長い語頭の付け替えだけが読む
     static func smoothSpeakers(tokens: [TimedToken], speakers initial: [Int?], frozenCount: Int = 0,
-                               gapSeconds: Double = phraseGapSeconds, keepIslandSeconds: Double = keepIslandSeconds,
-                               evidenceWeights: [Double]? = nil, segments: [SpeakerSegment] = [],
-                               options: Options = .current) -> [Int?] {
+                               segments: [SpeakerSegment] = []) -> [Int?] {
         var speakers = initial
-        let orderedSegments = segments.filter { $0.start.isFinite && $0.end.isFinite && $0.end > $0.start }
-            .sorted { $0.start < $1.start }
-        // 語内補正も島の吸収も外した比較では、フレーズの解析自体が要らない
-        for phrase in options.word || options.absorb ? phraseRanges(tokens, gapSeconds: gapSeconds) : [] {
-            // 全体が凍結済みのフレーズは、どの経路も書き込まない。語内補正は `word.lowerBound >= frozenCount`
-            // で入らず `correctedWords` は空のまま、島の吸収も `k >= frozenCount` で守られる。
+        for phrase in phraseRanges(tokens) {
+            // 全体が凍結済みのフレーズは語内補正が書き込まない(`word.lowerBound >= frozenCount`)。
             // 語境界の解析(NLTokenizer)だけが毎回走るので飛ばす。長い会議の録音中に効く
             if phrase.upperBound <= frozenCount { continue }
-            let words = WordBoundaries(tokens: Array(tokens[phrase]))
-            let lexicalRanges = words.tokenRanges.map { ($0.lowerBound + phrase.lowerBound)..<($0.upperBound + phrase.lowerBound) }
-            // 語内補正前の時間重みで多数決。長い1文字は検出された声の時間に絞る。
-            var weight: [Int: Double] = [:]
-            for i in phrase {
-                if let s = speakers[i] { weight[s, default: 0] += max(evidenceWeights?[i] ?? tokens[i].duration, 0.04) }
-            }
-            guard let major = argmax(weight) else { continue }
-            // 多数派は補正前の時間重みで固定する。長い語頭を動かしてもフレーズ全体を反転させない。
-            var correctedWords: [Range<Int>] = []
-            for word in lexicalRanges where options.word {
+            let words = WordBoundaries(tokens: Array(tokens[phrase])).tokenRanges
+                .map { ($0.lowerBound + phrase.lowerBound)..<($0.upperBound + phrase.lowerBound) }
+            for word in words {
                 guard word.lowerBound >= frozenCount,
                       word.allSatisfy({ initial[$0] != nil && tokens[$0].duration.isFinite && tokens[$0].duration > 0 }) else { continue }
                 var counts: [Int: Int] = [:]
@@ -166,115 +69,51 @@ public enum Aligner {
                     counts[initial[k]!, default: 0] += tokens[k].text.filter { $0.isLetter || $0.isNumber }.count
                 }
                 let total = counts.values.reduce(0, +)
-                guard let winner = counts.first(where: { $0.value * 2 > total })?.key,
-                      word.contains(where: { initial[$0] != winner }) else { continue }
                 // ASRの語頭は前の発話や無音を含んで長くなる。ここだけは時間ではなく文字数を使う。
-                // 同点は語末などへ決め打ちしない。元の境界を残す。
-                for k in word { speakers[k] = winner }
-                correctedWords.append(word)
-            }
-            guard options.absorb else { continue }
-            // 前後の連続性は吸収前のラベルで見る。先の吸収が後ろの島を連鎖的に吸収する根拠に
-            // ならないよう、語内補正後のこのフレーズだけを固定する。
-            let beforeSmoothing = Array(speakers[phrase])
-            // 句読点だけでは発話の連続性を裏付けない。同じラベルの句読点を越えた
-            // 実際の文字まで確認し、フレーズ端や別話者に達したら連続とは扱わない。
-            func hasMajorSpeech(from index: Int, step: Int) -> Bool {
-                var cursor = index
-                while phrase.contains(cursor) {
-                    guard beforeSmoothing[cursor - phrase.lowerBound] == major else { return false }
-                    if !Self.isPunctuationOnly(tokens[cursor]) { return true }
-                    cursor += step
+                if let winner = counts.first(where: { $0.value * 2 > total })?.key {
+                    for k in word { speakers[k] = winner }
+                    continue
                 }
-                return false
-            }
-            // 多数派と違う短い塊を多数派に揃える(凍結済みは触らない)
-            var i = phrase.lowerBound
-            while i < phrase.upperBound {
-                var j = i
-                while j < phrase.upperBound && speakers[j] == speakers[i] { j += 1 }
-                // 凍結境界をまたぐ島は一部だけ吸収しない。「代 / 表」のように語の後半だけ
-                // 多数派へ移すと、凍結済みの前半を戻せず新しい語内分断になる。
-                if i < frozenCount && frozenCount < j { i = j; continue }
-                if speakers[i] != major {
-                    let coreWords = lexicalRanges.filter { $0.lowerBound >= i && $0.upperBound <= j }
-                    // 戻す側の隣も多数派である場合だけ端を戻す。第三話者への交代を多数派で埋めない。
-                    if options.protect, speakers[i] != nil, coreWords.count >= 2, let first = coreWords.first, let last = coreWords.last,
-                       Self.hasShortRepairedEdge(first: first, last: last, correctedWords: correctedWords,
-                                                 initial: initial, tokens: tokens, phrase: phrase,
-                                                 speaker: speakers[i]!, limit: keepIslandSeconds),
-                       (first.lowerBound == i || (i > phrase.lowerBound && speakers[i - 1] == major)),
-                       (last.upperBound == j || (j < phrase.upperBound && speakers[j] == major)) {
-                        // 「ゃあ…そ」→「じゃあ…そ」と語頭を修復できた場合だけ、
-                        // 完全な語の核を残し、末尾の「そ」のような部分語を周囲へ戻す。
-                        for k in i..<first.lowerBound where k >= frozenCount { speakers[k] = major }
-                        for k in last.upperBound..<j where k >= frozenCount { speakers[k] = major }
-                        i = j
-                        continue
-                    }
-                    let span = tokens[j - 1].end - tokens[i].start
-                    let local = (i - phrase.lowerBound)..<(j - phrase.lowerBound)
-                    // 不明(どの話者区間にも当たらない)は話者交代ではない。1.5秒以上でも、語の途中を
-                    // 切る不明の島は多数派へ付ける。発話前の間を含んで長くなった語頭の1文字が
-                    // 「欲 / しいなと」「で、/ 具体的には」と不明の行に割れていた(タダシの実録で確認)。
-                    // 語として完結する長い不明の島は、従来どおり不明のまま残す。
-                    // 長さを 0 とみなすので、`keepIslandSeconds` を 0 にして吸収を止める検証は従来どおり効く
-                    let unknownFragment = speakers[i] == nil && !words.containsWholeWords(local)
-                    if (unknownFragment ? 0 : span) < keepIslandSeconds {
-                        // 「すごいね。」は0.84秒でも別話者の返答だった。短さだけでは吸収しない。
-                        if options.protect, speakers[i] != nil {
-                            // 多数派の声が区間全体を覆う場合、句点だけを根拠に複数語の島を保護せず、
-                            // 1語も相槌・応答の語彙に限って保護する。相槌が重なると音声側の区間が
-                            // 0.2〜0.5秒刻みで交互に出て、窓判定が文中の1語(「代表」)を相手へ倒す
-                            // (タダシの実録で確認。「代表」自体は多数派の区間の中に収まっていた)。
-                            // 多数派が黙って聞いた「はい」は区間が途切れるので、従来どおり残る。
-                            // 境界から始まる質問の保護は変えない。
-                            var coveredUntil = tokens[i].start
-                            for segment in orderedSegments where segment.speaker == major {
-                                if segment.end <= coveredUntil { continue }
-                                if segment.start > coveredUntil + 0.01 { break }
-                                coveredUntil = segment.end
-                            }
-                            let coveredByMajor = coveredUntil >= tokens[j - 1].end
-                            // 音声区間が途切れていても、前後が同じ多数派なら文中の一般語を戻す。
-                            // 「代表」は完全な1語でも独立した返答とは限らない。相槌は本文全体を
-                            // プリセットと照合して残す。「確かに」のような複数語も扱い、部分一致はしない。
-                            let surroundedByMajor = hasMajorSpeech(from: i - 1, step: -1)
-                                && hasMajorSpeech(from: j, step: 1)
-                            let keepsReply = coveredByMajor || surroundedByMajor
-                                ? words.isBackchannel(local) : words.containsWholeWords(local)
-                            if keepsReply || (span >= 0.6 && words.containsMeaningfulReply(local)) { i = j; continue }
-                        }
-                        for k in i..<j where k >= frozenCount { speakers[k] = major }
-                    }
+                // 同点は語末などへ決め打ちしない。元の境界を残す。長い語頭だけは例外
+                if let following = longHeadSpeaker(word: word, speakers: initial, tokens: tokens, segments: segments) {
+                    speakers[word.lowerBound] = following
                 }
-                i = j
             }
         }
         // 句読点だけのトークンは直前のトークンの話者に付ける(凍結済みは触らない)。句点は直前の文の
         // 一部で、時刻が次の発話の頭に食い込むと別話者に判定され「。」だけの行になる(実録で確認)
-        for i in speakers.indices where options.punct && i >= frozenCount && i > 0 && isPunctuationOnly(tokens[i]) {
+        for i in speakers.indices where i >= frozenCount && i > 0 && isPunctuationOnly(tokens[i]) {
             speakers[i] = speakers[i - 1]
         }
         return speakers
     }
 
-    private static func hasShortRepairedEdge(first: Range<Int>, last: Range<Int>, correctedWords: [Range<Int>],
-                                             initial: [Int?], tokens: [TimedToken], phrase: Range<Int>,
-                                             speaker: Int, limit: Double) -> Bool {
-        for word in correctedWords where word == first || word == last {
-            guard let anchor = word.first(where: { initial[$0] == speaker }) else { continue }
-            var start = anchor, end = anchor + 1
-            while start > phrase.lowerBound && initial[start - 1] == speaker { start -= 1 }
-            while end < phrase.upperBound && initial[end] == speaker { end += 1 }
-            let movedStart = word == first && start > first.lowerBound && start < first.upperBound
-            let movedEnd = word == last && end > last.lowerBound && end < last.upperBound
-            // 元から長い島や、島の内部だけの補正で複数語を新しく保護しない。
-            // 「じ」を取り戻すと1.5秒を超えるため、長さは補正前の連続raw島で判定する。
-            if (movedStart || movedEnd), start < first.upperBound, end > last.lowerBound,
-               tokens[end - 1].end - tokens[start].start < limit { return true }
+    /// 語の先頭が長い1文字で、その1文字だけが別の既知話者のとき、語の残りの話者を返す。
+    /// 付け替えるのは語頭の1文字だけで、語の残りは変えない。
+    ///
+    /// 「思 / い通り行きます。」「自 / 己肯定ですよ。」は原音で全体が同じ話者と確認した。
+    /// 区間データでは、どちらも語頭の時間の前半に別話者の区間があり、後続話者の区間が語頭の末尾から
+    /// 続く。前半は文字にならなかった別話者の声で、語頭の文字自体は末尾で発音されたと推測する
+    /// (原音で確かめたのは話者の正解だけ)。前半が無音なら `SpeechTail` が直すが、別話者の声が続くと直せない。
+    ///
+    /// 独立した短い返答を奪わないよう、次の全てを満たす場合に限る。
+    /// - 語頭と後続が同じ語。NLTokenizer の語で両端がASRトークンの境界と一致する
+    /// - 語頭は既知の話者。不明を新しく補わない
+    /// - 語の残りが全て同じ既知話者
+    /// - 後続話者の区間が、語頭の末尾 `headTailSeconds` 以上を途切れず覆う
+    static func longHeadSpeaker(word: Range<Int>, speakers: [Int?], tokens: [TimedToken],
+                                segments: [SpeakerSegment]) -> Int? {
+        let head = word.lowerBound
+        guard word.count >= 2, SpeechTail.isLongSingle(tokens[head]), let own = speakers[head],
+              let following = speakers[head + 1], following != own,
+              word.dropFirst().allSatisfy({ speakers[$0] == following }) else { return nil }
+        let end = tokens[head].end
+        var covered = end - headTailSeconds
+        for segment in segments.filter({ $0.speaker == following && $0.end > covered }).sorted(by: { $0.start < $1.start }) {
+            guard segment.start <= covered else { break }
+            covered = max(covered, segment.end)
         }
-        return false
+        return covered >= end ? following : nil
     }
 
     /// 句読点・空白だけのトークンか

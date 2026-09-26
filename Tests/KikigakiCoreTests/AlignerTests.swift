@@ -109,7 +109,7 @@ private func tokens(_ texts: [String], phrase: Int = 1, at start: Double = 0, st
 }
 
 @Suite struct AlignerSpeakersTests {
-    @Test func フレーズ内の短い別話者は多数派に揃える() {
+    @Test func 窓より短い別話者の区間は窓判定で周囲の話者に倒れる() {
         let toks = tokens(["い", "や", "本", "当", "に"])  // 0〜1.0秒
         let segments = [
             SpeakerSegment(speaker: 1, start: 0, end: 0.3),  // 「い」だけ話者B
@@ -122,7 +122,7 @@ private func tokens(_ texts: [String], phrase: Int = 1, at start: Double = 0, st
         let toks = tokens(Array(repeating: "x", count: 20))  // 0〜4.0秒
         let segments = [
             SpeakerSegment(speaker: 0, start: 0, end: 2.0),
-            SpeakerSegment(speaker: 1, start: 2.0, end: 4.0),  // 2秒 ≥ keepIslandSeconds
+            SpeakerSegment(speaker: 1, start: 2.0, end: 4.0),  // 2秒続く別話者
         ]
         let result = Aligner.speakers(for: toks, segments: segments)
         #expect(result.prefix(9).allSatisfy { $0 == 0 })

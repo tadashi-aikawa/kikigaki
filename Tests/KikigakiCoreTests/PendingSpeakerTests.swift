@@ -30,7 +30,8 @@ import Testing
 
     @Test func 長い語頭の凍結保留を時刻だけで確定扱いしない() {
         let long = [TimedToken(text: "あ", phraseId: 0, start: 0, end: 10)]
-        let frozen = SpeakerFreeze.advance(frozen: [], speakers: [0], tokens: long, elapsed: 100, finalCount: 1)
+        let frozen = SpeakerFreeze.advanceByPhrase(frozen: [], speakers: [0], tokens: long, accurateFinalCount: 1,
+                                                   judgedUntil: 100)
         let live = LiveTranscript(tokens: long, speakers: [0], finalCount: 1, frozenCount: frozen.count)
         #expect(live.pendingSpeakerRows == [0])
     }

@@ -6,8 +6,6 @@ import NaturalLanguage
 struct WordBoundaries {
     private let tokens: [TimedToken]
     private let offsets: [Int]
-    private let starts: Set<Int>
-    private let ends: Set<Int>
     private let words: Set<Range<Int>>
     /// 語の両端がASRトークンの端にも一致する場合だけ返す。混在トークンは分割しない。
     var tokenRanges: [Range<Int>] {
@@ -61,67 +59,6 @@ struct WordBoundaries {
             }
         }
         words = Set(connected)
-        starts = Set(connected.map(\.lowerBound))
-        ends = Set(connected.map(\.upperBound))
-    }
-
-    func containsWholeWords(_ range: Range<Int>, sentenceEndAllowed: Bool = true) -> Bool {
-        let text = tokens[range].map(\.text).joined()
-        let leading = text.prefix(while: Self.ignored).utf16.count
-        let trailing = String(text.reversed().prefix(while: Self.ignored)).utf16.count
-        // 句読点だけや1文字の助詞は独立させない。語の途中を切る境界も救済しない。
-        guard text.filter({ $0.isLetter || $0.isNumber }).count >= 2 else { return false }
-        let start = offsets[range.lowerBound] + leading
-        let end = offsets[range.upperBound] - trailing
-        guard start < end, starts.contains(start), ends.contains(end) else { return false }
-        // 文中の「経過報告」のような複数語の誤島を広く救済しない。
-        // 1語の返答「はい」、または文末まで完結した「すごいね。」から保守的に残す。
-        let sentenceEnd = text.trimmingCharacters(in: .whitespacesAndNewlines).last.map { "。！？!?".contains($0) } == true
-        return words.contains(start..<end) || (sentenceEndAllowed && sentenceEnd)
-    }
-
-    /// 句点が認識されなくても、語境界で閉じた質問・否定・依頼は意味のある短い発言として扱う。
-    /// 一般の複数語を全て保護すると、文中の誤った話者の島も残るため範囲を限定する。
-    func containsMeaningfulReply(_ range: Range<Int>) -> Bool {
-        let text = tokens[range].map(\.text).joined()
-        let leading = text.prefix(while: Self.ignored).utf16.count
-        let trailing = String(text.reversed().prefix(while: Self.ignored)).utf16.count
-        let start = offsets[range.lowerBound] + leading
-        let end = offsets[range.upperBound] - trailing
-        guard start < end, starts.contains(start), ends.contains(end) else { return false }
-        let prefix = tokens[..<range.lowerBound].map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard prefix.isEmpty || prefix.last?.isPunctuation == true else { return false }
-        let following = tokens[range.upperBound...].map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !following.hasPrefix("どうか") else { return false }
-        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: .punctuationCharacters)
-        return ["ですか", "ますか"]
-            .contains(where: value.hasSuffix)
-    }
-
-    /// 相槌・応答のプリセット。多数派の声が区間を覆うか、前後が同じ主話者でも保持する。
-    /// 重なった相手の「うん」が文字になったとき、主話者の本文へ混ぜないためのもの。
-    /// 複数語の定番応答も含む。語の一部への一致や一般語への拡張はしない。
-    /// 品詞(NLTagger の lexicalClass)は日本語で提供されないため、語彙で限定する
-    static let backchannelWords: Set<String> = [
-        "はい", "はいはい", "うん", "うんうん", "ええ", "そう", "そうそう", "そうですね", "そうなんですね",
-        "なるほど", "いや", "いいえ", "確かに", "本当", "ほんと", "本当に", "ほんとに", "ですね", "ですよね",
-        "おお", "へえ", "ふーん", "了解", "了解です", "オッケー", "はーい", "いえ", "まあ", "うーん",
-        "そうです", "そうですよね", "そうなんです", "なるほどね", "なるほどですね",
-        "わかりました", "分かりました", "わかります", "分かります", "承知しました", "承知です",
-    ]
-
-    /// 空白・句読点を除いた本文が相槌・応答の語彙に一致するか
-    func isBackchannel(_ range: Range<Int>) -> Bool {
-        let raw = tokens[range].map(\.text).joined()
-        let start = offsets[range.lowerBound] + raw.prefix(while: Self.ignored).utf16.count
-        let end = offsets[range.upperBound] - String(raw.reversed().prefix(while: Self.ignored)).utf16.count
-        // 定番応答は複数語も許すが、「そうめん」の「そう」のような語の断片は残さない。
-        guard start < end, starts.contains(start), ends.contains(end) else { return false }
-        let text = raw
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: .punctuationCharacters)
-        return Self.backchannelWords.contains(text)
     }
 
     private static func ignored(_ char: Character) -> Bool { char.isWhitespace || char.isPunctuation }

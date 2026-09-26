@@ -3,7 +3,7 @@ import Foundation
 /// ASRの1文字に発話前の間が含まれた場合だけ、最後の発話塊と後続文字で話者を確認する。
 /// 文全体や単語全体のトークンを末尾の話者へ付け替えない。
 enum SpeechTail {
-    /// 語頭の付け替えと重みの絞り込みの対象になる、0.8秒超の1文字
+    /// 語頭の付け替えの対象になる、0.8秒超の1文字
     static func isLongSingle(_ token: TimedToken) -> Bool {
         token.start.isFinite && token.end.isFinite && token.duration > 0.8
             && token.text.filter({ $0.isLetter || $0.isNumber }).count == 1
@@ -13,33 +13,9 @@ enum SpeechTail {
         token.text.contains(where: { $0.isLetter || $0.isNumber })
     }
 
-    /// 長い1文字の時間には無音や別話者の声が混ざる。その全長を多数決へ投票させず、
-    /// 付与された話者が実際に検出された時間だけを重みにする。区間の重複は二重加算しない。
-    static func evidenceWeights(tokens: [TimedToken], speakers: [Int?], segments: [SpeakerSegment]) -> [Double] {
-        let ordered = segments.filter { $0.start.isFinite && $0.end.isFinite && $0.end > $0.start }
-            .sorted { $0.start < $1.start }
-        return tokens.indices.map { i in
-            let token = tokens[i]
-            guard token.start.isFinite, token.end.isFinite, token.duration > 0.8,
-                  token.text.filter({ $0.isLetter || $0.isNumber }).count == 1,
-                  let speaker = speakers[i] else { return token.duration }
-            var end = token.start
-            var duration = 0.0
-            for segment in ordered where segment.speaker == speaker {
-                if segment.start >= token.end { break }
-                let lo = max(end, segment.start)
-                let hi = min(token.end, segment.end)
-                if hi > lo { duration += hi - lo; end = hi }
-            }
-            return duration
-        }
-    }
-
-    static func speakers(tokens: [TimedToken], segments: [SpeakerSegment], skippingPrefix: Int = 0,
-                         options: Aligner.Options = .current) -> [Int?] {
+    static func speakers(tokens: [TimedToken], segments: [SpeakerSegment], skippingPrefix: Int = 0) -> [Int?] {
         let first = min(tokens.count, max(0, skippingPrefix))
-        let raw = tokens.indices.map { $0 < first ? nil : options.speaker(at: tokens[$0].midpoint, segments: segments) }
-        guard options.tail else { return raw }
+        let raw = tokens.indices.map { $0 < first ? nil : Aligner.speaker(at: tokens[$0].midpoint, segments: segments) }
         var result = raw
         let ordered = segments.filter { $0.start.isFinite && $0.end.isFinite && $0.end > $0.start }
             .sorted { $0.start < $1.start }
