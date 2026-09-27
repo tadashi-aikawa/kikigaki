@@ -38,7 +38,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private var minutesHeader: NSView?
     private let pauseButton = WashiActionButton()
     private let openButton = HoverButton()
-    private let minutesButton = HoverButton(title: "議事録", target: nil, action: nil)
+    let minutesButton = MinutesToggleButton(title: "議事録", target: nil, action: nil)
     private(set) var minutesSplit: MinutesSplitView!
     private var minutesStore: MinutesStore?
     var onMinutesVisibility: ((Bool) -> Void)?
@@ -98,6 +98,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             guard let self else { return }; self.updateHeader(width: self.minutesSplit.left.frame.width)
         }
         minutesSplit.onVisibility = { [weak self] _ in self?.refreshMinutes() }
+        // 見えていないウィンドウや視差効果を減らす設定では、開閉を一瞬で切り替える。
+        minutesSplit.animates = { [weak self] in
+            guard let self, self.window?.isVisible == true, self.window?.inLiveResize != true else { return false }
+            return !self.shouldReduceMotion()
+        }
         minutesSplit.preview.onSelect = { [weak self] path in try self?.onSelectMinutes?(path) }
         minutesSplit.restore()
         updateHeader(width: minutesSplit.left.frame.width)
@@ -148,8 +153,22 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         minutesButton.toolTip = visible ? "議事録を隠す" : "議事録を表示"
         minutesButton.setAccessibilityLabel(minutesButton.toolTip)
         minutesButton.setAccessibilityValue(visible ? "ON" : "OFF")
+        minutesButton.isOn = visible
+        placeMinutesButton(visible: visible)
         compactFooter.minutesNotice.isHidden = minutesStore?.hasUnseenMinutes != true
         onMinutesVisibility?(visible)
+    }
+    /// 開閉ボタンはいつもウィンドウの右上に置く。閉じている間は会話ヘッダーの右端、開いている間は議事録ペインの右端。
+    private func placeMinutesButton(visible: Bool) {
+        guard let controls = headerControls else { return }
+        if visible {
+            guard minutesButton.superview !== minutesSplit.preview.headerBar else { return }
+            minutesSplit.preview.placeToggle(minutesButton, centerYWith: controls)
+        } else {
+            guard minutesButton.superview !== controls else { return }
+            minutesSplit.preview.placeToggle(nil)
+            minutesButton.removeFromSuperview(); controls.addArrangedSubview(minutesButton)
+        }
     }
     @objc func toggleMinutes() { minutesSplit.setVisible(!minutesSplit.isPreviewVisible) }
     /// 開始シートで議事録を指定したときだけ使う。隠れていれば開き、開いていればそのまま。
@@ -246,7 +265,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
 
     private func updateHeader(width: CGFloat) {
         let compact = width < 600
-        minutesButton.title = compact ? "" : "議事録"
+        minutesButton.showsTitle = !compact
         let value = snapshot
         // 開始は前の会議の表示中も朱の塗りにし、同じ操作を状態で別物に見せない。
         startStopButton.emphasis = value.state.canStart ? .primary : .accentOutline
@@ -389,8 +408,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         recordingRange.lineBreakMode = .byTruncatingMiddle
         minutesButton.target = self; minutesButton.action = #selector(toggleMinutes)
         minutesButton.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "議事録")
-        minutesButton.imagePosition = .imageLeading
-        minutesButton.isBordered = false; minutesButton.contentTintColor = Washi.muted
+        minutesButton.isBordered = false; minutesButton.refresh()
         minutesButton.heightAnchor.constraint(equalToConstant: 32).isActive = true
         let controls = row([Washi.logoView(size: 26), statusChip, recordingRange, speakerButton, NSView(), pauseButton, startStopButton, openButton, minutesButton], spacing: 8)
         headerControls = controls

@@ -3,8 +3,11 @@ import UniformTypeIdentifiers
 import KikigakiCore
 
 private final class MinutesPathCell: NSTextFieldCell {
+    /// 欄の内側に置くクリアボタンの分だけ右を空け、文字と編集中のカーソルをボタンの下へ潜らせない。
+    var trailingInset: CGFloat = 0
     override func drawingRect(forBounds rect: NSRect) -> NSRect {
         var result = super.drawingRect(forBounds: rect).insetBy(dx: 6, dy: 0)
+        result.size.width = max(0, result.width - trailingInset)
         let height = min(result.height, ceil((font?.ascender ?? 10) - (font?.descender ?? -3)) + 2)
         result.origin.y += (result.height - height) / 2; result.size.height = height
         return result
@@ -45,6 +48,18 @@ private final class MinutesPathField: NSTextField {
     }
 }
 
+/// 検索欄のクリアと同じく、地を敷かずに図の濃さだけでホバーを示す。
+final class MinutesClearButton: HoverButton {
+    override var drawsHoverBackground: Bool { false }
+    // 標準ベゼルのalignment余白で16ptの枠を膨らませず、欄の右端から6ptに置く。
+    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
+    override func draw(_ dirtyRect: NSRect) {
+        let tint = isHovered || isHighlighted ? Washi.ink : Washi.muted
+        if contentTintColor != tint { contentTintColor = tint }
+        super.draw(dirtyRect)
+    }
+}
+
 /// パス編集と本文閲読を分離する。通知が来てもfield editorのドラフトは変更しない。
 @MainActor final class MinutesPreviewView: NSView, NSSearchFieldDelegate {
     let pathField: NSTextField = MinutesPathField(string: "")
@@ -75,7 +90,10 @@ private final class MinutesPathField: NSTextField {
     // 対象が無いあいだは中央の同じボタンだけを出す。表示中と見つからないときは中央が隠れ、こちらが唯一の入口になる。
     private let headerChoose = HoverButton(title: "ファイルを選ぶ…", target: nil, action: nil)
     var onSelect: ((String?) throws -> Void)?
-    let closeButton = HoverButton(title: "", target: nil, action: nil)
+    let closeButton = MinutesClearButton(title: "", target: nil, action: nil)
+    private var headerRow = NSStackView()
+    private var headerRowTrailing: NSLayoutConstraint?
+    private weak var toggle: NSView?
     var herdrCommand: () -> String? = { nil }
     private var path: String?
     private var source: MinutesState.Source?
@@ -121,11 +139,21 @@ private final class MinutesPathField: NSTextField {
         pathField.setAccessibilityLabel("議事録のパス")
         pathField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         headerChoose.target = self; headerChoose.action = #selector(chooseFile); headerChoose.isHidden = true
-        // ×はペインを隠す操作ではなく、表示中の議事録を閉じて対象を解除する(起動直後と同じ空の状態へ戻す)。
-        // ペインの表示切替はヘッダーの「議事録」ボタンとメニューが担う。
-        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "議事録を閉じる")
-        closeButton.toolTip = "表示中の議事録を閉じる"; closeButton.setAccessibilityLabel("議事録を閉じる")
-        closeButton.target = self; closeButton.action = #selector(closeMinutes); closeButton.isEnabled = false
+        // クリアはペインを隠す操作ではなく、表示中の議事録を外して対象を解除する(起動直後と同じ空の状態へ戻す)。
+        // ペインの表示切替はヘッダーの「議事録」ボタンとメニューが担う。パス欄の中に置き、ペインを閉じる×と読ませない。
+        closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "議事録を外す")
+        closeButton.imagePosition = .imageOnly; closeButton.imageScaling = .scaleProportionallyDown
+        closeButton.isBordered = false; closeButton.contentTintColor = Washi.muted
+        closeButton.toolTip = "表示中の議事録を外す"; closeButton.setAccessibilityLabel("議事録を外す")
+        closeButton.target = self; closeButton.action = #selector(closeMinutes)
+        closeButton.isEnabled = false; closeButton.isHidden = true
+        pathField.addSubview(closeButton); closeButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            // 欄のアンカーはalignment余白の内側を指す。描いた輪郭から6pt内側へ置くため、その余白を差し引く。
+            closeButton.trailingAnchor.constraint(equalTo: pathField.trailingAnchor, constant: -6 + pathField.alignmentRectInsets.right),
+            closeButton.centerYAnchor.constraint(equalTo: pathField.centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 16), closeButton.heightAnchor.constraint(equalToConstant: 16)
+        ])
         neovimButton.target = self; neovimButton.action = #selector(openNeovim)
         obsidianButton.target = self; obsidianButton.action = #selector(openObsidian)
         for (button, asset, label) in [(neovimButton, "neovim", "Neovimで開く"), (obsidianButton, "obsidian", "Obsidianで開く")] {
@@ -140,12 +168,15 @@ private final class MinutesPathField: NSTextField {
         neovimButton.toolTip = "Neovimで開く — herdrの新しいタブ"
         obsidianButton.toolTip = "議事録をObsidianで開く"
         neovimButton.isEnabled = false; obsidianButton.isEnabled = false
-        let top = row([pathField, neovimButton, obsidianButton, headerChoose, closeButton], spacing: 8)
+        let top = row([pathField, neovimButton, obsidianButton, headerChoose], spacing: 8)
+        headerRow = top
         headerBar.addSubview(top); top.translatesAutoresizingMaskIntoConstraints = false
+        let trailing = top.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor, constant: -24)
+        headerRowTrailing = trailing
         NSLayoutConstraint.activate([
             headerBar.heightAnchor.constraint(equalToConstant: 56),
             top.leadingAnchor.constraint(equalTo: headerBar.leadingAnchor, constant: 24),
-            top.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor, constant: -24),
+            trailing,
             top.topAnchor.constraint(equalTo: headerBar.topAnchor, constant: 12),
             top.heightAnchor.constraint(equalToConstant: 32),
             pathField.heightAnchor.constraint(equalToConstant: 24)
@@ -298,10 +329,39 @@ private final class MinutesPathField: NSTextField {
         historyPopup.frame = NSRect(x: min(field.minX, bounds.width - width - 24), y: top - height, width: width, height: height)
         historyPopup.needsLayout = true
     }
+    /// クリアは外す対象があるときだけ見せ、その間だけ文字の右端を空ける。
+    private func setClearVisible(_ visible: Bool) {
+        closeButton.isHidden = !visible
+        guard let cell = pathField.cell as? MinutesPathCell else { return }
+        let inset: CGFloat = visible ? 16 + 4 : 0
+        guard cell.trailingInset != inset else { return }
+        cell.trailingInset = inset
+        pathField.needsDisplay = true
+    }
+    /// 開いている間の開閉ボタンを上部の行の右端へ置く。右端の余白と縦の中心を会話ヘッダーに揃え、
+    /// 開閉してもボタンがウィンドウの右上から動かないようにする。nilで外す。
+    func placeToggle(_ view: NSView?, centerYWith anchor: NSView? = nil) {
+        if let old = toggle, old !== view, old.superview === headerBar { old.removeFromSuperview() }
+        toggle = view
+        headerRowTrailing?.isActive = false
+        let trailing: NSLayoutConstraint
+        if let view {
+            if view.superview !== headerBar { view.removeFromSuperview(); headerBar.addSubview(view) }
+            view.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                view.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor, constant: -12),
+                view.centerYAnchor.constraint(equalTo: (anchor ?? headerRow).centerYAnchor)
+            ])
+            trailing = headerRow.trailingAnchor.constraint(equalTo: view.leadingAnchor, constant: -8)
+        } else {
+            trailing = headerRow.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor, constant: -24)
+        }
+        trailing.isActive = true; headerRowTrailing = trailing
+    }
     /// AIの依頼が編集を始める直前に、更新強調の基準を今の本文へ置き直す。
     func markUpdateBaseline() { minutesDocument.markUpdateBaseline(); boardDocument.markUpdateBaseline() }
     func resetContext() {
-        stop(); path = nil; body = nil; editing = false; commitError = nil; contextGeneration += 1; headerChoose.isHidden = true
+        stop(); path = nil; body = nil; editing = false; commitError = nil; contextGeneration += 1; headerChoose.isHidden = true; setClearVisible(false)
         window?.makeFirstResponder(nil)
         for view in [minutesDocument, boardDocument] { view.clear(); view.setFile(nil) }
         selectedBoard = false; boardHeading = nil; tabs.selectedSegment = 0; tabBar.isHidden = true
@@ -338,6 +398,7 @@ private final class MinutesPathField: NSTextField {
         neovimButton.isEnabled = path != nil && editorTask == nil
         obsidianButton.isEnabled = path != nil
         closeButton.isEnabled = path != nil
+        setClearVisible(path != nil)
         headerChoose.isHidden = path == nil
         if editing || pathField.currentEditor() != nil {
             if changed { notice.stringValue = "表示対象が変わりました。編集中のパスは保持しています"; notice.isHidden = false }

@@ -22,7 +22,8 @@ import KikigakiCore
         #expect(status.minutesItem.title == "議事録を隠す" && status.minutesItem.state == .on)
         #expect(controller.validateMenuItem(item) && item.title == "議事録を隠す" && item.state == .on)
         func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
-        let button = try #require(descendants(controller.minutesSplit.left).compactMap { $0 as? NSButton }.first { $0.toolTip == "議事録を隠す" })
+        // 開いている間の開閉ボタンは議事録ペインの右上にある。
+        let button = try #require(descendants(controller.minutesSplit.preview.headerBar).compactMap { $0 as? NSButton }.first { $0.toolTip == "議事録を隠す" })
         #expect(button.accessibilityValue() as? String == "ON")
         status.toggleMinutes()
         #expect(status.minutesItem.title == "議事録を表示" && status.minutesItem.state == .off)
@@ -55,8 +56,11 @@ import KikigakiCore
             let before = restored.preference
             restored.left.frame.size.width = 430; restored.preview.frame.size.width = 330
             restored.rememberWidths()
-            restored.setVisible(false); restored.setVisible(true)
+            // タイル中のドラッグは希望幅へ写さない。
             #expect(restored.preference == before)
+            // 閉じるときはタイル中でも、開いていた会話幅までウィンドウを縮め、その幅を希望幅にする。
+            restored.setVisible(false)
+            #expect(restored.preference.leftWidth == 430 && abs(window.frame.width - 430) < 0.5 && abs(window.frame.minX - actual.minX) < 0.5)
         }
     }
     @Test func 開いただけではパス欄へカーソルを入れず既存の焦点は奪わない() throws {
@@ -129,14 +133,21 @@ import KikigakiCore
         view.receive(.missing)
         #expect(view.message.stringValue.hasPrefix("AIが通知したファイル"))
         #expect(!headerChoose.isHidden)
-        // ×はペインを隠さず、表示中の議事録を閉じて対象を解除する。表示対象が無ければ押せない。
-        #expect(view.closeButton.isEnabled && view.closeButton.toolTip == "表示中の議事録を閉じる")
+        // クリアはペインを隠さず、表示中の議事録を外して対象を解除する。パス欄の中の右端に置き、文字を潜らせない。
+        #expect(view.closeButton.isEnabled && !view.closeButton.isHidden && view.closeButton.toolTip == "表示中の議事録を外す")
+        #expect(view.closeButton.superview === view.pathField)
+        view.frame = NSRect(x: 0, y: 0, width: 800, height: 600); view.layoutSubtreeIfNeeded()
+        let field = view.pathField, clear = view.closeButton.frame
+        #expect(abs(clear.maxX - (field.bounds.maxX - 6)) < 0.5 && clear.width == 16 && clear.height == 16, "\(clear) \(field.bounds)")
+        let text = try #require(field.cell?.drawingRect(forBounds: field.bounds))
+        #expect(text.maxX <= clear.minX)
         selected = "unchanged"; view.pathField.stringValue = "/tmp/draft.md"
         view.closeMinutes()
         #expect(selected == nil && view.notice.isHidden)
-        // 解除はstoreの通知でupdateへ戻り、そこで欄が空になりボタンも押せなくなる。
+        // 解除はstoreの通知でupdateへ戻り、そこで欄が空になりボタンは隠れて押せなくなる。文字の右の余白も戻す。
         view.update(path: nil, source: nil, active: false)
-        #expect(!view.closeButton.isEnabled && view.pathField.stringValue.isEmpty && !view.isHidden)
+        #expect(!view.closeButton.isEnabled && view.closeButton.isHidden && view.pathField.stringValue.isEmpty && !view.isHidden)
+        #expect(try #require(field.cell?.drawingRect(forBounds: field.bounds)).maxX > clear.minX)
         #expect(headerChoose.isHidden)
         view.update(path: "/tmp/old.md", source: .human, active: false)
         view.resetContext()
