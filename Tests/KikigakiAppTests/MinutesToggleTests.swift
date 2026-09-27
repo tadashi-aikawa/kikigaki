@@ -4,11 +4,14 @@ import KikigakiCore
 @testable import Kikigaki
 
 @Suite(.serialized) @MainActor struct MinutesToggleTests {
+    /// 画面は1800×1000に固定する。実行機の画面を使うと、CIの狭い画面ではウィンドウを伸ばせず期待が崩れる。
+    static let screen = NSRect(x: 0, y: 0, width: 1800, height: 1000)
     private func controller(width: CGFloat) throws -> (TranscriptWindowController, UserDefaults, String) {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let suite = "minutes-toggle-" + UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))
         let controller = TranscriptWindowController(shouldReduceMotion: { true }, minutesDefaults: defaults)
+        controller.minutesSplit.visibleScreen = { _ in Self.screen }
         let window = try #require(controller.window)
         window.setFrameAutosaveName("")
         window.setFrame(NSRect(x: 0, y: 100, width: width, height: 700), display: false)
@@ -90,7 +93,7 @@ import KikigakiCore
     }
 
     @Test func 伸ばせないウィンドウは議事録ペインが右端から滑り込み会話側が縮む() throws {
-        // 画面の無いテストでは1800幅を画面とみなす。全幅のウィンドウは伸ばせず、分割だけで開く。
+        // 画面と同じ1800幅のウィンドウは伸ばせず、分割だけで開く。
         let (controller, defaults, suite) = try controller(width: 1800)
         defer { defaults.removePersistentDomain(forName: suite); controller.minutesSplit.preview.stop() }
         let window = try #require(controller.window), split = controller.minutesSplit!
@@ -129,6 +132,7 @@ import KikigakiCore
             let controller = TranscriptWindowController(shouldReduceMotion: { true }, minutesDefaults: defaults)
             defer { controller.minutesSplit.preview.stop() }
             let window = try #require(controller.window), split = controller.minutesSplit!
+            split.visibleScreen = { _ in Self.screen }
             window.setFrameAutosaveName("")
             window.setFrame(NSRect(x: 0, y: 100, width: 800, height: 700), display: false)
             split.animates = { animated }
@@ -148,20 +152,17 @@ import KikigakiCore
 
     @Test(arguments: [false, true])
     func 閉じると開いていた会話幅を保ち議事録の分だけウィンドウを縮める(animated: Bool) throws {
-        let fallback = NSRect(x: 0, y: 0, width: 1800, height: 1000)
+        let screen = Self.screen
         // 初期サイズ・手で広げたサイズ・画面いっぱい(タイル推定)の3状態。
         for name in ["initial", "widened", "tiled"] {
             let (controller, defaults, suite) = try controller(width: 600)
             defer { defaults.removePersistentDomain(forName: suite); controller.minutesSplit.preview.stop() }
             let window = try #require(controller.window), split = controller.minutesSplit!
-            let screen = window.screen?.visibleFrame ?? fallback
             switch name {
             case "widened": window.setFrame(NSRect(x: screen.minX + 40, y: screen.minY + 40, width: 1100, height: 700), display: false)
             case "tiled":
                 window.setFrame(screen, display: false)
-                if window.screen != nil {
-                    #expect(MinutesLayout.constrained(frame: window.frame, screen: screen, fullScreen: false), "\(name)")
-                }
+                #expect(MinutesLayout.constrained(frame: window.frame, screen: screen, fullScreen: false), "\(name)")
             default: break
             }
             split.animates = { animated }

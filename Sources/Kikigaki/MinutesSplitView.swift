@@ -81,6 +81,8 @@ final class MinutesToggleButton: HoverButton {
     var isPreviewVisible: Bool { preference.visible }
     /// 開閉を動かしてよいか。既定は動かさない。書き起こしウィンドウが表示中かつ視差効果を減らさないときだけ真を返す。
     var animates: () -> Bool = { false }
+    /// ウィンドウが載っている画面の可視域。テストは実行機の画面の大きさに左右されないよう固定の値へ差し替える。
+    var visibleScreen: (NSWindow) -> NSRect? = { $0.screen?.visibleFrame }
     static let transitionDuration: CFTimeInterval = 0.25
 
     /// 開閉の途中。議事録ペインは最終の幅のまま右端の外から出入りさせ、中身を細い幅で組み直さない。
@@ -132,7 +134,7 @@ final class MinutesToggleButton: HoverButton {
             preview.isHidden = !visible; layoutPanes(leftWidth: preference.leftWidth); persist()
             onVisibility?(visible); onLayout?(); return
         }
-        let screen = window.screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1800, height: 1000)
+        let screen = visibleScreen(window) ?? NSRect(x: 0, y: 0, width: 1800, height: 1000)
         applyMinimumWidth(screen: screen)
         let target: NSRect
         if visible {
@@ -195,7 +197,7 @@ final class MinutesToggleButton: HoverButton {
     private var constrainedWindow: Bool {
         guard let window else { return false }
         // 公開のtile状態がないため、半幅か全幅で画面全高の配置に限定して推定する。
-        guard let screen = window.screen?.visibleFrame else { return false }
+        guard let screen = visibleScreen(window) else { return false }
         return MinutesLayout.constrained(frame: window.frame, screen: screen, fullScreen: window.styleMask.contains(.fullScreen))
     }
     private func applyMinimumWidth(screen: NSRect) {
@@ -204,7 +206,7 @@ final class MinutesToggleButton: HoverButton {
     func fitWindow() {
         finishTransition()
         guard let window else { return }
-        let screen = window.screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1800, height: 1000)
+        let screen = visibleScreen(window) ?? NSRect(x: 0, y: 0, width: 1800, height: 1000)
         applyMinimumWidth(screen: screen)
         guard !constrainedWindow else { return }
         adjusting = true

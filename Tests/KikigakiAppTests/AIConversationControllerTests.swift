@@ -178,7 +178,8 @@ import KikigakiAIIO
         let controller = try testAIController(meetingID: meeting, outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
         let request = try prepare(controller, config)
         #expect(!FileManager.default.fileExists(atPath: request.envelope.participant.sessionPath))
-        try await controller.connect(config: config, label: "会議", executable: URL(fileURLWithPath: "/tmp/codex"), arguments: [], readinessTimeout: 2)
+        // 締切を60秒にする理由は上のテストと同じ。CIの全体実行では主スレッドの順番待ちで締切2秒を超えた。
+        try await controller.connect(config: config, label: "会議", executable: URL(fileURLWithPath: "/tmp/codex"), arguments: [], readinessTimeout: 60)
         let bytes = try AIFileStore(root: root).read([".kikigaki-context", meeting.uuidString, "ai", "sessions", "1.json"])
         let session = try AIJSON.decode(AISessionRecord.self, from: bytes)
         #expect(session.schemaVersion == 1 && session.provider == .codex && session.connection?.paneID == "p")
