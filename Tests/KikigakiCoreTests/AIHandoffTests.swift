@@ -19,64 +19,40 @@ import Testing
         return try #require(JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
     }
 
-    @Test func 初回追記訂正改名は変更行以降を渡し固定ファイルを維持する() throws {
+    @Test func 毎回全文を渡し訂正や改名後も過去の固定ファイルを維持する() throws {
         let dir = try directory()
         defer { try? FileManager.default.removeItem(at: dir) }
         var history = HandoffHistory()
-        let names = SpeakerNames()
-        let initial = utterances(["最初", "暫定"])
-        let first = try #require(history.copy(utterances: initial, names: names, outputDirectory: dir) { _ in true })
+        let first = try #require(history.copy(utterances: utterances(["最初", "暫定"]), names: .init(), outputDirectory: dir) { _ in true })
         let originalFile = try String(contentsOf: first.fileURL, encoding: .utf8)
-        #expect(first.preview.isFull)
-        #expect(first.preview.startLine == 1)
-        #expect(first.preview.lineCount == 2)
-        #expect(!first.preview.includesCorrections)
-        #expect(try json(first)["kind"] as? String == "full")
-        #expect(try json(first)["previous_snapshot_id"] == nil)
-        let appended = utterances(["最初", "暫定", "追加"])
-        let second = try #require(history.copy(utterances: appended, names: names, outputDirectory: dir) { _ in true })
-        #expect(second.preview.startLine == 3)
-        #expect(second.preview.lineCount == 1)
-        #expect(second.preview.startTime == 20)
-        #expect(!second.preview.includesCorrections)
-        #expect(try json(second)["previous_snapshot_id"] as? String == first.snapshotID.uuidString)
         let corrected = utterances(["最初", "訂正", "追加"])
-        let third = try #require(history.copy(utterances: corrected, names: names, outputDirectory: dir) { _ in true })
-        #expect(third.preview.startLine == 2)
-        #expect(third.preview.lineCount == 2)
-        #expect(third.preview.includesCorrections)
-        let renamed = try #require(history.preview(utterances: corrected, names: SpeakerNames([0: "タダシ"])))
-        #expect(renamed.startLine == 1)
-        #expect(renamed.includesCorrections)
+        let second = try #require(history.copy(utterances: corrected, names: SpeakerNames([0: "タダシ"]), outputDirectory: dir) { _ in true })
+        for (copy, count) in [(first, 2), (second, 3)] {
+            let metadata = try json(copy)
+            #expect(metadata["kind"] as? String == "full")
+            #expect(metadata["previous_snapshot_id"] == nil)
+            #expect(metadata["read_start_line"] as? Int == 1)
+            #expect(metadata["read_line_count"] as? Int == count && metadata["total_line_count"] as? Int == count)
+            #expect(copy.lineCount == count)
+        }
+        #expect(try String(contentsOf: second.fileURL, encoding: .utf8).contains("タダシ: 訂正"))
         #expect(try String(contentsOf: first.fileURL, encoding: .utf8) == originalFile)
         #expect(first.fileURL != second.fileURL)
         #expect(first.meetingID == second.meetingID)
     }
 
-    @Test func 同一内容は更新せず全文コピーと再コピーは可能で再コピーは基準を進めない() throws {
+    @Test func 同じ内容でも押すたびに新しい全文を渡す() throws {
         let dir = try directory()
         defer { try? FileManager.default.removeItem(at: dir) }
         var history = HandoffHistory()
-        let initial = utterances(["本文"])
-        let first = try #require(history.copy(utterances: initial, names: .init(), outputDirectory: dir) { _ in true })
-        #expect(history.preview(utterances: initial, names: .init()) == nil)
-        #expect(try history.copy(utterances: initial, names: .init(), outputDirectory: dir) { _ in
-            Issue.record("変更なしでクリップボードを変更した")
-            return true
-        } == nil)
-        var copiedPrompt = ""
-        #expect(try history.recopy { copiedPrompt = $0; return true } == first)
-        #expect(copiedPrompt == first.prompt)
-        #expect(history.lastCopy == first)
-        let full = try #require(history.copy(utterances: initial, names: .init(), outputDirectory: dir, full: true) { _ in true })
-        #expect(full.preview.isFull)
-        #expect(full.snapshotID != first.snapshotID)
-        #expect(try json(full)["previous_snapshot_id"] == nil)
-        let next = try #require(history.copy(utterances: utterances(["本文", "続き"]), names: .init(), outputDirectory: dir) { _ in true })
-        #expect(try json(next)["previous_snapshot_id"] as? String == full.snapshotID.uuidString)
+        let lines = utterances(["本文"])
+        let first = try #require(history.copy(utterances: lines, names: .init(), outputDirectory: dir) { _ in true })
+        let again = try #require(history.copy(utterances: lines, names: .init(), outputDirectory: dir) { _ in true })
+        #expect(again.snapshotID != first.snapshotID && again.sequence == 2)
+        #expect(try String(contentsOf: again.fileURL, encoding: .utf8) == String(contentsOf: first.fileURL, encoding: .utf8))
     }
 
-    @Test func 統合と解除で結合行が変わってもAIへ訂正として渡す() throws {
+    @Test func 統合と解除で結合行が変わっても今の全文を渡す() throws {
         let dir = try directory()
         defer { try? FileManager.default.removeItem(at: dir) }
         var history = HandoffHistory()
@@ -87,36 +63,36 @@ import Testing
         let first = try #require(history.copy(utterances: firstLines, names: .init(), outputDirectory: dir) { _ in true })
         let merged = Aligner.utterances(tokens: tokens, speakers: SpeakerMapping(overrides: [2: 0]).apply(raw))
         let correction = try #require(history.copy(utterances: merged, names: .init(), outputDirectory: dir) { _ in true })
-        #expect(correction.preview.includesCorrections)
-        #expect(correction.preview.startLine == 1)
-        #expect(correction.preview.totalLineCount == 1)
+        #expect(correction.lineCount == 1)
         #expect(try String(contentsOf: correction.fileURL, encoding: .utf8).contains("話者A: 前半後半"))
         let restored = try #require(history.copy(utterances: firstLines, names: .init(), outputDirectory: dir) { _ in true })
-        #expect(restored.preview.includesCorrections)
-        #expect(restored.preview.totalLineCount == 2)
+        #expect(restored.lineCount == 2)
         #expect(try String(contentsOf: first.fileURL, encoding: .utf8).contains("話者C: 後半"))
     }
 
-    @Test func 空の初回は無効で末尾削除と全削除はゼロ行更新になる() throws {
+    @Test func 空の会話はコピーしない() throws {
         let dir = try directory()
         defer { try? FileManager.default.removeItem(at: dir) }
         var history = HandoffHistory()
-        #expect(history.preview(utterances: [], names: .init(), full: true) == nil)
-        #expect(try history.recopy { _ in true } == nil)
-        _ = try history.copy(utterances: utterances(["一", "二"]), names: .init(), outputDirectory: dir) { _ in true }
-        let truncated = try #require(history.copy(utterances: utterances(["一"]), names: .init(), outputDirectory: dir) { _ in true })
-        #expect(truncated.preview.startLine == 2)
-        #expect(truncated.preview.startTime == 10)
-        #expect(truncated.preview.lineCount == 0)
-        #expect(truncated.preview.totalLineCount == 1)
-        #expect(truncated.preview.includesCorrections)
-        let empty = try #require(history.copy(utterances: [], names: .init(), outputDirectory: dir) { _ in true })
-        #expect(empty.preview.startLine == 1)
-        #expect(empty.preview.lineCount == 0)
-        #expect(empty.preview.totalLineCount == 0)
-        #expect(try Data(contentsOf: empty.fileURL).isEmpty)
-        #expect(history.preview(utterances: [], names: .init()) == nil)
-        #expect(history.preview(utterances: [], names: .init(), full: true)?.isFull == true)
+        #expect(try history.copy(utterances: [], names: .init(), outputDirectory: dir) { _ in
+            Issue.record("空の会話でクリップボードを変更した")
+            return true
+        } == nil)
+        #expect(history.lastCopy == nil)
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent(".kikigaki-context").path))
+    }
+
+    @Test func 議事録のパスは指定した時だけ渡す() throws {
+        let dir = try directory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var history = HandoffHistory()
+        let plain = try #require(history.copy(utterances: utterances(["本文"]), names: .init(), outputDirectory: dir) { _ in true })
+        #expect(try json(plain)["minutes_path"] == nil)
+        let path = dir.appendingPathComponent("議事録 `a`.md").path
+        let withMinutes = try #require(history.copy(utterances: utterances(["本文"]), names: .init(), outputDirectory: dir,
+                                                    minutesPath: path) { _ in true })
+        #expect(try json(withMinutes)["minutes_path"] as? String == path)
+        #expect(withMinutes.prompt.components(separatedBy: "```").count == 3)
     }
 
     @Test func 保存失敗とクリップボード失敗は成功履歴を保持する() throws {
@@ -143,15 +119,6 @@ import Testing
             }
         }
         #expect(history.lastCopy == first)
-        #expect(history.preview(utterances: changed, names: .init())?.startLine == 2)
-        #expect(throws: HandoffError.self) { try history.recopy { _ in false } }
-        #expect(history.lastCopy == first)
-        try FileManager.default.removeItem(at: first.fileURL)
-        #expect(throws: HandoffError.self) { try history.recopy { _ in
-            Issue.record("ファイル消失後に再コピーした")
-            return true
-        } }
-        #expect(history.lastCopy == first)
     }
 
     @Test func 特殊な保存先はJSONから復元でき発話本文はプロンプトへ混入しない() throws {
@@ -173,7 +140,6 @@ import Testing
         var newMeeting = HandoffHistory()
         let fresh = try #require(newMeeting.copy(utterances: utterances(["次の会議"]), names: .init(), outputDirectory: special) { _ in true })
         #expect(fresh.meetingID != copy.meetingID)
-        #expect(fresh.preview.isFull)
     }
 
     @Test func 専用ディレクトリは既存も非公開にし通常Markdownを維持する() throws {
@@ -216,57 +182,32 @@ import Testing
         #expect(try FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? Int == permissions)
     }
 
-    @Test func 初回クリップボード失敗後の再試行も全文になる() throws {
-        let dir = try directory()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        var history = HandoffHistory()
-        #expect(throws: HandoffError.self) {
-            try history.copy(utterances: utterances(["本文"]), names: .init(), outputDirectory: dir) { _ in false }
-        }
-        #expect(history.lastCopy == nil)
-        #expect(history.preview(utterances: utterances(["本文"]), names: .init())?.isFull == true)
-        let retry = try #require(history.copy(utterances: utterances(["本文"]), names: .init(), outputDirectory: dir) { _ in true })
-        #expect(try json(retry)["previous_snapshot_id"] == nil)
-        #expect(retry.sequence == 1)
-    }
-
-    @Test func 連番は成功コピーだけ進み全文も通算し再コピーと新会議を区別する() throws {
+    @Test func 連番は成功コピーだけ進み新会議で1へ戻る() throws {
         let dir = try directory()
         defer { try? FileManager.default.removeItem(at: dir) }
         var history = HandoffHistory()
         let initial = utterances(["本文"])
-        let changed = utterances(["本文", "追加"])
+        #expect(throws: HandoffError.self) {
+            try history.copy(utterances: initial, names: .init(), outputDirectory: dir) { _ in false }
+        }
         let first = try #require(history.copy(utterances: initial, names: .init(), outputDirectory: dir) { _ in true })
         #expect(first.sequence == 1)
         #expect(try json(first)["sequence"] as? Int == 1)
-        #expect(try history.copy(utterances: initial, names: .init(), outputDirectory: dir) { _ in true } == nil)
-        #expect(throws: HandoffError.self) {
-            try history.copy(utterances: changed, names: .init(), outputDirectory: dir) { _ in false }
-        }
         let blocked = dir.appendingPathComponent("file")
         try Data().write(to: blocked)
         #expect(throws: HandoffError.self) {
-            try history.copy(utterances: changed, names: .init(), outputDirectory: blocked) { _ in true }
+            try history.copy(utterances: initial, names: .init(), outputDirectory: blocked) { _ in true }
         }
-        #expect(history.lastCopy?.sequence == 1)
-        let second = try #require(history.copy(utterances: changed, names: .init(), outputDirectory: dir) { _ in true })
+        let second = try #require(history.copy(utterances: initial, names: .init(), outputDirectory: dir) { _ in true })
         #expect(second.sequence == 2)
         #expect(try json(second)["sequence"] as? Int == 2)
-        let full = try #require(history.copy(utterances: changed, names: .init(), outputDirectory: dir, full: true) { _ in true })
-        #expect(full.sequence == 3)
-        #expect(try json(full)["sequence"] as? Int == 3)
-        let repeated = try #require(history.recopy { _ in true })
-        #expect(repeated == full)
-        #expect(try json(repeated)["sequence"] as? Int == 3)
-        let afterRecopy = try #require(history.copy(utterances: initial, names: .init(), outputDirectory: dir) { _ in true })
-        #expect(afterRecopy.sequence == 4)
         var nextMeeting = HandoffHistory()
         let fresh = try #require(nextMeeting.copy(utterances: initial, names: .init(), outputDirectory: dir) { _ in true })
         #expect(fresh.sequence == 1)
         #expect(fresh.meetingID != first.meetingID)
     }
 
-    @Test func 保存後に会議ディレクトリをリンクへ差し替えたらコピーも再コピーも拒否する() throws {
+    @Test func 保存後に会議ディレクトリをリンクへ差し替えたらコピーを拒否する() throws {
         let dir = try directory()
         defer { try? FileManager.default.removeItem(at: dir) }
         var history = HandoffHistory()
@@ -275,10 +216,6 @@ import Testing
         let moved = dir.appendingPathComponent("moved")
         try FileManager.default.moveItem(at: meeting, to: moved)
         try FileManager.default.createSymbolicLink(at: meeting, withDestinationURL: moved)
-        #expect(throws: HandoffError.self) { try history.recopy { _ in
-            Issue.record("リンク経由で再コピーした")
-            return true
-        } }
         #expect(throws: HandoffError.self) {
             try history.copy(utterances: utterances(["本文", "追加"]), names: .init(), outputDirectory: dir) { _ in true }
         }

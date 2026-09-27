@@ -1,17 +1,8 @@
 import Darwin
 import Foundation
 
-public struct HandoffPreview: Equatable, Sendable {
-    public let startLine: Int
-    public let lineCount: Int
-    public let totalLineCount: Int
-    public let startTime: Double
-    public let includesCorrections: Bool
-    public let isFull: Bool
-}
-
 public struct HandoffCopy: Equatable, Sendable {
-    public let preview: HandoffPreview
+    public let lineCount: Int
     public let prompt: String
     public let fileURL: URL
     public let meetingID: UUID
@@ -22,23 +13,20 @@ public struct HandoffCopy: Equatable, Sendable {
 public enum HandoffError: LocalizedError {
     case saveFailed(String)
     case clipboardFailed
-    case snapshotUnavailable
 
     public var errorDescription: String? {
         switch self {
         case .saveFailed(let reason): return "AI用の会話ファイルを保存できませんでした: \(reason)"
         case .clipboardFailed: return "クリップボードにコピーできませんでした。もう一度お試しください。"
-        case .snapshotUnavailable: return "前回コピーした会話ファイルを読み取れません。会議の最初からコピーしてください。"
         }
     }
 }
 
-/// 会議ごとに作り直す。ファイルとクリップボードの両方が成功した時だけ基準を進める。
+/// 会議ごとに作り直す。コピーは毎回会話の全体を渡し、成功した回だけ連番を進める。
+/// 差分を渡さないのは、受け取るAIに前回の受領を覚えさせずに済ませるため。
 public struct HandoffHistory {
     public private(set) var lastCopy: HandoffCopy?
     public let meetingID: UUID
-    private var previousLines: [String] = []
-    private var previousStarts: [Double] = []
     private let startedAt: Date
 
     public init(startedAt: Date = Date(), meetingID: UUID = UUID()) {
@@ -46,37 +34,13 @@ public struct HandoffHistory {
         self.meetingID = meetingID
     }
 
-    public func preview(utterances: [Utterance], names: SpeakerNames, timeline: MeetingTimeline? = nil,
-                        full: Bool = false) -> HandoffPreview? {
-        preview(lines: TranscriptRenderer.lines(utterances, names: names, timeline: timeline ?? MeetingTimeline(startedAt: startedAt)),
-                starts: utterances.map(\.start), full: full)
-    }
-
-    private func preview(lines: [String], starts: [Double], full: Bool) -> HandoffPreview? {
-        guard lastCopy != nil || !lines.isEmpty else { return nil }
-        let isFull = full || lastCopy == nil
-        var common = 0
-        while common < min(lines.count, previousLines.count), lines[common] == previousLines[common] {
-            common += 1
-        }
-        guard isFull || lines != previousLines else { return nil }
-        let start = isFull ? 0 : common
-        // 削除だけの更新には今回の開始行がないため、削除された旧行の時刻を使う。
-        let time = starts.indices.contains(start) ? starts[start]
-            : (previousStarts.indices.contains(start) ? previousStarts[start] : 0)
-        return HandoffPreview(startLine: start + 1, lineCount: lines.count - start,
-                              totalLineCount: lines.count, startTime: time,
-                              includesCorrections: lastCopy != nil && common < previousLines.count,
-                              isFull: isFull)
-    }
-
+    /// 議事録は本文を写さずパスだけ渡す。会話と違い、AIや人が書き換え続けるため。
     public mutating func copy(
         utterances: [Utterance], names: SpeakerNames, outputDirectory: URL,
-        timeline: MeetingTimeline? = nil, full: Bool = false, writeClipboard: (String) -> Bool
+        timeline: MeetingTimeline? = nil, minutesPath: String? = nil, writeClipboard: (String) -> Bool
     ) throws -> HandoffCopy? {
         let lines = TranscriptRenderer.lines(utterances, names: names, timeline: timeline ?? MeetingTimeline(startedAt: startedAt))
-        let starts = utterances.map(\.start)
-        guard let preview = preview(lines: lines, starts: starts, full: full) else { return nil }
+        guard !lines.isEmpty else { return nil }
         let snapshotID = UUID()
         let sequence = (lastCopy?.sequence ?? 0) + 1
         let root = outputDirectory.standardizedFileURL
@@ -85,9 +49,8 @@ public struct HandoffHistory {
             .appendingPathComponent(snapshotID.uuidString + ".md")
         let metadata = Metadata(
             meetingID: meetingID.uuidString, snapshotID: snapshotID.uuidString, sequence: sequence,
-            previousSnapshotID: preview.isFull ? nil : lastCopy?.snapshotID.uuidString,
-            kind: preview.isFull ? "full" : "update", transcriptPath: url.path,
-            readStartLine: preview.startLine, readLineCount: preview.lineCount, totalLineCount: lines.count)
+            transcriptPath: url.path, readLineCount: lines.count, totalLineCount: lines.count,
+            minutesPath: minutesPath)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let json = String(decoding: try encoder.encode(metadata), as: UTF8.self)
@@ -99,61 +62,36 @@ public struct HandoffHistory {
             throw HandoffError.saveFailed(error.localizedDescription)
         }
         guard writeClipboard(prompt) else { throw HandoffError.clipboardFailed }
-        let result = HandoffCopy(preview: preview, prompt: prompt, fileURL: url,
+        let result = HandoffCopy(lineCount: lines.count, prompt: prompt, fileURL: url,
                                  meetingID: meetingID, snapshotID: snapshotID, sequence: sequence)
-        previousLines = lines
-        previousStarts = starts
         lastCopy = result
         return result
     }
 
-    public func recopy(writeClipboard: (String) -> Bool) throws -> HandoffCopy? {
-        guard let lastCopy else { return nil }
-        // ファイル種別と読み取り可能性を確認する。存在するだけのディレクトリは受け付けない。
-        let root = lastCopy.fileURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let rootFD = open(root.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
-        guard rootFD >= 0 else { throw HandoffError.snapshotUnavailable }
-        defer { close(rootFD) }
-        let contextFD = openat(rootFD, ".kikigaki-context", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard contextFD >= 0 else { throw HandoffError.snapshotUnavailable }
-        defer { close(contextFD) }
-        let meetingFD = openat(contextFD, lastCopy.meetingID.uuidString, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard meetingFD >= 0 else { throw HandoffError.snapshotUnavailable }
-        defer { close(meetingFD) }
-        let fd = openat(meetingFD, lastCopy.fileURL.lastPathComponent, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
-        guard fd >= 0 else { throw HandoffError.snapshotUnavailable }
-        defer { close(fd) }
-        var info = stat()
-        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG else {
-            throw HandoffError.snapshotUnavailable
-        }
-        guard writeClipboard(lastCopy.prompt) else { throw HandoffError.clipboardFailed }
-        return lastCopy
-    }
-
+    /// 会議参加モードと同じ範囲の形を保ち、Skillの読み方を共有する。手動コピーは常に全文。
     private struct Metadata: Encodable {
         let schemaVersion = 1
         let meetingID: String
         let snapshotID: String
         let sequence: Int
-        let previousSnapshotID: String?
-        let kind: String
+        let kind = "full"
         let transcriptPath: String
-        let readStartLine: Int
+        let readStartLine = 1
         let readLineCount: Int
         let totalLineCount: Int
+        let minutesPath: String?
 
         enum CodingKeys: String, CodingKey {
             case schemaVersion = "schema_version"
             case meetingID = "meeting_id"
             case snapshotID = "snapshot_id"
             case sequence
-            case previousSnapshotID = "previous_snapshot_id"
             case kind
             case transcriptPath = "transcript_path"
             case readStartLine = "read_start_line"
             case readLineCount = "read_line_count"
             case totalLineCount = "total_line_count"
+            case minutesPath = "minutes_path"
         }
     }
 

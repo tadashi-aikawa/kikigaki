@@ -32,16 +32,17 @@ import KikigakiCore
         let row = Utterance(speaker: nil, start: 0, end: 1, text: "小声")
         var meter = AudioLevelMeter(); meter.append(Array(repeating: 0.001, count: 16000))
         session.setAudioTranscriptForTesting([row], meter: meter, url: root.appendingPathComponent("meeting.md"))
-        session.copyContext(full: true, writeClipboard: { _ in true })
-        #expect(session.snapshot.canRecopy)
+        var copied: [String] = []
+        session.copyContext(writeClipboard: { copied.append($0); return true })
+        #expect(copied.count == 1 && session.snapshot.canCopy)
         let calculationCount = session.audioLevelCalculationCount
         session.setAudioExclusion(.init(enabled: true))
         #expect(session.audioLevelCalculationCount == calculationCount)
         #expect(session.snapshot.audioLevels.isEmpty && session.snapshot.excludedRows == [0])
-        #expect(session.snapshot.includedUtterances.isEmpty && !session.snapshot.canRecopy)
-        #expect(session.snapshot.handoffPreview?.includesCorrections == true)
-        session.copyContext(writeClipboard: { _ in true })
-        #expect(session.snapshot.canRecopy)
+        // 除外で渡す行が無くなったら、空の会話はコピーしない。
+        #expect(session.snapshot.includedUtterances.isEmpty && !session.snapshot.canCopy)
+        session.copyContext(writeClipboard: { copied.append($0); return true })
+        #expect(copied.count == 1)
         session.setAudioExclusion(.init(enabled: true, thresholdDBFS: -70))
         #expect(session.snapshot.includedUtterances == [row])
         #expect(session.audioLevelCalculationCount == calculationCount)

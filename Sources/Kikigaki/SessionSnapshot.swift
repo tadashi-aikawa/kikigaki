@@ -5,7 +5,6 @@ import KikigakiCore
 struct SessionSnapshot {
     var aiSchedule = AIScheduleViewState()
     var ai: AIViewState?
-    var previousAIUnread = 0
     var aiRecoveryWarning: String?
     var state: RecordingState = .idle
     var utterances: [Utterance] = []
@@ -14,12 +13,6 @@ struct SessionSnapshot {
     var excludedRows: Set<Int> = []
     var includedUtterances: [Utterance] { utterances.enumerated().filter { !excludedRows.contains($0.offset) }.map(\.element) }
     var canChangeAudioExclusion: Bool { state != .preparing && state != .finishing }
-    var canRecopy = false
-    var copyBoundaryIndex: Int? {
-        guard let preview = handoffPreview else { return nil }
-        let indices = utterances.indices.filter { !excludedRows.contains($0) }
-        return indices.indices.contains(preview.startLine - 1) ? indices[preview.startLine - 1] : nil
-    }
     var tentativeText: String?
     var tentativeExcluded = false
     var pendingSpeakerRows: Set<Int> = []
@@ -33,8 +26,6 @@ struct SessionSnapshot {
     var markdownURL: URL?
     var message: String?
     var saved = false
-    var handoffPreview: HandoffPreview?
-    var hasCopied = false
     var handoffMessage: String?
     var handoffFailed = false
     var detectedSpeakerSlots: [Int] = []
@@ -65,16 +56,10 @@ struct SessionSnapshot {
         return timeline.clock(at: contextEnd, seconds: true)
     }
 
-    func contextStartClock(_ preview: HandoffPreview) -> String {
-        let index = preview.startLine - 1
-        let included = includedUtterances
-        if included.indices.contains(index) { return TranscriptRenderer.clock(for: included[index], timeline: timeline) }
-        return timeline.clock(at: preview.startTime, seconds: true)
-    }
-
     var canShare: Bool {
         markdownURL != nil && (state == .recording || state == .paused || state == .idle)
     }
+    var canCopy: Bool { canShare && !includedUtterances.isEmpty }
 
     /// AIへ新しく依頼を出せるのは録音中と一時停止中だけ。停止後はherdrのペインを閉じるので、
     /// 会議が終わった後の相談は送らない(自動の「最後の1回」はこの入口を通らない)。

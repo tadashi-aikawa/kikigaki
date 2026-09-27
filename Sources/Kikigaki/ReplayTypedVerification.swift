@@ -24,7 +24,7 @@ import KikigakiCore
             }
         }
         var copyError: Error?
-        session.copyContext(full: true) { prompt in
+        session.copyContext { prompt in
             do { try prompt.write(to: directory.appendingPathComponent("manual-copy.txt"), atomically: true, encoding: .utf8); return true }
             catch { copyError = error; return false }
         }

@@ -46,8 +46,17 @@ import KikigakiCore
         #expect(fired == 1)
         state.aiSchedule.active = false; window.apply(state)
         #expect(window.robotMenu().items.map(\.title) == ["自動実行…", "手動実行…"])
+        // 作り直しは接続が切れた録音中だけ、区切り線の下に出す。
+        var recreated = 0
+        window.onRecreateAI = { recreated += 1 }
+        state.ai?.canRecreate = true; window.apply(state)
+        let broken = window.robotMenu()
+        #expect(broken.items.map(\.title) == ["自動実行…", "手動実行…", "", "AIセッションを作り直す"])
+        broken.performActionForItem(at: 3)
+        #expect(recreated == 1)
         state.state = .idle; window.apply(state)
         #expect(!window.robotMenu().items[0].isEnabled)
+        #expect(!window.robotMenu().items.contains { $0.title == "AIセッションを作り直す" })
     }
 
     @Test func 状態別ラベルと可視性に従って1秒タイマーを止める() throws {

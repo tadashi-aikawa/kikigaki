@@ -131,7 +131,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var aiSheetMeetingID: UUID?
     /// 確認への返答シートが固定している枠。通常のシートはnilで選択中の宛先へ追随する
     private var aiSheetSlot: Int?
-    private var previousAI: AIPastMeetingsWindow?
     /// 開いている開始シート。録音を始めるまでは何も起きていない
     private(set) var startSheet: StartSheet?
     private let replayDebug: ReplayDebugOptions
@@ -237,8 +236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onAudioExclusionChange = { value in session.setAudioExclusion(value) }
         window.onStartStop = { [weak self] in self?.toggleRecording() }
         window.onPauseResume = { session.togglePause() }
-        window.onCopy = { full in session.copyContext(full: full, writeClipboard: Self.writeClipboard) }
-        window.onRecopy = { session.recopyContext(writeClipboard: Self.writeClipboard) }
+        window.onCopy = { session.copyContext(writeClipboard: Self.writeClipboard) }
         window.onAskAI = { [weak self] in self?.showAISheet(parent: $0) }
         window.onResendAI = { [weak self] in self?.showAISheet(parent: nil, resend: $0) }
         window.onScheduleAI = { [weak self] in self?.showScheduleSheet() }
@@ -249,7 +247,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onOpenAIPane = { session.showAIPane() }
         window.onRecreateAI = { session.recreateAI() }
         window.onRetryAISave = { session.retryAISaves() }
-        window.onShowPreviousAI = { [weak self] in self?.showPreviousAI() }
         window.onOpenMarkdown = {
             if session.snapshot.saved, let url = session.snapshot.markdownURL { NSWorkspace.shared.open(url) }
         }
@@ -278,7 +275,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             #endif
             self.window?.connectMinutes(try? session.previewMinutesStore(), waitingPath: session.waitingMinutesPath)
-            self.previousAI?.update()
             self.performReplayDebugActions(snapshot)
             if let sheet = self.aiSheet {
                 // 停止でシートも閉じる。停止後は新しい依頼を送れず、ペインも後片付けで閉じる。
@@ -703,12 +699,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         scheduleSheet = sheet; scheduleSheetMeetingID = session.aiMeetingID
         window?.show(); sheet.present(on: parent)
-    }
-
-    private func showPreviousAI() {
-        guard let aiStore, let session else { return }
-        if previousAI == nil { previousAI = AIPastMeetingsWindow(store: aiStore, current: { [weak session] in session?.aiMeetingID }) }
-        previousAI?.update(); previousAI?.showWindow(nil)
     }
 
     // MARK: - 補助

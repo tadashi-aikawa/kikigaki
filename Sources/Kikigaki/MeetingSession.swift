@@ -63,7 +63,6 @@ final class MeetingSession {
     static let audioExclusionDefaultsKey = "KikigakiAudioExclusion"
     private var audioExclusion = AudioExclusion()
     private var showAudioLevels = false
-    private var recopyInvalidated = false
     private struct AudioInterval: Hashable { let start: Double; let end: Double }
     private var cachedAudioLevels: [AudioInterval: Double?] = [:]
 #if DEBUG
@@ -277,7 +276,6 @@ final class MeetingSession {
         guard snapshot.canChangeAudioExclusion, value != audioExclusion else { return }
         audioExclusion = value
         if let data = try? JSONEncoder().encode(value) { diarizationDefaults?.set(data, forKey: Self.audioExclusionDefaultsKey) }
-        recopyInvalidated = true
         if archive != nil { archive?.original.audioExclusion = value; save() }
         emit()
     }
@@ -301,7 +299,6 @@ final class MeetingSession {
         audioLevelMeter = AudioLevelMeter()
         cachedAudioLevels = [:]
         showAudioLevels = meetingConfig.measureAudioLevels
-        recopyInvalidated = false
         // 開始・停止の進捗は状態チップに任せ、短時間のメッセージでヘッダーを伸縮させない。
         snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers)
         // 開始シートの指定はここで待機指定へ移す。前の会議のMarkdownはもう snapshot にない。
@@ -577,20 +574,15 @@ final class MeetingSession {
         emit()
     }
 
-    func copyContext(full: Bool = false, writeClipboard: (String) -> Bool) {
-        guard snapshot.canShare, let url = snapshot.markdownURL else { return }
+    func copyContext(writeClipboard: (String) -> Bool) {
+        guard snapshot.canCopy, let url = snapshot.markdownURL else { return }
         do {
-            if let copy = try handoff.copy(utterances: snapshot.includedUtterances, names: snapshot.names,
-                                          outputDirectory: url.deletingLastPathComponent(), timeline: snapshot.timeline, full: full,
-                                          writeClipboard: writeClipboard) {
-                recopyInvalidated = false
-                snapshot.handoffMessage = copy.preview.lineCount == 0
-                    ? "会話の訂正をコピーしました"
-                    : "\(snapshot.contextStartClock(copy.preview))以降をコピーしました。AIへ貼り付けられます"
-            } else {
-                snapshot.handoffMessage = "前回のコピーから会話の変更はありません"
+            if try handoff.copy(utterances: snapshot.includedUtterances, names: snapshot.names,
+                                outputDirectory: url.deletingLastPathComponent(), timeline: snapshot.timeline,
+                                minutesPath: copyableMinutesPath(markdownURL: url), writeClipboard: writeClipboard) != nil {
+                snapshot.handoffMessage = "会話をコピーしました。AIへ貼り付けられます"
+                snapshot.handoffFailed = false
             }
-            snapshot.handoffFailed = false
         } catch {
             snapshot.handoffMessage = "コピーできません: \(error.localizedDescription)"
             snapshot.handoffFailed = true
@@ -598,17 +590,11 @@ final class MeetingSession {
         emit()
     }
 
-    func recopyContext(writeClipboard: (String) -> Bool) {
-        guard snapshot.canShare, !recopyInvalidated else { return }
-        do {
-            guard try handoff.recopy(writeClipboard: writeClipboard) != nil else { return }
-            snapshot.handoffMessage = "直前と同じ範囲をコピーしました"
-            snapshot.handoffFailed = false
-        } catch {
-            snapshot.handoffMessage = "再コピーできません: \(error.localizedDescription)"
-            snapshot.handoffFailed = true
-        }
-        emit()
+    /// 表示中の議事録を渡す。まだ無いファイルは読めないので、書き先の予定だけでは渡さない。
+    private func copyableMinutesPath(markdownURL: URL) -> String? {
+        guard let path = try? aiStore?.minutesStores.store(meetingID: handoff.meetingID, markdownURL: markdownURL).state.minutesPath,
+              FileManager.default.fileExists(atPath: path) else { return nil }
+        return path
     }
 
     // MARK: - 内部
@@ -648,14 +634,6 @@ final class MeetingSession {
         snapshot.nextDiarizationEnabled = nextDiarizationEnabled
         refreshAudioSnapshot()
         snapshot.timeline = pause.timeline
-        snapshot.handoffPreview = handoff.preview(utterances: snapshot.includedUtterances, names: snapshot.names, timeline: snapshot.timeline)
-        snapshot.hasCopied = handoff.lastCopy != nil
-        snapshot.canRecopy = snapshot.hasCopied && !recopyInvalidated
-        snapshot.previousAIUnread = aiStore?.records.values.filter { $0.manifest.meetingID != handoff.meetingID }
-            .reduce(0) { count, record in
-                let questions = record.controller.conversation.questions
-                return count + questions.filter { AIBadgeKind.confirmation.matches($0, in: questions) }.count
-            } ?? 0
         snapshot.aiRecoveryWarning = aiStore?.warnings.first
         snapshot.aiSchedule = AIScheduleViewState(schedule: aiSchedule, warning: aiScheduleWarning,
             destination: meetingAIProfiles.count > 1 ? aiScheduleConfiguration?.name : nil,

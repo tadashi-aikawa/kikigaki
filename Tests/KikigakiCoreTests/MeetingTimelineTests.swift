@@ -123,13 +123,9 @@ import Testing
         let final = LiveTranscript(tokens: tokens, speakers: [0, 1, 1], finalCount: 3)
         let second = try #require(history.copy(utterances: final.utterances, names: .init(), outputDirectory: directory,
                                               timeline: timeline) { _ in true })
-        #expect(second.preview.startLine == 2)
-        #expect(second.preview.startTime == 3)
-        #expect(!second.preview.includesCorrections)
+        #expect(second.lineCount == final.utterances.count)
         let stamp = timeline.clock(at: 3, seconds: true)
         #expect(try String(contentsOf: second.fileURL, encoding: .utf8).contains("[\(stamp)] 話者B: 次は予算です"))
         #expect(try String(contentsOf: first.fileURL, encoding: .utf8) == original)
-        #expect(try history.recopy { _ in true } == second)
-        #expect(history.preview(utterances: final.utterances, names: .init(), timeline: timeline) == nil)
     }
 }

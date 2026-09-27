@@ -39,22 +39,32 @@ import KikigakiCore
         #expect(label.textColor == Washi.red)
     }
 
-    @Test func その他メニューの入口と状態別有効化を維持する() {
+    @Test func その他メニューはAIの項目を使える時だけ出す() {
         _ = NSApplication.shared
         let window = TranscriptWindowController()
-        window.apply(SessionSnapshot(ai: AIViewState(), state: .recording))
-        #expect(!window.footerMenu().items.contains { $0.title == "自動送信…" || $0.title == "自動送信を停止" || $0.title == "前の会議に返事あり" })
-        var state = window.snapshot
-        state.aiSchedule.active = true; state.aiSchedule.nextFire = Date().addingTimeInterval(180); state.previousAIUnread = 1
+        var ai = AIViewState(); ai.canOpenPane = false
+        var state = SessionSnapshot(ai: ai, state: .recording)
+        state.aiSchedule.active = true; state.aiSchedule.nextFire = Date().addingTimeInterval(180)
+        state.aiRecoveryWarning = "復元できない会議があります"
+        window.apply(state)
+        // 自動送信・作り直しはロボットへ集め、前の会議の案内は出さない。
+        let quiet = window.footerMenu()
+        #expect(quiet.items.map(\.title) == ["会話をコピー"])
+        #expect(!quiet.items[0].isEnabled)
+        state.utterances = [.init(speaker: 0, start: 0, end: 1, text: "本文")]
+        state.markdownURL = URL(fileURLWithPath: "/tmp/kikigaki-menu.md")
+        state.ai?.canOpenPane = true; state.ai?.saveFailed = true; state.ai?.canRecreate = true
         window.apply(state)
         let menu = window.footerMenu()
-        #expect(menu.items.map(\.title) == ["会話をコピー", "今すぐ送る", "ペインを開く", "AIセッションを作り直す", "保存を再試行", "前の会議に要返答・警告あり"])
-        var fired = false
-        window.onFireScheduleAI = { fired = true }
-        if let index = menu.items.firstIndex(where: { $0.title == "今すぐ送る" }) { menu.performActionForItem(at: index) }
-        #expect(fired)
-        state.aiSchedule.skipReason = "返事待ちでスキップ中"; state.aiSchedule.canFireNow = false; window.apply(state)
-        #expect(window.footerMenu().items.first { $0.title == "今すぐ送る" }?.isEnabled == false)
-        #expect(menu.items.filter { ["会話をコピー", "AIセッションを作り直す", "保存を再試行"].contains($0.title) }.allSatisfy { !$0.isEnabled })
+        #expect(menu.items.map(\.title) == ["会話をコピー", "", "ペインを開く", "保存を再試行"])
+        #expect(menu.items.filter { !$0.isSeparatorItem }.allSatisfy { $0.isEnabled })
+        var opened = false, retried = false
+        window.onOpenAIPane = { opened = true }; window.onRetryAISave = { retried = true }
+        menu.performActionForItem(at: 2); menu.performActionForItem(at: 3)
+        #expect(opened && retried)
+        state.state = .idle; state.ai?.canOpenPane = false; state.ai?.saveFailed = false
+        window.apply(state)
+        #expect(window.footerMenu().items.map(\.title) == ["会話をコピー"])
+        #expect(window.footerMenu().items[0].isEnabled)
     }
 }

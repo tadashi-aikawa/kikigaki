@@ -109,7 +109,7 @@ import KikigakiAIIO
         #expect(window.transcriptDocument.frame.height == scrolledHeight)
     }
 
-    @Test func 自動宛先を保存復元し過去会議にも発話と境界を表示する() async throws {
+    @Test func 自動宛先を保存復元し作り直しで境界を捨てる() async throws {
         _ = NSApplication.shared
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let registry = try testDirectory(); defer { try? FileManager.default.removeItem(at: registry) }
@@ -142,13 +142,6 @@ import KikigakiAIIO
         recovered.setAutomaticSlot(2, for: restored)
         #expect(restored.manifest.automaticSlot == 1)
         #expect(restored.controller.rangeBoundaries(slot: restored.manifest.automaticSlot, utterances: utterances) == .init(accepted: 1))
-        let window = AIPastMeetingsWindow(store: recovered, current: { nil })
-        window.window!.setFrameAutosaveName(""); window.window!.setContentSize(NSSize(width: 600, height: 600))
-        window.update(); window.window!.contentView!.layoutSubtreeIfNeeded()
-        let document = try #require(descendants(window.window!.contentView!).compactMap { $0 as? TranscriptDocument }.first)
-        #expect(document.rows.compactMap { $0 as? TranscriptRow }.count == 2)
-        #expect(document.rangeMarkers.count == 1)
-        try capture("range-past-600", window.window!.contentView!.superview!)
         try record.controller.newGeneration()
         let afterRecreation = AIRecordStore(directory: registry); afterRecreation.recover()
         let newRecord = try #require(afterRecreation.records[record.manifest.meetingID])

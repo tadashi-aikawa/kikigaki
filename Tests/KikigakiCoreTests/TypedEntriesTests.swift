@@ -199,9 +199,8 @@ import Testing
         let secondCopy = try history.copy(utterances: merged, names: SpeakerNames(), outputDirectory: dir,
             timeline: timeline, writeClipboard: { _ in true })
         let second = try #require(secondCopy)
-        #expect(second.preview.startLine == 2 && second.preview.includesCorrections)
+        #expect(second.lineCount == merged.count)
         #expect(try String(contentsOf: second.fileURL, encoding: .utf8).contains("手入力: " + entry.text))
         #expect(try Data(contentsOf: first.fileURL) == original)
-        #expect(try history.recopy(writeClipboard: { _ in true }) == second)
     }
 }

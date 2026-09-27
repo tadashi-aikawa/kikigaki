@@ -65,21 +65,21 @@ import Testing
         #expect(raw.contains("通常の声。") && raw.contains("小さな声。") && !raw.contains("## 小音量で除外した発話"))
         #expect(!FileManager.default.fileExists(atPath: MeetingFiles.levelsURL(for: url).path))
     }
-    @Test func 全除外は削除訂正となり復元も差分で伝える() throws {
+    @Test func 全除外はコピーせず復元は全文で渡す() throws {
         let (track, rows) = try fixture()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let quiet = [rows[1]], names = SpeakerNames()
         var history = HandoffHistory()
-        #expect(history.preview(utterances: [], names: names) == nil)
         _ = try history.copy(utterances: quiet, names: names, outputDirectory: root, writeClipboard: { _ in true })
         let empty = AudioExclusion(enabled: true).included(quiet, track: track)
-        let removedCopy = try history.copy(utterances: empty, names: names, outputDirectory: root, writeClipboard: { _ in true })
-        let removal = try #require(removedCopy)
-        #expect(removal.preview.lineCount == 0 && removal.preview.includesCorrections)
+        #expect(try history.copy(utterances: empty, names: names, outputDirectory: root, writeClipboard: { _ in
+            Issue.record("空の会話をコピーした")
+            return true
+        }) == nil)
         let restoredCopy = try history.copy(utterances: quiet, names: names, outputDirectory: root, writeClipboard: { _ in true })
         let restored = try #require(restoredCopy)
-        #expect(restored.preview.lineCount == 1)
+        #expect(restored.lineCount == 1 && restored.sequence == 2)
     }
 }

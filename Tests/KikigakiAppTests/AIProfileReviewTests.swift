@@ -133,7 +133,6 @@ import KikigakiCore
             .init(speaker: 0, start: 370, end: 376, text: "会場は本社の大会議室にしましょう。"),
         ], timeline: .init(startedAt: started), elapsed: 400, markdownURL: root.appendingPathComponent("meeting.md"))
         state.detectedSpeakerSlots = [0, 1, 2]
-        state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
         state.aiSchedule = AIScheduleViewState(schedule: nil, warning: nil, destination: "議事録")
 
         for width in [600, 900] {

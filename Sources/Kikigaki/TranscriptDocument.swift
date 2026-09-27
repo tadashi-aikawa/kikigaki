@@ -25,21 +25,6 @@ final class AIRangeBoundaryView: NSView {
 
 protocol DocumentRow: NSView { func height(for width: CGFloat) -> CGFloat }
 
-final class CopyBoundary: NSView, DocumentRow {
-    override var isFlipped: Bool { true }
-    func height(for width: CGFloat) -> CGFloat { 32 }
-    override func draw(_ dirtyRect: NSRect) {
-        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: Washi.muted]
-        let text = "次にコピーする範囲" as NSString
-        let size = text.size(withAttributes: attributes)
-        let x = (bounds.width - size.width) / 2
-        Washi.rule.setFill()
-        NSRect(x: 56, y: 15, width: max(0, x - 68), height: 0.5).fill()
-        NSRect(x: x + size.width + 12, y: 15, width: max(0, bounds.width - x - size.width - 32), height: 0.5).fill()
-        text.draw(at: NSPoint(x: x, y: 7), withAttributes: attributes)
-    }
-}
-
 /// 行ビューを再利用する。再配置は高さの加算だけで、本文の計測は変更行だけに限る。
 final class TranscriptDocument: NSView {
     override var isFlipped: Bool { true }

@@ -8,8 +8,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     let typedEntry = TypedEntryField()
     var onStartStop: (() -> Void)?
     var onPauseResume: (() -> Void)?
-    var onCopy: ((Bool) -> Void)?
-    var onRecopy: (() -> Void)?
+    var onCopy: (() -> Void)?
     var onOpenMarkdown: (() -> Void)?
     var onSpeakerMappingChange: ((Int, Int?) -> Void)?
     var onAskAI: ((UUID?) -> Void)?
@@ -25,7 +24,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onResendAI: ((UUID) -> Void)?
     var onRecreateAI: (() -> Void)?
     var onRetryAISave: (() -> Void)?
-    var onShowPreviousAI: (() -> Void)?
     private var aiRows: [String: any AITimelineRowView] = [:]
     private var aiProgress: [UUID: AIProgress] = [:]
     private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
@@ -54,7 +52,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let emptyView = NSStackView()
     private let emptyLabel = Washi.label(size: 13, color: Washi.muted)
     private var renamePopover: SpeakerPopover?
-    private let boundary = CopyBoundary()
     private let tentativeRow = TranscriptRow(tentative: true)
     private let avatars = AvatarStore()
     private let shouldReduceMotion: () -> Bool
@@ -344,7 +341,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         var changed: [TranscriptRow] = []
         for item in attached[-1, default: []] { ordered.append(aiRowView(item)) }
         for (index, utterance) in snapshot.utterances.enumerated() {
-            if snapshot.hasCopied, snapshot.copyBoundaryIndex == index { ordered.append(boundary) }
             let key = RowKey(kind: utterance.kind, start: utterance.start)
             let occurrence = occurrences[key, default: 0]
             occurrences[key] = occurrence + 1
@@ -579,20 +575,13 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self; item.isEnabled = enabled; menu.addItem(item)
         }
-        add("会話をコピー", #selector(copyPressed), enabled: snapshot.canShare && snapshot.handoffPreview != nil)
+        add("会話をコピー", #selector(copyPressed), enabled: snapshot.canCopy)
         menu.items.last?.toolTip = snapshot.handoffMessage
-        if snapshot.hasCopied {
-            add("直前の範囲を再コピー", #selector(recopyPressed), enabled: snapshot.canShare && snapshot.canRecopy)
-            add("会議の最初からコピー", #selector(fullCopyPressed), enabled: snapshot.canShare)
-        }
-        if snapshot.aiSchedule.active {
-            add("今すぐ送る", #selector(fireAutomaticPressed),
-                enabled: canFireAutomatic)
-        }
-        add("ペインを開く", #selector(panePressed), enabled: snapshot.ai?.canOpenPane == true)
-        add("AIセッションを作り直す", #selector(recreatePressed), enabled: snapshot.ai?.canRecreate == true)
-        add("保存を再試行", #selector(retrySavePressed), enabled: snapshot.ai?.saveFailed == true)
-        if snapshot.previousAIUnread > 0 || snapshot.aiRecoveryWarning != nil { add("前の会議に要返答・警告あり", #selector(previousPressed)) }
+        // AIの項目は使える時だけ出す。停止後などに押せない項目を並べて読み飛ばさせない。
+        let panes = snapshot.ai?.canOpenPane == true, saveFailed = snapshot.ai?.saveFailed == true
+        if panes || saveFailed { menu.addItem(.separator()) }
+        if panes { add("ペインを開く", #selector(panePressed)) }
+        if saveFailed { add("保存を再試行", #selector(retrySavePressed)) }
         return menu
     }
     private func showFooterMenu() {
@@ -622,6 +611,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
                 enabled: snapshot.ai != nil && (snapshot.state == .recording || snapshot.state == .paused))
         }
         add("手動実行…", #selector(askPressed), enabled: snapshot.ai != nil && snapshot.canSubmitAI)
+        // 接続が切れた時だけ出す。停止後は依頼を送れないので作り直しても使い道がない。
+        if snapshot.canSubmitAI, snapshot.ai?.canRecreate == true {
+            menu.addItem(.separator())
+            add("AIセッションを作り直す", #selector(recreatePressed), enabled: true)
+        }
         return menu
     }
     func robotMenuPosition(_ menu: NSMenu) -> NSPoint {
@@ -640,7 +634,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     @objc private func panePressed() { onOpenAIPane?() }
     @objc private func recreatePressed() { onRecreateAI?() }
     @objc private func retrySavePressed() { onRetryAISave?() }
-    @objc private func previousPressed() { onShowPreviousAI?() }
     @objc private func pausePressed() { onPauseResume?() }
     @objc private func openPressed() { onOpenMarkdown?() }
     @objc private func speakerPressed() {
@@ -659,23 +652,13 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         action()
         copyRequested = false
     }
-    @objc private func copyPressed() { copyWithNotice { onCopy?(false) } }
-    @objc func recopyPressed() {
-        guard snapshot.canShare && snapshot.canRecopy else { return }
-        copyWithNotice { onRecopy?() }
-    }
-    @objc func fullCopyPressed() {
-        guard snapshot.canShare && (snapshot.hasCopied || !snapshot.utterances.isEmpty) else { return }
-        copyWithNotice { onCopy?(true) }
-    }
+    @objc private func copyPressed() { copyWithNotice { onCopy?() } }
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(toggleMinutes) {
             menuItem.title = minutesSplit.isPreviewVisible ? "議事録を隠す" : "議事録を表示"
             menuItem.state = minutesSplit.isPreviewVisible ? .on : .off
             return true
         }
-        if menuItem.action == #selector(recopyPressed) { return snapshot.canShare && snapshot.canRecopy }
-        if menuItem.action == #selector(fullCopyPressed) { return snapshot.canShare && (snapshot.hasCopied || !snapshot.utterances.isEmpty) }
         return true
     }
     @objc private func latestPressed() {

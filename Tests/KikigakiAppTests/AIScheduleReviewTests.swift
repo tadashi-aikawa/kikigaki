@@ -69,7 +69,6 @@ import KikigakiAIIO
         var state = SessionSnapshot(ai: AIViewState(conversation: conversation, connection: .idle), state: .recording,
             utterances: meeting.utterances, timeline: meeting.timeline, names: meeting.names,
             elapsed: meeting.duration, markdownURL: archive.markdownURL)
-        state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
         state.ai?.conversation = nil
         window.apply(state); try capture("schedule-entry", view)
         state.ai?.conversation = conversation

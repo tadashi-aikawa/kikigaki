@@ -4,16 +4,11 @@ import KikigakiCore
 @testable import Kikigaki
 
 @Suite(.timeLimit(.minutes(1))) @MainActor struct TypedEntryTests {
-    @Test func 会話範囲の始点と終点はフォールバックも秒を表示する() throws {
+    @Test func 会話範囲の終点はフォールバックも秒を表示する() throws {
         let start = Date(timeIntervalSince1970: 0)
         let voice = Utterance(speaker: 0, start: 61, end: 62, text: "確認")
         var state = SessionSnapshot(utterances: [voice], timeline: MeetingTimeline(startedAt: start), elapsed: 72)
-        let preview = try #require(HandoffHistory().preview(utterances: [voice], names: SpeakerNames(), timeline: state.timeline))
-        let expectedStart = state.timeline.clock(at: 61, seconds: true)
-        #expect(state.contextStartClock(preview) == expectedStart)
         #expect(state.contextEndClock == state.timeline.clock(at: 72, seconds: true))
-        state.utterances = []
-        #expect(state.contextStartClock(preview) == expectedStart)
         state.utterances = [try .init(typedText: "手入力", at: 72, postedAt: start.addingTimeInterval(95))]
         #expect(state.contextEndClock == state.timeline.clock(at: 95, seconds: true))
     }
@@ -187,7 +182,6 @@ import KikigakiCore
         controller.window!.setContentSize(NSSize(width: 600, height: 640))
         func refresh() {
             state.utterances = TranscriptEntries.merge(voice: voices, typed: entries, timeline: state.timeline).utterances
-            state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
             controller.apply(state)
         }
         func capture(_ name: String) throws {

@@ -32,7 +32,7 @@ import KikigakiAIIO
         var schedule = AIScheduleState(meetingID: meeting)
         try schedule.start(options: .init(prompt: "議事録を更新", interval: 180), now: now.addingTimeInterval(-78), runID: UUID())
         var state = SessionSnapshot(ai: AIViewState(conversation: conversation, warning: "フック観測を確認できません。ペインで状況を確認してください"),
-            previousAIUnread: 1, state: .recording,
+            state: .recording,
             utterances: [.init(speaker: 0, start: 314, end: 320, text: "説明を十分、体験を二十分に分けますか。"),
                          .init(speaker: 1, start: 328, end: 338, text: "最後に質問の時間も五分あると安心ですね。")],
             timeline: MeetingTimeline(startedAt: started), names: SpeakerNames([0: "佐藤", 1: "鈴木"]),
@@ -149,7 +149,6 @@ import KikigakiAIIO
         #expect(clocks.count == (waiting ? 3 : 4)) // 発話・手入力・人側の送信・到着後だけAIの返事
         #expect(clocks.allSatisfy { $0.frame.width >= $0.intrinsicContentSize.width })
         try capture("feedback-avatar-900", view: content.superview!)
-        state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
         window.window!.setContentSize(NSSize(width: 600, height: 750))
         window.apply(state); content.layoutSubtreeIfNeeded()
         try capture("feedback-long-address-pills-600", view: content.superview!)
@@ -197,7 +196,6 @@ import KikigakiAIIO
         var state = SessionSnapshot(ai: AIViewState(conversation: conversation), state: .recording,
             utterances: [.init(speaker: 0, start: 320, end: 322, text: "案内は社内向けで進めましょう。")],
             timeline: .init(startedAt: started), elapsed: 340, markdownURL: root.appendingPathComponent("meeting.md"))
-        state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
         let window = TranscriptWindowController(shouldReduceMotion: { true })
         window.window!.setFrameAutosaveName("")
         window.window!.setFrame(NSRect(x: 20000, y: 20000, width: 680, height: 620), display: false)
@@ -242,7 +240,6 @@ import KikigakiAIIO
                          Utterance(speaker: 0, start: 350, end: 355, text: "次の話題へ進めましょう。")],
             tentativeText: "参加者への案内は", timeline: MeetingTimeline(startedAt: started),
             names: SpeakerNames([0: "田中", 1: "松村"]), elapsed: 375, markdownURL: root.appendingPathComponent("meeting.md"))
-        state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
         let window = TranscriptWindowController(shouldReduceMotion: { true })
         window.window!.setFrameAutosaveName("")
         window.window!.setFrame(NSRect(x: 20000, y: 20000, width: 680, height: 900), display: false)
@@ -280,12 +277,6 @@ import KikigakiAIIO
         // 返事待ちは末尾。声ではない送信なので細い1行にはしない。
         #expect(window.transcriptDocument.rows.last(where: { $0 is AIReplyRow }) === waiting || waiting.frame.minY > answer.frame.minY)
         try capture("timeline-states", view: content.superview!)
-        state.previousAIUnread = 1; apply()
-        var previousOpened = false
-        window.onShowPreviousAI = { previousOpened = true }
-        let menu = window.footerMenu()
-        let previous = try #require(menu.items.firstIndex { $0.title == "前の会議に要返答・警告あり" })
-        menu.performActionForItem(at: previous); #expect(previousOpened)
         let footer = window.compactFooter
         try capture("timeline-footer", view: footer)
         var readIDs: [UUID] = []
@@ -344,7 +335,6 @@ import KikigakiAIIO
         var state = SessionSnapshot(ai: AIViewState(conversation: conversation), state: .recording,
             utterances: [.init(speaker: 0, start: 320, end: 325, text: "うんうん、悪くはないかな。"), .init(speaker: 0, start: 330, end: 333, text: "ありがとう。")],
             timeline: .init(startedAt: started), elapsed: 380, markdownURL: root.appendingPathComponent("meeting.md"))
-        state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
         let window = TranscriptWindowController(shouldReduceMotion: { true })
         window.window!.setFrameAutosaveName("")
         window.window!.setFrame(NSRect(x: 20000, y: 20000, width: 680, height: 620), display: false)
@@ -705,7 +695,6 @@ import KikigakiAIIO
             utterances: utterances, timeline: MeetingTimeline(startedAt: started),
             names: SpeakerNames([0: "佐藤", 1: "鈴木", 2: "田中", 3: "松村"]), elapsed: 520,
             markdownURL: root.appendingPathComponent("meeting.md"))
-        state.handoffPreview = HandoffHistory().preview(utterances: state.utterances, names: state.names, timeline: state.timeline)
         let window = TranscriptWindowController(shouldReduceMotion: { true })
         window.window!.setFrameAutosaveName("")
         let content = window.window!.contentView!
@@ -746,49 +735,5 @@ import KikigakiAIIO
         try shoot("timeline-busy-900", width: 900)
         // 声と自動だけが細い1行。問い欄からの送信は文字があるので人側の行になる。
         #expect(window.transcriptDocument.rows.compactMap { $0 as? AISendLineRow }.count == 6)
-    }
-
-    @Test func 旧会議も展開既定で印から既読にでき新規送信の操作は出さない() async throws {
-        _ = NSApplication.shared
-        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
-        let registry = try testDirectory(); defer { try? FileManager.default.removeItem(at: registry) }
-        let fake = FakeHerdr()
-        let store = AIRecordStore(directory: registry, makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
-        let record = try store.begin(meetingID: UUID(), markdownURL: root.appendingPathComponent("old.md"), config: .init(config: AIConfig(), home: root))
-        let request = try record.controller.prepare(lines: [], question: "明示質問", voiceQuestion: "", capturedAt: Date(), cutoff: 0,
-            tail: nil, config: record.manifest.config, helper: root.appendingPathComponent("helper"))
-        try await record.controller.connect(config: record.manifest.config, label: "test", executable: root.appendingPathComponent("fake"), arguments: [])
-        try await record.controller.send(request, config: record.manifest.config)
-        let window = AIPastMeetingsWindow(store: store, current: { UUID() })
-        window.update()
-        let pending = try #require(descendants(window.window!.contentView!).compactMap { $0 as? AIReplyRow }.first)
-        #expect(pending.progressView.progress?.isHistorical == true)
-        #expect(pending.progressView.displayText == "送信済み · AIが読込中")
-        #expect(!pending.progressView.timerRunning && pending.noteText.isEmpty)
-        let event = try AIReceiveEvent(request: request, kind: .answered, recordedAt: Date(), body: "停止後の回答です。")
-        try AIFileStore(root: root).write(AIJSON.encode(event), to: [".kikigaki-context", record.manifest.meetingID.uuidString, "ai", "inbox", request.id.uuidString + ".result.json"], replacing: false)
-        record.controller.scan()
-        window.window!.setFrameAutosaveName("")
-        window.window!.setFrame(NSRect(x: 20000, y: 20000, width: 620, height: 700), display: false)
-        window.update()
-        let content = window.window!.contentView!; content.layoutSubtreeIfNeeded()
-        let answer = try #require(descendants(content).compactMap { $0 as? AIReplyRow }.first)
-        #expect(answer.accent == nil && answer.pillStyle == nil)
-        // 発話を持たないので、声でない送信も日時順の人側の行として並ぶ。
-        #expect(descendants(content).compactMap { $0 as? AITypedSendRow }.count == 1)
-        // 旧会議も明示クリックだけで既読にする。本番の配線を通す。
-        #expect(record.controller.conversation.questions[0].isUnread)
-        answer.statusPill.performClick(nil)
-        content.layoutSubtreeIfNeeded()
-        #expect(record.controller.conversation.questions[0].isUnread)
-        let after = try #require(descendants(content).compactMap { $0 as? AIReplyRow }.first)
-        #expect(after.accent == nil && after.pillStyle == nil)
-        window.update()
-        let buttons = descendants(content).compactMap { $0 as? NSButton }
-        #expect(!buttons.contains { $0.title.hasPrefix("AIへ") && $0.title != "AIへ送信" })
-        #expect(buttons.filter { ["取消", "返答する", "再送"].contains($0.title) }.allSatisfy { $0.isHidden })
-        #expect(buttons.contains { $0.title == "ペインを開く" && !$0.isHidden })
-        #expect(descendants(content).compactMap { $0 as? NSPopUpButton }.first?.titleOfSelectedItem == "old")
-        try capture("timeline-previous-meeting", view: content.superview!)
     }
 }
