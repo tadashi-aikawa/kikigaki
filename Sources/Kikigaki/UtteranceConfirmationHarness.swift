@@ -3,10 +3,10 @@ import AppKit
 import KikigakiCore
 
 /// 実寸検分用。トークン境界から本番Coreで導出したsnapshotを製品ウィンドウへ渡す。
-@MainActor final class UtteranceGaugeHarness: NSObject, NSApplicationDelegate {
+@MainActor final class UtteranceConfirmationHarness: NSObject, NSApplicationDelegate {
     private var controller: TranscriptWindowController!
     private let output: URL
-    private let suite = "kikigaki-row-gauge-" + UUID().uuidString
+    private let suite = "kikigaki-row-confirmation-" + UUID().uuidString
     private let start = ISO8601DateFormatter().date(from: "2026-09-13T05:00:00Z")!
     private let texts = ["来週の公開に向けて、確認事項を整理します。", "録音と議事録の保存は、私が確認します。",
                          "AIへの依頼は、受領したか分かると助かります。", "話者が変わるところも、もう一度見ましょう。", "では、確認結果を今日中にまとめます。"]
@@ -21,9 +21,9 @@ import KikigakiCore
             controller.show()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
                 do { try renderAll(); NSApp.terminate(nil) }
-                catch { FileHandle.standardError.write(Data("row gauge: \(error)\n".utf8)); exit(1) }
+                catch { FileHandle.standardError.write(Data("row confirmation: \(error)\n".utf8)); exit(1) }
             }
-        } catch { FileHandle.standardError.write(Data("row gauge: \(error)\n".utf8)); exit(1) }
+        } catch { FileHandle.standardError.write(Data("row confirmation: \(error)\n".utf8)); exit(1) }
     }
     func applicationWillTerminate(_ notification: Notification) {
         UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
@@ -48,7 +48,7 @@ import KikigakiCore
         }
         let merged = TranscriptEntries.merge(voice: live.utterances, typed: typed, timeline: timeline,
             pendingVoiceRows: live.pendingSpeakerRows,
-            voiceProgress: stopped ? nil : live.progress(accurateFinalCount: busy ? 7 : 3))
+            unconfirmedVoiceRows: stopped ? [] : live.unconfirmedRows(accurateFinalCount: busy ? 7 : 3))
         var value = SessionSnapshot()
         value.state = stopped ? .idle : .recording
         value.elapsed = Double(count * 8)
@@ -61,28 +61,37 @@ import KikigakiCore
         value.utterances = merged.utterances
         value.pendingSpeakerRows = merged.pendingSpeakerRows
         value.tentativeText = live.tentativeText
-        value.utteranceProgress = merged.progress
-        if busy, let index = value.utterances.firstIndex(where: { $0.start == 64 && $0.kind == .voice }) {
-            value.excludedRows = [index]
+        value.unconfirmedRows = merged.unconfirmedRows
+        if busy {
+            // 確定済みと未確定の行を1つずつ除外し、除外の薄さが未確定と掛け合わないことを見比べる。
+            value.excludedRows = Set([8.0, 64.0].compactMap { start in
+                value.utterances.firstIndex { $0.start == start && $0.kind == .voice }
+            })
         }
         return value
     }
 
+    /// 同じ内容のまま、声の行をすべて未確定またはすべて確定にした比較用。暫定末尾は常に未確定。
+    private func uniform(_ value: SessionSnapshot, unconfirmed: Bool) -> SessionSnapshot {
+        var copy = value
+        copy.unconfirmedRows = unconfirmed
+            ? Set(value.utterances.indices.filter { value.utterances[$0].kind == .voice }) : []
+        return copy
+    }
+
     private func renderAll() throws {
-        let live = try snapshot()
-        var before = live; before.utteranceProgress = nil
-        try capture("row-before", before)
-        try capture("row-live", live)
-        try capture("row-stopped", snapshot(stopped: true))
+        let on = try snapshot()
+        try capture("on-unconfirmed", uniform(on, unconfirmed: true))
+        try capture("on-confirmed", uniform(on, unconfirmed: false))
+        try capture("on-live", on)
+        try capture("on-stopped", snapshot(stopped: true))
         let off = try snapshot(diarization: false)
-        var offBefore = off; offBefore.utteranceProgress = nil
-        try capture("row-off-before", offBefore)
-        try capture("row-off-live", off)
-        try capture("row-off-stopped", snapshot(diarization: false, stopped: true))
-        let busy = try snapshot(busy: true)
-        var busyBefore = busy; busyBefore.utteranceProgress = nil
-        try capture("row-busy-before", busyBefore)
-        try capture("row-busy-live", busy)
+        try capture("off-unconfirmed", uniform(off, unconfirmed: true))
+        try capture("off-confirmed", uniform(off, unconfirmed: false))
+        try capture("off-live", off)
+        // 先頭側に確定+除外、末尾側に未確定+除外が入る。
+        try capture("busy-top", snapshot(busy: true))
+        try capture("busy-bottom", snapshot(busy: true))
     }
 
     private func capture(_ name: String, _ snapshot: SessionSnapshot) throws {
@@ -94,7 +103,7 @@ import KikigakiCore
         let document = controller.transcriptDocument
         if let scroll = document.enclosingScrollView {
             let maximum = max(0, document.frame.height - scroll.contentSize.height)
-            let y = name.contains("busy") ? maximum : 0
+            let y = name.hasSuffix("bottom") ? maximum : 0
             scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
             scroll.reflectScrolledClipView(scroll.contentView)
         }
@@ -109,8 +118,11 @@ import KikigakiCore
         view.cacheDisplay(in: view.bounds, to: actual)
         guard let actualPNG = actual.representation(using: .png, properties: [:]) else { throw AIError.invalid("1x png") }
         try actualPNG.write(to: output.appendingPathComponent(name + "-1x.png"))
-        let stages = snapshot.utteranceProgress?.rows.map { $0?.label ?? "非表示" }.joined(separator: ",") ?? "全て非表示"
-        print("\(name): \(Int(view.bounds.width))×\(Int(view.bounds.height))pt, rows=\(stages), tentative=\(snapshot.utteranceProgress?.tentative?.label ?? "非表示")")
+        let rows = snapshot.utterances.indices.map { index in
+            let kind = snapshot.utterances[index].kind == .typed ? "手入力" : snapshot.unconfirmedRows.contains(index) ? "未確定" : "確定"
+            return snapshot.excludedRows.contains(index) ? kind + "+除外" : kind
+        }.joined(separator: ",")
+        print("\(name): \(Int(view.bounds.width))×\(Int(view.bounds.height))pt, rows=\(rows), tentative=\(snapshot.tentativeText == nil ? "なし" : "未確定")")
     }
 }
 #endif

@@ -34,18 +34,12 @@ public struct LiveTranscript: Equatable, Sendable {
         tentativeText = text.isEmpty ? nil : text
     }
 
+    /// 薄く表示する未確定の行の添字。オンは高精度の文字と話者固定、オフは高精度の文字が行全体に届くまで未確定とする。
     /// 同じ合成スナップショットの高精度確定数を必ず渡す。停止結果にはこの表示情報を引き継がない。
-    public func progress(accurateFinalCount: Int) -> UtteranceProgress {
+    public func unconfirmedRows(accurateFinalCount: Int) -> Set<Int> {
         let accurate = min(max(0, accurateFinalCount), finalCount)
-        let frozen = min(max(0, frozenCount), accurate)
-        let rows: [UtteranceProgress.Stage?] = rowTokenRanges.map { range in
-            if range.upperBound > accurate { return .fastFinal }
-            if diarizationEnabled && range.upperBound > frozen { return .accurateFinal }
-            return nil
-        }
-        return UtteranceProgress(steps: diarizationEnabled
-            ? [.tentative, .fastFinal, .accurateFinal, .speakerFixed]
-            : [.tentative, .fastFinal, .accurateFinal],
-            rows: rows, tentative: tentativeText != nil ? .tentative : nil)
+        let confirmed = diarizationEnabled ? min(frozenCount, accurate) : accurate
+        // 行の途中までしか届いていなければ未確定。後続の文字が同じ行へ伸びれば再び未確定になる。
+        return Set(rowTokenRanges.indices.filter { rowTokenRanges[$0].upperBound > confirmed })
     }
 }

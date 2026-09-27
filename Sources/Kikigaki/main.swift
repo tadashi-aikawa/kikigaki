@@ -40,8 +40,8 @@ MainActor.assumeIsolated {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     #if DEBUG
-    if let index = CommandLine.arguments.firstIndex(of: "--utterance-gauge"), index + 1 < CommandLine.arguments.count {
-        let delegate = UtteranceGaugeHarness(output: CommandLine.arguments[index + 1])
+    if let index = CommandLine.arguments.firstIndex(of: "--utterance-confirmation"), index + 1 < CommandLine.arguments.count {
+        let delegate = UtteranceConfirmationHarness(output: CommandLine.arguments[index + 1])
         app.delegate = delegate; app.run(); return
     }
     if CommandLine.arguments.contains("--show-window"),

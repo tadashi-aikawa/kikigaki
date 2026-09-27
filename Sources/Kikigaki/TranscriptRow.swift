@@ -78,18 +78,21 @@ final class TranscriptContentView: NSView {
 }
 
 final class TranscriptRow: NSView, DocumentRow {
+    /// 未確定の行はアバター・名前・時刻・本文をまとめて薄くする。
+    static let unconfirmedOpacity: Float = 0.6
+    /// 小音量の除外はこれだけで薄くし、未確定の薄化と掛け合わせない。
+    static let excludedOpacity: Float = 0.4
     override var isFlipped: Bool { true }
-    /// 除外の薄化は本文側の合成レイヤーだけに適用し、進捗は独立して読める濃さを保つ。
+    /// 行の薄化は出現・点灯のアニメーションと分け、この合成レイヤーだけに適用する。
     let content = TranscriptContentView()
-    private let shade = NSView()
     private let flash = NSView()
     private let avatar = AvatarView()
-    private let progressGauge = UtteranceGaugeView()
     private let nameLabel = Washi.label(size: 12, weight: .semibold)
     private let timeLabel = Washi.label(color: Washi.muted)
     private let levelLabel = Washi.label(size: 11, color: Washi.muted)
     private var audioLevel: AudioLevelAssessment?
     private var excluded = false
+    private(set) var unconfirmed: Bool
     private var hasLevelNote: Bool { audioLevel != nil || excluded }
     private let body = NSTextField(wrappingLabelWithString: "")
     private let typedBody = TypedEntryBody()
@@ -113,16 +116,15 @@ final class TranscriptRow: NSView, DocumentRow {
 
     init(tentative: Bool = false) {
         self.tentative = tentative
+        // 暫定末尾は常に未確定。文字色では薄くせず、確定前の行と同じ不透明度だけで示す。
+        unconfirmed = tentative
         super.init(frame: .zero)
         wantsLayer = true
         content.wantsLayer = true
         addSubview(content)
-        for view in [shade, flash] {
-            Washi.surface(view)
-            view.layer?.cornerRadius = 5
-            content.addSubview(view)
-        }
-        shade.isHidden = !tentative
+        Washi.surface(flash)
+        flash.layer?.cornerRadius = 5
+        content.addSubview(flash)
         flash.layer?.opacity = 0
         avatar.tentative = tentative
         body.font = .systemFont(ofSize: 15)
@@ -131,7 +133,6 @@ final class TranscriptRow: NSView, DocumentRow {
         body.maximumNumberOfLines = 0
         body.lineBreakMode = .byWordWrapping
         timeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-        nameLabel.textColor = tentative ? Washi.muted : Washi.ink
         nameLabel.lineBreakMode = .byTruncatingTail
         if tentative { nameLabel.font = .systemFont(ofSize: 12) }
         levelLabel.isHidden = true
@@ -144,12 +145,21 @@ final class TranscriptRow: NSView, DocumentRow {
         speakerButton.action = #selector(renamePressed)
         speakerButton.isHidden = true
         content.addSubview(speakerButton)
-        addSubview(progressGauge)
+        applyOpacity()
     }
     required init?(coder: NSCoder) { fatalError() }
-    /// 本文の更新と分離し、段だけの変更では点灯も再計測も起こさない。
-    func updateProgress(_ stage: UtteranceProgress.Stage?, steps: [UtteranceProgress.Stage]) {
-        progressGauge.update(utterance?.kind == .typed ? nil : stage, steps: steps)
+    /// 本文の更新と分離し、確定状態だけの変更では点灯も再計測も起こさない。手入力は常に確定として扱う。
+    func updateConfirmation(unconfirmed value: Bool) {
+        let next = tentative || (value && utterance?.kind != .typed)
+        guard unconfirmed != next else { return }
+        unconfirmed = next
+        applyOpacity()
+    }
+    private func applyOpacity() {
+        content.layer?.opacity = excluded ? Self.excludedOpacity : unconfirmed ? Self.unconfirmedOpacity : 1
+        // 薄さだけに頼らず、読み上げでも確定前後を区別できるようにする。
+        // 手入力は別の本文ビューで表示するので、声の本文にだけ付ける。
+        body.setAccessibilityHelp(unconfirmed ? "未確定の発言。確定するまで内容や話者が変わることがあります" : "確定した発言")
     }
     @objc private func renamePressed() {
         if let slot = utterance?.speaker { onRename?(slot, speakerButton) }
@@ -244,7 +254,7 @@ final class TranscriptRow: NSView, DocumentRow {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = 4
         let attributed = NSMutableAttributedString(string: text, attributes: [
-            .font: NSFont.systemFont(ofSize: 15), .foregroundColor: tentative ? Washi.tentative : Washi.ink,
+            .font: NSFont.systemFont(ofSize: 15), .foregroundColor: Washi.ink,
             .paragraphStyle: paragraph
         ])
         if utterance?.kind == .typed, let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
@@ -273,11 +283,8 @@ final class TranscriptRow: NSView, DocumentRow {
     override func layout() {
         super.layout()
         content.frame = bounds
-        shade.frame = NSRect(x: 12, y: 2, width: max(0, bounds.width - 24), height: bounds.height - 4)
-        flash.frame = shade.frame
+        flash.frame = NSRect(x: 12, y: 2, width: max(0, bounds.width - 24), height: bounds.height - 4)
         avatar.frame = NSRect(x: 20, y: 8, width: 25, height: 26)
-        // documentの4pt + 行内4ptで、点の左端8pt・径8pt・アバターまで8pt。
-        progressGauge.frame = NSRect(x: 3, y: min(5, max(0, bounds.height - 46)), width: 10, height: 46)
         // 太字の字形が計測幅の右端へ届くため、端数の丸めと描画の余白を確保する。
         let nameWidth = min(ceil(nameLabel.intrinsicContentSize.width) + 4,
                             max(70, bounds.width - 220))
@@ -317,7 +324,7 @@ final class TranscriptRow: NSView, DocumentRow {
         layer?.removeAllAnimations()
         flash.layer?.removeAllAnimations()
         layer?.opacity = 1
-        content.layer?.opacity = excluded ? 0.4 : 1
+        applyOpacity()
         flash.layer?.opacity = 0
     }
 }

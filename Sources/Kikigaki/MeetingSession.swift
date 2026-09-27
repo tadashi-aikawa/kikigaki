@@ -457,10 +457,10 @@ final class MeetingSession {
         snapshot.utterances = merged
         snapshot.tentativeText = nil
         snapshot.pendingSpeakerRows = []
-        snapshot.utteranceProgress = nil
+        snapshot.unconfirmedRows = []
         snapshot.elapsed = duration
         consumedAudioTime = duration
-        traceUtteranceProgress(finalized: true)
+        traceUtteranceConfirmation(finalized: true)
         save()
         if aiSchedule?.finalSaveCompleted(succeeded: finalizationSucceeded && snapshot.saved) == .skipped(.saveFailed) {
             aiScheduleWarning = "保存が完了していないため最後の1回を中止しました"
@@ -1185,17 +1185,18 @@ final class MeetingSession {
                                   diarizationEnabled: snapshot.names.diarizationEnabled)
         let merged = TranscriptEntries.merge(voice: live.utterances, typed: typedEntries, timeline: pause.timeline,
                                              pendingVoiceRows: live.pendingSpeakerRows,
-                                             voiceProgress: live.progress(accurateFinalCount: liveSource.accurateFinalCount))
+                                             unconfirmedVoiceRows: live.unconfirmedRows(accurateFinalCount: liveSource.accurateFinalCount))
         snapshot.utterances = merged.utterances
         snapshot.tentativeText = live.tentativeText
         snapshot.pendingSpeakerRows = merged.pendingSpeakerRows
-        snapshot.utteranceProgress = merged.progress
-        traceUtteranceProgress(finalized: false)
+        snapshot.unconfirmedRows = merged.unconfirmedRows
+        traceUtteranceConfirmation(finalized: false)
     }
 
-    private func traceUtteranceProgress(finalized: Bool) {
-        diagnostics.utteranceProgressLines(snapshot.utteranceProgress, utterances: snapshot.utterances,
-            elapsed: consumedAudioTime, diarizationEnabled: snapshot.names.diarizationEnabled, finalized: finalized).forEach(log)
+    private func traceUtteranceConfirmation(finalized: Bool) {
+        diagnostics.utteranceConfirmationLines(unconfirmedRows: snapshot.unconfirmedRows, hasTentative: snapshot.tentativeText != nil,
+            utterances: snapshot.utterances, elapsed: consumedAudioTime,
+            diarizationEnabled: snapshot.names.diarizationEnabled, finalized: finalized).forEach(log)
     }
 
     private func publishLive(_ live: SpeakerTranscript, elapsed: Double) {

@@ -332,9 +332,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             let row = rows[id] ?? TranscriptRow()
             if rows[id] == nil { inserted.append(row) }
             if row.update(utterance, names: snapshot.names, timeline: snapshot.timeline) { changed.append(row) }
-            let progress = snapshot.utteranceProgress
-            row.updateProgress(progress?.rows.indices.contains(index) == true ? progress?.rows[index] : nil,
-                               steps: progress?.steps ?? [])
+            row.updateConfirmation(unconfirmed: snapshot.unconfirmedRows.contains(index))
             row.updateAudioLevel(snapshot.audioLevels.indices.contains(index) ? snapshot.audioLevels[index] : nil)
             row.updateExclusion(snapshot.excludedRows.contains(index))
             row.updateAvatar(speakers: snapshot.speakers, store: avatars, editable: snapshot.canShare)
@@ -346,7 +344,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         if let tentative = snapshot.tentativeText {
             tentativeRow.updateTentative(tentative)
-            tentativeRow.updateProgress(snapshot.utteranceProgress?.tentative, steps: snapshot.utteranceProgress?.steps ?? [])
             tentativeRow.updateExclusion(snapshot.tentativeExcluded)
             ordered.append(tentativeRow)
         }

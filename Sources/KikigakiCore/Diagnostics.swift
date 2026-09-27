@@ -26,17 +26,16 @@ public struct Diagnostics: Sendable {
         return [String(format: "[live at=%.2f]\n", elapsed) + TranscriptRenderer.text(utterances, names: names)]
     }
 
-    /// 画面へ渡した段を記録する。既存の本文traceは維持し、停止後の全消去も同じ形式で確認する。
-    public func utteranceProgressLines(_ progress: UtteranceProgress?, utterances: [Utterance], elapsed: Double,
-                                       diarizationEnabled: Bool, finalized: Bool) -> [String] {
+    /// 画面へ渡した未確定の行を記録する。既存の本文traceは維持し、停止後の全確定も同じ形式で確認する。
+    public func utteranceConfirmationLines(unconfirmedRows: Set<Int>, hasTentative: Bool, utterances: [Utterance],
+                                           elapsed: Double, diarizationEnabled: Bool, finalized: Bool) -> [String] {
         guard showsLiveTrace else { return [] }
-        let stages = utterances.enumerated().map { index, value in
-            let stage = progress?.rows.indices.contains(index) == true ? progress?.rows[index] : nil
-            return String(format: "%.2f:", value.start) + (stage?.label ?? "非表示")
+        let rows = utterances.enumerated().map { index, value in
+            String(format: "%.2f:", value.start) + (unconfirmedRows.contains(index) ? "未確定" : "確定")
         }.joined(separator: ",")
-        return [String(format: "[utterance-progress at=%.2f mode=%@ finalized=%@] rows=%@ tentative=%@",
-                       elapsed, diarizationEnabled ? "on" : "off", finalized ? "true" : "false", stages,
-                       progress?.tentative?.label ?? "非表示")]
+        return [String(format: "[utterance-confirmation at=%.2f mode=%@ finalized=%@] rows=%@ tentative=%@",
+                       elapsed, diarizationEnabled ? "on" : "off", finalized ? "true" : "false", rows,
+                       hasTentative ? "未確定" : "なし")]
     }
 
     /// 省略候補の通知。環境変数によらず出す(省略は原文と突き合わせて確かめるものなので、

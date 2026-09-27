@@ -23,7 +23,8 @@ struct SessionSnapshot {
     var tentativeText: String?
     var tentativeExcluded = false
     var pendingSpeakerRows: Set<Int> = []
-    var utteranceProgress: UtteranceProgress?
+    /// 録音中に薄く表示する未確定の声の行。停止結果では空にする。
+    var unconfirmedRows: Set<Int> = []
     var timeline = MeetingTimeline(startedAt: Date())
     var names = SpeakerNames()
     var speakers: [KikigakiConfig.Speaker] = []
