@@ -72,6 +72,8 @@ private final class MinutesPathField: NSTextField {
     private let retryButton = HoverButton(title: "再読込", target: nil, action: nil)
     private let cancelButton = HoverButton(title: "読込を取り消す", target: nil, action: nil)
     private let emptyChoose = HoverButton(title: "ファイルを選ぶ…", target: nil, action: nil)
+    // 対象が無いあいだは中央の同じボタンだけを出す。表示中と見つからないときは中央が隠れ、こちらが唯一の入口になる。
+    private let headerChoose = HoverButton(title: "ファイルを選ぶ…", target: nil, action: nil)
     var onSelect: ((String?) throws -> Void)?
     let closeButton = HoverButton(title: "", target: nil, action: nil)
     var herdrCommand: () -> String? = { nil }
@@ -118,7 +120,7 @@ private final class MinutesPathField: NSTextField {
         pathField.target = self; pathField.action = #selector(commitPath)
         pathField.setAccessibilityLabel("議事録のパス")
         pathField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let choose = HoverButton(title: "ファイルを選ぶ…", target: self, action: #selector(chooseFile))
+        headerChoose.target = self; headerChoose.action = #selector(chooseFile); headerChoose.isHidden = true
         // ×はペインを隠す操作ではなく、表示中の議事録を閉じて対象を解除する(起動直後と同じ空の状態へ戻す)。
         // ペインの表示切替はヘッダーの「議事録」ボタンとメニューが担う。
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "議事録を閉じる")
@@ -138,7 +140,7 @@ private final class MinutesPathField: NSTextField {
         neovimButton.toolTip = "Neovimで開く — herdrの新しいタブ"
         obsidianButton.toolTip = "議事録をObsidianで開く"
         neovimButton.isEnabled = false; obsidianButton.isEnabled = false
-        let top = row([pathField, neovimButton, obsidianButton, choose, closeButton], spacing: 8)
+        let top = row([pathField, neovimButton, obsidianButton, headerChoose, closeButton], spacing: 8)
         headerBar.addSubview(top); top.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             headerBar.heightAnchor.constraint(equalToConstant: 56),
@@ -299,7 +301,7 @@ private final class MinutesPathField: NSTextField {
     /// AIの依頼が編集を始める直前に、更新強調の基準を今の本文へ置き直す。
     func markUpdateBaseline() { minutesDocument.markUpdateBaseline(); boardDocument.markUpdateBaseline() }
     func resetContext() {
-        stop(); path = nil; body = nil; editing = false; commitError = nil; contextGeneration += 1
+        stop(); path = nil; body = nil; editing = false; commitError = nil; contextGeneration += 1; headerChoose.isHidden = true
         window?.makeFirstResponder(nil)
         for view in [minutesDocument, boardDocument] { view.clear(); view.setFile(nil) }
         selectedBoard = false; boardHeading = nil; tabs.selectedSegment = 0; tabBar.isHidden = true
@@ -336,6 +338,7 @@ private final class MinutesPathField: NSTextField {
         neovimButton.isEnabled = path != nil && editorTask == nil
         obsidianButton.isEnabled = path != nil
         closeButton.isEnabled = path != nil
+        headerChoose.isHidden = path == nil
         if editing || pathField.currentEditor() != nil {
             if changed { notice.stringValue = "表示対象が変わりました。編集中のパスは保持しています"; notice.isHidden = false }
         } else { pathField.stringValue = path ?? ""; pathField.toolTip = path; notice.isHidden = warning == nil; notice.stringValue = warning ?? "" }

@@ -120,9 +120,15 @@ import KikigakiCore
         view.pathField.stringValue = "~/minutes.md"; view.commitPath()
         #expect(selected == FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("minutes.md").path)
         #expect(view.notice.isHidden)
+        // 上部の「ファイルを選ぶ…」は対象がある間だけ出す。見つからない間も中央は隠れるので、上部が入口になる。
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        let headerChoose = try #require(descendants(view.headerBar).compactMap { $0 as? NSButton }
+            .first { $0.title == "ファイルを選ぶ…" })
+        #expect(!headerChoose.isHidden)
         view.update(path: "/tmp/none.md", source: .ai, active: false)
         view.receive(.missing)
         #expect(view.message.stringValue.hasPrefix("AIが通知したファイル"))
+        #expect(!headerChoose.isHidden)
         // ×はペインを隠さず、表示中の議事録を閉じて対象を解除する。表示対象が無ければ押せない。
         #expect(view.closeButton.isEnabled && view.closeButton.toolTip == "表示中の議事録を閉じる")
         selected = "unchanged"; view.pathField.stringValue = "/tmp/draft.md"
@@ -131,6 +137,10 @@ import KikigakiCore
         // 解除はstoreの通知でupdateへ戻り、そこで欄が空になりボタンも押せなくなる。
         view.update(path: nil, source: nil, active: false)
         #expect(!view.closeButton.isEnabled && view.pathField.stringValue.isEmpty && !view.isHidden)
+        #expect(headerChoose.isHidden)
+        view.update(path: "/tmp/old.md", source: .human, active: false)
+        view.resetContext()
+        #expect(headerChoose.isHidden)
     }
     @Test func 待機指定は二回目の準備でも一度だけ適用する() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }

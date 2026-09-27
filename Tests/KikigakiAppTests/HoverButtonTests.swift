@@ -122,7 +122,7 @@ import KikigakiCore
         let unread = AIStatusPill(); unread.update(.unread)
         let speaker = SpeakerButton(); speaker.title = ""; speaker.isBordered = false
         let action = WashiActionButton(title: "停止", target: nil, action: nil)
-        action.isBordered = false; action.emphasis = .neutralOutline
+        action.isBordered = false; action.emphasis = .accentOutline
         let buttons: [HoverButton] = [AIRobotButton(), AIFooterCount(kind: .unread), AIFooterCount(kind: .confirmation),
             AIFooterButton(symbol: "ellipsis", label: "その他"), AIFooterButton(symbol: "exclamationmark.triangle", label: "警告"),
             SpeakerCountButton(), speaker, unread, AIActionButton("返答する", action: {}),

@@ -248,9 +248,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         let compact = width < 600
         minutesButton.title = compact ? "" : "議事録"
         let value = snapshot
-        // 前の会議を共有できる画面ではフッターへ主操作を譲る。リサイズ時も状態だけで決める。
-        startStopButton.emphasis = value.state.canStart
-            ? (value.canShare ? .neutralOutline : .primary) : .accentOutline
+        // 開始は前の会議の表示中も朱の塗りにし、同じ操作を状態で別物に見せない。
+        startStopButton.emphasis = value.state.canStart ? .primary : .accentOutline
         pauseButton.emphasis = .goldOutline
         let title = value.state == .idle && value.markdownURL != nil ? "新しい録音"
             : value.state.canStart ? value.state.startStopTitle : "停止"
@@ -264,7 +263,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         headerControls?.spacing = compact ? 6 : 8
         // 経過時間が長くてもボタンを押し出さない。省略時の実時刻はホバーでも読める。
         recordingRange.setContentCompressionResistancePriority(compact ? .defaultLow : .required, for: .horizontal)
-        recordingRange.toolTip = recordingRange.stringValue
+        // 状態表示から外した保存後の録音の長さは、時刻帯のホバーで読めるようにする。
+        recordingRange.toolTip = recordingRange.stringValue.isEmpty || value.state != .idle ? recordingRange.stringValue
+            : "\(recordingRange.stringValue)(録音 \(TranscriptRenderer.elapsed(value.elapsed)))"
         startStopButton.refreshStyle(); pauseButton.refreshStyle()
     }
     private func updateRangeLabel() {

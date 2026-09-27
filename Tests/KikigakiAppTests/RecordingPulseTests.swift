@@ -1,5 +1,6 @@
 import AppKit
 import Testing
+import KikigakiCore
 @testable import Kikigaki
 
 @Suite @MainActor struct RecordingPulseTests {
@@ -26,5 +27,19 @@ import Testing
         chip.update(snapshot, reduceMotion: false)
         #expect(layer.opacity == 1 && mark.isHidden)
         #expect(layer.animationKeys()?.isEmpty ?? true)
+    }
+
+    @Test func 録音の長さは録音中と一時停止中だけ出し保存後は状態名だけを読む() throws {
+        let chip = RecordingStatusChip()
+        let elapsed = try #require(chip.arrangedSubviews.last as? NSTextField)
+        var snapshot = SessionSnapshot(state: .recording, elapsed: 65)
+        for state: RecordingState in [.recording, .paused] {
+            snapshot.state = state
+            chip.update(snapshot, reduceMotion: true)
+            #expect(!elapsed.isHidden && chip.accessibilityLabel() == "\(state.statusLabel) 01:05")
+        }
+        snapshot.state = .idle; snapshot.saved = true
+        chip.update(snapshot, reduceMotion: true)
+        #expect(elapsed.isHidden && chip.accessibilityLabel() == "保存済み")
     }
 }

@@ -24,6 +24,8 @@ import KikigakiCore
             #expect(abs(window.frame.width - 420) < 1)
             let buttons = descendants(content).compactMap { $0 as? WashiActionButton }.filter { !$0.isHiddenOrHasHiddenAncestor }
             #expect(!buttons.isEmpty)
+            // 保存後の「新しい録音」も空の画面と同じ朱の塗りにする。
+            if state == .idle { #expect(buttons.contains { $0.emphasis == .primary }) }
             for button in buttons {
                 #expect(button.title.isEmpty && button.image != nil)
                 #expect(button.toolTip?.isEmpty == false)

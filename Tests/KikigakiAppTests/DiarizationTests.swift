@@ -78,7 +78,7 @@ import KikigakiCore
         snapshot.names.diarizationEnabled = true; snapshot.detectedSpeakerSlots = [0, 1]
         snapshot.nextDiarizationEnabled = false
         popover.update(snapshot: snapshot); button.update(snapshot: snapshot)
-        #expect(button.countText == "2/8")
+        #expect(button.countText == "2")
         try capture("stopped-on-next-off", popover.contentView)
         snapshot.names.diarizationEnabled = false; snapshot.nextDiarizationEnabled = true
         popover.update(snapshot: snapshot); button.update(snapshot: snapshot)

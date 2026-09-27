@@ -5,16 +5,17 @@ import KikigakiCore
 @MainActor
 final class SpeakerCountButton: HoverButton {
     override var isFlipped: Bool { false }
-    private(set) var countText = "0/\(SpeakerNames.slotCount)"
+    private(set) var countText = "0"
     private var diarizationEnabled = true
     let countFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
     override var intrinsicContentSize: NSSize { NSSize(width: 36, height: 38) }
     func update(snapshot: SessionSnapshot) {
         diarizationEnabled = snapshot.displayedDiarizationEnabled
-        countText = diarizationEnabled ? "\(snapshot.detectedSpeakerSlots.count)/\(SpeakerNames.slotCount)" : "なし"
+        // 画面には人数だけを出す。上限の枠数はツールチップで伝える。
+        countText = diarizationEnabled ? "\(snapshot.detectedSpeakerSlots.count)" : "なし"
         title = ""; isBordered = false
         let subject = snapshot.markdownURL == nil && snapshot.state == .idle ? "次の録音" : "表示中の会議"
-        toolTip = subject + (diarizationEnabled ? "の話者。使用枠 \(countText)" : "は話者判別なし。すべて「発言」として記録します")
+        toolTip = subject + (diarizationEnabled ? "の話者。使用枠 \(countText)/\(SpeakerNames.slotCount)" : "は話者判別なし。すべて「発言」として記録します")
         setAccessibilityLabel(toolTip); needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {

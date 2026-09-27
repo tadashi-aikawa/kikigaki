@@ -7,7 +7,7 @@ final class WashiActionButton: HoverButton {
     override var drawsHoverBackground: Bool { false }
     // 自前の輪郭はboundsに描くため、標準ベゼルのalignment余白で34×32ptを膨らませない。
     override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
-    enum Emphasis { case primary, accentOutline, goldOutline, neutralOutline, secondary }
+    enum Emphasis { case primary, accentOutline, goldOutline, secondary }
     var emphasis: Emphasis = .secondary {
         didSet {
             guard emphasis != oldValue else { return }
@@ -138,11 +138,13 @@ final class RecordingStatusChip: NSStackView {
         label.stringValue = value.state == .idle && value.saved ? "保存済み"
             : value.state.statusLabel
         elapsed.stringValue = TranscriptRenderer.elapsed(value.elapsed)
+        // 録音の長さは進んでいる間だけ見せる。保存後は隣の時刻帯と数字が並んで紛らわしく、長さは時刻帯のツールチップで読める。
+        elapsed.isHidden = !recording && !paused
         for view in [mark, label, elapsed] { view.textColor = foreground }
         // 毎秒届く経過時間でだけ明暗を切り替え、連続的な再合成を発生させない。
         // 同じ秒に音声更新が複数届いても位相は変えない。
         let opacity: Float = recording && !reduceMotion && Int(max(0, value.elapsed)) % 2 == 1 ? 0.45 : 1
         if mark.layer?.opacity != opacity { mark.layer?.opacity = opacity }
-        setAccessibilityLabel([label.stringValue, elapsed.stringValue].joined(separator: " "))
+        setAccessibilityLabel(([label] + (elapsed.isHidden ? [] : [elapsed])).map(\.stringValue).joined(separator: " "))
     }
 }

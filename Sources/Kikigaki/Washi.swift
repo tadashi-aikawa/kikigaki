@@ -29,12 +29,14 @@ enum Washi {
     struct SpeakerColor { let background: NSColor; let foreground: NSColor }
     /// AI参加者の色。話者枡の4色とは別に固定し、4人喋る会議で人と同色にならないようにする。
     /// 宛先が複数あってもこの1色のままにし、名前で区別する。
-    /// 紺(0x2F4A7A)は4枡目の青緑と色相差が44°しかなく、4枡が埋まると紛らわしいので紫へ寄せた。
+    /// 紺(0x2F4A7A)は1枡目の青緑と色相差が44°しかなく紛らわしいので紫へ寄せた。
     static let ai = SpeakerColor(background: color(0x5B3E7A), foreground: paper)
-    static let slots = [SpeakerColor(background: red, foreground: paper),
+    // 朱は録音中の印と主ボタンのために残し、最もよく話す1枡目には使わない。
+    // 墨系も1枡目にすると不明話者(muted)・手入力(ink)と並んで見分けにくいので、青緑から始める。
+    static let slots = [SpeakerColor(background: color(0x3E706C), foreground: paper),
                         SpeakerColor(background: color(0xC4801F), foreground: ink),
                         SpeakerColor(background: color(0x514A43), foreground: paper),
-                        SpeakerColor(background: color(0x3E706C), foreground: paper)]
+                        SpeakerColor(background: red, foreground: paper)]
     static func speakerColor(for slot: Int?) -> SpeakerColor {
         guard let slot, slot >= 0 else { return SpeakerColor(background: muted, foreground: paper) }
         // パレットはエンジンの枡数とは独立。E〜Hは A〜Dの色を循環し、記号と名前で見分ける。
