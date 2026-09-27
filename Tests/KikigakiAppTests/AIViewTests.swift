@@ -412,6 +412,42 @@ import KikigakiAIIO
         try capture(searching ? "feedback-search-900" : "feedback-follow-900", view: content.superview!)
     }
 
+    @Test(arguments: [false, true]) func 到着の点灯から本文へ伸びても末尾追従を保ち上を読んでいれば動かさない(reading: Bool) throws {
+        _ = NSApplication.shared
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
+        let first = try request(1, history: &history, root: root)
+        var conversation = AIConversation(meetingID: meeting)
+        try conversation.append(first)
+        try conversation.update(first.id) { try $0.beginSending(at: started.addingTimeInterval(330)); try $0.submitted() }
+        var state = SessionSnapshot(ai: AIViewState(conversation: conversation, connection: .working), state: .recording,
+            utterances: (0..<40).map { Utterance(speaker: 0, start: Double($0 * 5), end: Double($0 * 5 + 2), text: "会議の発言 \($0)") },
+            timeline: MeetingTimeline(startedAt: started), elapsed: 400, markdownURL: root.appendingPathComponent("meeting.md"))
+        let window = TranscriptWindowController(shouldReduceMotion: { false })
+        window.window!.setFrameAutosaveName("")
+        window.window!.setContentSize(NSSize(width: 900, height: 700))
+        let content = window.window!.contentView!
+        window.apply(state); content.layoutSubtreeIfNeeded()
+        let document = window.transcriptDocument
+        document.reflow(anchor: .init(candidates: [], y: 0, atBottom: true))
+        if reading { window.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 100)) }
+        let before = window.scrollView.contentView.bounds.minY
+        _ = try conversation.receive(AIReceiveEvent(request: first, kind: .answered,
+            recordedAt: started.addingTimeInterval(401), body: String(repeating: "長い返事です。\n\n", count: 12)), at: started.addingTimeInterval(402))
+        state.ai?.conversation = conversation
+        window.apply(state); content.layoutSubtreeIfNeeded()
+        let row = try #require(document.rows.compactMap { $0 as? AIReplyRow }.first)
+        #expect(row.isShowingArrival)
+        let waitingHeight = row.frame.height
+        row.stopArrival(); content.layoutSubtreeIfNeeded()
+        #expect(row.frame.height > waitingHeight)
+        #expect(reading ? abs(window.scrollView.contentView.bounds.minY - before) < 1 : document.anchor().atBottom)
+        // 追従を保てていれば、次の発話も末尾で読める。
+        state.utterances.append(Utterance(speaker: 1, start: 405, end: 407, text: "次の発言"))
+        window.apply(state); content.layoutSubtreeIfNeeded()
+        #expect(reading ? abs(window.scrollView.contentView.bounds.minY - before) < 1 : document.anchor().atBottom)
+    }
+
     @Test func 末尾追従せず上を読んでいる間は到着でスクロールも既読にもしない() throws {
         _ = NSApplication.shared
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }

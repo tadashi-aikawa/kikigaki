@@ -563,6 +563,13 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
                 transcriptDocument.reflow(anchor: .init(candidates: [(reply, reply.frame.minY - y)], y: y, atBottom: false))
                 scrolled()
             }
+            reply.onArrivalEnd = { [weak self] in
+                guard let self else { return }
+                // 本文への入れ替えは発話の追加と同じ追従規則にする。末尾にいれば伸びた本文の末尾まで追い、
+                // 上を読んでいる間と検索中は位置を保つ。anchorは再配置前の枠で取る。
+                transcriptDocument.reflow(anchor: transcriptDocument.anchor())
+                scrolled()
+            }
         }
         aiRows[item.rowID] = view
         return view

@@ -353,6 +353,8 @@ final class AIReplyRow: NSView, AITimelineRowView {
     var onCancel: (() -> Void)?
     var onRetry: (() -> Void)?
     var onResize: (() -> Void)?
+    /// 到着の点灯を終えて本文へ入れ替え、行が伸びたとき。利用者の操作ではないので末尾追従を保つ。
+    var onArrivalEnd: (() -> Void)?
     private let avatar = AvatarView()
     private let nameLabel = Washi.label(size: 12, weight: .semibold)
     private let chip = AITagPill()
@@ -423,7 +425,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
         isShowingArrival = false
         progressView.update(lastProgress, reduceMotion: true)
         updateVisibility(); needsLayout = true
-        onResize?()
+        onArrivalEnd?()
     }
 
     /// 表示中の会議が変わる・行が消えるときは点灯を持ち越さない。
