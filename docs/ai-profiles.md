@@ -1,12 +1,6 @@
 # AI設定の複数プロファイル
 
-`board` を指定した宛先は、自動だけ内蔵のボードプロンプトを使い、`autoPrompt` は手動の初期値に残す。`boardPrompt` で全文差し替えが可能。`autoStart` はboardがあればautoPromptの省略を許す。詳細は [議論のボード](board.md)。
-
-`[ai]` を複数持ち、送信ごとに宛先を選べる設計。会議参加モードの契約は [ai-participant.md](ai-participant.md)、定期自動送信は [ai-scheduled.md](ai-scheduled.md) を引き継ぐ。既存docの「複数AIは対象外」はこの文書で改める。
-
-> **利用者が手で起こした既存herdrペインへ接続する案は取り下げた。** 段4の実herdr検証で、接続型ではフック・Codexのサンドボックス許可・Claudeの返送コマンド許可のいずれも渡せず、返し忘れ検知が使えないうえ返送自体が接続先の設定次第になることが確かめられたため。`attach` / `displayAgent` / 稼働中ペインのその場限りの宛先 / `AIAgentResolver` は実装ごと除く。
->
-> **その代替として置いた「準備済みAIセッション」も取り下げた。** 要旨は下の「取り下げた案(経緯)」にある。
+`[[ai]]` を複数持ち、送信ごとに宛先を選べる。会議参加モードの契約は [ai-participant.md](ai-participant.md)、定期自動送信は [ai-scheduled.md](ai-scheduled.md) を参照する。利用者が手で起こした既存herdrペインへ接続する案と、会議に紐づかない準備済みAIセッションは取り下げた。経緯は「取り下げた案(経緯)」にある。
 
 ## 確定した仕様
 
@@ -18,9 +12,11 @@
 - 通常の手動実行も宛先の `autoPrompt` を初期表示する。空欄を含む編集内容は宛先ごとに保持し、送信後やシートの開き直しでも復元する。自動実行の下書きとは独立し、新しい録音でリセットする。確認への返答・失敗した依頼の再送にはこの初期値を使わない。
 - herdrセッション・世代・`AIStreamHistory` はプロファイルごとに持つ。会議内の `#n` は全体で通し、印とMarkdownの宛名で区別する。
 - AIセッションはKIKIGAKIが `workspace create` と `agent start` で起こす。フック・サンドボックス許可・返送コマンド許可を渡せる形を保つ。
-- プロファイルの `autoStart = true` で、録音開始時に `autoPrompt` と `autoIntervalMinutes` の自動送信を始める。
+- プロファイルの `autoStart = true` は、録音開始シートの自動送信の宛先の既定になる。自動送信の始まり方は [ai-scheduled.md](ai-scheduled.md) を参照する。
 
 ## 設定
+
+`[[ai]]` がなければ新規送信の操作・外部起動を有効にしない。過去に送信済みの会議が登録されている場合は回答記録の回収だけ続ける。空の `[ai]` は既定値で有効。設定は録音開始時に固定し、途中の再読込では次の録音から適用する。保存先や参加者を進行中の質問で変更しない。
 
 ```toml
 [[ai]]
@@ -44,15 +40,45 @@ address = "ネオへ"                # cwd を省いたので既定のディレ�
 | キー | 既定と検証 |
 | --- | --- |
 | name | 省略時は `address` 末尾の「へ」を除いた参加者名。空・改行・NUL・前後空白のみを拒否し、配列内の重複を拒否する。**64バイトの上限は明示した `name` にだけ掛ける。** 宛名から補った名前は対象外で、`address` の長さは単数設定の頃から制限していない。上限を送信側にも掛けると、長い宛名の設定が解析を通るのに送信準備で落ちる。 |
+| cli | codex。codexまたはclaudeのみ。 |
+| command | 省略時は選択CLIをPATHと既知の置き場(下記)で解決し、絶対パスと実行可能性を検証する。指定時は空でない絶対パス。見つからなければ送信前に原因を示し、別CLIへ切り替えない。 |
+| herdrCommand | **共通**。省略時は `herdr` をPATHと既知の置き場で解決する。指定時は空でない絶対パス。2つ目以降は省略でき、先頭の値を引き継ぐ。先頭と違う値を明示したときだけ設定エラー。 |
+| model | 省略時はCLIの既定。指定時は空でない単一行の文字列として該当CLIのモデル引数へ渡す。 |
 | effort | 省略時はCLIの既定。単一行でNULを拒否し、CLIごとの値域で検証する。 |
-| cwd | 省略時は従来どおり固定の `~/Library/Application Support/KIKIGAKI/ai-work/`。起動時の作業ディレクトリで、プロファイルごとに変えられる。 |
-| autoStart | false。trueは配列全体で1つまで。`autoPrompt` が空なら設定エラー。録音開始シートの宛先の既定になる。 |
+| address | 迅雷へ。空・改行・制御文字を拒否。起動時の表示名にも使用する。 |
+| avatar | 省略時は紫のイニシャル。ローカルパスまたはhttp/httpsのURL。下記の「アバターの指定」を参照。 |
+| cwd | 省略時は従来どおり固定の `~/Library/Application Support/KIKIGAKI/ai-work/`。起動時の作業ディレクトリで、プロファイルごとに変えられる。指定時は絶対パスまたは先頭の `~/` を解決し、存在するディレクトリであることを確認する。 |
+| extraArgs | 空配列。引数の配列でありシェル文字列ではない。下記の規則で検証する。 |
+| prompt | 空文字列。利用者が指定する追加指示。32 KiBまで。接続プロトコルを上書きする位置へ置かない。 |
+| notifySound | false。trueのときだけ、返事が届いた枠の設定でアプリから通知音を鳴らす。 |
+| allowWork | true。送信シートの「作業を許可する」の初期値。会議内の変更を次の質問にも引き継ぎ、新しい録音で設定値へ戻す。 |
+| autoStart | false。trueは配列全体で1つまで。`board` を指定しない宛先は `autoPrompt` が空なら設定エラー。録音開始シートの宛先の既定になる。 |
+| autoPrompt | 空文字列。手動・自動実行シートと録音開始シートのプロンプトの初期値。32 KiBまで。 |
+| autoIntervalMinutes | 3。1〜60分。 |
+| board | 省略時はボードなし。単一のMarkdown見出し(`#` から `######`)で、配列内の重複を拒否する。 |
+| boardPrompt | `board` があるときだけ指定できる。省略時は内蔵のボードプロンプト。 |
+| boardLocation | `board` があるときだけ指定できる。議事録のパスが無いときの作成指示。 |
 | hotkey | **廃止**。書かれていても読み飛ばし、エラーにも警告にもしない。 |
-| herdrCommand | **共通**。2つ目以降は省略でき、先頭の値を引き継ぐ。先頭と違う値を明示したときだけ設定エラー。 |
-| notifySound | プロファイルごとに効く。返事が届いた枠の設定で鳴らす。 |
-| その他 | 既存の `[ai]` と同じ。`cli` `command` `herdrCommand` `model` `address` `extraArgs` `prompt` `notifySound` `allowWork` `autoPrompt` `autoIntervalMinutes` を要素ごとに持つ。 |
+| attach / displayAgent | **取り下げ**。書くと設定エラーにする。 |
 
 単数 `[ai]` と配列 `[[ai]]` の併記は拒否する。TOMLの同名テーブルと配列は文法上も両立しないが、片方だけを黙って採らない。
+
+`board` を指定した宛先は、自動だけ内蔵のボードプロンプトを使い、`autoPrompt` は手動の初期値に残す。`boardPrompt` で全文差し替えが可能。`autoStart` はboardがあれば `autoPrompt` の省略を許す。詳細は [議論のボード](board.md)。
+
+### CLIとherdrの実行ファイルの探し方
+
+GUI起動ではPATHに普段のCLIがない(実測: Finderや `open` から起動した.appは `/usr/bin:/bin:/usr/sbin:/sbin` だけで、miseやHomebrewの herdr・codex・claude を見つけられない)。PATHで見つからなければ `~/.local/bin`、`~/.local/share/mise/shims`、`/opt/homebrew/bin`、`/usr/local/bin` の順に探す。それでも見つからなければ `command` / `herdrCommand` の絶対パス指定を案内し、環境設定を自動変更しない。herdrが未導入なら手動コピーは使える状態でAI送信だけを失敗にする。
+
+### extraArgs
+
+`extraArgs` は、値の個数と意味を確認できる追加指定だけを受け付ける。NUL、対話モードを変えるprint/exec、resume、接続先・model・hooksを上書きする衝突指定は拒否する。
+
+| CLI | 値なしの指定 | 既知の値だけを受ける指定 | 絶対パス一つを受ける指定 |
+| --- | --- | --- | --- |
+| codex | `--search`、`--no-alt-screen`、`--strict-config` | `--sandbox` / `-s`(read-only・workspace-write・danger-full-access)、`--ask-for-approval` / `-a`(on-request・never) | `--add-dir` |
+| claude | `--verbose` | `--permission-mode`(default・manual・acceptEdits・plan・auto・dontAsk) | `--add-dir` |
+
+権限モードは利用者が明示した場合だけ渡し、アプリが自動で追加しない。`--key=value` も同じ検証を通す。その他のオプション、起動時prompt、サブコマンド、結合した短縮引数は送信前に拒否する。Codexの自由な `-c/--config` は、notify等への上書き経路になるため受け付けない。将来の追加はキーと値の規則をテストしてから行う。
 
 ### effortの翻訳と値域
 
@@ -65,7 +91,11 @@ codexの値域は `codex-rs/protocol/src/openai_models.rs` の `ReasoningEffort`
 
 codexの `-c` の値はTOMLとして解釈されるので、文字列はクォートを付けて渡す。既存の `notify` と `sandbox_workspace_write.writable_roots` と同じ引数配列の作り方を使い、シェルを経由しない。
 
-`extraArgs` の許可表から `--effort` を外す。旧設定で `extraArgs = ["--effort", "high"]` と書いていた場合は設定エラーにし、`effort` へ移すよう促す。黙って受理すると、翻訳した引数との順序依存で実際の効き方が読めなくなる。
+`extraArgs` の許可表から `--effort` を外す。`extraArgs = ["--effort", "high"]` と書くと設定エラーにし、`effort` へ移すよう促す。黙って受理すると、翻訳した引数との順序依存で実際の効き方が読めなくなる。
+
+### アバターの指定
+
+`[[ai]].avatar` には話者台帳と同じローカルパス、HTTPまたはHTTPSの画像URLを指定できる。ローカルの `~` は利用者のホームへ展開する。AIの行は送信元プロファイルの画像を使い、省略・取得失敗時は紫のイニシャルへ戻す。取得とURLキャッシュは話者と共通の `AvatarStore` を使い、キャッシュ先は `~/Library/Caches/kikigaki/avatars/`。設定は会議開始時に固定してmanifestにも保存し、古いmanifestにキーが無ければ画像なしとして読む。
 
 ## 送信ごとの宛先選択
 
@@ -81,10 +111,6 @@ codexの `-c` の値はTOMLとして解釈されるので、文字列はクォ�
 
 各印に出す接続状態と「旧接続からの返事」の判定は、**その質問を送った枠のもの**を見る。選択中の宛先で全行を塗ると、Aを作り直しただけでBの正常な返事まで旧接続扱いになる。
 
-## アバターの指定
-
-`[[ai]].avatar` には話者台帳と同じローカルパス、HTTPまたはHTTPSの画像URLを指定できる。ローカルの `~` は利用者のホームへ展開する。AIの行は送信元プロファイルの画像を使い、省略・取得失敗時は紫のイニシャルへ戻す。取得とURLキャッシュは話者と共通の `AvatarStore` を使い、キャッシュ先は `~/Library/Caches/kikigaki/avatars/`。設定は会議開始時に固定してmanifestにも保存し、古いmanifestにキーが無ければ画像なしとして読む。
-
 ## 取り下げた案(経緯)
 
 <details>
@@ -96,7 +122,7 @@ codexの `-c` の値はTOMLとして解釈されるので、文字列はクォ�
 - `-c sandbox_workspace_write.writable_roots` を渡せず、Codexの `workspace-write` では返送が `unsafe_file` で落ちる
 - `permissions.allow` に同梱CLIを足せず、返送のBash実行が利用者への確認になり得る
 
-実測の記録は [複数プロファイルの結合検証](ai-profiles-verification.md) に残す。`attach` / `displayAgent` / `AIAgentResolver` / `AIHerdr.list` の宛先候補 / 稼働中ペインのその場限りの宛先は実装ごと除く。Codex接続型の `writable_roots` 事前警告は不要になった。
+`attach` / `displayAgent` / `AIAgentResolver` / `AIHerdr.list` の宛先候補 / 稼働中ペインのその場限りの宛先は実装ごと除く。Codex接続型の `writable_roots` 事前警告は不要になった。
 
 </details>
 
@@ -115,9 +141,7 @@ codexの `-c` の値はTOMLとして解釈されるので、文字列はクォ�
 
 ## 録音開始時の自動送信
 
-`autoStart = true` のプロファイルがあれば、録音開始で `startAISchedule` を呼び、直後に本番の送信判定を1回行う。プロンプトは `autoPrompt`、間隔は `autoIntervalMinutes`、作業許可は `allowWork`、録音停止時の最後の1回はON。変更があれば即送信し、次の期限はCLIへ渡す時点から1間隔。会話が空など変更なしなら送らず、開始時点から1間隔のカウントダウンへ進む。セッションは従来どおり初回送信時に起こす。
-
-開始後はフッター左端のロボットから操作する。自動OFFは薄墨の輪郭、ONは朱の輪郭。起動・接続待ちは輪郭のまま目を動かし「準備中」、CLIへ渡した後は手動・自動とも朱の反転と白い目で「実行中」。返事待ちがなければ下に残り時間を分:秒で表示し、変更なしの理由はツールチップへ残す。切断・最終送信待ちは「—」。失敗・取消・自動停止では準備中を残さない。クリックで上へメニューを開き、解除後に設定を変えられる。「今すぐ送る」も直後に1回判定する。ダブルクリック送信と「…」の停止項目はない。AI未設定時はロボットと仕切りを隠す。稼働状態は新会議・再起動で引き継がない。
+録音開始シートでの宛先の選び方、開始直後の判定、ロボットの見た目と操作は [ai-scheduled.md](ai-scheduled.md) を正本とする。
 
 ## データ構造と保存
 
@@ -127,7 +151,7 @@ codexの `-c` の値はTOMLとして解釈されるので、文字列はクォ�
 
 controllerをプロファイルごとに複数へ分ける案は採らない。`AIConversation` が `request.number == index + 1` を復号時に検証しており、`archive.original.ai` も1つの会話を前提にしている。分けると通し番号・Markdown生成・保存・登録簿の再設計が連鎖する。受信箱はrequest ID単位なので、そもそも分ける必要がない。
 
-チャネル化で変える判定は次の3つ。
+チャネル化で変える判定は次の5つ。
 
 - `canSend`: 現在は現世代の返事待ちを会話全体から探している。**そのチャネルの世代に属するrequestだけ**で判定する。これが手動と自動を別プロファイルで同時に走らせる根拠になる。
 - `prepare` の設定等価性検証: チャネルが固定した設定とだけ比較する。
@@ -151,7 +175,7 @@ session recordの置き場を `ai/sessions/<slot>/<generation>.json` へ変え�
 
 manifestは `schemaVersion` を2へ上げ、`config` を `profiles: [ResolvedAIProfile]` の配列にする。schemaVersion 1のmanifestは、slot 1・`name` を参加者名としたプロファイル1つとして読む。
 
-`.kikigaki-context/<meeting>/ai/` の `state.json` `archive.json` `requests/` `inbox/` `generation.json` は形も置き場も変えない。`generation.json` だけはチャネル別になるので `ai/sessions/<slot>/generation.json` へ移す。
+`.kikigaki-context/<meeting>/ai/` の `state.json` `archive.json` `requests/` `inbox/` は形も置き場も変えない。`generation.json` だけはチャネル別になるので `ai/sessions/<slot>/generation.json` へ移す。
 
 ## 互換
 
@@ -163,38 +187,15 @@ manifestは `schemaVersion` を2へ上げ、`config` を `profiles: [ResolvedAIP
 - 利用者の台帳 `ai-prepared.json` と準備用の置き場には触れない。撤去後のKIKIGAKIは読まず、消しもしない。
 - `attach` と `displayAgent` を書いた設定は**設定エラーにする**。黙って無視すると、接続するつもりの設定で新規起動が始まる。取り下げた旨と移行先をメッセージに書く。
 
-## 検証する境界
-
-保証しないことを先に書く。
+## 保証しないこと
 
 - 複数プロファイルへ同時に送っても、AI同士は互いの回答を見ない。同じ会議の同じ範囲を別々に読むだけである。
 - KIKIGAKIが起こしたペインを利用者が別の用途に使っても検知しない。既存の同一性判定(pane・workspace・session・terminal)で置き換えだけを見つける。
 
-## 実装順
-
-| 段 | 内容 |
-| --- | --- |
-| 2・Core | `AIProfileList` の解析(配列・単数互換・name重複・autoStart重複・hotkeyの位置・effort値域・extraArgs二重指定・同条件の重複)、`AIEffort` の翻訳、接続先解決の純関数 `AIAgentResolver`、`participant.profile` / `profile_slot` の往復と旧欠損、`sessionPath` の新旧検証、manifest schemaVersion 2と1の読み分け。**完了** |
-| 3・アプリ | チャネル化した `AIConversationController`、`herdr agent list` の解釈と接続型の `connect`、両シートのポップアップと会議内の記憶、`autoStart`、状態行・警告・ピルの宛先表示、接続型でのフック判定の無効化。**完了** |
-| 3・実画面 | 600・900幅でポップアップ、複数プロファイルの印が積んだ会議、返事待ちの無効状態、単一プロファイルでの非表示を撮影して目視。**完了** |
-| 4・replay | 手動と自動で別プロファイルへ同時送信、片方の返事待ちがもう片方を止めないこと、`autoStart` の初回期限、接続先解決失敗で自動送信が始まらないこと。**完了** |
-| 4・実herdr | 稼働中ペインへの接続と返送、条件が一意に決まらないときの失敗、ペイン消失後の非フォールバック。**完了(この案は段5で取り下げ)** |
-| 5・設計 | 接続案の取り下げと準備済みセッションへの差し替え。この文書。**完了** |
-| 6〜8・準備済みセッション | 台帳・準備シート・紐づけシート・replay入力まで実装したが、機能ごと撤去した。上の「取り下げた案(経緯)」を参照する |
-
-replayの追加入力は2つ。どちらも通常起動では解釈せず、`--smoke --replay` で形式だけ検証できる。
-
-- `KIKIGAKI_DEBUG_AI_AUTO_SECONDS=<秒>`: 設定の `autoStart` の間隔を秒へ上書きする。分単位の設定値ではreplayの実行時間に収まらない
-- `KIKIGAKI_DEBUG_AI_ASK_PROFILE=<name>`: 手動送信の宛先を固定する。自動と別のプロファイルへ同時に送ることを確かめる
-
-結果は [複数プロファイルの結合検証](ai-profiles-verification.md) に記録する。
-
-各段のコミット前に `swift build` と `swift test` を通す。
-
 ## 対象外
 
-- 3つ以上のプロファイルを自動送信で同時に回すこと。自動送信の状態機械は会議に1つのままにする。
-- 利用者が手で起こした既存herdrペインへ接続すること。段5で取り下げた。
+- 複数のプロファイルを自動送信で同時に回すこと。`autoStart` は配列全体で1つまでで、自動送信の状態機械は会議に1つのままにする。
+- 利用者が手で起こした既存herdrペインへ接続すること。取り下げた。
 - 会議に紐づかないAIセッションを先に起こしておくこと。実装したうえで撤去した。
 - CLIの設定・サンドボックス・信頼設定をKIKIGAKIが書き換えること。
 - プロファイルごとのホットキー。グローバルショートカット自体を廃止した。
@@ -202,11 +203,8 @@ replayの追加入力は2つ。どちらも通常起動では解釈せず、`--s
 
 ## 採用した判断
 
-段1のレビューで決めた。段2はこの形で実装してある。
-
 - **`autoStart` は配列全体で1つまで。** 自動送信の状態機械 `AIScheduleState` は会議に1つで、複数同時は期限・失敗回数・最後の1回の権利をすべて多重化する。必要なら段を分ける。
 - **プロファイルの定義は固定値としてmanifestへ残す。** requestのenvelopeがプロファイルを参照するので、記録の側に定義が無いと過去会議を復元できない。
-- **切断したチャネルは「作り直す」で新しい世代を起こせる。** KIKIGAKIが起動する形に戻したので、この操作は既存の契約のまま使える。段3で接続型に限って隠していた判定は、接続案の取り下げとともに外す。
+- **切断したチャネルは「作り直す」で新しい世代を起こせる。** KIKIGAKIが起動する形なので、この操作は既存の契約のまま使える。
 - **`extraArgs` での effort 指定は設定エラーにする。** 受理すると翻訳した引数との順序依存になり、どちらが効くか読めない。移行は1行の書き換えで済む。
 - **`name` の既定は参加者名。** 重複したときだけ明示を必須にする。画面のポップアップは宛名で識別するのが自然で、設定の記述量も増えない。
-- **ホットキーはプロファイルごとに持たない。** 宛先はシート内で選ぶ。プロファイル数だけ予約すると録音・一時停止との衝突検証が組み合わせで増える。グローバルショートカットはその後まとめて廃止した。

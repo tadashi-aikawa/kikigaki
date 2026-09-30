@@ -10,7 +10,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 
 ## リポジトリ構成
 
-- `Sources/KikigakiCore/`: ロジック層 (Foundation + NaturalLanguage + TOMLKit。ユニットテストの主戦場)
+- `Sources/KikigakiCore/`: ロジック層 (Foundation + NaturalLanguage + TOMLKit。ユニットテストの主戦場)。herdr・AppKit・Processを置かない
   - `Aligner.swift`: トークン時刻と話者区間の突き合わせ。窓判定・語内補正と長い語頭の付け替え・決定的な同点処理
   - `SpeechTail.swift`: 長い1文字の末尾の声と後続文字を使う語頭補正
   - `WordBoundaries.swift`: 日本語の語境界を調べ、語内補正の対象の語をASRトークンの範囲で返す
@@ -19,178 +19,117 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
   - `SpeakerRuns.swift`: 話者判別の10ms確率を届いた分から話者区間へ畳む。確率の履歴は持たず、食い違った出力は取り込まない
   - `RepeatedBackchannels.swift` / `MeetingArchive.swift`: 停止時の繰り返し相槌の省略と、省略前後の保存。原文が保存できないときは省略しない
   - `SpeakerNames.swift` / `TranscriptRenderer.swift` / `MeetingMarkdown.swift` / `MeetingFiles.swift`: 話者名の枡・行の整形・Markdown 生成・ファイル命名
-  - `Config.swift`: 設定ファイルのパースと既定値
+  - `Config.swift` / `AIConfig.swift`: 設定ファイルのパースと既定値。キーの一覧は [設定リファレンス](docs/config.md)
   - `RecordingState.swift`: 録音状態とメニュー表題
   - `URLScheme.swift`: `kikigaki://start` の解析。開始シートの入口だけを開け、録音は始めない
+  - AI設定、独立stream履歴、envelope、質問と受信イベント、AIの返事のMarkdownもここに置く。契約は [AI参加者の設計](docs/ai-participant.md)
+- `Sources/KikigakiAIIO/`: アプリと返送CLIが共有するfd検証、原子的な保存、sessionとフック観測の型
+- `Sources/KikigakiCLI/`: 同梱CLI `kikigaki-cli`。配置は `.app/Contents/Helpers/kikigaki-cli`
+  - コマンド: `accept`・`reply`・`progress`・`notify`・`minutes`・`skill`。書式は `ReturnCommand.swift` と `SkillCommand.swift`
+  - `reply` の本文はstdinから読み、固定requestの受信箱へ排他公開する。`minutes` は議事録の絶対パスを独立イベントとして同じ検証で保存する。会議Markdownへは直接書かない
+  - `skill install|uninstall` は利用者が端末で打つ配布Skillの導入口。モデルの返送では使わない
 - `Sources/Kikigaki/`: 実行ターゲット (AppKit + Speech + FluidAudio)。Swift 5 言語モード (非 Sendable な型を音声スレッドと MainActor で受け渡すため)
   - `MeetingSession.swift`: 音源→WAV(任意)+話者判別+文字起こし→突き合わせ→表示、停止で保存、の流れ
   - `AudioSource.swift`: `MicSource` / `FileSource` (`--replay` 用) / `WavWriter`
   - `AppleTranscriber.swift` / `SpeakerDiarizer.swift`: エンジンのラッパー
   - `StartSheet.swift`: 録音開始シート。会議ごとの話者判別・議事録・自動送信を `session.start` の前に決める
   - `TranscriptWindow.swift` / `StatusItem.swift` / `AppDelegate.swift`
-- `Tests/KikigakiCoreTests/`: ユニットテスト (swift-testing)
+  - `AI*.swift` / `Minutes*.swift`: AI参加のherdr接続・会議の記録・進行表示と、議事録ペイン
+- `Tests/`: ユニットテスト (swift-testing)
+  - `KikigakiCoreTests`: ロジック層。主戦場
+  - `KikigakiAppTests`: AppKitとセッション。撮影用の環境変数は [開発用のフラグと環境変数](docs/dev-flags.md)
+  - `KikigakiCLITests`: 同梱CLI
 - `Resources/`: アプリバンドル用の Info.plist (マイク使用の説明文 `NSMicrophoneUsageDescription`・URLスキームの `CFBundleURLTypes` を含む)
 - `skills/kikigaki/`: AI参加者用の配布Skill。`.app` へ同梱し、同梱CLIの `skill install` が利用者のSkill置き場へリンクする
-- `scripts/`: アプリバンドル組み立て (`make-app.sh`)・リリース成果物 (`build_release.sh`)・Cask 本文の書き出し (`render_cask.sh`)・Homebrew tap 更新 (`update_tap.sh`)
+- `web/minutes/`: 議事録の描画資産のソース。再生成は [議事録の描画と検索](docs/minutes-rendering.md)
+- `experiments/nemotron/`: 話者判別モデルの比較用の独立CLI。アプリにはエンジンの切替を置かない
+- `scripts/`: アプリバンドル組み立て・リリース成果物・Cask・tap更新
+  - `make-app.sh`: `Contents/Helpers/kikigaki-cli` と `Contents/Resources/skills/kikigaki` を同梱し、helperを先に署名してから.appを署名する。配布ZIPでもhelperとSkillの存在、helperの署名を検証する
+  - `build_release.sh`: リリース成果物 (ZIP) を作る
+  - `render_cask.sh`: Cask本文を標準出力へ書く
+  - `update_tap.sh`: 本文をtapへ置くだけにして、pushせずに `brew audit --cask` や手元tapでの導入・削除を試せるようにする
+  - `make-icon.sh`: 配布用アイコンの再生成。手順は [ロゴの管理](docs/logo.md)
 
 設計上の前提と判断の理由は各ファイルのコメントに書いてあります (プロトで反証された仮定を含む)。変える前に読んでください。
 
-## 設定
+## 変える前に知っておくこと
 
-`~/.config/kikigaki/config.toml` (TOML)。すべて省略可で、省略時は既定値です。話者の統合先は画面から操作できます。
+コードを変える前に踏みやすい前提。理由と条件は各リンク先が正本。
 
-小音量の除外は「話者」ポップアップのスイッチとスライダーから操作します。OFFのあいだはスライダーを畳みます。録音開始シートでもON/OFFだけを切り替えられます。初回はOFF、しきい値は−45 dBFS。設定は次回も記憶し、計測表示の設定とは独立しています。薄い行はコピー・AI送信から外れ、OFFやしきい値の引き下げで復元できます。マイクや入力ゲインを変えたら再調整してください。詳細は[小音量発話の除外](docs/audio-exclusion.md)を参照してください。
+- 設定ファイルへ書き戻さない: 録音開始シートや画面で決めた値はその会議だけに効く。書き戻すと設定ファイルの正本が2つになる。[録音開始シート](docs/start-sheet.md)
+- 廃止して戻さないと決めたもの: 詳細は各リンク先
+  - グローバルショートカット。設定の `[hotkeys]` と `[ai.hotkey]` は読み飛ばす。[設定リファレンス](docs/config.md)
+  - 短い別話者区間をフレーズの多数派へ吸収する補正。[話者の割当と固定](docs/speaker-assignment.md)
+  - 稼働中のherdrペインへ接続する `attach` / `displayAgent` と、会議に紐づかない準備済みAIセッション。[AI設定の複数プロファイル](docs/ai-profiles.md)
+  - AIの返事の未読表示と既読操作。既読情報は保存形式の互換のため保持する。[AIへの定期自動送信](docs/ai-scheduled.md)
+- 停止後は新しい依頼を送れない: 「手動実行…」「返答する」「再送」は停止で無効になり、後片付けの後にherdrのペインを閉じる。[AI参加者の設計](docs/ai-participant.md)
+- 利用者のグローバル設定は書き換えない: CodexとClaudeの設定は、セッション限定の引数と専用の `--settings` JSONで渡す。[AI参加者の設計](docs/ai-participant.md)
+- manifestが欠損した会議登録は保持するが、対処できない警告は出さない。`AIRecordStore` の復元がこの扱い
+- 受け入れたリスク
+  - `outputDir` をCodexの書き込み許可へ加えるため、全会議のMarkdown・state・archive・minutes・返送tokenを含むrequestsをモデルから書き換えられる。会議Markdownを直接編集しない制約はSkillの規則で、サンドボックスでは保証されない。[議事録プレビューの設計](docs/minutes-preview.md) の「Skillの規則と書き込み許可」
+  - 速報を並走させると高精度側の認識結果も変わり、語尾や助詞が落ちやすくなる。認識品質の検証は等倍で行う。[文字起こしの速報表示](docs/fast-transcription.md)
+  - 話者補正が残す限界。吸収の廃止で元の形に戻る事例を含む。[話者の割当と固定](docs/speaker-assignment.md) の「受け入れた限界」
+- テストが本文を読む文書: `docs/board.md` の内蔵プロンプトの全文はテストが `BoardPrompt.builtIn` と機械照合する。囲みのコードフェンスを崩さない。[議論のボード](docs/board.md)
+- 文書の置き場
+  - `docs/` 直下は現行仕様の正本だけを置く。同じ仕様を複数の文書に書かず、正本を1つに決めて他は1行とリンクにする
+  - 試験・検証の記録、廃止した機能の条件、設計時の実装順は `docs/records/` へ置く。冒頭に時点と「現行の仕様ではない」旨を書き、本文は書き換えない
+  - 文書を移す・消すときは、この索引と `README.md`、`Sources/` ・ `Tests/` ・ `scripts/` のコメントにある文書パスを直す
+  - このファイルには機能ごとの振る舞いを書かない。振る舞いは正本の文書へ書く
 
-```toml
-# Markdown (と録音WAV) の保存先。既定: ~/Documents/KIKIGAKI
-outputDir = "~/Documents/KIKIGAKI"
-# 録音WAVを Markdown と並べて残すか。既定: false (通常利用では不要でディスクを食うだけ)
-saveRecording = false
-# 実験機能: 停止時に短い繰り返し相槌の候補を省く。原文を .raw.md にも保存する。既定: false
-dropRepeatedBackchannels = false
-# 診断表示: 発話ごとの音量と候補を表示・別途保存する。除外設定とは独立。既定: false
-measureAudioLevels = false
+## 文書の索引
 
-# 話者候補とアバター。省略可
-[[speakers]]
-name = "田中"
-avatar = "~/Pictures/avatars/tanaka.png"
+`docs/` の現行仕様の文書。変える部分に近いものを、コードを変える前に読む。
 
-[[speakers]]
-name = "迅雷"
-avatar = "https://example.com/jinrai.webp"
+| 文書 | 内容 | 読むとき |
+| --- | --- | --- |
+| [設定リファレンス](docs/config.md) | `config.toml` の全キー、廃止したキー、画面で決める値 | 設定キーを足す・変えるとき |
+| [開発用のフラグと環境変数](docs/dev-flags.md) | 起動フラグ、replay、検証・撮影用の環境変数 | replayや検証ハーネスを使う・足すとき |
+| [発話から文字・話者確定までのフロー](docs/utterance-flow.md) | 文字起こしから話者の確定、表示までの流れと実コードの対応 | 発話の処理全体を追うとき。最初に読む |
+| [文字起こしの速報表示](docs/fast-transcription.md) | 速報と高精度の合流、確定数、AI送信の待ち | `AppleTranscriber` ・ `TranscriptMerge` ・確定数を変える前 |
+| [発話の確定表示](docs/utterance-progress.md) | 行の半透明と通常の濃さの条件 | 行の確定前後の表示を変える前 |
+| [話者の割当と固定](docs/speaker-assignment.md) | 補正の順序、語内補正、被りの島、フレーズ凍結、受け入れた限界 | `Aligner` ・ `SpeakerIslands` ・ `SpeakerFreeze` の判定を変える前 |
+| [話者判定の再比較手順](docs/speaker-compare.md) | 入力の保存と、本番の判定を同じ入力へ当て直す手順 | 話者補正を変えて前後を比べるとき |
+| [Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md) | 依存、モデル、区間化、失敗の扱い、8枠、保存互換 | `SpeakerDiarizer` ・ `SpeakerRuns` ・FluidAudioを変える前 |
+| [話者判別の切替](docs/diarization-toggle.md) | 話者判別のオン・オフ、無効時の行分割 | 話者判別の有効・無効の経路を変える前 |
+| [話者の手動統合](docs/speaker-mapping.md) | 統合先の指定と解除、使用枠 | 統合・枠の数え方を変える前 |
+| [繰り返し相槌の省略](docs/repeated-backchannels.md) | 停止時の省略の条件、`.raw.md` の保存 | `RepeatedBackchannels` ・省略前後の保存を変える前 |
+| [小音量発話の除外](docs/audio-exclusion.md) | 除外の判定、操作、保存・コピー・AI送信への適用 | 除外の判定や適用先を変える前 |
+| [小音量発話の計測](docs/audio-levels.md) | 音量トラックと診断表示、`.levels.json` | 音量の計測・保存を変える前 |
+| [手入力の設計](docs/typed-entry.md) | 手入力の投稿、画像添付、併合、AI文脈 | 手入力・`TranscriptEntries.merge` を変える前 |
+| [録音開始シート](docs/start-sheet.md) | 会議ごとの指定、`kikigaki://start` | 開始経路・URLスキームを変える前 |
+| [書き起こしウィンドウ](docs/transcript-window.md) | 配色、行の構造、改名、フッター、ピン留め、幅 | ウィンドウの見た目・操作を変える前 |
+| [議事録ペイン](docs/minutes-pane.md) | 右ペインの操作、履歴、幅と復元、ファイル監視 | 議事録ペインのUIを変える前 |
+| [議事録の描画と検索](docs/minutes-rendering.md) | 対応する記法、検索、Wikiリンク、描画資産の再生成 | 議事録の描画・`web/minutes` を変える前 |
+| [議事録プレビューの設計](docs/minutes-preview.md) | 議事録の受け渡し、`ai/minutes.json`、書き込み許可と受け入れたリスク | 議事録の書き先・通知・Codexの許可を変える前 |
+| [議事録プレビューの表示例](docs/minutes-preview-example.md) | 描画の確認に使う議事録の例 | 描画を目で確かめるとき |
+| [議論のボード](docs/board.md) | ボードの設定、内蔵プロンプト、見出しの扱い | ボード・`BoardPrompt` を変える前。テストが本文を読む |
+| [AI参加者の設計](docs/ai-participant.md) | 会議参加モードの契約、envelope、受信箱、同梱CLI、Skill、フック、停止後の後片付け | AI参加・同梱CLI・返送・Skillを変える前 |
+| [AIへの受け渡し](docs/ai-handoff.md) | 「会話をコピー」と会話ファイルの契約 | 手動コピーを変える前 |
+| [AI設定の複数プロファイル](docs/ai-profiles.md) | `[[ai]]` のキー・検証、宛先の選択 | `AIConfig` ・宛先選択を変える前 |
+| [AIへの定期自動送信](docs/ai-scheduled.md) | 自動送信の状態機械、ロボットの操作、最後の1回 | 自動送信・ロボットの表示を変える前 |
+| [AI依頼の進行表示](docs/ai-progress.md) | 返事待ち行の進行文と4分割バー | `AIProgress` を変える前 |
+| [AIを会話の参加者として並べる](docs/ai-timeline.md) | AIの行の種類と並べ方 | AIの行・送信の印を変える前 |
+| [AIの返事のMarkdown表示](docs/ai-markdown.md) | 返事本文の分解と描画 | `MarkdownBlocks` を変える前 |
+| [ロゴの管理](docs/logo.md) | 元画像と配布用アイコン | ロゴ・アイコンを変える前 |
 
-# AI参加を有効にする。省略するとAI機能は無効。単数の [ai] は互換で読み、1つ目が既定
-[[ai]]
-name = "議事録"           # 省略時は address から導く参加者名。重複は不可
-cli = "codex"
-address = "迅雷へ"
-avatar = "~/Pictures/jinrai.png" # 省略時は紫のイニシャル。http/httpsのURLも使える
-effort = "high"           # 推論の強さ。CLIごとの引数へ翻訳する。extraArgs との二重指定は不可
-notifySound = false       # プロファイルごとに効く。返答元の設定で鳴らす
-cwd = "~/work/minutes"    # 起動時の作業ディレクトリ。省略時は固定の既定
-autoStart = true          # 録音開始シートの宛先の既定になる。配列で1つまで
-# 手動・自動実行シートと録音開始シートのプロンプト初期値
-autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください" # 省略時は空欄
-# board = "## ボード"          # 自動はこの見出しだけ更新。autoPromptは手動の初期値
-# boardLocation = "~/Documents/minutes/${yyyyMMdd_HHmmss}.md として作成し、変数は現在日時" # パス未指定時の作成指示
-# boardPrompt = "独自のボードのプロンプト全文" # board指定時のみ。省略時は内蔵
-autoIntervalMinutes = 3 # 1〜60分、省略時は3分
+`docs/records/` は試験・検証の記録。現行の仕様ではない。仕様を確かめるときは上の表の文書を読み、経緯を調べるときだけ開く。
 
-[[ai]]
-name = "相談"
-cli = "claude"
-effort = "max"
-address = "ネオへ"
-```
-
-`effort` の値域はCLIごとに違います。Codexは none / minimal / low / medium / high / xhigh / max / ultra を `-c model_reasoning_effort` へ渡し、Claudeは low / medium / high / xhigh / max を `--effort` へ渡します。実際に通る値はモデルによります。`extraArgs` での effort 指定は二重指定になるため設定エラーにします。
-
-`[[ai]].avatar` は話者台帳と同じローカルパス・HTTP・HTTPSの画像に対応します。AIの返事行に使い、省略・取得失敗時は従来の紫のイニシャルを表示します。URL画像は共通の `~/Library/Caches/kikigaki/avatars/` に保存します。アバターの設定も会議開始時に固定され、過去会議は保存済みのプロファイルから表示します。
-
-`[[ai]]` を複数書くと、「AIへ…」と「自動送信…」のシートで送信ごとに宛先を選べます。既定はどちらも1つ目で、会議内では手動と自動が独立に前回の選択を覚えるため、自動は議事録、手動は相談のように同時に使えます。会議内の番号は全体の通しで、印とMarkdownの宛名で見分けます。確認質問への返答は元の質問と同じ宛先へ返ります。
-
-`herdrCommand` はプロファイル共通です。2つ目以降は省略でき、先頭の値を引き継ぎます。先頭と違う値を明示したときだけ設定エラーになります。
-
-グローバルショートカットは廃止しました。設定の `[hotkeys]` と `[ai.hotkey]` は書いてあっても読み飛ばし、エラーにも警告にもしません。既存の設定ファイルを書き換えずに済ませるためです。録音の開始・停止・一時停止とAIの手動実行は、ウィンドウのボタン・メニューバー・フッターの「…」から操作します。
-
-Codexは議事録を書けるよう保存先 `outputDir` を書き込み許可へ追加します。引き継ぐ既存許可は `~/.codex/config.toml` 最上位の `[sandbox_workspace_write]` です。`CODEX_HOME` やプロファイル別設定を拾わない既存の制約は維持します。任意の議事録パスを指定しても、その場所への無条件の許可を追加するわけではありません。保存先外でcwdや既存許可にも含まれない場所への保存は、CLIの承認の仕組み(Codexのサンドボックス外への昇格要求、Claudeの編集の承認待ち)に委ねます。利用者がherdrのペインで承認すれば保存は成功し、拒否されたときだけ `work_failed` で返ります。Skillは許可の範囲を先読みして諦めないよう定めています。
-
-受け入れたリスク: outputDirへの許可によって、全会議のMarkdown、state、archive、minutes、返送tokenを含むrequestsをモデルから書き換えられるようになります。会議Markdownを直接編集しない制約はSkillの規則であり、サンドボックスでは保証されません。返送tokenも同じユーザー内の隔離ではありません。
-
-Claudeの同梱CLI限定allowは変えず、cwd外の編集は設定により承認待ちとなりherdrでblockedとして見えます。
-
-通常の手動実行の入力欄も、宛先の `autoPrompt` を初期表示します。編集した文面は空欄も含めて宛先ごとに会議内で保持し、送信後やシートを開き直したときに復元します。自動実行の下書きとは独立し、新しい録音で初期値へ戻ります。確認質問への返答と失敗した依頼の再送は従来の入力復元を使います。
-
-`board = "## ボード"` がある宛先の自動送信は、内蔵プロンプトで議事録のボードの見出しだけを更新します。`boardPrompt` で全文を差し替えられます。開始には議事録パスか、書き先の作り方を伝える自由文 `boardLocation` が必要です。パスが無い送信だけ、内蔵文面またはboardPromptの末尾へ作成・通知指示を付けます。変数はAIが解釈し、アプリでは展開しません。AIが作成後に `minutes` で通知したパスは、ボードの会議の以後の手動・自動送信へ渡します。人の指定がある場合はそちらを優先します。board無しのboardLocationは設定エラーです。「議事録」「ボード」の別タブで表示し、議事録本文と目次からはボードを外します。見出しは会議ごとに固定して保存し、手動更新にも渡して保護します。設定・内蔵文面・限界は [議論のボード](docs/board.md) を参照してください。
-
-ボードの見出し行は毎回 `## ボード(17:48 更新)` のように実時刻を併記して更新します。設定の `board` は時刻なしで固定し、切り出しでは時刻の飾りだけを許します。ボードタブは図から始まり、立場、直近の動きの順です。概要行・「論点」見出し・版数は出しません。
-
-詳細は [AI設定の複数プロファイル](docs/ai-profiles.md) を参照してください。稼働中のherdrペインへ接続する `attach` と `displayAgent` は取り下げたため、書くと設定エラーになります。会議に紐づかない「準備済みAIセッション」も取り下げ、実装ごと撤去しました。利用者の台帳 `~/Library/Application Support/KIKIGAKI/ai-prepared.json` と準備用の置き場は読まず、消しません。
-
-自動送信は録音開始シートで宛先を選んだときに録音開始と同時に始まり、それ以外はロボットの「自動実行…」シートから開始します。どちらも直後に本番の送信判定を1回行います。変更があれば即送信し、次の期限はCLIへ渡す時点から1間隔。空会話を含む変更なしなら送らず、開始時点から1間隔のカウントダウンへ進みます。「今すぐ送る」も同じ判定を直後に行います。「手動実行…」はAI依頼シートです。ダブルクリック送信はありません。
-
-開始シートで「送らない」を選ぶと、設定に `autoStart = true` があってもその会議では始めません。シートの宛先・間隔・プロンプト・作業許可・最後の1回はその録音にだけ効き、設定ファイルへは書き戻しません。
-
-ロボットは自動OFFで薄墨の輪郭、ONで朱の輪郭。確定待ち・起動・接続中は朱の輪郭のまま目を動かし「準備中」、CLIへ渡す直前の `beginSending` からは手動・自動とも朱の反転と白い目で「実行中」です。失敗・取消・自動停止では準備中を残さず、実行IDで古い接続の後着通知を除外します。送信待ちがなく自動ONなら `2:30`・`0:45` の形式で残り時間を表示し、変更なしのスキップ理由はツールチップへ。切断・最終送信待ちは「—」、自動OFFの待機は下ラベルなしです。文字は未読と共通の9pt mediumで数字だけ等幅です。
-
-ロボットのメニューの「自動実行解除」は録音を続けたまま自動送信を止めます。シートの「録音停止時に最後の1回を送る」は既定ONです。最終処理と保存が成功し、変更があれば送信し、返事待ちなら到着後まで保留します。保留中も同じ停止操作で取りやめられます。
-
-自動の返事は「自動」の印付きで表示します。通常の返答に未読表示や既読操作はなく、未回答の確認質問だけを「要返答」の赤バッジで強調します。保存済みの既読情報は互換性のため保持します。manifestが欠損した会議登録は保持しますが、警告表示は出しません。自動answeredの通知音は鳴らしません。失敗・送達不明の警告は維持します。稼働状態は新会議・再起動で引き継がず、シートの変更を設定ファイルへ書き戻しません。詳細は [定期自動送信](docs/ai-scheduled.md) を参照してください。
-
-ロボットの目は表示中の準備中・返事待ちに限り1秒周期で左右へ動きます。非表示・最小化・非稼働ではタイマーを止め、「視差効果を減らす」では目を静止させます。連続アニメーションは使いません。
-
-「録音を開始」を押すと、その会議だけの指定を決める録音開始シートが出ます。決めるのは話者判別・小音量除外のON/OFF・議事録・自動送信で、小音量のしきい値は文字で見せるだけです。既定値はすべて前回の値なので、何も触らず⏎(⌘⏎でも可)で始められます。シートに説明文は置きません。取消は何も始めません。指定した議事録は開始と同時に右のペインへ出し、自動送信はシートの値で始めます。決めた値は設定ファイルへ書き戻しません。詳細は [録音開始シート](docs/start-sheet.md) を参照してください。
-
-`kikigaki://start?minutes=<パーセントエンコードした絶対パス>` のリンクからも同じシートを開けます。議事録を用意した側がリンクを出し、クリックで議事録入りのシートが出るところまでが役目で、録音そのものはリンクからは始めません。`~/` 始まりのパスは展開します。読めない議事録はパス欄を空のままにして、理由を議事録欄の下へ1行出します。待機中だけ受け付け、録音中などは理由をヘッダーへ出してシートを出しません。開いている最中のリンクはパス欄を差し替えます。`start` 以外のホストと `minutes` 以外のクエリは無視します。
-
-話者名かアバターをクリックすると、台帳の候補選択・自由入力・既定名へのリセットができます。同じ枡の全発言に反映し、停止後は保存も更新します。別の枡で使用中の候補は選べません。台帳の名前は空と重複を認めません。
-
-ウィンドウ上部の人型アイコンと使用枠数で話者を手動統合し、「統合しない」で元の話者へ戻せます。停止後の変更は通常Markdownと省略前Markdownにも反映します。話者名と統合先は新しい録音の開始時にリセットします。詳しい条件は [話者の手動統合](docs/speaker-mapping.md) を参照してください。
-
-話者判別は録音開始シートの「話者判別」で切り替えます。初期値は有効で、UserDefaultsへ前回の選択を保存します。録音開始で会議のSpeakerNamesへモードを固定するため、始めてからは変えられません。無効設定での起動時は話者判別モデルを読み込まず、無効会議には生成・音声処理・最終判定を行いません。有効時の先読みとモデル再利用は維持し、シートで「区別する」を選んだ時点でも先読みします。
-
-無効時は全員共通の「発言」とマイク記号を使い、ASR結果の通知から確定表示します。話者待ち・改名・統合・相槌省略は適用しません。文末と1秒以上の無音で区切り、長い独話では30秒を超えた次の確定結果境界で分けます。画面・保存・AIは同じ分割処理を使い、旧archiveの不明話者は従来の「?」のままです。停止後のヘッダーは表示中の会議を表し、次回設定を変えても過去の内容は変わりません。詳細は [話者判別の切替](docs/diarization-toggle.md) を参照してください。
-
-画像はローカルパスとHTTP・HTTPSのURLに対応します。取得できない画像はイニシャルで表示し、URL画像は `~/Library/Caches/kikigaki/avatars/` へキャッシュします。台帳の変更は既存の設定再読込で反映します。
-
-保存先には `2026-09-05_1240.md` (有効時は同名の `.wav`) を1会議1ファイルで書きます。
-
-新しく保存する発話行とAI用の会話ファイルは `[HH:MM:SS] 話者名: 本文` の実時刻です。一時停止の長さを反映し、既存の経過時刻形式のファイルは変換しません。
-
-画面の時刻も、発話・手入力・AIの行・送信の細い1行をすべて `HH:MM:SS` で表示します。
-
-本文下の複数行入力欄から、録音中・一時停止中だけ⌘Enterで投稿できます。Enter・Shift+Enterで改行し、長文は折り返して縦スクロールします。画面・archive・Markdownは改行を保持し、コピー・AI送信は1発話1行へまとめます。固定名「手入力」は8話者とは別で、改名・統合・相槌省略の対象外です。IMEのEnterは変換確定を優先し、Escでは下書きを残します。手入力のURLはクリックで開け、名前と本文は検索対象です。
-
-`MeetingSession.typedEntries` を音声処理から独立して保持し、`TranscriptEntries.merge` で音声位置順に併合します。typedは必須のpostedAtを持ち、画面・Markdown・AI文脈は `TranscriptRenderer.clock` で投稿日時を表示します。AI送信のtypedは最初のawaitより前に固定します。詳細は [手入力の設計](docs/typed-entry.md)。
-
-手入力欄への⌘Vで画像を添付できます。クリップボードの画像とコピーした画像ファイルを受け、番号付きサムネイルから取り外せます。画像だけの投稿も可能です。下書きはメモリに持ち、投稿時に会議Markdownの隣の `<会議名>.attachments/` へ保存します。`Utterance.imagePaths` は絶対パスの配列で、旧archiveでは省略可能です。Markdownには画像を埋め込み、コピー・AI文脈には `画像N: ` とパスを載せます。投稿済みの画像はサムネイルから開けます。
-
-同じ分に録音を始め直した場合、既存の保存物があれば `_2`、`_3` と連番を付けます。
-
-`dropRepeatedBackchannels = true` は、停止時に「うんうん」「そうそう」など短い反復の候補を省きます。録音中は省略せず、通常の `.md` と停止後の画面へ省略結果を反映し、省略前の書き起こしは同名の `.raw.md` に残します。話者名の変更は両方へ反映します。原文ファイルの保存に失敗した会議は、通常の `.md` と画面へ原文を残します。
-
-1回だけの相槌や同じ話者に判定された繰り返しは対象外です。実際の発話者を保証する機能ではなく、誤った省略もあり得ます。詳細は [繰り返し相槌の仕様と検証](docs/repeated-backchannels.md) を参照してください。設定変更は次の録音から適用します。
-
-## AIへの受け渡し
-
-`measureAudioLevels = true` は次の会議から音量の計測を有効にします。行にdBFSと小音量候補を表示し、停止時に `.levels.json` とMarkdown末尾の計測表を保存します。WAV保存とは独立し、本文・コピー・AI送信には全発話を含めます。詳細は [小音量発話の計測](docs/audio-levels.md) を参照してください。
-
-会議中・停止後の「会話をコピー」は、固定したローカル会話ファイルへの参照をコピーします。押すたびに記録している会話の全体を渡し、表示中の議事録が実在すればそのパスも添えます。AI参加を設定していなくても、任意のAI Agentへ今の文脈を渡すための入口です。差分・再コピー・最初からのコピーは廃止しました。AI側の `skills/kikigaki` は `.app` に同梱してあり、同梱CLIの `skill install` で導入するため、利用者がリポジトリをcloneしてリンクを張る必要はありません。契約は [AIへの受け渡し](docs/ai-handoff.md) を参照してください。話者名はウィンドウ上部の「話者名…」でまとめて変更できます。
-
-フッターの「…」メニューは「会話をコピー」が常にあり、AIの項目は使える時だけ区切り線の下に出します。「ペインを開く」は開けるペインがある時、「保存を再試行」はAI記録の保存に失敗した時だけです。「今すぐ送る」と「AIセッションを作り直す」はロボットのメニューに集め、作り直しは録音中に接続が切れた時だけ出します。前の会議の要返答を案内する項目と、過去会議のAIの返事を開く窓は撤去しました。停止後の会議には返答できず、窓から解消できない案内が出続けるためです。
-
-`[ai]` を設定すると、herdrの専用ペインへ依頼や返答を送り、返事を同じ会議へ回収できます。既定はCodex・宛名「迅雷へ」・通知音なし。CLI種別や設定は会議開始時に固定し、変更は次の会議から反映します。初回は固定cwdへの信頼を利用者がherdrペインで承認します。CLIとherdrの実行ファイルはPATHのほか `~/.local/bin`・miseのshims・Homebrewを探し、見つからないときは `command` / `herdrCommand` の絶対パスで指定します。詳細は次の2つを参照してください。
-
-- 会議参加モードの契約: [AI参加者の設計](docs/ai-participant.md)
-- 複数プロファイル: [AI設定の複数プロファイル](docs/ai-profiles.md)
-
-録音を停止すると、後片付けが終わった時点でその会議のherdrのペインを閉じます。閉じてよいのは、最終保存が終わり、送信中の依頼と返事待ちの依頼が無くなったときです。「録音停止時に最後の1回を送る」がONなら、その返事か失敗・取消まで待ちます。人が答えていない確認質問は待たず、停止から10分を過ぎたら待たずに閉じます。閉じられなかった枠は開いたまま残して警告だけを出し、会議の保存は成功のままにします。アプリの終了では閉じません。
-
-そのため**停止後は新しい依頼を送れません**。「手動実行…」「返答する」「再送」は停止で無効になり、開いていたシートも閉じます。会議が終わった後の相談はAIのCLIへ直接どうぞ。停止後も届いた返事は同じ会議へ保存し、過去会議の記録は保存したMarkdownで読めます。閉じたペインの「ペインを開く」は出しません。
-
-返事待ちは進行文と4分割バーで確認できた位置を示します。段は「送信 · 読込 · 編集 · 返答」で、バーの下に9ptの段名を表示します。読込はAIの `accept`、編集はAIの1回の自己申告かClaudeの編集系ツールのフックで確認します。総数の申告があれば「編集中(全7か所)」と出します。返答はAIが回答を書き始める前に送る1回の自己申告で確認し、「返答を作成中」と出します。返事が届いたら全段を1.5秒点灯してから本文へ入れ替えます。経過時間は表示中だけ更新し、過去会議は静止します。詳細は [AI依頼の進行表示](docs/ai-progress.md) を参照してください。
-
-- `KikigakiCore`: AI設定、独立stream履歴、envelope、質問と受信イベント、Markdown。herdr・AppKit・Processを置かない
-- `KikigakiAIIO`: アプリと返送CLIが共有するfd検証、原子的な保存、sessionとフック観測の型
-- `KikigakiCLI`: `accept`・`reply`・`notify`・`minutes`・`skill`。reply本文はstdinから読み、固定requestの受信箱へ排他公開する。minutesは議事録の絶対パスを独立イベントとして同じ検証で保存する。会議Markdownへ直接書かない。`skill install|uninstall` は利用者が端末で打つ配布Skillの導入口
-- `scripts/make-app.sh`: `Contents/Helpers/kikigaki-cli` と `Contents/Resources/skills/kikigaki` を同梱し、helperを先に署名してから.appを署名する。配布ZIPでもhelperとSkillの存在、helperの署名を検証する
-- `scripts/render_cask.sh`: Cask本文を標準出力へ書く。`update_tap.sh` はそれをtapへ置くだけにして、pushせずに `brew audit --cask` や手元tapでの導入・削除を試せるようにする
-
-配布Skillの導入は、利用者が同梱CLIの `kikigaki-cli skill install` を実行して行います。同梱先 `Contents/Resources/skills/kikigaki` へのシンボリックリンクを `~/.claude/skills/kikigaki` と `~/.codex/skills/kikigaki` に張ります。リンクなので `brew upgrade` で `.app` を入れ替えるだけでSkillも新しくなります。
-
-- Caskはリンクに一切関与せず、caveatsで上のコマンドを案内するだけです。Homebrew 7の `postflight_steps` はHOMEを一時ディレクトリへ差し替えたsandboxで走り、`~/.claude` の読み取りも禁じるため、Claude Code側へ張れません
-- 同名のファイルが既にあるときは触らず、その旨を出力します。cloneしたリポジトリへリンクを張って開発している利用者から、編集中のSkillを黙って奪わないためです。同梱版へ切り替えるときは自分で消してから再実行します
-- 参照先が `KIKIGAKI.app/Contents/Resources/skills/kikigaki` で終わるリンクだけを自分のものとみなし、張り直しと `skill uninstall` での削除の対象にします。`brew uninstall` ではリンクは外れません
-- Claude Codeの `--plugin-dir` のような起動時の指定は使いません。Codexには同種の指定がなく、手動コピーで貼り付ける相手や利用者が自分で起こしたペインにも届かないためです。利用者のSkill置き場へ入れるのが唯一の共通経路です
-
-Claudeのフック設定はセッション専用の `--settings` JSONへ生成し、同梱CLIの絶対パスだけをallowします。利用者のグローバルsettingsは編集しません。Codexのnotifyはセッション限定で差し替え、TOMLで読める配列を渡します。フックは回答の正本にせず、未返送の補助表示に留めます。
-
-議事録の受け渡しでは `participant.minutes_path` に人の指定した書き先を優先して固定します。AIが作成・更新した場所は同梱CLIの `minutes --session ... --request ... --token ... --path ...` で通知します。ボードの会議では人の指定が無い場合に通知パスを次の手動・自動送信へ渡し、ボードのない会議では伝播させません。議事録の既定パスは設けず、ボードの自動作成はboardLocationの指示に従います。会議ごとの対象は `ai/minutes.json` へ保存し、古い後着通知は人の指定や対象解除を巻き戻しません。ヘッダーの「議事録」か「表示」メニューで右ペインを開けます。録音開始シートで指定した場合は、開始と同時にペインを開いて人の指定として扱います。パス欄はReturnで確定し、Escapeで取り消します。指定ファイルの更新は自動で表示します。詳細は [議事録プレビューの設計](docs/minutes-preview.md) を参照してください。
-
-議事録本文は専用WebKitでペイン幅に追従し、脚注・callout・画像・Mermaid・数式・SVGを描画します。議事録がObsidianのVault内にあるときは `[[ノート]]` をリンクとして描き、クリックでObsidianの同名ノートを開きます。Vault外では従来どおり文字のままです。⌘Fは焦点のあるペインを検索します。パス欄の右にNeovim・Obsidianで開くアイコンボタンがあります。対応記法と配布資産の再生成は [議事録の描画と検索](docs/minutes-rendering.md) を参照してください。
-
-議事録のパス欄へフォーカスすると、最近表示できたファイルを最大10件表示します。人の指定とAIの通知を区別せず、描画に成功したパスだけをアプリ全体のUserDefaultsへ保存し、別会議や再起動後も利用できます。先頭行を初期選択し、クリックまたは上下キーとReturnで開きます。Escapeは一覧を閉じる操作を下書き取消より先に行います。存在しない履歴も墨のファイル名で残し、薄墨の「見つかりません」を添えます。同じ親ディレクトリが続く行では従段を省略します。
+- [議事としての話者判定と発話分割の改善計画](docs/records/minutes-quality-plan.md)
+- [短い返答の話者を残す条件](docs/records/short-speaker-turns.md)
+- [話者交代の語頭・語尾補正の測定記録](docs/records/speaker-boundaries.md)
+- [話者補正の除外比較とフレーズ固定の試験](docs/records/speaker-correction-trial.md)
+- [被りの島の補正を段階的に強める試験](docs/records/speaker-overlap-islands.md)
+- [Nemotron fast128 への切替の検証記録](docs/records/nemotron-verification.md)
+- [議事録プレビューの実装記録](docs/records/minutes-preview-implementation.md)
+- [会議参加モードの検証項目と段1〜5の実装記録](docs/records/ai-participant-implementation.md)
+- [AI参加者の通信境界: 段2の実測](docs/records/ai-participant-spike.md)
+- [AI設定の複数プロファイルの実装順の記録](docs/records/ai-profiles-implementation.md)
+- [定期自動送信の検証計画と段2〜4の実装記録](docs/records/ai-scheduled-implementation.md)
+- [定期自動送信の結合検証](docs/records/ai-scheduled-verification.md)
+- [AIを会話の行として並べる表示の段1〜3の記録](docs/records/ai-timeline-implementation.md)
+- [AIを会話の行として並べる表示の結合検証](docs/records/ai-timeline-verification.md)
+- [AI依頼の進行表示の検証記録](docs/records/ai-progress-verification.md)
+- [議論のボードの検証記録と受入手順](docs/records/board-verification.md)
 
 ## コミットメッセージ
 
@@ -205,7 +144,7 @@ Conventional Commits 形式で日本語で書く。
   - 見た目だけの変更 (余白・色・サイズなど挙動が変わらないもの) は `feat` ではなく `style` を使う
   - 判定基準: **読み取れる情報や挙動が変わるなら `feat`、同じ情報の見せ方だけなら `style`。迷ったら `feat`**
 - ユーザーから見て1つの対応は1コミットにまとめる (タダシとのやりとりで生じた調整・手直しは分けず統合する)
-- `scope`: `session`, `aligner`, `window`, `config`, `hotkey` など機能単位 (省略可)
+- `scope`: `session`, `aligner`, `window`, `config` など機能単位 (省略可)
 - `description`: ユーザー視点で何が変わったかを簡潔に書く
 - AI Agent (owlery) がコミットする場合は `--author="<名前> <slug@owlery.local>"` で author を自分の Agent 名にする (committer はデフォルトのまま)
 
@@ -218,89 +157,22 @@ swift build
 swift test
 ```
 
-`KIKIGAKI_TEST_SPEECH=1 swift test --filter DiarizationTests` で、通常はスキップする実Apple Speechの結合テストも実行できます。マイクを使わず無音を入力し、話者モデルの呼出ゼロ・相槌省略なし・会議ごとの切替を確認します。
-
 動作確認は `./scripts/make-app.sh` で組んだ `.build/KIKIGAKI.app` で行います (マイクの TCC 許可は Info.plist の説明文が要るためバンドル実行が前提。日常利用も `.app` 起動を標準とします)。
 
-マイク無しでパイプラインの端から端までを確認するには、音声ファイルをマイクの代わりに流す開発用フラグを使います。流し終えると保存して終了します。replayは録音開始シートを出さず、前回の値と下記の環境変数の指定で同じ開始経路を通します。
-
-開始シートの見た目は `KIKIGAKI_START_SHEET_CAPTURE=<出力先> swift test --filter StartSheetTests` でPNGへ撮り、モックと突き合わせます。
+マイク無しでパイプラインの端から端までを確認するには、音声ファイルをマイクの代わりに流す開発用フラグを使います。流し終えると保存して終了します。
 
 ```bash
 swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 ```
 
-- `--config <path>`: 設定ファイルを差し替える (保存先を作業用ディレクトリにするため)
-- `--replay <wav>`: マイクの代わりに音声ファイルを実時間より速く流す
-- `--show-window`: 起動直後に書き起こしウィンドウを表示する (見た目の確認用)
-- DEBUGの `--open-url <url>` は、起動直後に `kikigaki://` のリンクを実物と同じ経路へ流します。LaunchServicesが別の場所の `.app` へURLを配るため、組んだばかりの `.app` を確かめるのはこちらです。replayとは併用しません。
-- DEBUGの `--minutes-history-ui <出力先>` は専用UserDefaultsで議事録履歴の実操作と600pt・1800ptの撮影を行います。同じ引数に `--history-restart` を足して別プロセスで復元と再表示を検証し、専用設定を消します。通常の `--preview-minutes` も既存の隔離設定を使います。
-- DEBUGビルドの `KIKIGAKI_DEBUG_REPLAY_REALTIME=1` はreplayを等倍で入力する。省略時は従来の約10倍速。
-- 環境変数 `KIKIGAKI_DEBUG_DIARIZATION=off` または `on`: replayで話者判別を指定する。通常起動では無視し、replayではUserDefaultsを読み書きしない。LIVE_TRACE併用時は、無効会議のASR確定受信と表示反映の単調時計を同じトークン数で照合できる。
-- `--smoke`: UI を起動せず設定の読み込みだけ確認して終了する (CI 用)
-- 環境変数 `KIKIGAKI_DEBUG_AI_ASK="40:;100:問い"`: replayの音声経過秒に達したら本番のsubmitAIで送信する。空の問いは声の末尾を使い、返事待ちは順番を保つ。前問がfailed/cancelledで接続が送信不可なら次問のために新世代へ作り直す。期限に達していない問いや失敗した問いの再送は行わない
-- 環境変数 `KIKIGAKI_DEBUG_AI_AUTO="3:議事録を更新してください"`: replay開始時に本番の自動送信を開始し、直後に1回判定する。変更があれば即送信、空会話を含む変更なしなら開始から1間隔待つ。間隔は有限の正の秒数、プロンプトは必須。最初のコロンだけで分割し、以後のコロン・改行を保持する。作業許可は設定値、停止時の最後の1回はON。返事待ちをスキップし、自動で世代を再作成しない。判定時の効果・接続可否・変更の有無・request数をstderrへ出す。ASKと併用でき、停止後の最終待機と返送回収にはHOLDを設定する。通常起動では無視し、`--smoke --replay <wav>` は形式だけを検証する
-- 環境変数 `KIKIGAKI_DEBUG_AI_AUTO_SECONDS=20`: 設定の `autoStart` の送信間隔を秒へ上書きする。0より大きく3600秒以下。分単位の設定値ではreplayの実行時間に収まらないため。開始そのものは本番の経路を通る
-- 環境変数 `KIKIGAKI_DEBUG_AI_AUTO_PROFILE="ボード"`: replayの自動送信先を固定し、宛先の内蔵ボードプロンプトまたは設定のプロンプトを本番の開始経路から送る。間隔は `KIKIGAKI_DEBUG_AI_AUTO_SECONDS` で上書きできる。AI登録先もoutputDir内へ隔離する。
-- 環境変数 `KIKIGAKI_DEBUG_MINUTES_PATH="/absolute/minutes.md"`: replay開始前に議事録パスを渡す。ボードのプロファイルではこれかboardLocationが必要。通常起動では無視する。
-- DEBUGの `--preview-minutes <path>` に `KIKIGAKI_DEBUG_BOARD_HEADING="## ボード"` と `KIKIGAKI_DEBUG_BOARD_CAPTURE=<出力先>` を添えると、両タブをPNGへ撮影して終了する。
-- 環境変数 `KIKIGAKI_DEBUG_AI_ASK_PROFILE="相談"`: `KIKIGAKI_DEBUG_AI_ASK` の送信先プロファイルを名前で固定する。`autoStart` と別のプロファイルを指定すると、手動と自動が同時に別のAIへ飛ぶことを確かめられる。設定に無い名前なら起動時に止まる
-- 環境変数 `KIKIGAKI_DEBUG_REPLAY_HOLD=180`: replayの停止・保存後に指定秒だけ終了を遅らせる。0〜86400秒、既定0。到達済みの送信待ちと回答回収を継続する。停止後にペインを閉じるところまで見るときも、返事が届くまでの時間をここで確保する
-- DEBUGビルドで `KIKIGAKI_DEBUG_AI_PROGRESS_REPLAY=/path/to/evidence` を指定すると、replayの本番画面更新直後にAI進行の変化をPNGと `evidence.json` へ記録する。AI登録簿は保存先の `.typed-test-support/` へ隔離し、request・受信箱・保存形式は変更しない。実herdrを使うため同梱CLIのある `.app` から起動する
-- 環境変数 `KIKIGAKI_DEBUG_AI_RENAME="0=田中"`: HOLD中に結果が届いた時点で0始まりの枡を一度改名する。結果がなければHOLD終了直前に行う。この3変数は通常起動では無視し、`--smoke --replay <wav>` で入力形式だけ検証できる
-- 環境変数 `KIKIGAKI_DEBUG_TYPED_ENTRIES='[{"seconds":20,"text":"https://example.com:8080/a;b"}]'`: replayの処理済み音声秒が指定位置に達したら本番のsubmitTypedで投稿する。startは実際の受付時点の収録位置で、処理が遅れていれば指定秒より後になる。JSON配列なのでURL中のコロン・セミコロンを保持し、同じ指定秒では配列順を保つ
-  - 投稿に `"pauseSeconds":2` を足すと、その位置で一時停止し、実時間2秒後に投稿して再開する。0秒超・60秒以下だけを受け付ける。一時停止中の音声は通常の録音と同じく取り込まない。検証フラグ併用時は一時停止中・再開直後の会話、timelineと実ウィンドウも保存する
-- 環境変数 `KIKIGAKI_DEBUG_TYPED_VERIFY=1`: replay中の投稿直後と停止後に本番の全体コピーを通し、保存先の `typed-verification/` に行JSON・コピープロンプト・Markdownを残す。停止後は改名、先頭2話者の統合、統合解除も通す。名前はAI_RENAMEの指定、なければ「改名確認」。クリップボードは変えず、AI登録簿も保存先の `.typed-test-support/` に隔離する。この2変数も通常起動では無視し、`--smoke --replay <wav>` で形式だけ検証できる
-  - AI_ASKを併用する場合も、問いは録音中の指定秒で送る。停止後は手動の依頼を受け付けずペインも閉じるため、HOLD中には送らない。停止後の送信と返送回収を見るときは `KIKIGAKI_DEBUG_AI_AUTO` の最後の1回を使う
-- 環境変数 `KIKIGAKI_DEBUG_LIVE=1`: 停止直前の録音中表示を stderr に出す (録音中と最終結果の差を調べる用)
-- 環境変数 `KIKIGAKI_DEBUG_LIVE_TRACE=1`: 録音中の表示更新時に、音声経過秒と全文を stderr に出す。診断ログに会話本文を含む
-- 環境変数 `KIKIGAKI_DEBUG_PHRASES=1`: 停止時のフレーズごとに、トークンの時刻と窓判定から多数決後への話者の変化を stderr に出す
-  - `[segment]` は窓集計前の音声側の話者区間。発話が重なる場合は複数話者の区間も重なる
-- 話者判別は Nemotron 3 の `fast128` だけを使う。chunk の先頭から10.56秒ぶん入力が溜まると判定が出て、出た判定は後から変わらない。アプリの話者固定猶予とは別の値
-  - 停止時は `finishStream` が末尾の chunk を詰めて判定する。保存する録音と会議時間は延長せず、話者区間も実音声の終端で切る
-  - 録音中に推論が失敗したら、その会議ではエンジンを呼ばず判定済みの区間だけを使う。失敗後の続行は時刻をずらすため
-- 他のモデルとの比較は `experiments/nemotron` の独立CLIで行う。アプリにはエンジンの切替を置かない
-- DEBUGの `KIKIGAKI_TRIAL_DUMP` でreplayやマイクの入力を書き出し、`--align-compare` で本番の判定とフレーズ固定を当て直す。別のビルドとの差は出力の全文を `diff` で比べる。試験用 `.app` は `KIKIGAKI_TRIAL=1 ./scripts/make-app.sh` で別の場所・別の識別子に組む。補正を外した条件の比較は、廃止した試験変数を持つコミット `11d8733` のビルドで行う。手順と結果は [話者補正の除外比較とフレーズ固定の試験](docs/speaker-correction-trial.md)
-- 被りの島の補正の段階 `off|cut|phrase|cross` の比較は、試験変数 `KIKIGAKI_TRIAL_ISLAND` を持つコミット `66be821` のビルドで行う。採用は `cross` で、試験変数は廃止した。条件・凍結との整合・比較結果は [被りの島の補正を段階的に強める試験](docs/speaker-overlap-islands.md)
-- 環境変数 `KIKIGAKI_TEST_DIARIZATION=1 swift test --filter SpeakerDiarizerTests`: 実モデルで短い入力とchunk境界の末尾処理を確かめる。初回はモデルを取得する
+起動フラグ、replayの指定、検証・撮影用の環境変数の一覧は [開発用のフラグと環境変数](docs/dev-flags.md) を参照してください。
 
-### 表示品質の検証
-
-短い別話者区間をフレーズの多数派へ吸収する補正は置きません。短い返答は、語内補正など残した補正を当てた後の話者のまま保持します。旧来の吸収は「思い通り行きます。」の全体を別話者へ倒していたため外しました。「代表」のような文中の1語や、語の途中を切る不明の1文字が別の行に残る退行は受け入れています。経緯と比較は [話者補正の除外比較とフレーズ固定の試験](docs/speaker-correction-trial.md)、廃止前の条件は [短い返答の話者を残す条件](docs/short-speaker-turns.md) を参照してください。
-
-語内で話者が割れた場合は、ASRトークンと語の両端が一致し、既知話者の文字数で過半数がある語だけ境界を補正します。同点・不明・凍結済みを含む語は補正しません。
-
-- 例外: 過半数が無くても、0.8秒を超える1文字の語頭だけが別の既知話者で、語の残りが同じ既知話者に揃い、後続話者の区間が語頭の末尾0.12秒以上を覆う場合は、語頭の1文字だけを後続へ付け替えます
-- 対象: 「自 / 己肯定ですよ。」のように、語頭の時間の前半に別話者の声が入った形です。不明の語頭は補いません
-- 詳細: [話者交代の語頭・語尾補正](docs/speaker-boundaries.md)
-
-話し手の声が続く中で、重なった別話者へ割れた短い島は両隣の話者へ戻します。両隣が同じ話者で、1.5秒以下、島の各文字に話し手の区間が0.12秒以上重なり、両隣との間に0.35秒以上の間が無い場合です。文末はまたぎます。
-
-- 対象: 「だ / から」「話で少 / し」「よね。で、」のように、相槌が重なった区間で話し手の本文が割れた形です
-- 受け入れた限界: 話し手の声に重なって実際に言った「はい」なども話し手へ戻します。区間だけでは文字にならなかった相槌と区別できません
-- 詳細: [被りの島の補正を段階的に強める試験](docs/speaker-overlap-islands.md)
-
-録音中は、判定に読む入力が全て確定したフレーズを丸ごと凍結します。条件は、全トークンの高精度確定、終端の確定、長い1文字の後続文字の確定、判定済み範囲、間の無い後続の文の確定です。停止時は凍結を外して全体を再判定します。文字起こしの確定と話者判定の正しさは別であり、確定した文字列でも話者は誤ることがあります。
-
-- 30秒猶予からの置き換え: 9/26の等倍replayで固定待ちの中央値が30.3秒から15.4秒になり、停止時との不一致は0でした
-- 限界: 文末記号の無いフレーズは次の発話の確定まで待つため、素材によってp90と最大は30秒猶予より長くなります
-- 島の補正の採用で、文末の後も次の発話の確定を待つようになり、固定待ちの中央値が5〜8秒延びました(9/26で15.4秒→20.5秒)
-
-文字起こしは話者判別のオン・オフとも速報を先に表示し、高精度側が確定した範囲から静かに差し替えます。`TranscriptMerge` の表示用確定数は速報を含みますが、話者凍結には高精度側の確定数だけを渡します。
-発話行の確定前後は、行全体の半透明と通常の濃さで示します。4段階のランプは表示しません。話者判別オンでは行全体の高精度文字と話者が固定された時、オフでは高精度文字が確定した時に通常表示になります。停止後の最終結果も通常表示です。詳細は [発話の確定表示](docs/utterance-progress.md) を参照してください。
-半透明の発話もコピー・AI送信の対象です。小音量の除外は従来の薄化と注記で示し、未確定の薄化と掛け合わせません。
-AI送信は速報エンジンの生成に成功した会議では文字の確定を待たず、その時点の速報を含む最新結果を使います。速報の生成に失敗した会議では従来の文字確定待ちを使います。停止後の画面とMarkdown・archiveは高精度側だけで作ります。詳細は [文字起こしの速報表示](docs/fast-transcription.md) を参照してください。
-
-受け入れたリスク: 速報を並走させると高精度側の認識結果そのものも変わり、語尾や助詞が落ちやすくなります。高精度側だけを保存しても単独実行と同じ品質になる保証はなく、表示の速さと引き換えにこの変化を受け入れます。迅雷の等倍replayによる比較結果と具体例は [文字起こしの速報表示](docs/fast-transcription.md) に記載しています。10倍速では差が誇張されるため、認識品質の検証は等倍で行います。
-
-長い1文字に続く文字の確定結果がまだ無い場合は、そのフレーズの凍結を保留します。尾部の語頭補正が後続結果に依存するためです。吸収を廃止する前の評価と残っていた課題は [議事品質の改善計画](docs/minutes-quality-plan.md) を参照してください。
+### 検証の注意
 
 - プロトと同じ音声で保存結果が一致することは移植の検証です。精度や録音中の表示の安定性は別に確認します
 - `KIKIGAKI_DEBUG_LIVE` が出すのは停止直前の1回分です。録音中の全時点の検証には、途中の表示と、その時点の確定・暫定トークンを確認する必要があります
 - `KIKIGAKI_DEBUG_PHRASES` の変更前の話者も、前後0.5秒の窓で集計した推定値です。実際の発話者の正解ラベルではありません。相槌の除去を評価するときは、原音と突き合わせ、本文の誤削除も確認します
 - 修正前後を比べるときは、入力音声を揃え、出力先をそれぞれ別の検証用ディレクトリにします。ビルドの終了コードが成功であることを確認してから実行します
-
-FluidAudio の Nemotron 3 fast128 モデル(約193MB)は初回起動時に HuggingFace から `~/Library/Application Support/FluidAudio/Models/nemotron-3-diarization` へ落ちます。旧版の `sortformer` は使わなくなりましたが、アプリからは消しません。Apple Speech の日本語アセットも初回に自動取得されます。
 
 ## リリース方法
 

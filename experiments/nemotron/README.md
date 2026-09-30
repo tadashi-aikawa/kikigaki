@@ -1,5 +1,8 @@
 # Nemotron 試作比較
 
+> [!NOTE]
+> 2026-09-26 時点の比較の記録。その後アプリは話者判別を Nemotron 3 の fast128 へ切り替え済みで、以下の「現行」は切替前の Sortformer を指す。実装は [Nemotron fast128 への話者判別の切替](../../docs/nemotron-integration.md) を参照する。
+
 Nemotron 3 Diarization と Nemotron 3.5 ASR を、現行の Sortformer と Apple Speech に同じ入力で比べる独立CLI。アプリ本体・既定・設定・保存形式は変えていない。
 
 ## 結論
@@ -218,6 +221,9 @@ Apple の速報+高精度を、4人冒頭の先頭60秒で等倍に流した値�
 - ASR の比較は Apple を基準にした差分率で、正解に対する CER ではない
 
 ## アプリへ入れる場合の変更点
+
+> [!NOTE]
+> 計画時点の案で、実装とは異なる。実装は [Nemotron fast128 への話者判別の切替](../../docs/nemotron-integration.md) を参照する。
 
 話者判別だけを Nemotron 3 へ替える案。文字起こしは Apple のまま。
 

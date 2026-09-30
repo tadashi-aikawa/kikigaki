@@ -3,7 +3,7 @@ import Foundation
 import KikigakiCore
 
 /// `--align-compare <dumpDir>`: 書き出した入力へ本番の判定とフレーズ固定を当て、Markdown・JSON・全文を書く。
-/// UIもモデルも起動しない。別のビルドとの比較は全文の `diff` で行う。使い方は docs/speaker-correction-trial.md
+/// UIもモデルも起動しない。別のビルドとの比較は全文の `diff` で行う。使い方は docs/speaker-compare.md
 enum SpeakerTrialCompare {
     static let usage = """
         usage: Kikigaki --align-compare <dumpDir> [--out <dir>] [--source <名前>]

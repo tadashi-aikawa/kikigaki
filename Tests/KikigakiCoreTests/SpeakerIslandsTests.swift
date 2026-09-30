@@ -2,7 +2,7 @@ import Testing
 
 @testable import KikigakiCore
 
-/// 話し手の声が重なった短い別話者の島を両隣の話者へ戻す補正。設計: docs/speaker-overlap-islands.md
+/// 話し手の声が重なった短い別話者の島を両隣の話者へ戻す補正。設計: docs/speaker-assignment.md
 @Suite struct SpeakerIslandsTests {
     // MARK: - 実録
 

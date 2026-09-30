@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/.build/KIKIGAKI.app"
 # KIKIGAKI_TRIAL=1: 話者補正の試験用。起動中の通常の .app を消さないよう別の固定パスへ組み、
 # 識別子を分けてUserDefaults・マイク許可を本体と分ける。kikigaki:// のリンクも受け付けない。
-# 自由なパスを rm -rf する口は作らない。詳細: docs/speaker-correction-trial.md
+# 自由なパスを rm -rf する口は作らない。詳細: docs/speaker-compare.md
 TRIAL="${KIKIGAKI_TRIAL:-0}"
 if [ "$TRIAL" = 1 ]; then
   APP="$ROOT/.build/trial/KIKIGAKI-Trial.app"

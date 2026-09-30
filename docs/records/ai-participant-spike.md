@@ -1,6 +1,10 @@
 # AI参加者の通信境界: 段2の実測
 
-2026-09-07に専用workspaceで検証した。設計への反映は [AI参加者の設計](ai-participant.md)。本番コードの実装や端から端の動作確認はまだ行っていない。
+2026-09-07の段2で行った使い捨てスパイクの実測記録。現行の仕様ではない。現行は [会議中のAI参加者との往復連携](../ai-participant.md) を参照する。
+
+記録の中のCLIの書式は当時のスパイク用で、本番とは違う。本番の同梱CLIは `notify --provider claude|codex --session <path> --token <token>` の形で、Claudeのフックは専用のJSON設定から呼ぶ。記録の `notify claude` の位置引数、`session` を呼ぶSessionStartフック、`/private/tmp` のパスは使わない。書式の現行は上記の文書の「同梱CLI」を参照する。
+
+以下は段2の時点の記述。設計への反映は [AI参加者の設計](../ai-participant.md)。本番コードの実装や端から端の動作確認はまだ行っていない。
 
 ## 環境と再現手順
 

@@ -1,6 +1,6 @@
 # 手入力で会話へ投稿する
 
-会議中に共有されたURLなどを、音声の行と同じ会話へ投稿する。投稿者は4枡とは別の固定名「手入力」。受付は録音中・一時停止中のみとする。
+会議中に共有されたURLなどを、音声の行と同じ会話へ投稿する。投稿者は8話者とは別の固定名「手入力」。受付は録音中・一時停止中のみとする。
 
 ## 操作と表示
 
@@ -108,7 +108,7 @@ Coreへ `TranscriptEntries.merge(voice:typed:timeline:pendingVoiceRows:)` を置
 - [14:05:45] 鈴木: こちらのページですね。
 ```
 
-Markdownのメタ情報にある4枡の「話者」には手入力を含めない。raw保存に失敗して音声の省略を止めた場合も、通常Markdown・画面の両方に手入力を残す。typedだけで声が一度も確定しなかった会議も保存できる。
+Markdownのメタ情報にある「話者」の一覧には手入力を含めない。raw保存に失敗して音声の省略を止めた場合も、通常Markdown・画面の両方に手入力を残す。typedだけで声が一度も確定しなかった会議も保存できる。
 
 手動コピーは既に `snapshot.utterances` → `TranscriptRenderer.lines` を通るので、併合結果がそのまま入る。コピーは毎回全文なので、手入力後に遅れた音声が途中へ挿入されても次のコピーにそのまま入る。過去の固定済み会話ファイルは変更しない。
 
@@ -132,7 +132,7 @@ Markdownのメタ情報にある4枡の「話者」には手入力を含めな�
 
 並び順の第一キーは音声位置start、typedの時計表示はpostedAtとする。一時停止中も実際に投稿した日時を保持し、再開の操作で投稿時刻を書き換えない。
 
-`TranscriptRenderer.date(for:timeline:)` でtypedはpostedAt、voiceは従来の `timeline.date(at: start)` を返す。`TranscriptRenderer.clock(for:timeline:seconds:timeZone:)` を時計文字列の単一の口とし、画面のtimeLabel、Markdown、AI会話ファイルが共用する。書式は画面がHH:mm、保存とAI文脈がHH:mm:ss。タイムゾーンの扱いは従来と同じ。
+`TranscriptRenderer.date(for:timeline:)` でtypedはpostedAt、voiceは従来の `timeline.date(at: start)` を返す。`TranscriptRenderer.clock(for:timeline:seconds:timeZone:)` を時計文字列の単一の口とし、画面のtimeLabel、Markdown、AI会話ファイルが共用する。書式は画面・保存・AI文脈のいずれもHH:mm:ss。タイムゾーンの扱いは従来と同じ。
 
 たとえば14:00開始・音声60秒で一時停止し、14:02と14:03に投稿して14:05に再開した場合、typedのstartは両方60だが時計は14:02・14:03で固定される。再開後のstartが60の声の時計だけが14:05となる。手入力へtimelineの停止時間を二重に足さない。
 
@@ -154,18 +154,6 @@ AI印と発話の位置を比較する `AIMarkdown` とウィンドウも、発�
 | UIの行 | 鉛筆と尾なし、改名不可、URLクリックと選択、名前「手入力」と本文の検索、検索強調後もURLが開ける |
 | 時刻 | 一時停止中の同時刻連投、再開してもtypedの時計不変、voiceの従来の時計変換、postedAtのJSON往復、収録位置と処理位置がずれた場合のコピー範囲終端 |
 
-段3では投稿直後・声の行の間・一時停止中の投稿・停止後の4画面を実ビューで撮影して目視確認する。段4では既存replayへ開発用の投稿タイミング指定を加え、本番の `submitTyped` を通す。入力値はreplay時だけ解釈し、通常起動には影響させない。URL中の `:` を壊さない形式を使う。
+replayの投稿タイミング指定は本番の `submitTyped` を通す。入力値はreplay時だけ解釈し、通常起動には影響させない。URL中の `:` を壊さない形式を使う。指定の書式は [開発用のフラグと環境変数](dev-flags.md) の `KIKIGAKI_DEBUG_TYPED_ENTRIES` を参照する。
 
 replay検証は専用の出力先で行い、同じURLが通常Markdown・省略前 `.raw.md`・手動コピーの会話ファイル・AI送信用の会話ファイルに現れることを比較する。改名・統合の後にも比較し、行の保持だけでなく声との順序も確認する。実時間の一時停止中に投稿して再開し、声の時計だけが停止時間分ずれる区間も含める。IMEの操作は実ビューの検証で補う。
-
-## 実装の段取りと文書更新
-
-- 段2: Utterance.kind、表示名、併合とpendingの変換、archive、AICapture、声のアンカーとCoreテスト。
-- 段3: セッションでの独立保持、AI送信時の固定、入力欄、行表示と検索、コールバックの配線、実画面検証。
-- 段4: replayから投稿・停止・保存・改名・統合を通し、各出力を検証する。
-
-実録での段4の結果は [手入力の端から端の検証](typed-entry-verification.md) に記録した。
-
-実装時に `skills/kikigaki/SKILL.md` へ「`手入力` は声ではなく利用者が入力欄から投稿した行。URLの共有などに使う」を追記する。会話一般をすべて音声認識結果とする説明もvoiceに限定し、手入力が新しい権限を与えるようには書かない。
-
-`README.md` と `CLAUDE.md` に操作と受付状態、`docs/ai-handoff.md` に行の意味とコピー契約を追加する。同文書の古い全幅ボタンと旧表題の説明は、既に統合された固定幅・「続きをコピー」に合わせる。AI送信の別経路を扱うため `docs/ai-participant.md` にも送信時点で手入力を固定する規則を追記する。

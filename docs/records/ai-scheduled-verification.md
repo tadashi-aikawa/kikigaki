@@ -1,5 +1,7 @@
 # 定期自動送信の結合検証
 
+2026-09-08時点の検証記録。現行の仕様ではなく、現行は [AIへの定期自動送信](../ai-scheduled.md) を参照する。未読表示はその後に廃止したため、表の `isUnread` 列は今のUIでは意味を持たない。
+
 2026-09-08、main `f905030` の手入力統合を含むworktreeで実施。実herdrのCodexは `gpt-6-astra medium`、cwdは信頼確認済みの既定ディレクトリを使用した。導入先Skillは本人がmainへ展開し、worktreeの `skills/kikigaki/references/meeting.md` と `cmp` で一致を確認した。
 
 音声は `say -v Kyoko` で作った架空の会議と無音だけ。実データを含み得る既存WAVの送信が自動承認レビューで拒否されたため、既存音声を使用しなかった。訂正の内容はreplayの手入力から投入した。音声認識精度を測る検証ではない。

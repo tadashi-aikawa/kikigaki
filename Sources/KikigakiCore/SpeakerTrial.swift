@@ -2,7 +2,7 @@ import Foundation
 
 /// 話者の割当と固定の検証用に、録音の入力を保存して本番の判定を当て直す。本番の判定は変えない。
 /// 1回の録音(replay)で得た入力を保存し、別のビルドの結果とも同じ入力で比べられるようにする。
-/// 設計: docs/speaker-correction-trial.md
+/// 設計: docs/speaker-compare.md
 public enum SpeakerTrial {
     /// 試験の環境変数。アプリはDEBUGビルドだけで読む
     /// - `KIKIGAKI_TRIAL_DUMP`: 比較用の入力を書き出す先。会話本文を含む

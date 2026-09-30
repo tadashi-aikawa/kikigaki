@@ -43,7 +43,7 @@ public enum Aligner {
     /// トークンごとに窓判定で区間から引き、長い1文字の語頭と語内の境界を補正する。その後、話し手の声が
     /// 続く中で重なった別話者へ割れた短い島を両隣の話者へ戻す(`SpeakerIslands`)。
     /// フレーズの多数派へ短い別話者の塊を吸収する補正は置かない。吸収を外した比較と採用の経緯:
-    /// docs/speaker-correction-trial.md。島の補正の段階の比較と採用: docs/speaker-overlap-islands.md
+    /// docs/speaker-assignment.md。島の補正の段階の比較と採用も同じ文書にある
     ///
     /// 島は補正前のラベルで判定するので、凍結境界の手前も補正前のラベルを計算し直す
     public static func speakers(for tokens: [TimedToken], segments: [SpeakerSegment], frozen: [Int?] = []) -> [Int?] {

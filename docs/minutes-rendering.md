@@ -30,7 +30,7 @@ AIへ依頼を送った時点と、その依頼の `progress --editing` を観�
 
 ⌘Fは焦点のあるペインを検索する。右ペインでは検索欄、一致の強調、現在位置と件数を表示する。⌘G・⌘⇧G、Enter・Shift+Enter、矢印ボタンで次・前へ移動し、Escapeで閉じる。大文字小文字を区別せず、太字などの装飾をまたぐ語も検索できる。強調する一致は先頭10,000件まで。
 
-パス欄の右のアイコンボタンで対象ファイルをNeovim・Obsidianに開ける。未作成ファイルは案内を表示する。
+パス欄の右のアイコンボタンで対象ファイルをNeovim・Obsidianに開ける。ペインの構成は [議事録ペイン](minutes-pane.md) を参照する。未作成ファイルは案内を表示する。
 
 - Neovimは操作時に選択中のherdrワークスペースへ新しいタブを作る。作業ディレクトリは議事録の親。設定の `herdrCommand` があれば利用する。引数のパスはシェル引用し、既存ペインへコマンドを送らない。Ghosttyが起動中なら前面化する。
 - Obsidianには絶対パスを `obsidian://open?path=...` で渡す。対象ファイルがObsidianのVault内にあることが必要。
@@ -102,3 +102,7 @@ script・イベント属性・iframe・form・外部CSS・固定配置・CSSのU
 ## 開発用の実画面確認
 
 debug版.appは `--preview-minutes <絶対パス>` で議事録の検証画面だけを起動できる。マイク・モデル・AIを起動しない。会議状態と幅設定は一時領域へ分け、終了時に片づける。
+
+表示例の [minutes-preview-example.md](minutes-preview-example.md) は `--preview-minutes docs/minutes-preview-example.md` で開くと、上の対応記法をまとめて目視できる。
+
+右ペインの開閉・パス欄・履歴・幅の復元は [議事録ペイン](minutes-pane.md)、AIとの受け渡しの契約は [議事録プレビューの設計](minutes-preview.md) を参照する。

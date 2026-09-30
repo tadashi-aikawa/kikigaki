@@ -1,7 +1,7 @@
 import Foundation
 
 /// 調査用の stderr 出力の文言。出力先と有効・無効の判定をここに集め、判定そのものからは切り離す。
-/// 既存の診断ログを読む手順が CLAUDE.md にあるので、文字列の形は変えない
+/// 既存の診断ログを読む手順が docs/dev-flags.md にあるので、文字列の形は変えない
 public struct Diagnostics: Sendable {
     /// 停止直前の録音中表示。最終結果との差を調べる用
     public let showsLive: Bool

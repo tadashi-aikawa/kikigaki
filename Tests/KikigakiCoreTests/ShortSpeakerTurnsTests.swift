@@ -3,7 +3,7 @@ import Testing
 
 /// フレーズの多数派へ短い別話者の塊を吸収する補正は廃止した。短い返答は区間が示す話者のまま残る。
 /// 吸収で直っていた実録の事例は、元の期待を `withKnownIssue` の中に残し、既知の退行として示す。
-/// 期待を変更後の出力で上書きしない。経緯: docs/speaker-correction-trial.md
+/// 期待を変更後の出力で上書きしない。経緯: docs/records/speaker-correction-trial.md
 @Suite struct ShortSpeakerTurnsTests {
     // 2026-09-05_1529.wavの再処理ログ。rawは窓判定の観測値で、正解ラベルではない。
     @Test func 実録のはいとすごいねを多数派へ吸収しない() {

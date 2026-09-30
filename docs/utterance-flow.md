@@ -1,6 +1,16 @@
 # 発話から文字・話者確定までのフロー
 
-フローの土台は `2540a86` 時点のコード。行表示の説明には半透明と通常の濃さによる2状態表示を反映している。文字の確定と話者の固定は別の状態であり、「確定」は認識の正しさを保証しない。録音中に固定した話者も、停止時には全体の突き合わせで変わり得る。
+行表示の説明には半透明と通常の濃さによる2状態表示を反映している。文字の確定と話者の固定は別の状態であり、「確定」は認識の正しさを保証しない。録音中に固定した話者も、停止時には全体の突き合わせで変わり得る。
+
+各段の仕様は次の文書が正本で、この文書は流れの図と実コードの対応だけを置く。
+
+- 話者の補正の順序と凍結の条件: [話者の割当と固定](speaker-assignment.md)
+- 速報と高精度の合流、時間の目安: [文字起こしの速報表示](fast-transcription.md)
+- 行の半透明表示と確定の表示: [発話の確定表示](utterance-progress.md)
+- 話者判別オフの経路と行分割: [話者判別の切替](diarization-toggle.md)
+- 話者判別エンジン: [Nemotron fast128 への話者判別の切替](nemotron-integration.md)
+- 繰り返し相槌の省略: [繰り返し相槌](repeated-backchannels.md)
+- 小音量の除外: [小音量発話の除外](audio-exclusion.md)
 
 ## 全体図
 
@@ -16,10 +26,10 @@ flowchart TD
     consume --> diarizer["SpeakerDiarizer.process：話者判別オンのみ"]
     fast --> merge["TranscriptMerge.combine：高精度の確定＋その先の速報"]
     accurate --> merge
-    diarizer --> segments["segments：確定区間＋暫定区間"]
-    merge -->|オン：チャンク処理後、更新間隔0.5秒以上| align["Aligner.speakers：時刻・語境界・フレーズで突き合わせ"]
+    diarizer --> segments["segments：判定済みの話者区間"]
+    merge -->|オン：チャンク処理後、更新間隔0.5秒以上| align["Aligner.speakers：窓判定・語内補正・被りの島・句読点で突き合わせ"]
     segments --> align
-    align --> freeze["SpeakerFreeze.advanceByPhrase：フレーズ単位で高精度確定・終端確定・モデル確定範囲内"]
+    align --> freeze["SpeakerFreeze.advanceByPhrase：フレーズ単位で入力が全て確定したら凍結"]
     freeze -.->|次回は凍結済みラベルを維持| align
     freeze --> live["LiveTranscript：通常行と暫定末尾を分離"]
     merge -->|オフ：onResultからpublishUndiarized| off["UndiarizedTranscript.utterances：話者なしの行生成"]
@@ -83,7 +93,7 @@ stateDiagram-v2
         Mode --> Pending : 話者判別オン
         Mode --> Off : 話者判別オフ
         Pending --> Pending : チャンク処理後、0.5秒以上の更新間隔でAlignerを再実行
-        Pending --> Frozen : フレーズの全トークンが高精度確定・終端確定・モデル確定範囲内・保留条件なし
+        Pending --> Frozen : フレーズの全トークンが高精度確定・終端確定・モデル確定範囲内・間の無い後続フレーズも確定・保留条件なし
         Off --> Off : 結果通知で通常行／暫定末尾を更新、話者待ちなし
         note right of Pending
             暫定トークンも突き合わせる。
@@ -111,16 +121,7 @@ stateDiagram-v2
 
 速報の確定は高精度の確定を待つ前から突き合わせ対象になる。高精度の確定から初めて話者推定が始まる、という順序ではない。速報利用時の高精度の暫定結果は表示へ合成しない。
 
-凍結は先頭から連続するフレーズを丸ごと伸ばす処理で、次の条件をすべて満たすフレーズまで進む。満たさないフレーズで止まり、後ろのフレーズも凍結しない。
-
-- フレーズの全トークンが `accurateFinalCount` 未満。速報確定と暫定は対象外。
-- フレーズの終端が確定している。文末記号で終わるか、次のトークンも高精度確定済み。
-- 0.8秒を超える長さのトークンで、文字・数字が1文字だけの場合、後続の文字・数字を含むトークンも高精度確定済み。なければそのフレーズで保留する。
-- 各トークンの終端と中央+0.5秒、上の後続トークンの同じ範囲が `diarizer.finalizedDuration` 以下。モデルがまだ確定予測していない範囲を先に凍結しない。
-
-根拠: [SpeakerFreeze.advanceByPhrase](../Sources/KikigakiCore/SpeakerFreeze.swift)。音声時刻の猶予は無く、一時停止中は入力が無いので進まない。凍結済みでも後続の未凍結トークンと同じ行にまとまれば、行全体を半透明にする。
-
-最終化に失敗しても `stop` は取得済みの高精度の確定・暫定を保存へ回す。話者の最終化失敗時も取得済み区間を使う。図の「保存済み」はファイル保存の成功であり、エンジン最終化の成功や文字・話者の正解を意味しない。通常Markdown保存前に原文保存が失敗した場合は相槌省略を中止し、その会議では以後も原文を表示・保存する。
+図の「保存済み」はファイル保存の成功であり、エンジン最終化の成功や文字・話者の正解を意味しない。最終化に失敗しても `stop` は取得済みの高精度の確定・暫定を保存へ回し、話者の最終化失敗時も取得済み区間を使う。
 
 ## 図と実コードの対応
 
@@ -131,10 +132,11 @@ stateDiagram-v2
 | 速報・高精度の結果保管 | `AppleTranscriber.Engine`、`ResultStore.apply`、`CombinedStore.apply` / `snapshot` | [AppleTranscriber.swift](../Sources/Kikigaki/AppleTranscriber.swift)。`isFinal` は確定列へ追記、非finalは最新の暫定列へ置換 |
 | 文字の合流 | `TranscriptMerge.combine`、`Snapshot.finalCount` / `accurateFinalCount` | [TranscriptMerge.swift](../Sources/KikigakiCore/TranscriptMerge.swift)。高精度確定prefixの終端以降に開始する速報だけ採用 |
 | 話者区間・確定予測範囲 | `DiarizationModels.config`、`SpeakerDiarizer.process` / `segments` / `finalizedDuration`、`SpeakerRuns` | [SpeakerDiarizer.swift](../Sources/Kikigaki/SpeakerDiarizer.swift)、[SpeakerRuns.swift](../Sources/KikigakiCore/SpeakerRuns.swift)。Nemotron 3 fast128。閉じた区間と、判定済み末尾で切った発話中の区間を返す。区間が進んだときだけ消費位置と同じ更新でMainActorへ渡す |
-| 時刻の突き合わせ | `Aligner.speakers` / `speaker` / `smoothSpeakers` / `longHeadSpeaker` / `phraseRanges` | [Aligner.swift](../Sources/KikigakiCore/Aligner.swift)。窓判定、語内補正、語内の長い語頭の付け替え |
+| 時刻の突き合わせ | `Aligner.speakers` / `speaker` / `wordSpeakers` / `longHeadSpeaker` / `attachPunctuation` / `phraseRanges` | [Aligner.swift](../Sources/KikigakiCore/Aligner.swift)。窓判定、語内補正、語内の長い語頭の付け替え、句読点の付与を順に当てる |
 | 長い語頭の補正 | `SpeechTail.speakers` | [SpeechTail.swift](../Sources/KikigakiCore/SpeechTail.swift)。トークン中央の窓判定を基に、長い1文字の末尾の声と後続文字を照合 |
 | 語境界 | `WordBoundaries.init`、`tokenRanges` | [WordBoundaries.swift](../Sources/KikigakiCore/WordBoundaries.swift)。フレーズ全文の語境界を使い、ASRトークン自体は分割しない |
-| 録音中の凍結 | `SpeakerFreeze.advanceByPhrase` | [SpeakerFreeze.swift](../Sources/KikigakiCore/SpeakerFreeze.swift)。高精度確定・終端・長い1文字の後続・モデル確定範囲でフレーズ単位に凍結 |
+| 被りの島の補正 | `SpeakerIslands.apply` / `recomputeStart` | [SpeakerIslands.swift](../Sources/KikigakiCore/SpeakerIslands.swift)。語内補正の後、句読点の付与の前に、重なった別話者の短い島を両隣の話者へ戻す。凍結境界の手前は補正前のラベルを計算し直す |
+| 録音中の凍結 | `SpeakerFreeze.advanceByPhrase` | [SpeakerFreeze.swift](../Sources/KikigakiCore/SpeakerFreeze.swift)。高精度確定・終端・長い1文字の後続・モデル確定範囲・間の無い後続フレーズでフレーズ単位に凍結 |
 | 表示用の行と暫定末尾 | `LiveTranscript.init`、`Aligner.utterances` / `utteranceTokenRanges` | [LiveTranscript.swift](../Sources/KikigakiCore/LiveTranscript.swift)、[Aligner.swift](../Sources/KikigakiCore/Aligner.swift)。`finalCount` まで通常行、その先を `tentativeText` へ。未凍結を含む行を `pendingSpeakerRows` へ |
 | 話者判別オフの経路 | `MeetingSession.publishUndiarized` / `flushUndiarized`、`UndiarizedTranscript.utterances` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[UndiarizedTranscript.swift](../Sources/KikigakiCore/UndiarizedTranscript.swift)。結果通知で更新し、話者ラベルはnil、未凍結行集合は空 |
 | 話者統合の反映 | `SpeakerMapping.apply`、`MeetingSession.refreshLive` | [SpeakerMapping.swift](../Sources/KikigakiCore/SpeakerMapping.swift)、[MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)。録音中は推定・凍結後のラベルへ統合設定を適用 |
@@ -145,50 +147,4 @@ stateDiagram-v2
 | 繰り返し相槌の省略 | `RepeatedBackchannels.candidates` / `utterances` | [RepeatedBackchannels.swift](../Sources/KikigakiCore/RepeatedBackchannels.swift)。有効時だけ候補を省いた行を別に作る |
 | 原文保護・Markdown保存 | `MeetingSession.save`、`MeetingArchive.save`、`MeetingMarkdown.render` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[MeetingArchive.swift](../Sources/KikigakiCore/MeetingArchive.swift)、[MeetingMarkdown.swift](../Sources/KikigakiCore/MeetingMarkdown.swift)。保存結果の行を停止後の画面へ返す |
 
-突き合わせ内部の順序は、凍結済みprefixの維持 → `SpeechTail` による窓判定と長い語頭の補正 → 語内の文字多数決と、過半数が無い語の長い語頭の付け替え → 句読点を直前の話者へ付与、となる。フレーズ多数派への短い区間の吸収は2026-09-26に廃止した。トークンの本文を省く処理は停止時の `RepeatedBackchannels` に分かれている。詳細は [語頭・語尾補正](speaker-boundaries.md)、[短い返答](short-speaker-turns.md)、[議事品質の改善計画](minutes-quality-plan.md) を参照。
-
-相槌省略は「うん」または「そう」の同語2回以上の連続で、同一フレーズ内・1.5秒未満などの条件を満たす候補に限る。直後に同じ話者の本文が続き、窓判定の時間重みの過半数が別の同一話者であることも必要。不明や同点を削除根拠にしない。詳細は [繰り返し相槌](repeated-backchannels.md) を参照。
-
-## 時間の目安
-
-| 対象 | 数値・条件 | 出典・読み方 |
-| --- | --- | --- |
-| 速報の結果 | 1〜3秒 | [AppleTranscriberの冒頭コメント](../Sources/Kikigaki/AppleTranscriber.swift)の実測記述。すべての発話に対する保証値ではない |
-| 高精度の結果 | 約11.6秒分を蓄積、発話から6〜13秒遅れる | 同じコードコメントの実測記述。約11.6秒は各発話の固定の確定待ち時間ではない。現行の [fast-transcription.md](fast-transcription.md) にはこの秒数の記載がないため、出典をコードコメントとして明記する |
-| 話者エンジン | chunk先頭から10.56秒ぶんの入力で判定 | [DiarizationModels.configのコメント](../Sources/Kikigaki/SpeakerDiarizer.swift)。fast128の設定値。試作の実測でフレームごとの待ちは中央値5.7秒・最大11.06秒 |
-| 話者の凍結 | フレーズ単位。9/26の等倍replayで固定待ちの中央値15.4秒・p90 22.6秒・最大27.7秒 | [SpeakerFreeze.advanceByPhrase](../Sources/KikigakiCore/SpeakerFreeze.swift)。固定の秒数は無い。待ちは文字起こしの確定待ちを含む音声秒で、素材により最大は50秒を超える。[比較結果](speaker-correction-trial.md) |
-| オン時の画面反映 | 消費ループで前回更新から0.5秒以上経過したとき | [MeetingSession.makeConsumer](../Sources/Kikigaki/MeetingSession.swift)。独立タイマーではなく、チャンク処理後の判定。処理遅延もあり、表示までの上限ではない |
-| オフ時の画面反映 | 確定数の増加は直ちに反映、その他の変化は0.5秒間隔へ集約 | [MeetingSession.publishUndiarized](../Sources/Kikigaki/MeetingSession.swift)、[話者判別の切替](diarization-toggle.md)。結果通知起点なので入力停止中も反映できる |
-
-話者エンジンの待ちと文字の確定待ちを足した時刻で確定するとはしない。どちらも音声上の範囲に関わる別の条件で、コードはその条件が揃った先頭のフレーズを凍結する。結果の受信時刻や凍結までの発話別実測値は、この文書では新たに測っていない。
-
-行分割の秒数も待ち時間とは別である。オン時は話者の変化かトークン間1秒以上の間で行を分ける。オフ時は1秒以上の間、文末記号、または既に30秒以上ある行の次の結果ID境界で分ける。多数決に使うフレーズ境界はさらに別で、0.35秒以上の間、文末記号、または結果IDの変化と0.2秒以上の間で区切る。
-
-## UIで見えている状態と見えていない状態
-
-### 行で区別できる状態
-
-| 内部の状態 | 今の表示 | 注意点 |
-| --- | --- | --- |
-| `tentativeText != nil` | 行全体が半透明、「聞き取り中…」、時刻なし | 話者別に分けない暫定末尾。速報利用時は速報の暫定、速報準備失敗時は高精度の暫定 |
-| 通常行に未凍結トークンを含む | 本文・推定話者を含む行全体が半透明 | 行右上に未確定の注記は出さない |
-| 通常行の全トークンが高精度確定かつ凍結済み | 通常の濃さ | 認識精度は表示しない。停止時には再判定され得る |
-| 話者判別オフの通常行 | マイク記号と「発言」、高精度確定までは行全体が半透明 | 話者が判明した意味ではなく、話者を判定しない会議 |
-| オン時の話者ラベルがnil | 「?」 | 未凍結とは別の軸。「?」のまま凍結・最終表示になることもある |
-
-### 内部状態と半透明表示の区別
-
-| 内部の区別 | 行での表示と限界 |
-| --- | --- |
-| 速報の確定と高精度の確定 | 途中段階は区別しない。文字と話者が固定されるまで半透明。話者判別オフでは高精度の文字確定だけを待つ |
-| モデル未判定・モデル暫定・モデル確定だがフレーズ未固定 | 途中段階は区別せず、行全体が半透明 |
-| 高精度待ち・フレーズ終端待ち・モデル確定範囲待ち・長い1文字の後続待ち | 凍結できない理由を表示しない |
-| 一部だけ凍結した行と全体が未凍結の行 | どちらも行全体が半透明。行内の凍結境界は表示しない |
-| 録音中の凍結と停止後の再判定済み | 行単位の専用印はない。会議全体の録音状態・保存結果は別に表示する |
-| 正しく認識した文字・話者と誤認識 | 確定・凍結は正誤の採点ではなく、UIにも正解保証はない |
-
-「話者未確定」「コピーには含めません」の右上注記は表示しない。暫定末尾は「聞き取り中…」で行の種類を示す。`TranscriptDocument` は渡された行を配置し、文字・話者の確定条件を判定しない。小音量による薄表示と除外注記は別の除外状態なので、薄さだけから文字・話者の確定を読み取らない。詳細は [小音量発話の除外](audio-exclusion.md) を参照。
-
-確定前後の切替だけでは本文の変更点灯を起こさない。表示の規則は [発話の確定表示](utterance-progress.md) を参照。
-
-図はプレビューのMermaid 12.0.0・`securityLevel: 'strict'` に合わせ、基本のノード・遷移・複合状態・並行領域と色定義を使用する。記法の参照は [Mermaidのflowchart](https://mermaid.js.org/syntax/flowchart.html) と [stateDiagram](https://mermaid.js.org/syntax/stateDiagram.html)。
+突き合わせ内部の順序は、凍結済みprefixの維持 → `SpeechTail` による窓判定と長い語頭の補正 → 語内の文字数の過半数への統一と、過半数が無い語の長い語頭の付け替え → 被りの島の補正 → 句読点を直前の話者へ付与、となる。トークンの本文を省く処理は停止時の `RepeatedBackchannels` に分かれている。

@@ -13,17 +13,6 @@
 
 メニューバーの待機中アイコンも同じICNSを18ポイントで表示する。録音中・一時停止中・準備中・保存中は状態を示すシンボルに切り替える。画像を同梱しない `swift run` では待機中も波形シンボルを使う。
 
-## owleryとparliament
-
-owleryの `shared/images/projects/KIKIGAKI.webp` は元画像から256×256で書き出す。
-
-```bash
-cwebp -quiet -lossless -resize 256 256 Resources/kikigaki.png \
-  -o /Users/tadashi-aikawa/work/owlery/shared/images/projects/KIKIGAKI.webp
-```
-
-owleryのプロジェクトノートはこの画像を埋め込む。parliamentは同じ画像をプロジェクト名から自動検出する。新規セッションのKIKIGAKI項目もこのパスを参照する。
-
 ## 制作
 
 内蔵 `image_gen` で採用案Cを参照画像として背景を除去し、`sips` で1024×1024へ変換した。再生成のたびに外観が変わる可能性があるため、通常のビルドでは画像生成を行わない。

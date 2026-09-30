@@ -62,7 +62,8 @@
 
 ### 終了・短い会議・空入力
 
-- `finish()` は `finishStream()` を1回だけ呼ぶ。High Context で必要だった無音の補いは要らない
+- `finish()` は `finishStream()` を1回だけ呼び、末尾の chunk を詰めて判定する。High Context で必要だった無音の補いは要らない
+    - 判定済みの範囲は受け取った音声の長さを超えないので、保存する録音と会議時間は延長しない
 - 0サンプルなら `finishStream` を呼ばない
 - 10.56秒に満たない会議は、録音中は区間が出ず、停止時の `finish()` で全体が出る
 - 区間は実音声の長さで切る。末尾の10ms切り上げで1フレーム余るため
@@ -94,16 +95,7 @@
 
 ## SpeakerFreeze
 
-切替の時点では30秒の猶予を維持し、`judgedUntil` に渡す値を Nemotron の判定済み末尾に替えた。2026-09-26に、30秒猶予をフレーズ単位の固定へ置き換えた。
-
-モデルの確率が確定でも、録音中の話者表示は次の理由で後から変わり得る。
-
-1. Apple の高精度側がまだ確定していないトークンは、文字も時刻も変わる
-2. 語境界の補正は後続の文字で語の切れ目が変わる
-3. `SpeechTail` は長い1文字の話者を後続の文字で確かめる
-4. 窓判定は各トークンの前後0.5秒の区間を見る
-
-フレーズ固定は、フレーズの全トークンの高精度確定、終端の確定、長い1文字の後続文字の確定、`judgedUntil` がそろったフレーズを丸ごと凍結する。条件と比較結果は [話者補正の除外比較とフレーズ固定の試験](speaker-correction-trial.md)。
+録音中の話者の固定は、`judgedUntil` に Nemotron の判定済み末尾を渡す。モデルの確率が確定でも話者表示は後から変わり得るため、判定に読む入力が全て確定したフレーズを丸ごと凍結する。条件は [話者の割当と固定](speaker-assignment.md#録音中のフレーズ凍結) を参照する。
 
 ## 削除したもの
 
@@ -115,31 +107,4 @@
 
 ## 検証
 
-### テスト
-
-- `SpeakerRunsTests`: 重なり、分割しても一括と同じ結果、末尾の切り上げと長さ0、食い違った出力を取り込まないこと
-- `SpeakerNamesTests`: E〜H、9枠目以降の番号、旧4人会議の archive、枠7の往復
-- `DiarizationTests`: E〜H の検出・改名・統合、8枠のポップオーバー
-- `SpeakerDiarizerTests`: 実モデルで0・1600・48000・168960・170000サンプル。`KIKIGAKI_TEST_DIARIZATION=1` のときだけ走る
-
-### replay
-
-保存先は素材ごとに分け、AIは設定しない。`KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_PHRASES=1` で流し、`[segment]` 行を試作の fast128 の区間と小数3桁で比べた。
-
-| 素材 | 結果 |
-|---|---|
-| 公開 kpjud 140.5秒 | 27区間が一致。枠0〜7すべてが出る |
-| 4人パネル冒頭 226秒 | 57区間が一致。4人 |
-| 2人対談 先頭360秒 | 94区間が一致。2人。ffmpeg で先頭5,760,000サンプルを無変換で切り出した |
-| 3秒・無音5秒 | 停止まで通り、保存できる |
-
-- 末尾の区間は試作と同じ `finishStream` の結果と一致したことで確かめた。無音で終わる音声では、区間が音声の終端まで届くとは限らない
-- kpjud で `KIKIGAKI_DEBUG_TYPED_VERIFY=1` と `KIKIGAKI_DEBUG_AI_RENAME` を通し、E〜H の改名が Markdown へ保存され、統合と解除が戻ることを確かめた
-    - kpjud は英語音声で、ja_JP の文字起こしが出す行は試行ごとに揺れる。どの枠に行が付くかは一定しない
-
-### GUI
-
-- 8枠を検出した状態の統合ポップオーバーと開始シートを PNG にした
-    - `KIKIGAKI_UI_CAPTURE=<出力先> swift test --filter DiarizationTests`
-    - `KIKIGAKI_START_SHEET_CAPTURE=<既存の出力先> swift test --filter StartSheetTests`
-- 録音中・停止後のウィンドウは `--replay <kpjud> --show-window` で撮る
+テスト・replay・GUIの検証は [Nemotron fast128 への切替の検証記録](records/nemotron-verification.md) に移した。
