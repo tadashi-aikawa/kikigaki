@@ -43,6 +43,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 - `skills/kikigaki/`: AI参加者用の配布Skill。`.app` へ同梱し、同梱CLIの `skill install` が利用者のSkill置き場へリンクする
 - `web/minutes/`: 議事録の描画資産のソース。再生成は [議事録の描画と検索](docs/minutes-rendering.md)
 - `experiments/nemotron/`: 話者判別モデルの比較用の独立CLI。アプリにはエンジンの切替を置かない
+- `experiments/system-audio/`: システム音声とマイクの同時取り込みを検証する独立CLI。検証記録は [システム音声取り込みの実現性試作](docs/records/system-audio-spike.md)
 - `scripts/`: アプリバンドル組み立て・リリース成果物・Cask・tap更新
   - `make-app.sh`: `Contents/Helpers/kikigaki-cli` と `Contents/Resources/skills/kikigaki` を同梱し、helperを先に署名してから.appを署名する。配布ZIPでもhelperとSkillの存在、helperの署名を検証する
   - `build_release.sh`: リリース成果物 (ZIP) を作る
@@ -120,6 +121,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 - [話者補正の除外比較とフレーズ固定の試験](docs/records/speaker-correction-trial.md)
 - [被りの島の補正を段階的に強める試験](docs/records/speaker-overlap-islands.md)
 - [Nemotron fast128 への切替の検証記録](docs/records/nemotron-verification.md)
+- [システム音声取り込みの実現性試作の検証記録](docs/records/system-audio-spike.md)
 - [議事録プレビューの実装記録](docs/records/minutes-preview-implementation.md)
 - [会議参加モードの検証項目と段1〜5の実装記録](docs/records/ai-participant-implementation.md)
 - [AI参加者の通信境界: 段2の実測](docs/records/ai-participant-spike.md)

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleIdentifier</key><string>com.tadashi-aikawa.kikigaki.system-audio-probe</string>
+    <key>CFBundleName</key><string>SystemAudioProbe</string>
+    <key>CFBundleExecutable</key><string>SystemAudioProbe</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>26.0</string>
+    <key>LSUIElement</key><true/>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>KIKIGAKIの実現性試作として、再生中の会議音声を録音します。</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>システム音声と自分の声を同時に録音する試作でマイクを使います。</string>
+</dict></plist>
