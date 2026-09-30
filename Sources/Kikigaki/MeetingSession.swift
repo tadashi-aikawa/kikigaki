@@ -317,7 +317,7 @@ final class MeetingSession {
         emit()
         var reservation: URL?
         do {
-            if source is MicSource, !(await MicSource.requestPermission()) {
+            if source is MicSource || source is MicAndSystemSource, !(await MicSource.requestPermission()) {
                 throw NSError(domain: "kikigaki", code: 3, userInfo: [NSLocalizedDescriptionKey: "マイクの使用が許可されていない。システム設定 > プライバシーとセキュリティ > マイク で KIKIGAKI を許可する"])
             }
             let loaded = diarizationEnabled ? try await models() : nil
@@ -350,16 +350,34 @@ final class MeetingSession {
             samplesIn = continuation
             consumer = makeConsumer(stream: stream, transcriber: transcriber, diarizer: diarizer, wav: wav, generation: preparation)
             let pause = self.pause
+            if let mixed = source as? MicAndSystemSource {
+                mixed.onWarning = { [weak self] reason in
+                    Task { @MainActor in
+                        guard let self, self.preparationID == preparation,
+                              self.snapshot.state == .preparing || self.snapshot.state == .recording || self.snapshot.state == .paused else { return }
+                        self.snapshot.message = reason
+                        self.log(reason)
+                        self.emit()
+                    }
+                }
+            }
             // 一時停止の判定は収録時(音声スレッド)に行う。消費側で判定すると、処理が遅れている間に
             // 収録した分が利用者の操作した境界とずれる
-            try source.start { chunk in
+            let onSamples: ([Float]) -> Void = { chunk in
                 pause.accept(chunk, into: continuation)
+            }
+            // HALの初回許可待ちは長くなり得る。MainActorを占有せず、音源の準備を待つ。
+            if let mixed = source as? MicAndSystemSource { try await mixed.prepare(onSamples: onSamples) }
+            else { try source.start(onSamples: onSamples) }
+            guard preparationID == preparation, snapshot.state == .preparing else {
+                source.stop()
+                return false
             }
             self.source = source
 
             snapshot.state = .recording
             snapshot.markdownURL = markdownURL
-            snapshot.message = nil
+            snapshot.message = (source as? MicAndSystemSource)?.warning
             do { _ = try previewMinutesStore() }
             catch { snapshot.message = "議事録の設定を引き継げません。パスを指定し直してください" }
             startAutomaticSchedule()

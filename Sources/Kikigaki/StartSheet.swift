@@ -11,6 +11,8 @@ import UniformTypeIdentifiers
 final class StartSheet: NSObject, NSTextViewDelegate {
     /// シートが決めた、この録音だけの指定。
     struct Options: Equatable {
+        var systemAudioMode: SystemAudioMode = .automatic
+        var recordSystemAudio = false
         var diarizationEnabled = true
         /// 小音量除外のON/OFF。しきい値は次回設定のまま
         var exclusionEnabled = false
@@ -36,6 +38,12 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     private(set) var selectedSlot: Int?
 
     private let stack = NSStackView()
+    static let systemAudioDefaultsKey = "KikigakiSystemAudioMode"
+    let systemAudioAutomatic = NSButton(radioButtonWithTitle: "自動(いまは取り込まない)", target: nil, action: nil)
+    let systemAudioInclude = NSButton(radioButtonWithTitle: "取り込む", target: nil, action: nil)
+    let systemAudioExclude = NSButton(radioButtonWithTitle: "取り込まない", target: nil, action: nil)
+    private let outputKind: () -> AudioOutputKind
+    private var outputTimer: Timer?
     let diarizeOn = NSButton(radioButtonWithTitle: "区別する(最大8人)", target: nil, action: nil)
     let diarizeOff = NSButton(radioButtonWithTitle: "区別しない", target: nil, action: nil)
     let exclusionSwitch = NSSwitch()
@@ -58,8 +66,11 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     private let startButton = WashiActionButton()
 
     init(profiles: [ResolvedAIConfig], diarizationEnabled: Bool, exclusion: AudioExclusion,
-         minutesPath: String? = nil, minutesHistory: [String] = []) {
+         minutesPath: String? = nil, minutesHistory: [String] = [],
+         systemAudioMode: SystemAudioMode = .automatic,
+         outputKind: @escaping () -> AudioOutputKind = { .unknown }) {
         self.profiles = profiles
+        self.outputKind = outputKind
         window = StartSheetWindow(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 400),
                                   styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
@@ -75,6 +86,16 @@ final class StartSheet: NSObject, NSTextViewDelegate {
 
         let rows = NSStackView()
         rows.orientation = .vertical; rows.alignment = .leading; rows.spacing = 0
+
+        // 前回値の保存は開始確定側だけが行う。シート内の選び直しと取消は記憶しない。
+        let audioRadios = [systemAudioAutomatic, systemAudioInclude, systemAudioExclude]
+        for radio in audioRadios { radio.target = self; radio.action = #selector(systemAudioChanged) }
+        selectSystemAudio(systemAudioMode)
+        refreshSystemAudioOutput()
+        let audioChoices = NSStackView(views: audioRadios)
+        audioChoices.orientation = .horizontal; audioChoices.spacing = 14
+        add(row("システム音声", audioChoices), to: rows)
+        add(separator(), to: rows)
 
         // 話者判別。録音開始で会議へ固定するので、始めてからは変えられない。
         for radio in [diarizeOn, diarizeOff] { radio.target = self; radio.action = #selector(diarizationChanged) }
@@ -434,10 +455,15 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     static let width: CGFloat = 640
 
     func present(on parent: NSWindow) {
+        // 開いているシートだけ追従する。開始後の会議の音源モードは固定する。
+        outputTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshSystemAudioOutput() }
+        }
         parent.beginSheet(window)
         window.makeFirstResponder(nil)
     }
     func close() {
+        outputTimer?.invalidate(); outputTimer = nil
         if let parent = window.sheetParent { parent.endSheet(window) }
         window.orderOut(nil)
     }
@@ -452,6 +478,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     /// 画面の値。開始できない入力があれば nil。
     var options: Options? {
         var result = Options(diarizationEnabled: diarizeOn.state == .on, exclusionEnabled: exclusionSwitch.state == .on)
+        result.systemAudioMode = selectedSystemAudioMode
+        result.recordSystemAudio = selectedSystemAudioMode.includes(outputKind())
         if let path = minutesInput {
             guard (try? MinutesPath.validate(path)) != nil else { return nil }
             result.minutesPath = path
@@ -483,6 +511,22 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     @objc func cancelPressed() {
         close()
         onCancel?()
+    }
+
+    var selectedSystemAudioMode: SystemAudioMode {
+        systemAudioInclude.state == .on ? .include : systemAudioExclude.state == .on ? .exclude : .automatic
+    }
+    func selectSystemAudio(_ mode: SystemAudioMode) {
+        systemAudioAutomatic.state = mode == .automatic ? .on : .off
+        systemAudioInclude.state = mode == .include ? .on : .off
+        systemAudioExclude.state = mode == .exclude ? .on : .off
+    }
+    @objc private func systemAudioChanged(_ sender: NSButton) {
+        selectSystemAudio(sender === systemAudioInclude ? .include : sender === systemAudioExclude ? .exclude : .automatic)
+    }
+    func refreshSystemAudioOutput() {
+        systemAudioAutomatic.title = SystemAudioMode.automatic.includes(outputKind())
+            ? "自動(いまは取り込む)" : "自動(いまは取り込まない)"
     }
 }
 

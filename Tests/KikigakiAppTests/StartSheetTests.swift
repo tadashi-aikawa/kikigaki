@@ -4,6 +4,29 @@ import KikigakiCore
 @testable import Kikigaki
 
 @Suite(.timeLimit(.minutes(1))) @MainActor struct StartSheetTests {
+    @Test func システム音声の自動判定が追従し開始時に固定する() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        var kind: AudioOutputKind = .headphones
+        let sheet = StartSheet(profiles: [], diarizationEnabled: true, exclusion: AudioExclusion(), outputKind: { kind })
+        #expect(sheet.systemAudioAutomatic.title == "自動(いまは取り込む)")
+        #expect(sheet.options?.recordSystemAudio == true)
+        try capture("system-auto-include", sheet)
+        kind = .builtInSpeaker
+        sheet.refreshSystemAudioOutput()
+        #expect(sheet.systemAudioAutomatic.title == "自動(いまは取り込まない)")
+        #expect(sheet.options?.recordSystemAudio == false)
+        try capture("system-auto-exclude", sheet)
+        sheet.selectSystemAudio(.include)
+        #expect(sheet.options?.recordSystemAudio == true)
+        kind = .unknown
+        #expect(sheet.options?.recordSystemAudio == true)
+        sheet.selectSystemAudio(.exclude)
+        #expect(sheet.options?.recordSystemAudio == false)
+        var cancelled = false
+        sheet.onCancel = { cancelled = true }
+        sheet.cancelPressed()
+        #expect(cancelled)
+    }
     private func profiles(_ root: URL, toml: String) throws -> [ResolvedAIConfig] {
         ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: root).aiProfiles
     }

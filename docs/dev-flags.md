@@ -24,6 +24,24 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - 環境変数 `KIKIGAKI_DEBUG_REPLAY_HOLD=180`: replayの停止・保存後に指定秒だけ終了を遅らせる。0〜86400秒、既定0。到達済みの送信待ちと回答回収を継続する。停止後にペインを閉じるところまで見るときも、返事が届くまでの時間をここで確保する
 - 環境変数 `KIKIGAKI_DEBUG_DIARIZATION=off` または `on`: replayで話者判別を指定する。通常起動では無視し、replayではUserDefaultsを読み書きしない。LIVE_TRACE併用時は、無効会議のASR確定受信と表示反映の単調時計を同じトークン数で照合できる。
 
+## システム音声の混合replay
+
+- `KIKIGAKI_DEBUG_REPLAY_SYSTEM=<wav>`: `--replay` のファイルをマイクの役、指定したファイルをシステム音声の役として、本番と同じ加算とピーク保護へ渡す。
+  - 入力: 2本を16kHzへ変換し、先頭を同時刻として扱う。短い方の末尾は無音で延長する。
+  - 起動: `--replay` がある場合だけ読む。通常起動では不正な値も無視する。マイクとプロセスタップは開かない。
+  - 形式: 空欄、空白だけ、NUL、改行を拒否する。`~` は展開する。
+  - smoke: `--smoke --replay <wav>` は値の形式だけを検証する。ファイルの存在や音声の形式は実際のreplayで確認する。
+  - 診断: stderrへ混合後のフレーム数とピークを出す。`saveRecording = true` で混合後のWAVを保存できる。
+
+```bash
+KIKIGAKI_DEBUG_REPLAY_SYSTEM=<システム音声.wav> \
+KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
+.build/KIKIGAKI.app/Contents/MacOS/KIKIGAKI \
+  --config <検証用config.toml> --replay <マイク音声.wav>
+```
+
+混ぜ方の設計は [システム音声の取り込み](system-audio.md) を参照する。
+
 ## replayでのAI送信
 
 - 環境変数 `KIKIGAKI_DEBUG_AI_ASK="40:;100:問い"`: replayの音声経過秒に達したら本番のsubmitAIで送信する。空の問いは声の末尾を使い、返事待ちは順番を保つ。前問がfailed/cancelledで接続が送信不可なら次問のために新世代へ作り直す。期限に達していない問いや失敗した問いの再送は行わない

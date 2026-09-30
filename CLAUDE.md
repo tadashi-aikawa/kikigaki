@@ -6,7 +6,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 
 - 文字起こし: Apple の Speech フレームワーク `SpeechTranscriber` (macOS 26 以降、端末内処理)
 - 話者判別: FluidAudio の Nemotron 3 Diarization fast128 (ストリーミング、最大8話者)。FluidAudio への依存はこのためだけ。設計は [Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md)
-- 音源は MVP ではマイクのみ。`AudioSource` プロトコルで差し替えられるようにしてあり、システム音声は次の段で足す
+- 音源はマイク、またはマイクとシステム音声の混合。開始シートで選ぶ。設計は [システム音声の取り込み](docs/system-audio.md)
 
 ## リポジトリ構成
 
@@ -21,6 +21,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
   - `SpeakerNames.swift` / `TranscriptRenderer.swift` / `MeetingMarkdown.swift` / `MeetingFiles.swift`: 話者名の枡・行の整形・Markdown 生成・ファイル命名
   - `Config.swift` / `AIConfig.swift`: 設定ファイルのパースと既定値。キーの一覧は [設定リファレンス](docs/config.md)
   - `RecordingState.swift`: 録音状態とメニュー表題
+  - `SystemAudioMix.swift`: システム音声の3択、出力の3値判定、16kHzの加算とピーク保護
   - `URLScheme.swift`: `kikigaki://start` の解析。開始シートの入口だけを開け、録音は始めない
   - AI設定、独立stream履歴、envelope、質問と受信イベント、AIの返事のMarkdownもここに置く。契約は [AI参加者の設計](docs/ai-participant.md)
 - `Sources/KikigakiAIIO/`: アプリと返送CLIが共有するfd検証、原子的な保存、sessionとフック観測の型
@@ -31,6 +32,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 - `Sources/Kikigaki/`: 実行ターゲット (AppKit + Speech + FluidAudio)。Swift 5 言語モード (非 Sendable な型を音声スレッドと MainActor で受け渡すため)
   - `MeetingSession.swift`: 音源→WAV(任意)+話者判別+文字起こし→突き合わせ→表示、停止で保存、の流れ
   - `AudioSource.swift`: `MicSource` / `FileSource` (`--replay` 用) / `WavWriter`
+  - `SystemAudioHardware.swift` / `SystemAudioCapture.swift` / `MicAndSystemSource.swift`: 出力の判定、プロセスタップとマイクの同時取り込み、継続的な変換、失敗時のマイクへの切替
   - `AppleTranscriber.swift` / `SpeakerDiarizer.swift`: エンジンのラッパー
   - `StartSheet.swift`: 録音開始シート。会議ごとの話者判別・議事録・自動送信を `session.start` の前に決める
   - `TranscriptWindow.swift` / `StatusItem.swift` / `AppDelegate.swift`
@@ -39,7 +41,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
   - `KikigakiCoreTests`: ロジック層。主戦場
   - `KikigakiAppTests`: AppKitとセッション。撮影用の環境変数は [開発用のフラグと環境変数](docs/dev-flags.md)
   - `KikigakiCLITests`: 同梱CLI
-- `Resources/`: アプリバンドル用の Info.plist (マイク使用の説明文 `NSMicrophoneUsageDescription`・URLスキームの `CFBundleURLTypes` を含む)
+- `Resources/`: アプリバンドル用の Info.plist。マイクの `NSMicrophoneUsageDescription`、システム音声の `NSAudioCaptureUsageDescription`、URLスキームの `CFBundleURLTypes` を含む
 - `skills/kikigaki/`: AI参加者用の配布Skill。`.app` へ同梱し、同梱CLIの `skill install` が利用者のSkill置き場へリンクする
 - `web/minutes/`: 議事録の描画資産のソース。再生成は [議事録の描画と検索](docs/minutes-rendering.md)
 - `experiments/nemotron/`: 話者判別モデルの比較用の独立CLI。アプリにはエンジンの切替を置かない
@@ -92,6 +94,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 | [話者判定の再比較手順](docs/speaker-compare.md) | 入力の保存と、本番の判定を同じ入力へ当て直す手順 | 話者補正を変えて前後を比べるとき |
 | [Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md) | 依存、モデル、区間化、失敗の扱い、8枠、保存互換 | `SpeakerDiarizer` ・ `SpeakerRuns` ・FluidAudioを変える前 |
 | [話者判別の切替](docs/diarization-toggle.md) | 話者判別のオン・オフ、無効時の行分割 | 話者判別の有効・無効の経路を変える前 |
+| [システム音声の取り込み](docs/system-audio.md) | 開始シートの3択、出力判定、同時取り込みと混合、失敗時の扱い | 音源・混合・システム音声の許可を変える前 |
 | [話者の手動統合](docs/speaker-mapping.md) | 統合先の指定と解除、使用枠 | 統合・枠の数え方を変える前 |
 | [繰り返し相槌の省略](docs/repeated-backchannels.md) | 停止時の省略の条件、`.raw.md` の保存 | `RepeatedBackchannels` ・省略前後の保存を変える前 |
 | [小音量発話の除外](docs/audio-exclusion.md) | 除外の判定、操作、保存・コピー・AI送信への適用 | 除外の判定や適用先を変える前 |

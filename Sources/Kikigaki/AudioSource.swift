@@ -4,7 +4,7 @@ import Foundation
 import KikigakiCore
 
 /// 音源の口。16kHz mono Float32 のサンプル列を渡す。
-/// MVPはマイクのみだが、次の段でシステム音声(Core Audio のプロセスタップ)を足すため差し替え可能にしておく
+/// マイク単独と、システム音声を混ぜる会議で差し替える。
 protocol AudioSource: AnyObject {
     /// サンプルを渡し始める。`onSamples` は音声スレッドから呼ばれる
     func start(onSamples: @escaping ([Float]) -> Void) throws
@@ -51,8 +51,18 @@ final class FileSource: AudioSource {
     private var task: Task<Void, Never>?
     var onEnd: (() -> Void)?
 
-    init(url: URL) throws {
-        samples = try AudioConverter().resampleAudioFile(url)
+    init(url: URL, systemAudioURL: URL? = nil) throws {
+        let microphone = try AudioConverter().resampleAudioFile(url)
+        if let systemAudioURL {
+            let system = try AudioConverter().resampleAudioFile(systemAudioURL)
+            // 実録の同時刻WAVを使う検証口。短い方の末尾は無音で延長し、時間を詰めない。
+            let count = max(microphone.count, system.count)
+            let micLane = microphone + [Float](repeating: 0, count: count - microphone.count)
+            let systemLane = system + [Float](repeating: 0, count: count - system.count)
+            samples = SystemAudioMixer.process(microphone: micLane, systemAudio: systemLane)
+            let peak = samples.reduce(Float(0)) { max($0, abs($1)) }
+            FileHandle.standardError.write(Data("system-audio replay: frames=\(samples.count) peak=\(peak)\n".utf8))
+        } else { samples = microphone }
         guard !samples.isEmpty else {
             throw NSError(domain: "kikigaki", code: 1, userInfo: [NSLocalizedDescriptionKey: "音声を読めない: \(url.path)"])
         }

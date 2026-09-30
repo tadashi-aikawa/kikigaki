@@ -39,6 +39,8 @@
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>会議の発話を聴いて、話者付きで文字起こしするためにマイクを使います。</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>オンライン会議の相手の声をマイクの音と合わせて文字起こしするために、Macで再生中の音を使います。</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>会議の発話を端末内で文字起こしするために音声認識を使います。</string>
 </dict>

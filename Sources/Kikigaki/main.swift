@@ -26,7 +26,7 @@ if CommandLine.arguments.contains("--smoke") {
         }
         print("Kikigaki (smoke): outputDir=\(config.outputDir.path) saveRecording=\(config.saveRecording)")
         if CommandLine.arguments.contains("--replay") {
-            print("Kikigaki (replay debug): questions=\(replayDebug.questions.count) hold=\(replayDebug.hold) rename=\(replayDebug.rename != nil) typed=\(replayDebug.typedEntries.count) verifyTyped=\(replayDebug.verifyTyped) automatic=\(replayDebug.automatic != nil)")
+            print("Kikigaki (replay debug): questions=\(replayDebug.questions.count) hold=\(replayDebug.hold) rename=\(replayDebug.rename != nil) typed=\(replayDebug.typedEntries.count) verifyTyped=\(replayDebug.verifyTyped) automatic=\(replayDebug.automatic != nil) systemAudio=\(replayDebug.systemAudioPath != nil)")
         }
     } catch {
         FileHandle.standardError.write(Data("Kikigaki: failed to load config: \(error)\n".utf8))

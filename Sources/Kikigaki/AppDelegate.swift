@@ -5,6 +5,7 @@ import KikigakiAIIO
 
 /// replayだけで使う開発用入力。通常起動では環境変数自体を解釈しない。
 struct ReplayDebugOptions {
+    var systemAudioPath: String?
     var diarizationEnabled: Bool?
     struct Question { let seconds: Double; let text: String }
     var questions: [Question] = []
@@ -30,6 +31,13 @@ struct ReplayDebugOptions {
     static func load(arguments: [String] = CommandLine.arguments, environment env: [String: String] = ProcessInfo.processInfo.environment) throws -> Self {
         guard arguments.contains("--replay") else { return Self() }
         var result = Self()
+        if let input = env["KIKIGAKI_DEBUG_REPLAY_SYSTEM"] {
+            guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !input.contains("\0"), !input.contains(where: \.isNewline) else {
+                throw AIError.invalid("KIKIGAKI_DEBUG_REPLAY_SYSTEM")
+            }
+            result.systemAudioPath = (input as NSString).expandingTildeInPath
+        }
         if let input = env["KIKIGAKI_DEBUG_AI_AUTO_PROFILE"] {
             guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   !input.contains("\0"), !input.contains(where: \.isNewline) else { throw AIError.invalid("KIKIGAKI_DEBUG_AI_AUTO_PROFILE") }
@@ -382,10 +390,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                diarizationEnabled: session.snapshot.nextDiarizationEnabled,
                                exclusion: session.snapshot.audioExclusion,
                                minutesPath: minutesPath ?? session.waitingMinutesPath,
-                               minutesHistory: window?.minutesSplit.preview.history.paths ?? [])
+                               minutesHistory: window?.minutesSplit.preview.history.paths ?? [],
+                               systemAudioMode: UserDefaults.standard.string(forKey: StartSheet.systemAudioDefaultsKey)
+                                    .flatMap(SystemAudioMode.init(rawValue:)) ?? .automatic,
+                               outputKind: SystemAudioOutput.current)
         sheet.onDiarizationPreload = { [weak self] in self?.preloadModels() }
         sheet.onCancel = { [weak self] in self?.startSheet = nil }
         sheet.onStart = { [weak self] options in
+            UserDefaults.standard.set(options.systemAudioMode.rawValue, forKey: StartSheet.systemAudioDefaultsKey)
             self?.startSheet = nil
             Task { await self?.startRecording(options: options) }
         }
@@ -398,7 +410,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let source: AudioSource
         if let replayURL {
             do {
-                let file = try FileSource(url: replayURL)
+                let file = try FileSource(url: replayURL, systemAudioURL: replayDebug.systemAudioPath.map { URL(fileURLWithPath: $0) })
                 file.onEnd = { [weak self] in
                     Task { @MainActor in
                         await self?.session?.stop()
@@ -425,7 +437,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
         } else {
-            source = MicSource()
+            source = options?.recordSystemAudio == true ? MicAndSystemSource() : MicSource()
         }
         // シートの値はこの録音にだけ効く。設定ファイルへは書き戻さない。
         if let options {
