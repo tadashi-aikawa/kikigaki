@@ -1,7 +1,7 @@
 import Foundation
 
 /// 自動送信先の現streamが読んだ末尾。添字は0始まり、nilは境界なし。
-/// 停止時の再分割・省略で添字が変わるため、受領した音声位置を表示配列へ写し直す。
+/// 停止時の再分割で添字が変わるため、受領した音声位置を表示配列へ写し直す。
 public struct AIRangeBoundaries: Equatable, Sendable {
     public let answered: Int?
     public let accepted: Int?

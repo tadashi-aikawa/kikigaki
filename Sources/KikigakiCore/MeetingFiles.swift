@@ -10,7 +10,7 @@ public enum MeetingFiles {
         while true {
             let stem = base + (suffix == 1 ? "" : "_\(suffix)")
             let url = directory.appendingPathComponent(stem + ".md")
-            if [url, rawURL(for: url), wavURL(for: url), levelsURL(for: url)].contains(where: { FileManager.default.fileExists(atPath: $0.path) }) {
+            if [url, wavURL(for: url), levelsURL(for: url)].contains(where: { FileManager.default.fileExists(atPath: $0.path) }) {
                 suffix += 1
                 continue
             }
@@ -22,10 +22,6 @@ public enum MeetingFiles {
                 suffix += 1
             }
         }
-    }
-
-    public static func rawURL(for markdownURL: URL) -> URL {
-        markdownURL.deletingPathExtension().appendingPathExtension("raw.md")
     }
 
     public static func wavURL(for markdownURL: URL) -> URL {

@@ -74,7 +74,7 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
 ## AI依頼の進行表示の検証
 
 - DEBUGビルドで `KIKIGAKI_DEBUG_AI_PROGRESS_REPLAY=/path/to/evidence` を指定すると、replayの本番画面更新直後にAI進行の変化をPNGと `evidence.json` へ記録する。AI登録簿は保存先の `.typed-test-support/` へ隔離し、request・受信箱・保存形式は変更しない。実herdrを使うため同梱CLIのある `.app` から起動する
-- DEBUGの `--show-window` と `KIKIGAKI_DEBUG_AI_PROGRESS_CAPTURE=<出力先>` の併用は、マイク・モデル・herdrを起動せず、進行表示のfixtureを本番のウィンドウへ流してPNGを撮って終了する。実際のrequest操作から状態を流し、保存はしない。段ごと(送信・読込・編集・返答)、返答の到着、接続の切断、過去会議の静止表示、3宛先の混雑、420ptの狭い幅を撮る
+- DEBUGの `--show-window` と `KIKIGAKI_DEBUG_AI_PROGRESS_CAPTURE=<出力先>` の併用は、マイク・モデル・herdrを起動せず、進行表示のfixtureを本番のウィンドウへ流してPNGを撮って終了する。実際のrequest操作から状態を流し、保存はしない。段ごと(送信・読込・編集・返答)、返答の到着、接続の切断、読み取り専用snapshotの静止表示、3宛先の混雑、420ptの狭い幅を撮る
     - 環境変数 `KIKIGAKI_DEBUG_AI_FEEDBACK=<値>`: 撮る場面を切り替える。`model` は本文の下のモデル表記を、`labels` は状態ごとのラベルを撮る。`before` は `before-working.png` の1枚だけを撮る。それ以外の値は、状態の推移と返事の種類(回答・確認質問)を撮る。`model` 以外では、先頭の宛先のアバター画像の読み込みを待ち、読み込めなければ失敗する
     - 環境変数 `KIKIGAKI_DEBUG_AI_AVATAR=<ローカルパスまたは画像URL>`: fixtureの先頭の宛先のアバター画像を差し替える
 - DEBUGの `--show-window` と `KIKIGAKI_DEBUG_AI_PROGRESS_VERIFY=1` の併用は、実際のAppKitイベントループで返事待ち行の更新タイマーを検証する。表示・スクロールで外れる・他のウィンドウで隠れる・最小化・閉じる・開き直し・返事の到着で、タイマーの動作と停止が期待どおりかを確かめ、成功なら終了コード0、失敗なら1で終了する
@@ -96,7 +96,7 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
 
 ## テスト
 
-- `KIKIGAKI_TEST_SPEECH=1 swift test --filter DiarizationTests`: 通常はスキップする実Apple Speechの結合テストも実行できます。マイクを使わず無音を入力し、話者モデルの呼出ゼロ・相槌省略なし・会議ごとの切替を確認します。
+- `KIKIGAKI_TEST_SPEECH=1 swift test --filter DiarizationTests`: 通常はスキップする実Apple Speechの結合テストも実行できます。マイクを使わず無音を入力し、話者モデルの呼出ゼロ・会議ごとの切替を確認します。
 - 環境変数 `KIKIGAKI_TEST_DIARIZATION=1 swift test --filter SpeakerDiarizerTests`: 実モデルで短い入力とchunk境界の末尾処理を確かめる。初回はモデルを取得する
 - 開始シートの見た目は `KIKIGAKI_START_SHEET_CAPTURE=<出力先> swift test --filter StartSheetTests` でPNGへ撮り、モックと突き合わせます。
 - 撮影用の環境変数: 次の変数は、値に出力先を渡したときだけ、該当のテストがPNGを書き出す。指定しなければ何も書かない

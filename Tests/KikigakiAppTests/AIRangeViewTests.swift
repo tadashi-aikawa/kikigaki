@@ -132,7 +132,7 @@ import KikigakiAIIO
         #expect(record.controller.rangeBoundaries(slot: 2, utterances: utterances) == .init())
         #expect(record.controller.rangeBoundaries(slot: 1, utterances: utterances) == .init(accepted: 1))
         var archive = MeetingArchive(original: .init(startedAt: timeline.startedAt, duration: 5, utterances: utterances, names: SpeakerNames()),
-            processed: nil, candidateCount: 0, markdownURL: record.manifest.markdownURL)
+            markdownURL: record.manifest.markdownURL)
         _ = store.save(&archive, for: record.manifest.meetingID)
         record.controller.stopWatching()
         let recovered = AIRecordStore(directory: registry); recovered.recover()

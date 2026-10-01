@@ -30,10 +30,8 @@ import KikigakiCore
         }
         if let copyError { throw copyError }
         guard !session.snapshot.handoffFailed else { throw AIError.invalid("replay copy failed") }
-        for (source, name) in [(markdown, "meeting.md"), (MeetingFiles.rawURL(for: markdown), "meeting.raw.md")] {
-            if FileManager.default.fileExists(atPath: source.path) {
-                try Data(contentsOf: source).write(to: directory.appendingPathComponent(name), options: .atomic)
-            }
+        if FileManager.default.fileExists(atPath: markdown.path) {
+            try Data(contentsOf: markdown).write(to: directory.appendingPathComponent("meeting.md"), options: .atomic)
         }
     }
     static func finish(_ session: MeetingSession, rename: (slot: Int, name: String)?, window: NSWindow? = nil) throws {

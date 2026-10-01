@@ -280,7 +280,6 @@ private enum SyntheticSession {
         #expect(comparison.final.expectations.first?.matchedLetters == 4)
         #expect(comparison.live == nil)
         let markdown = SpeakerTrial.markdown(comparison, names: [0: "司会"], meta: nil)
-        #expect(markdown.contains("繰り返し相槌の省略は無効"))
         #expect(SpeakerTrial.transcript(tokens: tokens, speakers: speakers, names: [0: "司会"]) == "[00:00.00] 司会: そうです。\n")
         // 旧版の条件で録った記録の凍結列とは照合しない。
         // 録音中は間を空けた次の文も確定済みで、条件5を満たして最初の文が凍結される

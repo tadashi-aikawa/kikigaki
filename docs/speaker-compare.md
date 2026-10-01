@@ -4,7 +4,6 @@
 
 - 判定と固定の条件: [話者の割当と固定](speaker-assignment.md)
 - 比較の対象はトークンへの話者の割当と補正だけ。ASR自体と話者判別モデルの出力は同じ入力を使う
-    - 繰り返し相槌の省略は、比較でも replay でも無効にする。保存の `.md` とは違う場合がある
     - 手動の話者統合・速報と高精度の合流・小音量の除外は対象外
     - 行の区切り(同じ話者で1秒以上の無音)は補正ではない
 
@@ -40,7 +39,6 @@ KIKIGAKI_TRIAL=1 ./scripts/make-app.sh
 ```toml
 outputDir = "<作業用ディレクトリ>/meeting"
 saveRecording = false
-dropRepeatedBackchannels = false
 ```
 
 ```sh

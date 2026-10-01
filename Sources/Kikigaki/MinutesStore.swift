@@ -63,6 +63,7 @@ import KikigakiAIIO
     func validateTarget(_ path: String) throws {
         try MinutesPath.validate(path)
         if let markdownURL {
+            // 廃止前に保存した原文も保護する。既存ファイルは読まず、議事録への流用を拒否する。
             let raw = markdownURL.deletingPathExtension().appendingPathExtension("raw.md")
             guard path != markdownURL.path, path != raw.path else { throw AIError.invalid("meeting markdown") }
         }

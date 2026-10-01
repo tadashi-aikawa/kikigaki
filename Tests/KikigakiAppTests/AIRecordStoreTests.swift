@@ -5,6 +5,15 @@ import KikigakiAIIO
 @testable import Kikigaki
 
 @Suite @MainActor struct AIRecordStoreTests {
+    private struct LegacyArchive: Encodable {
+        let original: MeetingMarkdown.Meeting
+        let markdownURL: URL
+        let processed: [Utterance]
+        let candidateCount = 1
+        let ownsRawFile = true
+        let omissionDisabledAfterFailure = false
+    }
+
     @Test func 音量だけの保存失敗をポーリングで繰り返さず明示再試行できる() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let registry = try testDirectory(); defer { try? FileManager.default.removeItem(at: registry) }
@@ -12,7 +21,7 @@ import KikigakiAIIO
         let id = UUID(), markdown = root.appendingPathComponent("meeting.md")
         let record = try store.begin(meetingID: id, markdownURL: markdown, config: .init(config: AIConfig(), home: root))
         var meter = AudioLevelMeter(); meter.append(Array(repeating: 0.1, count: 1600))
-        var archive = MeetingArchive(original: .init(startedAt: Date(), duration: 0.1, utterances: [], names: SpeakerNames(), audioLevels: meter.track()), processed: nil, candidateCount: 0, markdownURL: markdown)
+        var archive = MeetingArchive(original: .init(startedAt: Date(), duration: 0.1, utterances: [], names: SpeakerNames(), audioLevels: meter.track()), markdownURL: markdown)
         let levels = MeetingFiles.levelsURL(for: markdown)
         try Data("別のファイル".utf8).write(to: levels)
         let saved = store.save(&archive, for: id)
@@ -37,7 +46,7 @@ import KikigakiAIIO
         let base = [".kikigaki-context", id.uuidString, "ai"]
         let archivePath = (base + ["archive.json"]).reduce(root) { $0.appendingPathComponent($1) }
         try FileManager.default.createSymbolicLink(at: archivePath, withDestinationURL: root.appendingPathComponent("absent"))
-        var archive = MeetingArchive(original: .init(startedAt: Date(), duration: 1, utterances: [], names: SpeakerNames()), processed: nil, candidateCount: 0, markdownURL: markdown)
+        var archive = MeetingArchive(original: .init(startedAt: Date(), duration: 1, utterances: [], names: SpeakerNames()), markdownURL: markdown)
         #expect(!store.save(&archive, for: id).succeeded)
         #expect(try String(contentsOf: markdown, encoding: .utf8) == "既存本文")
         #expect(record.needsRecovery)
@@ -47,7 +56,7 @@ import KikigakiAIIO
         #expect(record.saveWarning == nil)
         #expect(try String(contentsOf: markdown, encoding: .utf8).contains("# KIKIGAKI"))
     }
-    @Test func 新会議中の旧会議への回答を元の両Markdownへ保存する() async throws {
+    @Test func 新会議中の旧会議への回答を元のMarkdownへ保存する() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let registry = try testDirectory(); defer { try? FileManager.default.removeItem(at: registry) }
         let fake = FakeHerdr(), config = ResolvedAIConfig(config: AIConfig(), home: root)
@@ -59,7 +68,7 @@ import KikigakiAIIO
         try await first.controller.send(request, config: config)
         let utterances = [Utterance(speaker: 0, start: 0, end: 1, text: "本文")]
         var archive = MeetingArchive(original: .init(startedAt: Date(), duration: 1, utterances: utterances, names: SpeakerNames()),
-            processed: utterances, candidateCount: 0, markdownURL: first.manifest.markdownURL)
+            markdownURL: first.manifest.markdownURL)
         #expect(store.save(&archive, for: first.manifest.meetingID).succeeded)
         let second = try store.begin(meetingID: UUID(), markdownURL: root.appendingPathComponent("second.md"), config: config)
         let result = try AIReceiveEvent(request: request, kind: .answered, recordedAt: Date(), body: "旧会議への回答")
@@ -68,8 +77,8 @@ import KikigakiAIIO
         first.controller.scan()
         #expect(second.controller.conversation.questions.isEmpty)
         let markdown = try String(contentsOf: first.manifest.markdownURL, encoding: .utf8)
-        let raw = try String(contentsOf: root.appendingPathComponent("first.raw.md"), encoding: .utf8)
-        #expect(markdown.contains("旧会議への回答") && raw.contains("旧会議への回答"))
+        #expect(markdown.contains("旧会議への回答"))
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("first.raw.md").path))
         archive.original.names.set("変更後", for: 0)
         #expect(store.save(&archive, for: first.manifest.meetingID).succeeded)
         #expect(try String(contentsOf: first.manifest.markdownURL, encoding: .utf8).contains("変更後"))
@@ -77,7 +86,8 @@ import KikigakiAIIO
         let entries = try AIJSON.decode([AIRegistration].self, from: AIFileStore(root: registry).read(["ai-roots.json"]))
         #expect(!entries.contains { $0.meetingID == first.manifest.meetingID })
     }
-    @Test func 再起動時は登録済みの未完了会議だけを回収して起動しない() async throws {
+    @Test(arguments: [false, true])
+    func 再起動時は旧省略形式を含む未完了会議を回収して起動しない(_ legacy: Bool) async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let registry = try testDirectory(); defer { try? FileManager.default.removeItem(at: registry) }
         let fake = FakeHerdr(), config = ResolvedAIConfig(config: AIConfig(), home: root)
@@ -88,8 +98,17 @@ import KikigakiAIIO
             capturedAt: Date(), cutoff: 1, tail: nil, config: config, helper: root.appendingPathComponent("helper"))
         try await record!.controller.connect(config: config, label: "test", executable: URL(fileURLWithPath: "/tmp/fake"), arguments: [])
         try await record!.controller.send(request, config: config)
-        var archive = MeetingArchive(original: .init(startedAt: Date(), duration: 1, utterances: [], names: SpeakerNames()), processed: nil, candidateCount: 0, markdownURL: markdown)
+        let original = MeetingMarkdown.Meeting(startedAt: Date(), duration: 1,
+            utterances: [.init(speaker: 0, start: 0, end: 1, text: "うんうん本文")], names: SpeakerNames())
+        var archive = MeetingArchive(original: original, markdownURL: markdown)
         #expect(initial!.save(&archive, for: id).succeeded)
+        let raw = root.appendingPathComponent("stopped.raw.md")
+        if legacy {
+            let saved = LegacyArchive(original: original, markdownURL: markdown,
+                processed: [.init(speaker: 0, start: 0.5, end: 1, text: "本文")])
+            try AIFileStore(root: root).write(AIJSON.encode(saved), to: [".kikigaki-context", id.uuidString, "ai", "archive.json"])
+            try "旧原文ファイル".write(to: raw, atomically: true, encoding: .utf8)
+        }
         record = nil; initial = nil
         let result = try AIReceiveEvent(request: request, kind: .answered, recordedAt: Date(), body: "終了中に保存した回答")
         try AIFileStore(root: root).write(AIJSON.encode(result), to: [".kikigaki-context", id.uuidString, "ai", "inbox", result.filename], replacing: false)
@@ -100,7 +119,12 @@ import KikigakiAIIO
         #expect(starts == 0 && sounds == 0)
         #expect(restored.records[id]?.controller.connection == nil)
         #expect(restored.records[id]?.controller.canSend == false)
+        #expect(restored.records[id]?.saveWarning == nil)
+        #expect(restored.records[id]?.archive?.original.utterances == original.utterances)
         #expect(try String(contentsOf: markdown, encoding: .utf8).contains("終了中に保存した回答"))
+        #expect(try String(contentsOf: markdown, encoding: .utf8).contains("うんうん本文"))
+        if legacy { #expect(try String(contentsOf: raw, encoding: .utf8) == "旧原文ファイル") }
+        else { #expect(!FileManager.default.fileExists(atPath: raw.path)) }
         #expect(try AIJSON.decode([AIRegistration].self, from: AIFileStore(root: registry).read(["ai-roots.json"])).isEmpty)
     }
     @Test func 壊れた登録簿を上書きせず新規送信を拒否する() throws {

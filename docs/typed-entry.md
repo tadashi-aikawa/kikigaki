@@ -67,20 +67,20 @@ Coreへ `TranscriptEntries.merge(voice:typed:timeline:pendingVoiceRows:)` を置
 
 入力列へ別のkindが混ざっても本番を停止させず、kindで声と手入力へ振り分け直す。voice列に混ざったtypedも投稿として保持し、未確定の印は元のvoice列にある声だけへ付ける。
 
-順序はstart昇順。同じstartで声と手入力を比較するときだけ、typed.postedAtとvoiceの `timeline.date(at: start)` を比べ、早いほうを先にする。時計まで同値ならvoiceを先にする。voice同士は元の順、typed同士は投稿順を保つ。音声行の途中に手入力の時刻が入っても音声行を分割せず、その音声行の後ろへ置く。本文一致による削除や相槌判定は行わない。
+順序はstart昇順。同じstartで声と手入力を比較するときだけ、typed.postedAtとvoiceの `timeline.date(at: start)` を比べ、早いほうを先にする。時計まで同値ならvoiceを先にする。voice同士は元の順、typed同士は投稿順を保つ。音声行の途中に手入力の時刻が入っても音声行を分割せず、その音声行の後ろへ置く。本文一致による削除は行わない。
 
 | 呼び出し位置 | 併合するもの・維持するもの |
 |---|---|
 | `refreshLive()` | `LiveTranscript.utterances` とtypedEntriesを併合。pendingSpeakerRowsを音声側の添字から変換する。typedをpendingにしない |
 | 投稿直後 | 同じ `refreshLive()` を通す。再描画のたびに前回の併合済み配列へ追加しない |
-| `stop()` | `MeetingResult.make` が声だけを最終判定してから、originalとprocessedの両方へtypedEntriesを併合する |
+| `stop()` | `MeetingResult.make` が声だけを最終判定してから、最終判定の発話へtypedEntriesを併合する |
 | 停止後の `rename` | 併合済みarchiveのnamesだけを更新し、再保存する |
 | 停止後の `setSpeakerMapping` | 音声tokens・segmentsだけでMeetingResultを再計算し、archiveのtypedを残して置換する |
 | `save()`・AIの返事による再保存 | 既に併合済みのarchiveを保存する。二重に併合しない |
 
-`MeetingArchive.replaceResult(_:)` は `original.utterances` のtypedだけを退避し、渡された声の再計算結果のoriginal・processedそれぞれへ併合する。rawの所有権と省略失敗状態は現状どおり維持する。この方式ならarchive復元後も手入力が残り、archiveへ独立したtyped配列を二重保存する必要がない。
+`MeetingArchive.replaceResult(_:)` は `original.utterances` のtypedだけを退避し、渡された声の再計算結果へ併合する。この方式ならarchive復元後も手入力が残り、archiveへ独立したtyped配列を二重保存する必要がない。
 
-`MeetingResult.make`、`Aligner`、`SpeakerFreeze`、`RepeatedBackchannels`、`SpeakerMapping` は引き続き音声だけを扱う。processedがnilならnilを維持し、手入力を理由に `.raw.md` を新設しない。
+`MeetingResult.make`、`Aligner`、`SpeakerFreeze`、`SpeakerMapping` は音声だけを扱う。
 
 行ビューの識別子 `RowID` はkindを含め、同じstartの声と手入力を別に数える。声の再分割によってtypedのビューを声の行へ流用しない。typed内の同時刻の並びには投稿順のoccurrenceを使い、永続IDは増やさない。
 
@@ -94,13 +94,13 @@ Coreへ `TranscriptEntries.merge(voice:typed:timeline:pendingVoiceRows:)` を置
 
 投稿時に `<会議名>.attachments/<UUID>.png` または `.jpg` へ保存し、絶対パスを `Utterance.imagePaths` へ入れる。保存失敗では投稿しない。その投稿で保存した画像だけを戻し、UIの下書きを残す。空本文でも画像があれば受理する。停止時は未投稿の画像を保持し、新会議開始時に消す。元ファイルの変更・削除に依存しない。
 
-`imagePaths` がない旧archiveは空配列として読む。声への画像付与、相対パス、制御文字を含むパスは拒否する。画像は通常Markdown・raw・archiveに残り、投稿済みサムネイルをクリックすると既定アプリで開く。Markdownでは画像埋め込みを出力する。コピー・AI文脈ではparliamentと同じ番号付き絶対パスを同じ発話行に付け、1発話1行の契約を維持する。画像の内容を自動で文字列化するのではなく、AIがファイルを読むための参照を渡す。
+`imagePaths` がない旧archiveは空配列として読む。声への画像付与、相対パス、制御文字を含むパスは拒否する。画像は通常Markdownとarchiveに残り、投稿済みサムネイルをクリックすると既定アプリで開く。Markdownでは画像埋め込みを出力する。コピー・AI文脈ではparliamentと同じ番号付き絶対パスを同じ発話行に付け、1発話1行の契約を維持する。画像の内容を自動で文字列化するのではなく、AIがファイルを読むための参照を渡す。
 
 ### Markdownとコピー
 
 手入力の改行は画面とarchiveへ保持する。Markdownでは同じ箇条書き項目の継続行として保存する。コピーとAI文脈は既存の1発話1行の検証・差分契約を維持し、`TranscriptRenderer.line` で改行を空白へまとめる。
 
-会議Markdownと、省略が有効な会議の `.raw.md` に次の行が入る。
+会議Markdownに次の行が入る。
 
 ```markdown
 - [14:05:40] 佐藤: URLを送ります。
@@ -108,7 +108,7 @@ Coreへ `TranscriptEntries.merge(voice:typed:timeline:pendingVoiceRows:)` を置
 - [14:05:45] 鈴木: こちらのページですね。
 ```
 
-Markdownのメタ情報にある「話者」の一覧には手入力を含めない。raw保存に失敗して音声の省略を止めた場合も、通常Markdown・画面の両方に手入力を残す。typedだけで声が一度も確定しなかった会議も保存できる。
+Markdownのメタ情報にある「話者」の一覧には手入力を含めない。通常Markdownと画面の両方に手入力を残す。typedだけで声が一度も確定しなかった会議も保存できる。
 
 手動コピーは既に `snapshot.utterances` → `TranscriptRenderer.lines` を通るので、併合結果がそのまま入る。コピーは毎回全文なので、手入力後に遅れた音声が途中へ挿入されても次のコピーにそのまま入る。過去の固定済み会話ファイルは変更しない。
 
@@ -145,7 +145,7 @@ AI印と発話の位置を比較する `AIMarkdown` とウィンドウも、発�
 | Core互換 | kindなしの旧Utteranceと旧archiveを読む。voice・typedのJSON往復。未知kindとtypedの不正speakerを拒否 |
 | 名前 | voiceのnilは「?」、typedは「手入力」。声の名前変更でtypedが変わらない |
 | 併合 | 声の前・間・末尾、同時刻の声とtyped、同時刻の複数typed、同文の連投、声の再分割、pending行の添字変換 |
-| archive | original・processed両方へ残る。改名・統合・統合解除・JSON復元後の再保存・raw保存失敗でも消えず重複しない |
+| archive | 発話列へ残る。改名・統合・統合解除・JSON復元後の再保存でも消えず重複しない |
 | コピー | 初回、手入力追加、遅着の音声による途中訂正、改名後の全文と、過去の固定ファイル不変 |
 | AICapture | cutoffと同時刻は含め、後は除外。確定待ち中の追加投稿は除外。声の末尾・暫定末尾・確定待ち条件がtypedで変わらない |
 | AI印 | 同時刻や再分割時でも送信印は声に付く。typedしかないときに声のアンカーを作らない |
@@ -156,4 +156,4 @@ AI印と発話の位置を比較する `AIMarkdown` とウィンドウも、発�
 
 replayの投稿タイミング指定は本番の `submitTyped` を通す。入力値はreplay時だけ解釈し、通常起動には影響させない。URL中の `:` を壊さない形式を使う。指定の書式は [開発用のフラグと環境変数](dev-flags.md) の `KIKIGAKI_DEBUG_TYPED_ENTRIES` を参照する。
 
-replay検証は専用の出力先で行い、同じURLが通常Markdown・省略前 `.raw.md`・手動コピーの会話ファイル・AI送信用の会話ファイルに現れることを比較する。改名・統合の後にも比較し、行の保持だけでなく声との順序も確認する。実時間の一時停止中に投稿して再開し、声の時計だけが停止時間分ずれる区間も含める。IMEの操作は実ビューの検証で補う。
+replay検証は専用の出力先で行い、同じURLが通常Markdown・手動コピーの会話ファイル・AI送信用の会話ファイルに現れることを比較する。改名・統合の後にも比較し、行の保持だけでなく声との順序も確認する。実時間の一時停止中に投稿して再開し、声の時計だけが停止時間分ずれる区間も含める。IMEの操作は実ビューの検証で補う。

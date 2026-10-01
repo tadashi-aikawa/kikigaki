@@ -52,7 +52,7 @@ import KikigakiCore
         #expect(AIRangeBoundaries.resolve(history: next, questions: [cancelled], utterances: utterances) == .init())
     }
 
-    @Test func 再分割と相槌省略でも受領した音声位置までを指す() throws {
+    @Test func 再分割と行数の変化でも受領した音声位置までを指す() throws {
         var history = try AIStreamHistory(meetingID: UUID())
         let answered = try question(&history, number: 1, lines: 4, kind: .answered)
         let accepted = try question(&history, number: 2, lines: 6, kind: .accept)
@@ -63,7 +63,7 @@ import KikigakiCore
         // cutoffは35秒と55秒。停止時の分割数が増えても、送った範囲の末尾を保つ。
         #expect(AIRangeBoundaries.resolve(history: history, questions: questions,
             utterances: rows([0, 10, 20, 25, 30, 40, 50, 60])) == .init(answered: 4, accepted: 6))
-        // 相槌の省略で行数が減っても消えず、残った発話の同じ音声位置へ写す。
+        // 再分割で行数が減っても消えず、残った発話の同じ音声位置へ写す。
         #expect(AIRangeBoundaries.resolve(history: history, questions: questions,
             utterances: rows([0, 30, 50, 60])) == .init(answered: 1, accepted: 2))
         let typed = try Utterance(typedText: "境界上の手入力", at: 55, postedAt: Date())

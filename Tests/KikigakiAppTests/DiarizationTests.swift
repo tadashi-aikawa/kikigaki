@@ -188,7 +188,7 @@ import KikigakiCore
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
 
     /// オンデバイスSpeechを使う結合検証。通常のテストではモデル・言語アセットを要求しない。
-    @Test func 本番の開始停止でモデルを読み込まず相槌省略ファイルを作らない() async throws {
+    @Test func 本番の開始停止でモデルを読み込まず通常Markdownだけを作る() async throws {
         guard ProcessInfo.processInfo.environment["KIKIGAKI_TEST_SPEECH"] == "1" else { return }
         final class Silence: AudioSource {
             func start(onSamples: @escaping ([Float]) -> Void) throws { onSamples(Array(repeating: 0, count: 1600)) }

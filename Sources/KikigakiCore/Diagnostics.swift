@@ -38,16 +38,7 @@ public struct Diagnostics: Sendable {
                        hasTentative ? "未確定" : "なし")]
     }
 
-    /// 省略候補の通知。環境変数によらず出す(省略は原文と突き合わせて確かめるものなので、
-    /// 何を落としたかは常に残す)
-    public func backchannelLines(tokens: [TimedToken], candidates: [Range<Int>]) -> [String] {
-        candidates.map { range in
-            "[backchannel] " + String(format: "%.2f-%.2f", tokens[range.lowerBound].start, tokens[range.upperBound - 1].end)
-                + " " + tokens[range].map(\.text).joined()
-        }
-    }
-
-    /// 区間と、フレーズごとの「生の判定(区間からの窓判定)→多数決後の判定」と時刻
+    /// 区間と、フレーズごとの「窓判定→補正後の判定」と時刻
     public func phraseLines(tokens: [TimedToken], segments: [SpeakerSegment], speakers: [Int?]) -> [String] {
         guard showsPhrases else { return [] }
         var lines = segments.sorted(by: { $0.start < $1.start }).map { segment in

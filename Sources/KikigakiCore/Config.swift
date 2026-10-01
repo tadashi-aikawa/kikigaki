@@ -12,19 +12,16 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     public var outputDir: String?
     /// 録音WAVを Markdown と並べて残すか
     public var saveRecording: Bool?
-    /// 停止時に短い繰り返し相槌を省き、省略前のMarkdownも残す実験機能
-    public var dropRepeatedBackchannels: Bool?
     /// 小音量候補の計測・表示だけを行う。本文からの除外はしない。
     public var measureAudioLevels: Bool?
     public var speakers: [Speaker]?
     /// 単数の `[ai]` と配列の `[[ai]]` の両方を読む
     public var ai: AIProfileList?
 
-    public init(outputDir: String? = nil, saveRecording: Bool? = nil, dropRepeatedBackchannels: Bool? = nil,
+    public init(outputDir: String? = nil, saveRecording: Bool? = nil,
                 speakers: [Speaker]? = nil, ai: AIProfileList? = nil, measureAudioLevels: Bool? = nil) {
         self.outputDir = outputDir
         self.saveRecording = saveRecording
-        self.dropRepeatedBackchannels = dropRepeatedBackchannels
         self.measureAudioLevels = measureAudioLevels
         self.speakers = speakers
         self.ai = ai
@@ -43,7 +40,6 @@ public struct ResolvedConfig: Equatable, Sendable {
     /// 録音WAVは既定では残さない。通常利用では不要でディスクを食うだけで、要るのはデバッグや
     /// 別エンジンでの再処理のとき(タダシの決定)
     public var saveRecording: Bool
-    public var dropRepeatedBackchannels: Bool
     public var measureAudioLevels: Bool
     public var speakers: [KikigakiConfig.Speaker]
     /// 設定順のプロファイル。slotは1始まりで、この並びが宛先ポップアップの並びになる
@@ -63,7 +59,6 @@ public struct ResolvedConfig: Equatable, Sendable {
     public init(config: KikigakiConfig, home: URL = FileManager.default.homeDirectoryForCurrentUser) {
         outputDir = Self.expand(config.outputDir ?? Self.defaultOutputDir, home: home)
         saveRecording = config.saveRecording ?? false
-        dropRepeatedBackchannels = config.dropRepeatedBackchannels ?? false
         measureAudioLevels = config.measureAudioLevels ?? false
         speakers = (config.speakers ?? []).map { speaker in
             var speaker = speaker

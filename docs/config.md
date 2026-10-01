@@ -13,8 +13,6 @@
 outputDir = "~/Documents/KIKIGAKI"
 # 録音WAVを Markdown と並べて残すか。既定: false (通常利用では不要でディスクを食うだけ)
 saveRecording = false
-# 実験機能: 停止時に短い繰り返し相槌の候補を省く。原文を .raw.md にも保存する。既定: false
-dropRepeatedBackchannels = false
 # 診断表示: 発話ごとの音量と候補を表示・別途保存する。除外設定とは独立。既定: false
 measureAudioLevels = false
 
@@ -57,7 +55,6 @@ address = "ネオへ"
 | --- | --- | --- |
 | `outputDir` | `~/Documents/KIKIGAKI` | Markdown (と録音WAV) の保存先。絶対パスか `~` 始まりだけを受け付ける。相対パスと空文字は設定エラー |
 | `saveRecording` | `false` | 録音WAVを Markdown と並べて残す |
-| `dropRepeatedBackchannels` | `false` | 停止時に短い繰り返し相槌の候補を省く実験機能。詳細は [繰り返し相槌の省略](repeated-backchannels.md) |
 | `measureAudioLevels` | `false` | 発話ごとの音量と小音量候補の診断表示と保存。除外の設定とは独立。次の会議から効く。詳細は [小音量発話の計測](audio-levels.md) |
 
 `outputDir` は Codex の書き込み許可にも追加する。議事録を書けるようにするためで、許可の範囲と受け入れたリスクは [議事録プレビューの設計](minutes-preview.md) の「Skillの規則と書き込み許可」を参照する。
@@ -67,7 +64,6 @@ address = "ネオへ"
 保存先には 1会議1ファイルで `2026-09-05_1240.md` の形の名前を書く。
 
 - `.wav`: `saveRecording = true` のとき、同名で並べる
-- `.raw.md`: `dropRepeatedBackchannels = true` のとき、省略前の書き起こしを同名で残す
 - `.levels.json`: `measureAudioLevels = true` のとき、音量の記録を同名で残す
 - `<会議名>.attachments/`: 手入力へ貼り付けた画像。詳細は [手入力の設計](typed-entry.md)
 - 同じ分に録音を始め直した場合は、既存の保存物があれば `_2`、`_3` と連番を付ける
@@ -125,6 +121,9 @@ address = "ネオへ"
 ## 廃止したキー
 
 設定ファイルに残っていても、次のように扱う。
+
+- `dropRepeatedBackchannels`: 廃止した実験機能のキーとして、値や型に関係なく読み飛ばす。エラーにも警告にもしない。
+    - 理由: 既存の設定ファイルを書き換えずに済ませるため
 
 - `[hotkeys]` と `[ai.hotkey]`: グローバルショートカットの廃止に伴い、読み飛ばす。エラーにも警告にもしない。既存の設定ファイルを書き換えずに済ませるため
 - `maxSpeakers`: 話者の人数上限設定の廃止に伴い、無視する

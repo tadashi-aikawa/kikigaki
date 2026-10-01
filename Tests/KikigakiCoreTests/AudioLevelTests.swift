@@ -80,7 +80,7 @@ import Testing
         let rows = [Utterance(speaker: 0, start: 0, end: 1, text: "小さな声。")]
         let meeting = MeetingMarkdown.Meeting(startedAt: Date(), duration: 1, utterances: rows, names: SpeakerNames(), audioLevels: track([0.001], samplesPerLevel: 16000))
         let url = try MeetingFiles.reserveMarkdownURL(in: root, startedAt: meeting.startedAt)
-        var archive = MeetingArchive(original: meeting, processed: nil, candidateCount: 0, markdownURL: url)
+        var archive = MeetingArchive(original: meeting, markdownURL: url)
         let result = archive.save()
         #expect(result.succeeded && result.levelsSucceeded && result.utterances == rows)
         let report = try JSONDecoder().decode(AudioLevelReport.self, from: Data(contentsOf: MeetingFiles.levelsURL(for: url)))
@@ -105,7 +105,7 @@ import Testing
         let url = try MeetingFiles.reserveMarkdownURL(in: root, startedAt: meeting.startedAt)
         let levels = MeetingFiles.levelsURL(for: url)
         try Data("既存の記録".utf8).write(to: levels)
-        var archive = MeetingArchive(original: meeting, processed: nil, candidateCount: 0, markdownURL: url)
+        var archive = MeetingArchive(original: meeting, markdownURL: url)
         let result = archive.save()
         #expect(result.succeeded && !result.levelsSucceeded && result.message.contains("音量記録の保存に失敗"))
         #expect(try String(contentsOf: levels, encoding: .utf8) == "既存の記録")
@@ -134,7 +134,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: root) }
         let meeting = MeetingMarkdown.Meeting(startedAt: Date(), duration: 0.1, utterances: [], names: SpeakerNames(), audioLevels: track([0.1]))
         let url = try MeetingFiles.reserveMarkdownURL(in: root, startedAt: meeting.startedAt)
-        var archive = MeetingArchive(original: meeting, processed: nil, candidateCount: 0, markdownURL: url)
+        var archive = MeetingArchive(original: meeting, markdownURL: url)
         let before = try JSONEncoder().encode(archive)
         #expect(archive.save().levelsSucceeded)
         var recovered = try JSONDecoder().decode(MeetingArchive.self, from: before)

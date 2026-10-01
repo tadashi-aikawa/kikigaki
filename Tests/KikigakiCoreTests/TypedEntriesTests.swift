@@ -115,32 +115,28 @@ import Testing
         #expect(TranscriptEntries.merge(voice: [], typed: backwards, timeline: timeline).utterances == backwards)
     }
 
-    @Test func 改名と再分割とarchive復元でも両保存先に手入力を一度だけ残す() throws {
+    @Test func 改名と再分割とarchive復元でも手入力を一度だけ残す() throws {
         let dir = try directory(); defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("meeting.md")
         let entry = try typed(at: 2, posted: 2)
         let rawVoice = [voice("はいはい本文", at: 0), voice("続き", at: 3)]
-        let processedVoice = [voice("本文", at: 0), voice("続き", at: 3)]
         let merged = TranscriptEntries.merge(voice: rawVoice, typed: [entry], timeline: timeline).utterances
-        let processed = TranscriptEntries.merge(voice: processedVoice, typed: [entry], timeline: timeline).utterances
         let meeting = MeetingMarkdown.Meeting(startedAt: start, duration: 4, utterances: merged, names: SpeakerNames())
-        var archive = MeetingArchive(original: meeting, processed: processed, candidateCount: 1, markdownURL: url)
-        #expect(archive.save().utterances == processed)
+        var archive = MeetingArchive(original: meeting, markdownURL: url)
+        #expect(archive.save().utterances == merged)
         archive = try AIJSON.decode(MeetingArchive.self, from: AIJSON.encode(archive))
         archive.original.names.set("佐藤", for: 0)
         let split = [voice("はいはい", at: 0, speaker: 1), voice("本文", at: 1), voice("続き", at: 3)]
-        let result = MeetingResult(speakers: [1, 0, 0], utterances: split, processed: split, candidates: [])
+        let result = MeetingResult(speakers: [1, 0, 0], utterances: split)
         // 複数回の統合訂正でも前回の併合済み結果へ足さない。
         archive.replaceResult(result)
         archive.replaceResult(result)
         #expect(archive.save().utterances.map(\.text) == ["はいはい", "本文", entry.text, "続き"])
-        for file in [url, MeetingFiles.rawURL(for: url)] {
-            let text = try String(contentsOf: file, encoding: .utf8)
-            #expect(text.components(separatedBy: "手入力: ").count == 2)
-            #expect(text.contains("佐藤: 本文") && text.contains("手入力: " + entry.text))
-            #expect(text.range(of: "佐藤: 本文")!.lowerBound < text.range(of: "手入力: ")!.lowerBound)
-            #expect(text.range(of: "手入力: ")!.lowerBound < text.range(of: "佐藤: 続き")!.lowerBound)
-        }
+        let text = try String(contentsOf: url, encoding: .utf8)
+        #expect(text.components(separatedBy: "手入力: ").count == 2)
+        #expect(text.contains("佐藤: 本文") && text.contains("手入力: " + entry.text))
+        #expect(text.range(of: "佐藤: 本文")!.lowerBound < text.range(of: "手入力: ")!.lowerBound)
+        #expect(text.range(of: "手入力: ")!.lowerBound < text.range(of: "佐藤: 続き")!.lowerBound)
     }
 
     @Test func 混在した配列も由来で振り分けて全行と声の未確定位置を保つ() throws {
@@ -152,22 +148,16 @@ import Testing
         #expect(result.pendingSpeakerRows == [0])
     }
 
-    @Test func raw保存失敗と省略なしでも手入力を保つ() throws {
+    @Test func 声がなくても手入力を保つ() throws {
         let dir = try directory(); defer { try? FileManager.default.removeItem(at: dir) }
         let entry = try typed(at: 2)
-        for omit in [true, false] {
-            let url = dir.appendingPathComponent("\(omit).md")
-            let raw = MeetingFiles.rawURL(for: url)
-            if omit { try "別の会議".write(to: raw, atomically: true, encoding: .utf8) }
-            let meeting = MeetingMarkdown.Meeting(startedAt: start, duration: 3, utterances: [entry], names: SpeakerNames())
-            var archive = MeetingArchive(original: meeting, processed: omit ? [entry] : nil, candidateCount: 0, markdownURL: url)
-            archive.replaceResult(.init(speakers: [], utterances: [], processed: omit ? [] : nil, candidates: []))
-            #expect(archive.save().utterances == [entry])
-            let text = try String(contentsOf: url, encoding: .utf8)
-            #expect(text.contains("手入力: ") && !text.contains("- 話者:"))
-            if omit { #expect(try String(contentsOf: raw, encoding: .utf8) == "別の会議") }
-            else { #expect(!FileManager.default.fileExists(atPath: raw.path)) }
-        }
+        let url = dir.appendingPathComponent("meeting.md")
+        let meeting = MeetingMarkdown.Meeting(startedAt: start, duration: 3, utterances: [entry], names: SpeakerNames())
+        var archive = MeetingArchive(original: meeting, markdownURL: url)
+        archive.replaceResult(.init(speakers: [], utterances: []))
+        #expect(archive.save().utterances == [entry])
+        let text = try String(contentsOf: url, encoding: .utf8)
+        #expect(text.contains("手入力: ") && !text.contains("- 話者:"))
     }
 
     @Test func AI文脈へ境界の投稿を含めても声の問いと確定待ちは変わらない() throws {

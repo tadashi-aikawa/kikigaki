@@ -20,56 +20,32 @@ import Testing
         .init(text: "た", phraseId: 501, start: 76.02, end: 76.08),
         .init(text: "。", phraseId: 501, start: 76.08, end: 76.20),
     ]
-    // 相槌の位置だけ別話者。窓判定は別話者に振れる。旧来はフレーズの多数決で吸収される長さだった。
-    // 吸収の廃止後は相槌が別話者の行に残り、繰り返し相槌の省略は候補を見つけない。
-    // 元の期待は `withKnownIssue` に残す。省略機能の扱いは別に判断する
+    // 相槌の位置だけ別話者。吸収をせず、別話者の行に残す。
     private let segments = [
         SpeakerSegment(speaker: 0, start: 70.00, end: 74.80),
         SpeakerSegment(speaker: 1, start: 74.80, end: 75.35),
         SpeakerSegment(speaker: 0, start: 75.35, end: 80.00),
     ]
 
-    @Test func 省略が無効なら発話行だけを返す() {
-        let result = MeetingResult.make(tokens: tokens, segments: segments, dropRepeatedBackchannels: false)
-        withKnownIssue("吸収の廃止で「うんうん」が別話者の行に残る") {
-            #expect(result.speakers == Array(repeating: 0, count: tokens.count))
-            #expect(result.utterances.map(\.text) == ["うんうん先週も言ってました。"])
-        }
-        #expect(result.processed == nil)
-        #expect(result.candidates.isEmpty)
+    @Test func 最終判定でも繰り返しの相槌と本文を全て残す() {
+        let result = MeetingResult.make(tokens: tokens, segments: segments)
+        #expect(result.speakers == Aligner.speakers(for: tokens, segments: segments))
+        #expect(result.utterances.map(\.text).joined() == "うんうん先週も言ってました。")
+        #expect(result.utterances.contains { $0.speaker == 1 })
     }
 
-    @Test func 省略が有効なら候補と省略後の行も返す() {
-        let result = MeetingResult.make(tokens: tokens, segments: segments, dropRepeatedBackchannels: true)
-        // 省略前の行は無効時と同じものを残す(`.raw.md` と、原文が保存できないときの `.md` に使う)
-        #expect(result.utterances == MeetingResult.make(tokens: tokens, segments: segments, dropRepeatedBackchannels: false).utterances)
-        withKnownIssue("吸収の廃止で繰り返し相槌の候補が見つからない") {
-            #expect(result.candidates == [0..<4])
-            #expect(result.utterances.map(\.text) == ["うんうん先週も言ってました。"])
-            #expect(result.processed?.map(\.text) == ["先週も言ってました。"])
-            #expect(result.processed?.first?.start == 75.06)
-        }
+    @Test func 統合と解除で原判定から再計算し全文を保つ() {
+        let merged = MeetingResult.make(tokens: tokens, segments: segments, mapping: .init(overrides: [1: 0]))
+        #expect(merged.speakers == Array(repeating: 0, count: tokens.count))
+        #expect(merged.utterances.map(\.text) == ["うんうん先週も言ってました。"])
+        let restored = MeetingResult.make(tokens: tokens, segments: segments)
+        #expect(restored.utterances.map(\.text).joined() == merged.utterances.map(\.text).joined())
+        #expect(restored.utterances.contains { $0.speaker == 1 })
     }
 
-    @Test func 統合後は同じ人の相槌を消さず解除すると原判定から再計算する() {
-        let mapping = SpeakerMapping(overrides: [1: 0])
-        let merged = MeetingResult.make(tokens: tokens, segments: segments, dropRepeatedBackchannels: true, mapping: mapping)
-        #expect(merged.candidates.isEmpty)
-        #expect(merged.processed?.map(\.text) == ["うんうん先週も言ってました。"])
-        let restored = MeetingResult.make(tokens: tokens, segments: segments, dropRepeatedBackchannels: true)
-        withKnownIssue("吸収の廃止で繰り返し相槌の候補が見つからない") {
-            #expect(restored.candidates == [0..<4])
-        }
-    }
-
-    @Test func 発話がなければどちらも空() {
-        for drop in [false, true] {
-            let result = MeetingResult.make(tokens: [], segments: [], dropRepeatedBackchannels: drop)
-            #expect(result.speakers.isEmpty)
-            #expect(result.utterances.isEmpty)
-            #expect(result.candidates.isEmpty)
-            #expect(result.processed?.isEmpty ?? true)
-        }
+    @Test func 発話がなければ空() {
+        let result = MeetingResult.make(tokens: [], segments: [])
+        #expect(result.speakers.isEmpty && result.utterances.isEmpty)
     }
 }
 
@@ -86,12 +62,7 @@ import Testing
         #expect(off.phraseLines(tokens: tokens, segments: [], speakers: [nil, nil]).isEmpty)
     }
 
-    @Test func 省略候補は環境変数によらず出す() {
-        let lines = Diagnostics(environment: [:]).backchannelLines(tokens: tokens, candidates: [0..<2])
-        #expect(lines == ["[backchannel] 1.00-1.40 うん"])
-    }
-
-    @Test func フレーズ出力は区間と生の判定から多数決後への変化を並べる() {
+    @Test func フレーズ出力は区間と窓判定から補正後への変化を並べる() {
         let on = Diagnostics(environment: ["KIKIGAKI_DEBUG_PHRASES": "1"])
         let segments = [SpeakerSegment(speaker: 1, start: 1.0, end: 1.4)]
         let lines = on.phraseLines(tokens: tokens, segments: segments, speakers: [0, nil])

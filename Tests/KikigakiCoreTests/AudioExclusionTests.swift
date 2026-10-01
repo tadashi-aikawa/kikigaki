@@ -50,7 +50,7 @@ import Testing
             #expect(capture.voiceExcluded)
         }
     }
-    @Test func 相槌省略の原文は小音量除外を適用せず順番を保つ() throws {
+    @Test func 保存は全発話を保持し小音量除外の発話を末尾に残す() throws {
         let (track, rows) = try fixture()
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -58,11 +58,15 @@ import Testing
         var meeting = MeetingMarkdown.Meeting(startedAt: Date(), duration: 2, utterances: rows, names: SpeakerNames(), audioLevels: track)
         meeting.audioExclusion = .init(enabled: true); meeting.showAudioLevels = false
         let url = root.appendingPathComponent("meeting.md")
-        var archive = MeetingArchive(original: meeting, processed: rows, candidateCount: 0, markdownURL: url)
+        var archive = MeetingArchive(original: meeting, markdownURL: url)
         let result = archive.save()
-        #expect(result.succeeded && result.rawSucceeded)
-        let raw = try String(contentsOf: MeetingFiles.rawURL(for: url), encoding: .utf8)
-        #expect(raw.contains("通常の声。") && raw.contains("小さな声。") && !raw.contains("## 小音量で除外した発話"))
+        #expect(result.succeeded && result.utterances == rows)
+        let markdown = try String(contentsOf: url, encoding: .utf8)
+        let sections = markdown.components(separatedBy: "## 小音量で除外した発話")
+        #expect(sections.count == 2)
+        #expect(sections.first?.contains("通常の声。") == true && sections.first?.contains("小さな声。") == false)
+        #expect(sections.last?.contains("小さな声。") == true)
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("meeting.raw.md").path))
         #expect(!FileManager.default.fileExists(atPath: MeetingFiles.levelsURL(for: url).path))
     }
     @Test func 全除外はコピーせず復元は全文で渡す() throws {

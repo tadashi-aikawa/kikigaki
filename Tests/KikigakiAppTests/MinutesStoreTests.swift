@@ -156,7 +156,7 @@ import KikigakiAIIO
         try await record.controller.connect(config: config, label: "test", executable: URL(fileURLWithPath: "/tmp/fake"), arguments: [])
         try await record.controller.send(req, config: config)
         var archive = MeetingArchive(original: .init(startedAt: Date(), duration: 1, utterances: [], names: SpeakerNames()),
-            processed: nil, candidateCount: 0, markdownURL: markdown)
+            markdownURL: markdown)
         #expect(store.save(&archive, for: id).succeeded)
         let files = AIFileStore(root: root), base = [".kikigaki-context", id.uuidString, "ai"]
         let reply = try AIReceiveEvent(request: req, kind: .answered, recordedAt: Date(), body: "済")

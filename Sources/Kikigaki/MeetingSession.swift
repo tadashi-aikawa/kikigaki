@@ -58,7 +58,6 @@ final class MeetingSession {
     private var startedAt = Date()
     /// 停止後に話者名を付け直して保存し直すために持つ
     private var archive: MeetingArchive?
-    private var dropRepeatedBackchannels = false
     private var audioLevelMeter: AudioLevelMeter?
     static let audioExclusionDefaultsKey = "KikigakiAudioExclusion"
     private var audioExclusion = AudioExclusion()
@@ -295,7 +294,6 @@ final class MeetingSession {
         let diarizationEnabled = nextDiarizationEnabled
         resetMeetingAIState(meetingConfig)
         consumedAudioTime = 0
-        dropRepeatedBackchannels = diarizationEnabled && meetingConfig.dropRepeatedBackchannels
         audioLevelMeter = AudioLevelMeter()
         cachedAudioLevels = [:]
         showAudioLevels = meetingConfig.measureAudioLevels
@@ -444,10 +442,8 @@ final class MeetingSession {
 
         diagnostics.liveLines(snapshot.utterances, names: snapshot.names).forEach(log)
         let final = snapshot.names.diarizationEnabled
-            ? MeetingResult.make(tokens: tokens, segments: segments,
-                                 dropRepeatedBackchannels: dropRepeatedBackchannels, mapping: speakerMapping)
+            ? MeetingResult.make(tokens: tokens, segments: segments, mapping: speakerMapping)
             : MeetingResult.withoutDiarization(tokens: tokens)
-        diagnostics.backchannelLines(tokens: tokens, candidates: final.candidates).forEach(log)
         diagnostics.phraseLines(tokens: tokens, segments: segments, speakers: final.speakers).forEach(log)
 
         let duration = Double(result.fedSamples) / 16000
@@ -457,15 +453,13 @@ final class MeetingSession {
         trialDump = nil
         snapshot.timeline = pause.timeline
         let merged = TranscriptEntries.merge(voice: final.utterances, typed: typedEntries, timeline: snapshot.timeline).utterances
-        let processed = final.processed.map { TranscriptEntries.merge(voice: $0, typed: typedEntries, timeline: snapshot.timeline).utterances }
         var meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: duration, utterances: merged,
                                               names: snapshot.names, pauses: snapshot.timeline.pauses,
                                               audioLevels: audioLevelMeter?.track(includingPartial: true))
         meeting.audioExclusion = audioExclusion
         meeting.showAudioLevels = showAudioLevels
         if let url = snapshot.markdownURL {
-            archive = MeetingArchive(original: meeting, processed: processed,
-                                     candidateCount: final.candidates.count, markdownURL: url)
+            archive = MeetingArchive(original: meeting, markdownURL: url)
         }
 
         snapshot.state = .idle
@@ -582,8 +576,7 @@ final class MeetingSession {
         speakerMapping.overrides[source] = target
         refreshSpeakerMapping()
         if archive != nil {
-            let result = MeetingResult.make(tokens: finalTokens, segments: speakerSegments,
-                dropRepeatedBackchannels: dropRepeatedBackchannels, mapping: speakerMapping)
+            let result = MeetingResult.make(tokens: finalTokens, segments: speakerSegments, mapping: speakerMapping)
             archive?.replaceResult(result)
             save()
         } else {

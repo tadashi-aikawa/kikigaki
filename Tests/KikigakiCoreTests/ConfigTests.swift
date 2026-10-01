@@ -64,7 +64,6 @@ import Testing
         let resolved = ResolvedConfig(config: config, home: home)
         #expect(resolved.outputDir.path == "/Users/test/Documents/KIKIGAKI")
         #expect(resolved.saveRecording == false)
-        #expect(resolved.dropRepeatedBackchannels == false)
         #expect(resolved.measureAudioLevels == false)
     }
 
@@ -72,13 +71,11 @@ import Testing
         let toml = """
             outputDir = "~/work/minerva/Notes/meetings"
             saveRecording = true
-            dropRepeatedBackchannels = true
             measureAudioLevels = true
             """
         let resolved = ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: home)
         #expect(resolved.outputDir.path == "/Users/test/work/minerva/Notes/meetings")
         #expect(resolved.saveRecording == true)
-        #expect(resolved.dropRepeatedBackchannels == true)
         #expect(resolved.measureAudioLevels == true)
     }
 
@@ -116,8 +113,11 @@ import Testing
         #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "outputDir = ") }
     }
 
-    @Test func 相槌省略は真偽値だけを受け付ける() {
-        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "dropRepeatedBackchannels = \"true\"") }
+    @Test(arguments: ["true", "false", "\"true\"", "42", "1.5", "[]", "{ enabled = true }"])
+    func 廃止した相槌省略キーは値の型に関係なく読み飛ばす(_ value: String) throws {
+        let config = try ConfigLoader.parse(toml: "dropRepeatedBackchannels = \(value)\nsaveRecording = true")
+        #expect(config == KikigakiConfig(saveRecording: true))
+        #expect(ResolvedConfig(config: config, home: home).saveRecording)
     }
 
     @Test func ファイルがなければ既定設定() throws {

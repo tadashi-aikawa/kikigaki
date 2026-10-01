@@ -258,7 +258,7 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         #expect(rendered.contains("話者Aの案"))
     }
 
-    @Test func 通常とrawに同じAI節を出して改名後も維持() throws {
+    @Test func MarkdownにAI節を出して改名後も維持() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("kikigaki-ai-markdown-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -270,15 +270,14 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         let original = MeetingMarkdown.Meeting(startedAt: epoch, duration: 2,
             utterances: [.init(speaker: 0, start: 0, end: 2, text: "うんうん")], names: .init(), ai: c)
         let file = root.appendingPathComponent("meeting.md")
-        var archive = MeetingArchive(original: original, processed: [.init(speaker: 0, start: 0, end: 2, text: "うん")], candidateCount: 1, markdownURL: file)
+        var archive = MeetingArchive(original: original, markdownURL: file)
         #expect(archive.save().succeeded)
         archive.original.names = SpeakerNames([0: "改名"])
         #expect(archive.save().succeeded)
         let normal = try String(contentsOf: file, encoding: .utf8)
-        let raw = try String(contentsOf: MeetingFiles.rawURL(for: file), encoding: .utf8)
-        #expect(normal.components(separatedBy: "## AIとのやりとり").last == raw.components(separatedBy: "## AIとのやりとり").last)
-        #expect(normal.contains("話者Aへの回答") && raw.contains("話者Aへの回答"))
-        #expect(normal.contains("改名: うん") && raw.contains("改名: うんうん"))
+        #expect(normal.contains("## AIとのやりとり") && normal.contains("話者Aへの回答"))
+        #expect(normal.contains("改名: うんうん"))
+        #expect(!FileManager.default.fileExists(atPath: file.deletingPathExtension().appendingPathExtension("raw.md").path))
     }
 }
 

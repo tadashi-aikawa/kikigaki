@@ -432,7 +432,6 @@ public enum SpeakerTrial {
             lines.append("- 録音中の記録: \(pace)。記録時の設定は `\(meta.preset)` / `\(meta.freeze)` / 島 `\(meta.islands ?? "なし")`")
         }
         lines.append("- 本番の話者の割当とフレーズ固定を、記録したトークン・時刻・話者区間へ当てた")
-        lines.append("    - 繰り返し相槌の省略は無効。保存の `.md` と違う場合がある")
         lines.append("    - 手動の話者統合・小音量の除外・速報と高精度の合流は対象外")
         lines.append("- 別のビルドとの差は `transcript.md` の `diff` で見る。差は正誤ではない。正解があるのは「正解区間」だけ")
         if !names.isEmpty {

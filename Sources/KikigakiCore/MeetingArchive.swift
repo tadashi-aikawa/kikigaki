@@ -1,20 +1,16 @@
 import Foundation
 
-/// 省略前の本文は不変に保持し、改名時も原文から両方のMarkdownを生成する。
+/// 会議の本文と設定を保持し、改名・再判定・AIの更新でMarkdownを生成し直す。
 public struct MeetingArchive: Codable {
+    /// 旧archiveとの保存形式の互換のためoriginalというキーを維持する。
+    /// 旧processedは読み飛ばし、相槌を省略する前の発話列を使う。
     public var original: MeetingMarkdown.Meeting
     public let markdownURL: URL
-    private var processed: [Utterance]?
-    private var candidateCount: Int
-    private var ownsRawFile = false
     /// optionalで旧archiveの欠損を読む。
     private var ownsLevelsFile: Bool?
-    private var omissionDisabledAfterFailure = false
 
-    public init(original: MeetingMarkdown.Meeting, processed: [Utterance]?, candidateCount: Int, markdownURL: URL) {
+    public init(original: MeetingMarkdown.Meeting, markdownURL: URL) {
         self.original = original
-        self.processed = processed
-        self.candidateCount = candidateCount
         self.markdownURL = markdownURL
     }
 
@@ -22,26 +18,20 @@ public struct MeetingArchive: Codable {
         public var utterances: [Utterance]
         public var message: String
         public var succeeded: Bool
-        public var rawSucceeded: Bool = true
         public var levelsSucceeded: Bool = true
-        public init(utterances: [Utterance], message: String, succeeded: Bool, rawSucceeded: Bool = true, levelsSucceeded: Bool = true) {
-            self.utterances = utterances; self.message = message; self.succeeded = succeeded; self.rawSucceeded = rawSucceeded
+        public init(utterances: [Utterance], message: String, succeeded: Bool, levelsSucceeded: Bool = true) {
+            self.utterances = utterances; self.message = message; self.succeeded = succeeded
             self.levelsSucceeded = levelsSucceeded
         }
     }
 
-    /// 統合訂正は原トークンから再計算した結果を入れる。raw所有権と省略失敗状態は維持する。
+    /// 統合訂正は原トークンから再計算した結果を入れる。手入力は保持する。
     public mutating func replaceResult(_ result: MeetingResult) {
         let typed = original.utterances.filter { $0.kind == .typed }
         original.utterances = TranscriptEntries.merge(voice: result.utterances, typed: typed, timeline: original.timeline).utterances
-        processed = result.processed.map { TranscriptEntries.merge(voice: $0, typed: typed, timeline: original.timeline).utterances }
-        candidateCount = result.candidates.count
     }
 
     public mutating func save() -> SaveResult {
-        var displayed = original
-        var warning: String?
-        var rawSucceeded = true
         var levelsSucceeded = true
         var levelsWarning: String?
         if original.displaysAudioLevels, let track = original.audioLevels {
@@ -73,40 +63,15 @@ public struct MeetingArchive: Codable {
                 levelsWarning = "音量記録の保存に失敗: \(error.localizedDescription)"
             }
         }
-        if let processed {
-            let rawURL = MeetingFiles.rawURL(for: markdownURL)
-            do {
-                if !ownsRawFile {
-                    try Data().write(to: rawURL, options: .withoutOverwriting)
-                    ownsRawFile = true
-                }
-                var raw = original
-                raw.audioExclusion?.enabled = false
-                try MeetingMarkdown.render(raw).write(to: rawURL, atomically: true, encoding: .utf8)
-                if !omissionDisabledAfterFailure { displayed.utterances = processed }
-            } catch {
-                // 原文が保存できないときに文字を省かない。この会議では改名後も原文表示を続ける。
-                omissionDisabledAfterFailure = true
-                rawSucceeded = false
-                warning = "原文ファイルの保存に失敗。相槌の省略を中止: \(error.localizedDescription)"
-            }
-        }
         do {
-            try MeetingMarkdown.render(displayed).write(to: markdownURL, atomically: true, encoding: .utf8)
+            try MeetingMarkdown.render(original).write(to: markdownURL, atomically: true, encoding: .utf8)
             var message = "保存: \(markdownURL.path)"
-            if processed != nil, candidateCount > 0, !omissionDisabledAfterFailure {
-                message += " / 相槌候補\(candidateCount)件を省略(原文は .raw.md)"
-            }
-            if omissionDisabledAfterFailure, warning == nil { warning = "原文を保持。相槌の省略は適用していない" }
-            if let warning { message = warning + " / " + message }
             if let levelsWarning { message = levelsWarning + " / " + message }
-            return SaveResult(utterances: displayed.utterances, message: message, succeeded: true, rawSucceeded: rawSucceeded, levelsSucceeded: levelsSucceeded)
+            return SaveResult(utterances: original.utterances, message: message, succeeded: true, levelsSucceeded: levelsSucceeded)
         } catch {
             var message = "保存に失敗: \(error.localizedDescription)"
-            if let warning { message += " / " + warning }
             if let levelsWarning { message += " / " + levelsWarning }
-            if processed != nil, warning == nil { message += " / 原文: \(MeetingFiles.rawURL(for: markdownURL).path)" }
-            return SaveResult(utterances: displayed.utterances, message: message, succeeded: false, rawSucceeded: rawSucceeded, levelsSucceeded: levelsSucceeded)
+            return SaveResult(utterances: original.utterances, message: message, succeeded: false, levelsSucceeded: levelsSucceeded)
         }
     }
 }

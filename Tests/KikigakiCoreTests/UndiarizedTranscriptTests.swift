@@ -38,12 +38,11 @@ import Testing
         #expect(UndiarizedTranscript.utterances(tokens: []).isEmpty)
     }
 
-    @Test func 画面と停止後とAIの会話が同じ行になり相槌省略を走らせない() throws {
+    @Test func 画面と停止後とAIの会話が同じ行になる() throws {
         let fixed = Array(tokens.prefix(4))
         let live = LiveTranscript(tokens: fixed, speakers: [], finalCount: fixed.count, diarizationEnabled: false)
         let final = MeetingResult.withoutDiarization(tokens: fixed)
         #expect(live.utterances == final.utterances)
-        #expect(final.processed == nil && final.candidates.isEmpty)
         let timeline = MeetingTimeline(startedAt: Date(timeIntervalSince1970: 0))
         let capture = try AICapture(tokens: tokens, speakers: Array(repeating: nil, count: tokens.count),
             finalCount: fixed.count, processedUntil: 5, cutoff: 4, names: names, timeline: timeline)
@@ -63,8 +62,7 @@ import Testing
         let meeting = MeetingMarkdown.Meeting(startedAt: Date(), duration: 4,
             utterances: MeetingResult.withoutDiarization(tokens: Array(tokens.prefix(4))).utterances,
             names: restored)
-        let archive = MeetingArchive(original: meeting, processed: nil, candidateCount: 0,
-            markdownURL: URL(fileURLWithPath: "/tmp/unused.md"))
+        let archive = MeetingArchive(original: meeting, markdownURL: URL(fileURLWithPath: "/tmp/unused.md"))
         let decoded = try JSONDecoder().decode(MeetingArchive.self, from: JSONEncoder().encode(archive))
         let markdown = MeetingMarkdown.render(decoded.original)
         #expect(markdown.contains("発言: 読みます。"))

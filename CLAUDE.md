@@ -17,7 +17,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
   - `SpeakerFreeze.swift`: 判定に読む入力が全て確定したフレーズを丸ごと凍結する。高精度側で未確定のトークンは凍結しない
   - `SpeakerIslands.swift`: 話し手の声が重なった短い別話者の島を両隣の話者へ戻す。判定は毎回補正前のラベルで行う
   - `SpeakerRuns.swift`: 話者判別の10ms確率を届いた分から話者区間へ畳む。確率の履歴は持たず、食い違った出力は取り込まない
-  - `RepeatedBackchannels.swift` / `MeetingArchive.swift`: 停止時の繰り返し相槌の省略と、省略前後の保存。原文が保存できないときは省略しない
+  - `MeetingArchive.swift`: 会議の本文と設定の保存。改名・再判定・AIの更新でMarkdownを生成し直す
   - `SpeakerNames.swift` / `TranscriptRenderer.swift` / `MeetingMarkdown.swift` / `MeetingFiles.swift`: 話者名の枡・行の整形・Markdown 生成・ファイル命名
   - `Config.swift` / `AIConfig.swift`: 設定ファイルのパースと既定値。キーの一覧は [設定リファレンス](docs/config.md)
   - `RecordingState.swift`: 録音状態とメニュー表題
@@ -96,7 +96,6 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 | [話者判別の切替](docs/diarization-toggle.md) | 話者判別のオン・オフ、無効時の行分割 | 話者判別の有効・無効の経路を変える前 |
 | [システム音声の取り込み](docs/system-audio.md) | 開始シートの3択、出力判定、同時取り込みと混合、失敗時の扱い | 音源・混合・システム音声の許可を変える前 |
 | [話者の手動統合](docs/speaker-mapping.md) | 統合先の指定と解除、使用枠 | 統合・枠の数え方を変える前 |
-| [繰り返し相槌の省略](docs/repeated-backchannels.md) | 停止時の省略の条件、`.raw.md` の保存 | `RepeatedBackchannels` ・省略前後の保存を変える前 |
 | [小音量発話の除外](docs/audio-exclusion.md) | 除外の判定、操作、保存・コピー・AI送信への適用 | 除外の判定や適用先を変える前 |
 | [小音量発話の計測](docs/audio-levels.md) | 音量トラックと診断表示、`.levels.json` | 音量の計測・保存を変える前 |
 | [手入力の設計](docs/typed-entry.md) | 手入力の投稿、画像添付、併合、AI文脈 | 手入力・`TranscriptEntries.merge` を変える前 |
@@ -118,6 +117,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 
 `docs/records/` は試験・検証の記録。現行の仕様ではない。仕様を確かめるときは上の表の文書を読み、経緯を調べるときだけ開く。
 
+- [繰り返し相槌の省略の旧仕様](docs/records/repeated-backchannels.md)
 - [議事としての話者判定と発話分割の改善計画](docs/records/minutes-quality-plan.md)
 - [短い返答の話者を残す条件](docs/records/short-speaker-turns.md)
 - [話者交代の語頭・語尾補正の測定記録](docs/records/speaker-boundaries.md)
@@ -176,7 +176,7 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 
 - プロトと同じ音声で保存結果が一致することは移植の検証です。精度や録音中の表示の安定性は別に確認します
 - `KIKIGAKI_DEBUG_LIVE` が出すのは停止直前の1回分です。録音中の全時点の検証には、途中の表示と、その時点の確定・暫定トークンを確認する必要があります
-- `KIKIGAKI_DEBUG_PHRASES` の変更前の話者も、前後0.5秒の窓で集計した推定値です。実際の発話者の正解ラベルではありません。相槌の除去を評価するときは、原音と突き合わせ、本文の誤削除も確認します
+- `KIKIGAKI_DEBUG_PHRASES` の変更前の話者も、前後0.5秒の窓で集計した推定値です。実際の発話者の正解ラベルではありません。話者の割当を評価するときは、原音と突き合わせます
 - 修正前後を比べるときは、入力音声を揃え、出力先をそれぞれ別の検証用ディレクトリにします。ビルドの終了コードが成功であることを確認してから実行します
 
 ## リリース方法

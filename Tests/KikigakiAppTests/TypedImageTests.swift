@@ -117,10 +117,10 @@ import KikigakiCore
         let markdown = try String(contentsOf: markdownURL, encoding: .utf8)
         #expect(markdown.contains("![画像1](<\(URL(fileURLWithPath: path).absoluteString)>)"))
         let meeting = MeetingMarkdown.Meeting(startedAt: Date(), duration: 0, utterances: [entry], names: .init())
-        var archive = MeetingArchive(original: meeting, processed: [entry], candidateCount: 0, markdownURL: markdownURL)
+        var archive = MeetingArchive(original: meeting, markdownURL: markdownURL)
         archive = try JSONDecoder().decode(MeetingArchive.self, from: JSONEncoder().encode(archive))
         #expect(archive.save().succeeded)
-        #expect(try String(contentsOf: MeetingFiles.rawURL(for: markdownURL), encoding: .utf8).contains("![画像1]"))
+        #expect(!FileManager.default.fileExists(atPath: markdownURL.deletingPathExtension().appendingPathExtension("raw.md").path))
         #expect(archive.original.utterances.first?.imagePaths == [path])
     }
 

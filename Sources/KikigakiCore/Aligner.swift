@@ -15,17 +15,13 @@ public enum Aligner {
     /// 時刻 t の話者を決める。t の前後 `halfWindow` 秒の窓と各話者区間の重なり長を話者ごとに合計し、
     /// 最大の話者を採る(窓なしの点判定だと 0.3 秒程度の細切れ区間に引きずられて話者が飛び飛びになる)。
     /// 重なりが無ければ nil
-    public static func speaker(at t: Double, segments: [SpeakerSegment], halfWindow: Double = windowHalfSeconds, tiesAreUnknown: Bool = false) -> Int? {
+    public static func speaker(at t: Double, segments: [SpeakerSegment], halfWindow: Double = windowHalfSeconds) -> Int? {
         var overlap: [Int: Double] = [:]
         let lo = t - halfWindow, hi = t + halfWindow
         for s in segments {
             let o = min(hi, s.end) - max(lo, s.start)
             guard o > 0 else { continue }
             overlap[s.speaker, default: 0] += o
-        }
-        // 表示の同点は従来の番号順。文字を省く判断では、同点を根拠に別話者と断定しない。
-        if tiesAreUnknown, let best = overlap.values.max(), overlap.values.filter({ abs($0 - best) < 1e-9 }).count > 1 {
-            return nil
         }
         return argmax(overlap)
     }
@@ -145,7 +141,7 @@ public enum Aligner {
 
     /// エンジンの結果境界(phraseId の変化)をフレーズの切れ目として数える最小の無音(秒)。
     /// Apple の確定結果の境界は語の途中にも落ちる(「読 / みやすい」「わ / かりました」)。無音を
-    /// ほぼ挟まない境界は発話の区切りではないので、フレーズを切らずに多数決へ含める。
+    /// ほぼ挟まない境界は発話の区切りではないので、語内補正の対象フレーズを切らない。
     /// プロトでは「0.4秒未満の1トークンだけ次へ寄せる」救済だったが、1文字が0.4秒を超える
     /// 喋り方で救済から漏れて1文字の行が残った(タダシの実録で確認)
     public static let resultBoundaryGapSeconds = 0.2

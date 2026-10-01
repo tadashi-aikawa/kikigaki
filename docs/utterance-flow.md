@@ -9,7 +9,6 @@
 - 行の半透明表示と確定の表示: [発話の確定表示](utterance-progress.md)
 - 話者判別オフの経路と行分割: [話者判別の切替](diarization-toggle.md)
 - 話者判別エンジン: [Nemotron fast128 への話者判別の切替](nemotron-integration.md)
-- 繰り返し相槌の省略: [繰り返し相槌](repeated-backchannels.md)
 - 小音量の除外: [小音量発話の除外](audio-exclusion.md)
 
 ## 全体図
@@ -44,12 +43,11 @@ flowchart TD
     asrEnd --> speakerEnd["オン：SpeakerDiarizer.finish／オフ：通過"]
     speakerEnd --> finalMode{"話者判別"}
     finalMode -->|オン| realign["MeetingResult.make：凍結なしでAligner.speakersを全体へ適用"]
-    finalMode -->|オフ| noDiarization["MeetingResult.withoutDiarization：話者判定・相槌省略なし"]
-    realign --> omit["RepeatedBackchannels：設定オン時だけ省略候補と省略後の行を作る"]
-    omit --> finalEntries["TranscriptEntries.merge：原文・省略後それぞれに手入力を併合"]
+    finalMode -->|オフ| noDiarization["MeetingResult.withoutDiarization：話者判定なし"]
+    realign --> finalEntries["TranscriptEntries.merge：最終判定の発話に手入力を併合"]
     noDiarization --> finalEntries
-    finalEntries --> archive["MeetingArchive.save：原文保護後にMarkdown保存"]
-    archive --> md["通常の .md／省略有効時は .raw.md も保存"]
+    finalEntries --> archive["MeetingArchive.save：Markdown保存"]
+    archive --> md["通常の .md を保存"]
     archive -->|SaveResult.utterancesで停止後の行を更新| ui
 
     classDef common fill:#f1f3f5,stroke:#65717c,color:#20262c
@@ -57,7 +55,7 @@ flowchart TD
     classDef stopping fill:#fff0dc,stroke:#b77924,color:#603b12
     class audio,accept,consume,wav,ui common
     class fast,accurate,diarizer,merge,segments,align,freeze,live,off,entries recording
-    class stop,drain,asrEnd,speakerEnd,finalMode,realign,noDiarization,omit,finalEntries,archive,md stopping
+    class stop,drain,asrEnd,speakerEnd,finalMode,realign,noDiarization,finalEntries,archive,md stopping
 ```
 
 話者エンジンの出力は `TranscriptMerge` へ入らず、合成された文字と `Aligner` で合流する。速報の準備に失敗した会議では `CombinedStore.snapshot` が高精度の確定・暫定をそのまま返し、`TranscriptMerge.combine` を通らない。
@@ -105,14 +103,14 @@ stateDiagram-v2
     state "停止処理：入力を排出・高精度最終化" as Finishing
     state "停止時の話者再判定・行生成" as Rejudge
     state "停止時の話者なし行生成" as FinalOff
-    state "原文保護・保存" as Saving
+    state "Markdown保存" as Saving
     state "最終表示・保存済み" as Saved
     state "保存失敗：画面にエラー" as SaveFailed
     Recording --> Finishing : stop呼出、文字・話者のどの段からも移行
     Finishing --> Rejudge : オン、話者finish後に凍結なしで全体を突き合わせ
     Finishing --> FinalOff : オフ、高精度結果だけで行生成
-    Rejudge --> Saving : 設定オン時に相槌省略候補を作成、手入力を併合
-    FinalOff --> Saving : 手入力を併合、相槌省略なし
+    Rejudge --> Saving : 手入力を併合
+    FinalOff --> Saving : 手入力を併合
     Saving --> Saved : 通常Markdownの保存成功
     Saving --> SaveFailed : 通常Markdownの保存失敗
     Saved --> [*]
@@ -144,7 +142,6 @@ stateDiagram-v2
 | 画面の更新 | `MeetingSession.publishLive` / `refreshLive`、`TranscriptWindow.updateRows`、`TranscriptRow.update` / `updateTentative`、`TranscriptDocument.setRows` / `reflow` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[TranscriptWindow.swift](../Sources/Kikigaki/TranscriptWindow.swift)、[TranscriptRow.swift](../Sources/Kikigaki/TranscriptRow.swift)、[TranscriptDocument.swift](../Sources/Kikigaki/TranscriptDocument.swift)。状態はSessionから渡し、Documentは行を配置 |
 | 停止・エンジン最終化 | `MeetingSession.stop`、`AppleTranscriber.finish` / `tokens`、`SpeakerDiarizer.finish` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[AppleTranscriber.swift](../Sources/Kikigaki/AppleTranscriber.swift)、[SpeakerDiarizer.swift](../Sources/Kikigaki/SpeakerDiarizer.swift)。消費完了後に高精度、話者の順で最終化 |
 | 全体再判定・最終行 | `MeetingResult.make` / `withoutDiarization` | [MeetingResult.swift](../Sources/KikigakiCore/MeetingResult.swift)。オンは凍結なしでAlignerを呼び、統合設定を反映。オフは話者なし行を生成 |
-| 繰り返し相槌の省略 | `RepeatedBackchannels.candidates` / `utterances` | [RepeatedBackchannels.swift](../Sources/KikigakiCore/RepeatedBackchannels.swift)。有効時だけ候補を省いた行を別に作る |
-| 原文保護・Markdown保存 | `MeetingSession.save`、`MeetingArchive.save`、`MeetingMarkdown.render` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[MeetingArchive.swift](../Sources/KikigakiCore/MeetingArchive.swift)、[MeetingMarkdown.swift](../Sources/KikigakiCore/MeetingMarkdown.swift)。保存結果の行を停止後の画面へ返す |
+| Markdown保存 | `MeetingSession.save`、`MeetingArchive.save`、`MeetingMarkdown.render` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[MeetingArchive.swift](../Sources/KikigakiCore/MeetingArchive.swift)、[MeetingMarkdown.swift](../Sources/KikigakiCore/MeetingMarkdown.swift)。保存結果の行を停止後の画面へ返す |
 
-突き合わせ内部の順序は、凍結済みprefixの維持 → `SpeechTail` による窓判定と長い語頭の補正 → 語内の文字数の過半数への統一と、過半数が無い語の長い語頭の付け替え → 被りの島の補正 → 句読点を直前の話者へ付与、となる。トークンの本文を省く処理は停止時の `RepeatedBackchannels` に分かれている。
+突き合わせ内部の順序は、凍結済みprefixの維持 → `SpeechTail` による窓判定と長い語頭の補正 → 語内の文字数の過半数への統一と、過半数が無い語の長い語頭の付け替え → 被りの島の補正 → 句読点を直前の話者へ付与、となる。

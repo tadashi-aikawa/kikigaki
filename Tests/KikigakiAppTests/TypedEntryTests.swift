@@ -226,7 +226,7 @@ import KikigakiCore
         state.state = .idle; refresh()
         let meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: 120, utterances: state.utterances,
             names: state.names, pauses: state.timeline.pauses)
-        var archive = MeetingArchive(original: meeting, processed: state.utterances, candidateCount: 0, markdownURL: url)
+        var archive = MeetingArchive(original: meeting, markdownURL: url)
         let result = archive.save()
         #expect(result.message.hasPrefix("保存:"))
         state.utterances = result.utterances; state.saved = result.succeeded; state.message = result.message
@@ -234,11 +234,9 @@ import KikigakiCore
         #expect(state.saved && !controller.typedEntry.editor.isEditable)
         #expect(state.utterances.filter { $0.kind == .typed } == entries)
         try capture("saved")
-        for file in [url, MeetingFiles.rawURL(for: url)] {
-            let text = try String(contentsOf: file, encoding: .utf8)
-            #expect(text.contains("手入力: https://example.com/workshop") && text.contains("手入力: 会場案内:"))
-            if let output { try text.write(to: output.appendingPathComponent(file.lastPathComponent), atomically: true, encoding: .utf8) }
-        }
+        let text = try String(contentsOf: url, encoding: .utf8)
+        #expect(text.contains("手入力: https://example.com/workshop") && text.contains("手入力: 会場案内:"))
+        if let output { try text.write(to: output.appendingPathComponent(url.lastPathComponent), atomically: true, encoding: .utf8) }
         // 狭い高さ・長いURLでも折り返し、会話本文の幅を押し広げない。
         state.state = .recording; controller.apply(state)
         controller.typedEntry.editor.string = ""
