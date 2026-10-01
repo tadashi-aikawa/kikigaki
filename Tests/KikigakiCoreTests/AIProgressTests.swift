@@ -123,7 +123,7 @@ import KikigakiCore
         #expect(answered.arrival()?.observedStages == Set(AIProgress.Stage.allCases))
     }
 
-    @Test func 送信前の返答の申告は成立せず過去会議は保存済みの申告だけで静止する() throws {
+    @Test func 送信前の返答の申告は成立せず読み取り専用snapshotは保存済みの申告だけで静止する() throws {
         let prepared = try question()
         #expect(progress(prepared, report: .replying).observedStages.isEmpty)
         let value = try question(.accepted)
@@ -293,7 +293,7 @@ import KikigakiCore
         #expect(fresh.status == .unknown && fresh.currentStage == .reading)
     }
 
-    @Test(arguments: connections) func 過去会議は保存状態と受信箱だけを静止表示する(_ connection: AIConnectionStatus) throws {
+    @Test(arguments: connections) func 読み取り専用snapshotは保存状態と受信箱だけを静止表示する(_ connection: AIConnectionStatus) throws {
         let value = try question(.accepted)
         let live = progress(value, .working, report: .editing(total: 4))
         let historical = AIProgress(question: value, connection: connection, connectionGeneration: 1,
@@ -303,7 +303,7 @@ import KikigakiCore
         #expect(historical.showsReplyProgress && !historical.isUnknown)
         #expect(historical.text(at: sent.addingTimeInterval(9999)) == "読込済み · 作業中")
         #expect(!historical.updatesElapsedTime(isDisplayed: true, reduceMotion: false))
-        // 受信箱に残る自己申告は、過去会議でも同じ位置と総数で再現する。
+        // 受信箱に残る自己申告は、読み取り専用snapshotでも同じ位置と総数で再現する。
         let replayed = AIProgress(question: value, connection: connection, connectionGeneration: 1,
                                   report: .editing(total: 4), isHistorical: true)
         #expect(replayed.currentStage == .editing && replayed.message == "編集中(全4か所)")
@@ -323,7 +323,7 @@ import KikigakiCore
         var answered = try question(.answered)
         #expect(try #require(progress(answered).arrival()).message == "返答到着")
         try receive(.accept, into: &answered)
-        // 過去会議の読込では点灯しない。静止のまま本文を出す。
+        // 読み取り専用snapshotでは点灯しない。静止のまま本文を出す。
         let historical = AIProgress(question: answered, connection: .unknown, connectionGeneration: nil, isHistorical: true)
         #expect(historical.arrival() == nil)
         let failed = try question(.failed)
@@ -367,7 +367,7 @@ import KikigakiCore
         #expect(try encoder.encode(value) == before)
     }
 
-    @Test func 過去会議の前回値はライブの観測履歴へ混ぜない() throws {
+    @Test func 読み取り専用snapshotの前回値はライブの観測履歴へ混ぜない() throws {
         var value = try question(.submitted)
         let submitted = value
         try receive(.answered, into: &value)

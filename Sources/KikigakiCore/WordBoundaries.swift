@@ -41,7 +41,7 @@ struct WordBoundaries {
             return start < end ? start..<end : nil
         }
         // NLTokenizerは「なり / ます」を分ける。語尾だけが別話者に見えても、
-        // 直前の語と連続する丁寧語尾は一つの語として文字多数決へ渡す。
+        // 直前の語と連続する丁寧語尾は一つの語として語内補正の文字数の集計へ渡す。
         // 空白・句読点を越えて接続しない。
         var connected: [Range<Int>] = []
         let tokenEndOffsets = Set(tokens.indices.map {

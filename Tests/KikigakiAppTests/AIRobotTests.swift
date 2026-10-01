@@ -85,7 +85,7 @@ import KikigakiCore
         footer.update(state, reduceMotion: false, now: now)
         #expect(footer.robot.displayText == "実行中" && footer.timerRunning && footer.robot.eyeOffset == -1.5)
         #expect(footer.robot.isRunning && footer.robot.eyeColor == .white)
-        #expect(footer.robot.statusFont == footer.unread.labelFont)
+        #expect(footer.robot.statusFont == footer.confirmation.labelFont)
         #expect(footer.robot.statusFont.pointSize == 9)
         let countdownWidths = ["1:11", "2:30", "8:88"].map {
             ($0 as NSString).size(withAttributes: [.font: footer.robot.statusFont]).width
@@ -152,13 +152,13 @@ import KikigakiCore
         }
     }
 
-    @Test func ロボットの顔と未読の丸の中心を同じ高さにする() {
+    @Test func ロボットの顔と要返答の丸の中心を同じ高さにする() {
         _ = NSApplication.shared
         let footer = AICompactFooter(visibility: { false })
         footer.robot.frame = NSRect(x: 16, y: 6, width: 36, height: 40)
-        footer.unread.frame = NSRect(x: 68, y: 6, width: 36, height: 40)
+        footer.confirmation.frame = NSRect(x: 68, y: 6, width: 36, height: 40)
         let face = footer.robot.convert(footer.robot.headFrame, to: footer)
-        let badge = footer.unread.convert(footer.unread.badgeFrame, to: footer)
+        let badge = footer.confirmation.convert(footer.confirmation.badgeFrame, to: footer)
         #expect(face.midY == badge.midY)
         #expect(footer.robot.headFrame.maxY + 7 <= footer.robot.bounds.height)
         #expect(AIFooterMetrics.labelY == 2)

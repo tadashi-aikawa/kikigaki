@@ -460,7 +460,7 @@ final class AIConversationController {
                 do {
                     let bytes = try files.read(base + ["inbox", name], limit: AILimits.eventBytes)
                     let event = try AIInbox.decodeProgress(bytes, filename: name, for: q.request)
-                    // 結果到着より後の申告は無視する。過去会議でも同じ順序で再現できる。
+                    // 結果到着より後の申告は無視する。読み取り専用snapshotでも同じ順序で再現できる。
                     if let result = q.result, event.recordedAt > result.recordedAt { continue }
                     switch event.phase {
                     case .editing: isEditing = true; total = event.total

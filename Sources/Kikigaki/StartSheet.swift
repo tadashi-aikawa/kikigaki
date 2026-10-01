@@ -105,7 +105,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         radios.orientation = .horizontal; radios.spacing = 20
         add(row("話者判別", radios), to: rows)
 
-        // 小音量除外はON/OFFだけ。しきい値は音を聞いて決めるものなので、録音中の「話者…」に残す。
+        // 小音量除外はON/OFFだけ。しきい値は音を聞いて決めるものなので、録音中の「話者」ポップアップに残す。
         add(separator(), to: rows)
         exclusionSwitch.controlSize = .small
         exclusionSwitch.state = exclusion.enabled ? .on : .off

@@ -47,7 +47,7 @@ import KikigakiAIIO
             let content = window.window!.contentView!
             content.layoutSubtreeIfNeeded()
             #expect(window.compactFooter.frame.height <= 54)
-            #expect(window.compactFooter.unread.isHidden && window.compactFooter.confirmation.count == 1)
+            #expect(window.compactFooter.confirmation.count == 1)
             #expect(window.compactFooter.robot.displayText == "1:42")
             try capture("footer-recording-\(width)", view: content.superview!)
             state.state = .idle; state.saved = true; state.aiSchedule = AIScheduleViewState()
@@ -248,7 +248,7 @@ import KikigakiAIIO
         func replies() -> [AIReplyRow] { window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow } }
         apply()
         #expect(state.ai?.badges == "要返答 1 · 返事待ち 1 · 失敗 1")
-        #expect(window.compactFooter.unread.isHidden && window.compactFooter.confirmation.count == 1)
+        #expect(window.compactFooter.confirmation.count == 1)
         #expect(!window.compactFooter.warning.isHidden)
         // 手入力欄と添付画像の横スクロールを除き、AI本文が独立スクロールを作らないことを確認する。
         #expect(descendants(window.minutesSplit.left).compactMap { $0 as? NSScrollView }.filter {
@@ -374,10 +374,8 @@ import KikigakiAIIO
         state.ai?.conversation = conversation
         window.apply(state); content.layoutSubtreeIfNeeded()
         window.scrollView.contentView.scroll(to: .zero)
-        let unread = window.compactFooter.unread
-        unread.performClick(nil)
         let nextAnswer = try #require(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.first { $0.item.rowID == next.id.uuidString + "/reply" })
-        #expect(unread.isHidden && !window.scrollView.contentView.bounds.intersects(nextAnswer.frame))
+        #expect(!window.scrollView.contentView.bounds.intersects(nextAnswer.frame))
     }
 
     @Test(arguments: [false, true]) func AIの行追加と返事到着も末尾追従し検索中だけ止める(searching: Bool) throws {

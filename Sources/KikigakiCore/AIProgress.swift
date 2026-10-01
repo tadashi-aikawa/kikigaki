@@ -120,7 +120,7 @@ public struct AIProgress: Equatable, Sendable {
         } else if question.state == .deliveryUnknown {
             next = .deliveryUnknown
         } else if isHistorical {
-            // 過去会議は現在の接続・前回の表示メモリを混ぜない。保存されていない作業は復元しない。
+            // 読み取り専用snapshotは現在の接続・前回の表示メモリを混ぜない。保存されていない作業は復元しない。
             next = working
         } else {
             switch connection {
@@ -149,7 +149,7 @@ public struct AIProgress: Equatable, Sendable {
     }
 
     /// 返答が届いた行に、本文へ入れ替える前の全段点灯を出すための派生。
-    /// 過去会議の読込と、結果以外の状態では作らない。
+    /// 読み取り専用snapshotと、結果以外の状態では作らない。
     public func arrival() -> AIProgress? {
         guard !isHistorical, status == .answered || status == .needsInput else { return nil }
         return AIProgress(arrivalOf: self)

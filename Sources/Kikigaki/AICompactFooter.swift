@@ -2,7 +2,7 @@ import AppKit
 import KikigakiCore
 
 enum AIFooterMetrics {
-    /// 40ptの部品内で、顔と未読の丸の中心、下ラベルの原点を揃える。
+    /// 40ptの部品内で、顔と要返答の丸の中心、下ラベルの原点を揃える。
     static let iconCenterY: CGFloat = 24.5
     static let labelY: CGFloat = 2
     static let labelFont = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium)
@@ -42,28 +42,19 @@ class AIFooterButton: HoverButton {
 }
 
 final class AIFooterCount: AIFooterButton {
-    let kind: AIBadgeKind
     var count = 0
     var badgeFrame: NSRect { NSRect(x: 8, y: AIFooterMetrics.iconCenterY - 10, width: 20, height: 20) }
     var labelFont: NSFont { AIFooterMetrics.labelFont }
-    init(kind: AIBadgeKind) {
-        self.kind = kind
-        super.init(symbol: "questionmark.bubble.fill", label: kind == .unread ? "未読" : "要返答")
+    init() {
+        super.init(symbol: "questionmark.bubble.fill", label: "要返答")
     }
     required init?(coder: NSCoder) { fatalError() }
     override func draw(_ dirtyRect: NSRect) {
         drawHoverBackground()
         let color = Washi.red
-        if kind == .unread || kind == .confirmation {
-            color.setFill(); NSBezierPath(ovalIn: badgeFrame).fill()
-            centered(String(count), y: AIFooterMetrics.iconCenterY - 8, size: 11, color: .white)
-        } else {
-            NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-                .withSymbolConfiguration(.init(paletteColors: [color]))?
-                .draw(in: NSRect(x: 1, y: AIFooterMetrics.iconCenterY - 9.5, width: 19, height: 19))
-            (String(count) as NSString).draw(at: NSPoint(x: 23, y: AIFooterMetrics.iconCenterY - 8), withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: color])
-        }
-        centered(kind == .unread ? "未読" : "要返答", y: AIFooterMetrics.labelY, font: labelFont, color: Washi.muted)
+        color.setFill(); NSBezierPath(ovalIn: badgeFrame).fill()
+        centered(String(count), y: AIFooterMetrics.iconCenterY - 8, size: 11, color: .white)
+        centered("要返答", y: AIFooterMetrics.labelY, font: labelFont, color: Washi.muted)
     }
     private func centered(_ text: String, y: CGFloat, size: CGFloat, color: NSColor) {
         centered(text, y: y, font: .systemFont(ofSize: size, weight: .medium), color: color)
@@ -133,8 +124,7 @@ final class AICompactFooter: NSStackView {
     let minutesNotice = AIFooterButton(symbol: "doc.text", label: "議事録")
     let robot = AIRobotButton()
     private let rule = NSView()
-    let unread = AIFooterCount(kind: .unread)
-    let confirmation = AIFooterCount(kind: .confirmation)
+    let confirmation = AIFooterCount()
     let warning = AIFooterButton(symbol: "exclamationmark.triangle", label: "警告")
     let more = AIFooterButton(symbol: "ellipsis", label: "その他の操作")
     let pin = AIFooterButton(symbol: "pin", label: "最前面に固定")
@@ -157,7 +147,7 @@ final class AICompactFooter: NSStackView {
         minutesNotice.tint = Washi.muted
         minutesNotice.visibleLabel = "議事録"
         minutesNotice.setAccessibilityLabel("議事録あり。議事録を表示")
-        for view in [robot, rule, unread, confirmation, warning, NSView(), minutesNotice, pin, more] { addArrangedSubview(view) }
+        for view in [robot, rule, confirmation, warning, NSView(), minutesNotice, pin, more] { addArrangedSubview(view) }
         pin.tint = Washi.muted
         pin.setAccessibilityValue("OFF")
         pin.callback = { [weak self] in
@@ -181,12 +171,11 @@ final class AICompactFooter: NSStackView {
         robot.isEnabled = state.ai != nil
         robot.isHidden = state.ai == nil; rule.isHidden = robot.isHidden
         let questions = state.ai?.conversation?.questions ?? []
-        for button in [unread, confirmation] {
-            let matching = questions.filter { button.kind.matches($0, in: questions) }
-            button.count = matching.count; button.isHidden = matching.isEmpty; button.needsDisplay = true
-            button.setAccessibilityLabel("\(button.kind == .unread ? "未読" : "要返答") \(matching.count)、最初の行へ移動")
-            let kind = button.kind
-            button.callback = { [weak self] in if let first = matching.first { self?.onSelect?(kind.rowID(first)) } }
+        let matching = questions.filter { AIBadgeKind.confirmation.matches($0, in: questions) }
+        confirmation.count = matching.count; confirmation.isHidden = matching.isEmpty; confirmation.needsDisplay = true
+        confirmation.setAccessibilityLabel("要返答 \(matching.count)、最初の行へ移動")
+        confirmation.callback = { [weak self] in
+            if let first = matching.first { self?.onSelect?(AIBadgeKind.confirmation.rowID(first)) }
         }
         let failures = questions.filter { $0.state == .failed || $0.state == .deliveryUnknown }
         let warnings = [state.ai?.warning, state.aiSchedule.warning, state.aiRecoveryWarning,

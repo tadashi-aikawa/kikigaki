@@ -33,7 +33,7 @@ import KikigakiCore
         #expect(row.item.isUnread && callbacks == 0)
         #expect(body.accessibilityPerformPress())
         #expect(conversation.questions[0].isUnread && callbacks == 0)
-        #expect(row.accent == nil && window.compactFooter.unread.isHidden)
+        #expect(row.accent == nil)
         #expect(!snapshot.ai!.badges.contains("未読"))
         #expect(row.statusPill.isHidden && body.selectedRange() == NSRange(location: 0, length: 5))
         #expect(body.string == "担当と期限を確認しました。")
@@ -88,11 +88,10 @@ import KikigakiCore
             #expect(before)
             #expect(callbacks == 0)
             #expect(conversation.questions[0].isUnread)
-            window.compactFooter.unread.performClick(nil)
             #expect(conversation.questions[0].isUnread && callbacks == 0)
             row.statusPill.performClick(nil)
             #expect(conversation.questions[0].isUnread && callbacks == 0)
-            #expect(window.compactFooter.unread.isHidden && row.statusPill.isHidden && row.accent == nil)
+            #expect(row.statusPill.isHidden && row.accent == nil)
         }
     }
 
