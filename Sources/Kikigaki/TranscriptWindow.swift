@@ -258,6 +258,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
 
     func windowDidResize(_ notification: Notification) {
         updateHeader(width: minutesSplit.left.frame.width)
+        // 縦だけの変更は表示域の境界の通知が来ず、文書の幅も変わらない。載せる行をここで揃える。
+        transcriptDocument.mountVisibleRows()
     }
 
     private func updateHeader(width: CGFloat) {
@@ -441,7 +443,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         ])
         compactFooter.onSelect = { [weak self] id in
             guard let self, let view: NSView = aiRows[id] else { return }
-            view.scrollToVisible(view.bounds); scrolled()
+            // 画面外の行はサブビューに載っていないので、行自身ではなく文書側からスクロールする。
+            transcriptDocument.scrollRowToVisible(view); scrolled()
         }
         compactFooter.robot.callback = { [weak self] in self?.showRobotMenu() }
         compactFooter.more.callback = { [weak self] in self?.showFooterMenu() }
@@ -673,6 +676,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         latestButton.isHidden = true
     }
     @objc func scrolled() {
+        // 新しく載った行の進行表示が下で可視判定を読むので、載せ替えを先に済ませる。
+        transcriptDocument.mountVisibleRows()
         latestButton.isHidden = transcriptDocument.anchor().atBottom || (snapshot.utterances.isEmpty && snapshot.tentativeText == nil)
         for row in aiRows.values { (row as? AIReplyRow)?.progressView.updateVisibility() }
     }

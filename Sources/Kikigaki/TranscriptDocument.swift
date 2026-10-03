@@ -26,6 +26,10 @@ final class AIRangeBoundaryView: NSView {
 protocol DocumentRow: NSView { func height(for width: CGFloat) -> CGFloat }
 
 /// 行ビューを再利用する。再配置は高さの加算だけで、本文の計測は変更行だけに限る。
+///
+/// 行ビューは全行ぶん持ち、枠も全行に置くが、サブビューに載せるのは見えている範囲の近くだけにする。
+/// AppKitはスクロールのたびにサブビューを全部たどるので、全行を載せると1コマの時間が行数に比例する
+/// (実測: 60分・581行で43ms、画面外を外すと約5ms)。行の生存は `rows` で判定し、`superview` では見ない。
 final class TranscriptDocument: NSView {
     override var isFlipped: Bool { true }
     var followsBottom = true
@@ -67,9 +71,35 @@ final class TranscriptDocument: NSView {
     func setRows(_ rows: [any DocumentRow], anchor: Anchor) {
         let keep = Set(rows.map { ObjectIdentifier($0) })
         for view in subviews where !(view is AIRangeBoundaryView) && !keep.contains(ObjectIdentifier(view)) { view.removeFromSuperview() }
-        for row in rows where row.superview !== self { addSubview(row) }
         self.rows = rows
         reflow(anchor: anchor)
+    }
+    /// 見えている範囲の上下にこの高さ(最低でも見えている高さ)の余白を取り、その中の行だけを載せる。
+    /// 速いスクロールやウィンドウを縦に伸ばした直後でも、載せ替えの前に空白が見えないための幅。
+    static let mountMargin: CGFloat = 1200
+    /// スクロール・再配置・表示域の変化の後に呼ぶ。行の枠は `reflow` が全行に置いてある前提。
+    func mountVisibleRows() {
+        guard let clip = enclosingScrollView?.contentView.bounds else { return }
+        let area = clip.insetBy(dx: 0, dy: -max(Self.mountMargin, clip.height))
+        // 行は上から順に並ぶ。載せる範囲より下は外すだけなので、交差の判定は全行で行う。
+        var previous: NSView?
+        for row in rows {
+            if row.frame.intersects(area) {
+                // 重なりは無いが、描画順を行の順に揃えて範囲の印より下に置く。
+                if row.superview !== self {
+                    if let previous { addSubview(row, positioned: .above, relativeTo: previous) }
+                    else { addSubview(row, positioned: .below, relativeTo: nil) }
+                }
+                previous = row
+            } else if row.superview === self {
+                row.removeFromSuperview()
+            }
+        }
+    }
+    /// 載っていない行も含めて、その行が見える位置までスクロールする。
+    func scrollRowToVisible(_ row: NSView) {
+        guard rows.contains(where: { $0 === row }) else { return }
+        scrollToVisible(row.frame)
     }
     override func setFrameSize(_ newSize: NSSize) {
         let oldWidth = frame.width
@@ -92,10 +122,12 @@ final class TranscriptDocument: NSView {
         }
         setFrameSize(NSSize(width: width, height: max(scroll.contentSize.height, y + 8)))
         positionRangeMarkers()
-        let surviving = anchor.candidates.first { $0.0.superview === self }
+        let alive = Set(rows.map { ObjectIdentifier($0) })
+        let surviving = anchor.candidates.first { alive.contains(ObjectIdentifier($0.0)) }
         let target = anchor.atBottom && followsBottom ? frame.height - scroll.contentSize.height
             : surviving.map { $0.0.frame.minY - $0.1 } ?? anchor.y
         scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, min(target, frame.height - scroll.contentSize.height))))
         scroll.reflectScrolledClipView(scroll.contentView)
+        mountVisibleRows()
     }
 }
