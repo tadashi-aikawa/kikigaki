@@ -472,6 +472,90 @@ import KikigakiAIIO
         #expect(scheduled.request.trigger == .scheduled && scheduled.state != .submitted)
     }
 
+    private func sameBoard(_ root: URL) throws -> [ResolvedAIConfig] {
+        try profiles(root, toml: """
+        [[ai]]
+        name = "議事録"
+        command = "/bin/echo"
+        cwd = "\(root.path)"
+        board = "## ボード"
+        boardLocation = "ここに作成"
+
+        [[ai]]
+        name = "相談"
+        command = "/bin/echo"
+        cwd = "\(root.path)"
+        board = "## ボード"
+        boardLocation = "ここに作成"
+        """)
+    }
+    /// 旧担当Aに同じボードの自動依頼を返事待ちで残し、Bへ担当を替えて自動送信を始める。Bは返事待ちで止まる。
+    private func switchBoardOwner(_ root: URL, fake: FakeHerdr) async throws -> (MeetingSession, AIConversationController, AIQuestion) {
+        let list = try sameBoard(root)
+        let session = session(root, profiles: list, fake: fake, recordedSamples: 16_000)
+        session.setScheduleTranscriptForTesting("架空の会議です")
+        session.submitAI(question: "ボードを更新", full: false, parent: nil,
+                         helper: URL(fileURLWithPath: "/bin/echo"), trigger: .scheduled, profile: list[0])
+        if let task = session.submissionTaskForTesting(slot: 1) { await task.value }
+        let controller = try #require(session.aiRecord?.controller)
+        let old = try #require(controller.conversation.questions.first)
+        #expect(old.isAwaitingResult && old.request.envelope.participant.boardHeading == "## ボード")
+
+        try session.startAISchedule(options: try AIScheduleOptions(prompt: "更新", interval: 0.01),
+                                    helper: URL(fileURLWithPath: "/bin/echo"), profile: list[1])
+        try await waitUntil("新担当が返事待ちで止まる") { session.snapshot.aiSchedule.skipReason == "返事待ちでスキップ中" }
+        #expect(!controller.conversation.questions.contains { $0.request.envelope.participant.profileSlot == 2 })
+        return (session, controller, old)
+    }
+
+    /// 同じボードの宛先へ担当を替えても、旧担当の返事を待ってから送る。並行して同じ節を書き換えさせない。
+    @Test func 同じボードの担当替えは旧担当の返事を待つ() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, controller, old) = try await switchBoardOwner(root, fake: FakeHerdr())
+
+        try deliver(session, old.request, kind: .answered, body: "更新しました")
+        try await waitUntil("旧担当の返事の後に新担当が送る") {
+            controller.conversation.questions.contains { $0.request.envelope.participant.profileSlot == 2 }
+        }
+        if let task = session.submissionTaskForTesting(slot: 2) { await task.value }
+        session.stopAISchedule()
+    }
+
+    /// 旧担当の一時的な見失いは同じ世代のまま戻りうる。閉じるまでは新担当を待たせる。
+    @Test func 同じボードの旧担当を一時的に見失っても新担当は待つ() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let (session, controller, _) = try await switchBoardOwner(root, fake: fake)
+
+        await fake.setStatuses(["missing"])
+        try? await controller.refreshConnection(slot: 1)
+        #expect(controller.connectionStatus(slot: 1) == .disconnected && !controller.isPaneClosed(slot: 1))
+        // 自動送信の判定は0.5秒ごと。複数回の判定を経ても送らない。
+        try await Task.sleep(for: .seconds(1.2))
+        #expect(!controller.conversation.questions.contains { $0.request.envelope.participant.profileSlot == 2 })
+        #expect(session.snapshot.aiSchedule.skipReason == "返事待ちでスキップ中")
+        session.stopAISchedule()
+    }
+
+    /// 後片付けで旧担当のペインを閉じたら返事は来ない。新担当の送信を待たせ続けない。
+    @Test func 同じボードの旧担当のペインを閉じたら新担当は待たない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, controller, _) = try await switchBoardOwner(root, fake: FakeHerdr())
+
+        #expect(await controller.closePanes())
+        // 閉じても旧担当の依頼は返事待ちのまま残る。待ちを解くのは接続の状態。
+        #expect(controller.conversation.questions.contains(where: {
+            $0.request.envelope.participant.profileSlot == 1 && $0.isAwaitingResult }))
+        try await waitUntil("旧担当を閉じた後に新担当が送る") {
+            controller.conversation.questions.contains { $0.request.envelope.participant.profileSlot == 2 }
+        }
+        if let task = session.submissionTaskForTesting(slot: 2) { await task.value }
+        session.stopAISchedule()
+    }
+
     /// 【中】Aへの返答シートを開いている間、Bの自動送信まで抑制していた。
     @Test func 返答シートは自分の枠だけを抑制する() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)

@@ -161,12 +161,10 @@ public struct AIProfileList: Codable, Equatable, Sendable {
         func invalid(_ message: String) -> ConfigError { .invalid(description: "ai: " + message) }
         guard !profiles.isEmpty else { throw invalid("must contain at least one profile") }
         var names = Set<String>()
-        var boards = Set<String>()
         for (index, profile) in profiles.enumerated() {
             try profile.validate(label: isArrayForm ? "ai[\(index)]" : "ai")
-            if let board = profile.board, !boards.insert(board).inserted {
-                throw invalid("board must be unique: \(board)")
-            }
+            // boardの重複は許す。自動送信は会議に1つで、会議の見出しは初回の自動送信で固定し異なる見出しだけを拒否する。
+            // 同じ見出しを複数の宛先に持たせれば、会議の途中で担当のAIを替えても同じボードを更新し続けられる。
             guard names.insert(profile.resolvedName).inserted else {
                 throw invalid("name must be unique: \(profile.resolvedName)")
             }

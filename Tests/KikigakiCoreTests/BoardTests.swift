@@ -76,6 +76,19 @@ import Testing
         #expect(custom.scheduledPrompt == "独自のボード")
         try AIConfig(autoStart: true, board: "# ボード").validate()
     }
+    @Test func 複数の宛先が同じボードの見出しを持てる() throws {
+        let parsed = try ConfigLoader.parse(toml: """
+        [[ai]]
+        name = "Codex"
+        board = "## ボード"
+        [[ai]]
+        name = "Claude"
+        cli = "claude"
+        board = "## ボード"
+        """)
+        let profiles = ResolvedConfig(config: parsed, home: URL(fileURLWithPath: "/tmp")).aiProfiles
+        #expect(profiles.map(\.board) == ["## ボード", "## ボード"])
+    }
     @Test func ボード開始には議事録パスか書き先指示が必要() {
         let home = URL(fileURLWithPath: "/tmp")
         let board = ResolvedAIConfig(config: AIConfig(board: "## ボード"), home: home)
@@ -91,9 +104,8 @@ import Testing
     func 不正見出しを拒否する(_ heading: String) {
         #expect(throws: (any Error).self) { try AIConfig(board: heading).validate() }
     }
-    @Test func 設定の孤立プロンプトと重複と型違いを拒否する() {
-        for toml in ["[ai]\nboardPrompt = '更新'", "[ai]\nboard = 3", "[ai]\nboard = '## ボード'\nboardPrompt = ''",
-                     "[[ai]]\nname = 'a'\nboard = '## カード'\n[[ai]]\nname = 'b'\nboard = '## カード'"] {
+    @Test func 設定の孤立プロンプトと型違いを拒否する() {
+        for toml in ["[ai]\nboardPrompt = '更新'", "[ai]\nboard = 3", "[ai]\nboard = '## ボード'\nboardPrompt = ''"] {
             #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: toml) }
         }
     }

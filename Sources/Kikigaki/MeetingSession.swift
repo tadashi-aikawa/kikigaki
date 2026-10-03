@@ -1293,6 +1293,16 @@ extension MeetingSession {
                     && $0.request.envelope.participant.sessionGeneration == generation
             }
             if current.contains(where: { $0.isAwaitingResult }) { return .awaitingResult }
+            // 同じボードを持つ宛先は複数ありうる。担当を替えた直後に、旧担当の返事待ちの依頼と同じ節を並行して書き換えさせない。
+            // 後片付けで旧担当のペインを閉じたら返事は来ない。閉じた後も待つと、最後の1回が終わらない。
+            // 接続状態の .disconnected は見ない。一時的な見失いから同じ世代のまま戻るため、並行送信を許してしまう。
+            if let heading = aiScheduleConfiguration?.board, controller.conversation.questions.contains(where: {
+                let participant = $0.request.envelope.participant
+                let owner = participant.profileSlot ?? controller.defaultSlot
+                return $0.request.trigger == .scheduled && participant.boardHeading == heading
+                    && participant.sessionGeneration == controller.generation(slot: owner)
+                    && !controller.isPaneClosed(slot: owner) && $0.isAwaitingResult
+            }) { return .awaitingResult }
             if !controller.canSend(slot: slot) { return controller.connectionStatus(slot: slot) == .working ? .busy : .disconnected }
             // 失敗・取消で終わった返答は返答済みと数えない。まだ返答できる確認は自動送信を止める。
             let questions = controller.conversation.questions
