@@ -31,6 +31,14 @@ cp -R "$ROOT/.build/$CONFIG/Kikigaki_Kikigaki.bundle" "$APP/Contents/Resources/"
 # 署名前に置くので Contents/Resources のシールに含まれ、--deep --strict も通る。
 mkdir -p "$APP/Contents/Resources/skills"
 cp -R "$ROOT/skills/kikigaki" "$APP/Contents/Resources/skills/"
+# 本体と第三者のライセンスを同梱する。依存の版に追従するよう、SwiftPMのcheckoutから毎回写す。
+# 一覧は THIRD-PARTY-NOTICES.md。依存を足したらこことその一覧の両方へ足す。
+LICENSES="$APP/Contents/Resources/licenses"
+mkdir -p "$LICENSES/FluidAudio" "$LICENSES/TOMLKit"
+cp "$ROOT/LICENSE" "$ROOT/THIRD-PARTY-NOTICES.md" "$LICENSES/"
+cp "$ROOT/.build/checkouts/FluidAudio/LICENSE" "$LICENSES/FluidAudio/"
+cp -R "$ROOT/.build/checkouts/FluidAudio/ThirdPartyLicenses" "$LICENSES/FluidAudio/"
+cp "$ROOT/.build/checkouts/TOMLKit/LICENSE" "$LICENSES/TOMLKit/"
 sed "s/0\.0\.0-development/$VERSION/" "$ROOT/Resources/Info.plist" >"$APP/Contents/Info.plist"
 if [ "$TRIAL" = 1 ]; then
   /usr/libexec/PlistBuddy \

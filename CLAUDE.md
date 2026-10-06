@@ -47,7 +47,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 - `experiments/nemotron/`: 話者判別モデルの比較用の独立CLI。アプリにはエンジンの切替を置かない
 - `experiments/system-audio/`: システム音声とマイクの同時取り込みを検証する独立CLI。検証記録は [システム音声取り込みの実現性試作](docs/records/system-audio-spike.md)
 - `scripts/`: アプリバンドル組み立て・リリース成果物・Cask・tap更新
-  - `make-app.sh`: `Contents/Helpers/kikigaki-cli` と `Contents/Resources/skills/kikigaki` を同梱し、helperを先に署名してから.appを署名する。配布ZIPでもhelperとSkillの存在、helperの署名を検証する
+  - `make-app.sh`: `Contents/Helpers/kikigaki-cli` と `Contents/Resources/skills/kikigaki`、本体と第三者のライセンスを置く `Contents/Resources/licenses` を同梱し、helperを先に署名してから.appを署名する。配布ZIPでもhelperとSkillの存在、helperの署名を検証する
   - `build_release.sh`: リリース成果物 (ZIP) を作る
   - `render_cask.sh`: Cask本文を標準出力へ書く
   - `update_tap.sh`: 本文をtapへ置くだけにして、pushせずに `brew audit --cask` や手元tapでの導入・削除を試せるようにする

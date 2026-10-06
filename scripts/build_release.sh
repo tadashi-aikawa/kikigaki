@@ -42,5 +42,9 @@ unzip -Z1 "$ARCHIVE" | grep -x "KIKIGAKI.app/Contents/Helpers/kikigaki-cli" >/de
 # Caskがリンクを張る先。欠けたままリリースすると導入後にSkillが空振りする
 unzip -Z1 "$ARCHIVE" | grep -x "KIKIGAKI.app/Contents/Resources/skills/kikigaki/SKILL.md" >/dev/null
 unzip -Z1 "$ARCHIVE" | grep -x "KIKIGAKI.app/Contents/Resources/skills/kikigaki/references/meeting.md" >/dev/null
+# 配布物に含む第三者のライセンスは、本文の同梱が利用条件になっている
+for license in LICENSE THIRD-PARTY-NOTICES.md FluidAudio/LICENSE TOMLKit/LICENSE; do
+  unzip -Z1 "$ARCHIVE" | grep -x "KIKIGAKI.app/Contents/Resources/licenses/$license" >/dev/null
+done
 
 echo "Built and validated $ARCHIVE (version $VERSION)"

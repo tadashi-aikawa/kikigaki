@@ -40,6 +40,24 @@
 
 取得が完了するまで、録音開始は準備待ちになります。
 
+## データの行き先
+
+音声と文字起こしは端末の外へ出ません。外へ出るのは、AI参加を自分で設定して送信した内容だけです。
+
+| 情報 | 行き先 | 条件 |
+| --- | --- | --- |
+| マイクとシステム音声 | 端末内だけ。文字起こしも話者判別も端末内で処理します | 常に |
+| 書き起こし・議事録・録音WAV・音量の記録 | 端末内の保存先フォルダ。既定は `~/Documents/KIKIGAKI` | WAVと音量の記録は設定で有効にしたときだけ |
+| 会話の本文・手入力・添付画像のパス | 自分のMacで動くCodex・Claude Code。そこから先は各サービスへ送られます | `[[ai]]` を設定し、手動か自動で送信したときだけ |
+| 「会話をコピー」の内容 | クリップボード。貼り付けた先へ渡ります | 自分でコピーしたときだけ |
+| モデルと言語アセットの取得 | Hugging FaceとApple。取得するだけで、音声や文字起こしは送りません | 初回と未取得のとき |
+| 画像のURLへの接続 | アバターや議事録に書かれた外部画像の配信元 | URLを設定・記載したときだけ |
+| 利用状況や不具合の情報 | 送りません | — |
+
+- AI参加: 送った内容の扱いは、使うCodex・Claude Codeの契約と設定に従います。業務で使う場合は、そのサービスへ会議の内容を渡してよいかを先に確かめてください。
+- AIの作業範囲: 参加したAIは保存先フォルダへ書き込めます。詳しくは [議事録プレビューの設計](docs/minutes-preview.md) の「Skillの規則と書き込み許可」を参照してください。
+- 話者判別モデル: [Nemotron 3 Diarization](https://huggingface.co/FluidInference/nemotron-3-diarization-coreml) です。利用条件は [OpenMDW License Agreement 1.1](https://openmdw.ai/license/1-1/) で、商用利用もできます。
+
 ## インストール
 
 Homebrewで導入します。
@@ -215,3 +233,9 @@ bash scripts/make-icon.sh
 生成した `Resources/kikigaki.icns` はアプリの組み立て時に同梱されます。
 
 owlery・parliamentへの反映手順と制作記録は [ロゴの管理](docs/logo.md) を参照してください。
+
+## ライセンス
+
+[MIT License](LICENSE) です。
+
+同梱する第三者のソフトウェアとそのライセンスは [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) にまとめています。各ライセンスの本文は `KIKIGAKI.app/Contents/Resources/licenses/` に入っています。
