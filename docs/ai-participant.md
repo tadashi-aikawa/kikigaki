@@ -145,7 +145,7 @@ ai/
   inbox/<request_id>.progress.replying.json
   inbox/<request_id>.minutes.json
   inbox/notify-<event_id>.json
-  state.json                    送信試行、取り込み順、既読情報(互換のため保持)、表示状態
+  state.json                    送信試行、取り込み順、表示状態
   archive.json                  最後に永続化した人間の保存用データ
 ```
 

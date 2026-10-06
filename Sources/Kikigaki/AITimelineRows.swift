@@ -26,36 +26,32 @@ enum AIRowMetrics {
     }
 }
 
-/// 未読・確認待ち・返事待ちの印。押して既読にできるのは未読だけで、
-/// 他は状態表示なので操作を持たせない。無効でも面は足さず、色だけを抜く。
+/// 確認待ち・返事待ちの印。状態表示なので操作を持たせない。無効でも面は足さず、色だけを抜く。
 final class AIStatusPill: HoverButton {
-    enum Style: Equatable { case unread, confirmation, waiting }
+    enum Style: Equatable { case confirmation, waiting }
     private(set) var style: Style = .waiting
     private var configured = false
-    var callback: (() -> Void)?
     init() {
         super.init(frame: .zero)
         isBordered = false
         title = ""
         font = .systemFont(ofSize: 11, weight: .bold)
-        target = self; action = #selector(pressed)
+        isEnabled = false
     }
     required init?(coder: NSCoder) { fatalError() }
     func update(_ style: Style) {
         guard self.style != style || !configured else { return }
         configured = true
         self.style = style
-        title = style == .unread ? "未読" : style == .confirmation ? "要返答" : "返事待ち"
-        isEnabled = style == .unread
-        toolTip = style == .unread ? "押すと既読にします" : nil
-        setAccessibilityLabel(title + (style == .unread ? "、押すと既読にします" : ""))
+        title = style == .confirmation ? "要返答" : "返事待ち"
+        setAccessibilityLabel(title)
         invalidateIntrinsicContentSize(); needsDisplay = true
     }
     override var intrinsicContentSize: NSSize {
         NSSize(width: ceil((title as NSString).size(withAttributes: [.font: font!]).width) + 16, height: 20)
     }
     override func draw(_ dirtyRect: NSRect) {
-        let color = style == .unread ? (isHovered ? Washi.brightRed : Washi.red) : style == .confirmation ? Washi.red : Washi.muted
+        let color = style == .confirmation ? Washi.red : Washi.muted
         let filled = style != .waiting
         let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10)
         if filled { color.setFill(); pill.fill() }
@@ -67,7 +63,6 @@ final class AIStatusPill: HoverButton {
         (title as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2),
                                  withAttributes: attributes)
     }
-    @objc private func pressed() { callback?() }
 }
 
 /// 「AI」「自動」の印。塗りは足さず枠だけで、状態のピルとは別の大きさにする。
@@ -348,7 +343,6 @@ final class AIReplyRow: NSView, AITimelineRowView {
     override var isFlipped: Bool { true }
     private(set) var item: AITimeline.Item
     private var state: AIViewState
-    var onRead: (() -> Void)?
     var onReply: (() -> Void)?
     var onCancel: (() -> Void)?
     var onRetry: (() -> Void)?
@@ -432,16 +426,12 @@ final class AIReplyRow: NSView, AITimelineRowView {
     func stopArrival() { endArrival() }
     deinit { arrivalTimer?.invalidate() }
 
-    private func markReadIfNeeded() {
-        // 通常返答に既読操作を要求しない。保存済み状態もクリックで書き換えない。
-    }
-
     var isFailure: Bool { if case .failure = item.kind { return true }; return false }
     /// モデルが返した失敗報告。送信そのものができなかった失敗と区別し、本文を全部見せる。
     var isReturnedFailure: Bool { if case let .failure(_, returned) = item.kind { return returned }; return false }
     /// 返答到着の点灯中も、本文へ入れ替えるまでは返事待ちと同じ見た目を保つ。
     var isWaiting: Bool { item.kind == .reply(.waiting) || isShowingArrival }
-    /// 要返答と失敗だけを朱で強調し、通常返答に未読の強調を置かない。
+    /// 要返答と失敗だけを朱で強調する。
     var accent: NSColor? {
         if isFailure { return Washi.red }
         // 確認質問の帯は返答するまで残す。
@@ -451,7 +441,6 @@ final class AIReplyRow: NSView, AITimelineRowView {
     var pillStyle: AIStatusPill.Style? {
         if isWaiting { return nil }
         if item.kind == .reply(.needsInput) { return item.needsAnswer ? .confirmation : nil }
-        // 通常返答と失敗には未読の操作を置かない。
         return nil
     }
 
@@ -465,8 +454,6 @@ final class AIReplyRow: NSView, AITimelineRowView {
         notes.isSelectable = true; notes.maximumNumberOfLines = 0; notes.lineBreakMode = .byWordWrapping
         failureLabel.lineBreakMode = .byTruncatingTail
         Washi.surface(quoteRule, color: Washi.rule)
-        pill.callback = { [weak self] in self?.markReadIfNeeded() }
-        markdownBody.onClick = { [weak self] in self?.markReadIfNeeded() }
         quote.onToggle = { [weak self] in self?.onResize?() }
         for view in [avatar, nameLabel, chip, timeLabel, durationLabel, pill, quoteRule, quote, markdownBody,
                      progressView, footer, confirmationMark, notes, failureLabel, replyAction, cancelAction,
@@ -549,7 +536,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
         // 幅で落とした塊に関係なく、読み上げには全部入りの表記を渡す。
         let spoken = model.map { "、" + $0.text } ?? ""
         setAccessibilityLabel(failure ? failureLabel.stringValue + spoken
-            : item.participantName + "、" + (isWaiting ? "返事待ち" : chip.text) + spoken + (pillStyle == .unread ? "、未読" : ""))
+            : item.participantName + "、" + (isWaiting ? "返事待ち" : chip.text) + spoken)
     }
 
     /// 測る前に表示と同じ幅の枠を与える。幅0のまま測るとTextKitが器の寸法を誤り、
@@ -588,7 +575,6 @@ final class AIReplyRow: NSView, AITimelineRowView {
             let right = retryAction.isHidden ? bounds.width - 20 : retryAction.frame.minX - 8
             let timeWidth = ceil(timeLabel.intrinsicContentSize.width) + 4
             timeLabel.frame = NSRect(x: right - timeWidth, y: 6, width: timeWidth, height: 18)
-            // 返送された失敗は未読になるので、押して既読にできる印を帯の中へ置く。
             let pillWidth = pill.isHidden ? 0 : ceil(pill.intrinsicContentSize.width)
             pill.frame = NSRect(x: timeLabel.frame.minX - 8 - pillWidth, y: 5, width: pillWidth, height: 20)
             let end = pill.isHidden ? timeLabel.frame.minX : pill.frame.minX

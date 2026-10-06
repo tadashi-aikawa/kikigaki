@@ -87,7 +87,7 @@ import KikigakiAIIO
         controller.scan(); #expect(controller.warning == "受信箱のイベントを検証できません")
     }
 
-    @Test func minutesは回答未読と自動送信待ちを変えない() async throws {
+    @Test func minutesは回答の有無と自動送信待ちを変えない() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr(), records = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
         var config = ResolvedConfig(config: try ConfigLoader.parse(toml: ""), home: root)
@@ -102,12 +102,12 @@ import KikigakiAIIO
         let event = try AIMinutesEvent(request: request, path: "/tmp/通知.md", recordedAt: Date())
         let scheduled = session.snapshot.aiSchedule
         try files.write(AIJSON.encode(event), to: inbox + [event.filename]); controller.scan()
-        #expect(controller.conversation.questions[0].state == .submitted && !controller.conversation.questions[0].isUnread)
+        #expect(controller.conversation.questions[0].state == .submitted && controller.conversation.questions[0].result == nil)
         #expect(session.snapshot.aiSchedule.nextFire == scheduled.nextFire && session.snapshot.aiSchedule.active == scheduled.active)
         let reply = try AIReceiveEvent(request: request, kind: .answered, recordedAt: Date(), body: "回答")
         try files.write(AIJSON.encode(reply), to: inbox + [reply.filename]); controller.scan()
-        #expect(controller.conversation.questions[0].isUnread)
-        controller.scan(); #expect(controller.conversation.questions[0].isUnread)
+        #expect(controller.conversation.questions[0].result?.body == "回答")
+        controller.scan(); #expect(controller.conversation.questions[0].result?.body == "回答")
         #expect(session.snapshot.aiSchedule.active == scheduled.active)
     }
 }

@@ -129,7 +129,6 @@ public struct AIQuestion: Codable, Equatable, Sendable {
     public private(set) var failure: String?
     public private(set) var resultReceivedAt: Date?
     public private(set) var resultOrder: Int?
-    public private(set) var isUnread = false
     public private(set) var answeredByRequestID: UUID?
     public var contextReceived: Bool { acceptance != nil || result?.contextReceived == true }
     public var isAwaitingResult: Bool { sendAttemptedAt != nil && result == nil && state != .cancelled && state != .failed }
@@ -174,7 +173,6 @@ public struct AIQuestion: Codable, Equatable, Sendable {
         } else {
             guard order > 0 else { throw AIError.invalid("event order") }
             result = event; resultReceivedAt = date; resultOrder = order
-            isUnread = true
             if cancelledAt == nil {
                 switch event.kind {
                 case .answered: state = .answered
@@ -186,8 +184,6 @@ public struct AIQuestion: Codable, Equatable, Sendable {
         }
         return true
     }
-
-    public mutating func markRead() { isUnread = false }
 
     /// 失敗・取消に終わった返答は、同じ確認へ送り直せるよう参照を付け替える。
     /// 付け替えないと、失敗した返答の再送が「返答済み」として拒否される。
@@ -215,7 +211,6 @@ public struct AIQuestion: Codable, Equatable, Sendable {
               acceptance == nil || sendAttemptedAt != nil,
               (result == nil) == (resultReceivedAt == nil), (result == nil) == (resultOrder == nil),
               resultOrder == nil || resultOrder! > 0,
-              !isUnread || result != nil,
               [sendAttemptedAt, cancelledAt, resultReceivedAt].compactMap({ $0 }).allSatisfy({ $0.timeIntervalSince1970.isFinite }),
               answeredByRequestID == nil || result?.kind == .needsInput else { throw AIError.invalid("question state") }
         if cancelledAt != nil {

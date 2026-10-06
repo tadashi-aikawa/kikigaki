@@ -15,7 +15,7 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     /// 小音量候補の計測・表示だけを行う。本文からの除外はしない。
     public var measureAudioLevels: Bool?
     public var speakers: [Speaker]?
-    /// 単数の `[ai]` と配列の `[[ai]]` の両方を読む
+    /// 配列の `[[ai]]`
     public var ai: AIProfileList?
 
     public init(outputDir: String? = nil, saveRecording: Bool? = nil,
@@ -29,9 +29,6 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
 }
 
 /// 既定値を解決した設定
-///
-/// グローバルショートカットは廃止した。`[hotkeys]` と `[ai.hotkey]` が書かれていても
-/// **読み飛ばす**。既存の設定ファイルを書き換えさせないため、エラーにも警告にもしない。
 public struct ResolvedConfig: Equatable, Sendable {
     /// 既定の保存先。人が開く Markdown なので隠しディレクトリではなく書類フォルダに置く
     public static let defaultOutputDir = "~/Documents/KIKIGAKI"
@@ -44,7 +41,7 @@ public struct ResolvedConfig: Equatable, Sendable {
     public var speakers: [KikigakiConfig.Speaker]
     /// 設定順のプロファイル。slotは1始まりで、この並びが宛先ポップアップの並びになる
     public var aiProfiles: [ResolvedAIConfig]
-    /// 既定のプロファイル。ホットキーと設定の有無の判定はこれを見る。
+    /// 既定のプロファイル。設定の有無の判定はこれを見る。
     /// 代入は1つ目の差し替えで、nilは全プロファイルの取り消し
     public var ai: ResolvedAIConfig? {
         get { aiProfiles.first }

@@ -119,13 +119,12 @@ import KikigakiCore
 
     @Test func 押せる各部品はホバーで変化し無効時は変化しない() throws {
         _ = NSApplication.shared
-        let unread = AIStatusPill(); unread.update(.unread)
         let speaker = SpeakerButton(); speaker.title = ""; speaker.isBordered = false
         let action = WashiActionButton(title: "停止", target: nil, action: nil)
         action.isBordered = false; action.emphasis = .accentOutline
         let buttons: [HoverButton] = [AIRobotButton(), AIFooterCount(),
             AIFooterButton(symbol: "ellipsis", label: "その他"), AIFooterButton(symbol: "exclamationmark.triangle", label: "警告"),
-            SpeakerCountButton(), speaker, unread, AIActionButton("返答する", action: {}),
+            SpeakerCountButton(), speaker, AIActionButton("返答する", action: {}),
             AIActionButton("取消", action: {}), action, HoverButton(title: "開く", target: nil, action: nil)]
         let event = try #require(NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
                                                        windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil))

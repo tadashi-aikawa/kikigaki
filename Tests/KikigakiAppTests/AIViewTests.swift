@@ -219,7 +219,7 @@ import KikigakiAIIO
         #expect(descendants(sheet.window.contentView!).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "迅雷へ" })
     }
 
-    @Test func 展開既定のまま明示操作で既読にし件数と行の同一性を保つ() throws {
+    @Test func 展開既定のまま状態の印と行の同一性を保つ() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID()
@@ -271,7 +271,7 @@ import KikigakiAIIO
         #expect(confirmation.statusPill.title == "要返答" && !confirmation.statusPill.isEnabled)
         #expect(waiting.statusPill.isHidden)
         #expect(!descendants(content).compactMap { $0 as? AIStatusPill }.contains { $0.title == "Button" })
-        #expect(!failed.timeText.isEmpty && failed.statusPill.isHidden)   // 送信前の失敗は未読にならない
+        #expect(!failed.timeText.isEmpty && failed.statusPill.isHidden)
         #expect(!waiting.chipVisible && waiting.timeText.isEmpty)
         #expect(answer.chipVisible && answer.chipText == "AI" && !answer.timeText.isEmpty)
         // 返事待ちは末尾。声ではない送信なので細い1行にはしない。
@@ -279,38 +279,23 @@ import KikigakiAIIO
         try capture("timeline-states", view: content.superview!)
         let footer = window.compactFooter
         try capture("timeline-footer", view: footer)
-        var readIDs: [UUID] = []
-        window.onReadAI = { id in
-            readIDs.append(id)
-            try! conversation.update(id) { $0.markRead() }
-            apply()
-        }
-        // 可視域へ移動しても既読にせず、各行の印を明示的に押す。
         window.scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, answer.frame.minY - 20)))
         content.layoutSubtreeIfNeeded()
-        #expect(readIDs.isEmpty)
-        answer.statusPill.performClick(nil)
-        #expect(try #require(descendants(confirmation).compactMap { $0 as? MarkdownBodyView }.first).accessibilityPerformPress())
-        #expect(readIDs.isEmpty)
-        #expect(!readIDs.contains(requests[2].id) && !readIDs.contains(requests[3].id))
         #expect(answer.accent == nil && answer.pillStyle == nil)
-        #expect(!state.ai!.badges.contains("未読"))
-        let readCount = readIDs.count
-        // 既読と改名だけの更新でも同じ行ビューを使い続ける。
+        // 改名だけの更新でも同じ行ビューを使い続ける。
         state.names = SpeakerNames([0: "相川", 1: "松村"])
         state.utterances.append(Utterance(speaker: 1, start: 380, end: 385, text: "担当者は明日決めましょう。"))
         apply()
-        #expect(replies().contains { $0 === answer } && readIDs.count == readCount)
+        #expect(replies().contains { $0 === answer })
         var replied: UUID?
         window.onAskAI = { replied = $0 }
         let reply = try #require(descendants(confirmation).compactMap { $0 as? NSButton }.first { $0.title == "返答する" })
         #expect(!reply.isHidden); reply.performClick(nil)
         #expect(replied == requests[1].id)
-        // 確認待ちの帯は返答されるまで残す。既読では消さない。
-        confirmation.onRead?()
+        // 確認待ちの帯は返答されるまで残す。
         apply()
         #expect(confirmation.item.needsAnswer && confirmation.accent == Washi.red)
-        #expect(confirmation.pillStyle == .confirmation && !confirmation.item.isUnread)
+        #expect(confirmation.pillStyle == .confirmation)
         var cancelled: UUID?
         window.onCancelAI = { cancelled = $0 }
         let cancel = try #require(descendants(waiting).compactMap { $0 as? NSButton }.first { $0.title == "取消" })
@@ -340,10 +325,6 @@ import KikigakiAIIO
         window.window!.setFrame(NSRect(x: 20000, y: 20000, width: 680, height: 620), display: false)
         let content = window.window!.contentView!
         window.apply(state); content.layoutSubtreeIfNeeded()
-        window.onReadAI = { id in
-            try! conversation.update(id) { $0.markRead() }
-            state.ai?.conversation = conversation; window.apply(state)
-        }
         let rows = window.transcriptDocument.rows
         let send = try #require(rows[1] as? AISendLineRow)
         #expect(rows[0] is TranscriptRow && rows[2] is TranscriptRow)
@@ -357,7 +338,7 @@ import KikigakiAIIO
         #expect(answer.item.question.isEmpty && answer.quoteButton.isHidden)
         #expect(answer.chipText == "AI")
         try capture("timeline-voice-anchor", view: content.superview!)
-        answer.onRead?(); content.layoutSubtreeIfNeeded()
+        content.layoutSubtreeIfNeeded()
         // 再分割で元の開始位置が消えても、改名済みの直前の発話へ配置する。
         state.utterances[0] = .init(speaker: 0, start: 315, end: 325, text: "先ほどの案は、うんうん、悪くはないかな。")
         state.names = SpeakerNames([0: "田中"])
@@ -446,7 +427,7 @@ import KikigakiAIIO
         #expect(reading ? abs(window.scrollView.contentView.bounds.minY - before) < 1 : document.anchor().atBottom)
     }
 
-    @Test func 末尾追従せず上を読んでいる間は到着でスクロールも既読にもしない() throws {
+    @Test func 末尾追従せず上を読んでいる間は到着でスクロールしない() throws {
         _ = NSApplication.shared
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
@@ -467,18 +448,6 @@ import KikigakiAIIO
         let row = try #require(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.first)
         #expect(row.accent == Washi.red && row.pillStyle == .confirmation)
         #expect(abs(window.scrollView.contentView.bounds.minY - before) < 1)
-        // 上を読んでいる間は画面に入らないので既読にならない。
-        var read: [UUID] = []
-        window.onReadAI = { read.append($0) }
-        window.scrollView.contentView.scroll(to: .zero); content.layoutSubtreeIfNeeded()
-        #expect(read.isEmpty)
-        // 長い返事の一部が見えても、クリックするまでは未読を保つ。
-        window.scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, row.frame.midY)))
-        content.layoutSubtreeIfNeeded()
-        #expect(window.scrollView.contentView.bounds.intersects(row.frame))
-        #expect(read.isEmpty)
-        #expect(try #require(descendants(row).compactMap { $0 as? MarkdownBodyView }.first).accessibilityPerformPress())
-        #expect(read.isEmpty)
         let snapshot = try history.prepare(lines: [], outputDirectory: root)
         let participant = AIParticipantContext(streamID: history.streamID, requestID: UUID(), sessionGeneration: 1, participantName: "迅雷",
             cliPath: root.appendingPathComponent("helper").path,
@@ -494,7 +463,7 @@ import KikigakiAIIO
         #expect(descendants(row).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "?" && !$0.isHidden })
     }
 
-    @Test func 返送された失敗は未読になり印で既読にできる() throws {
+    @Test func 返送された失敗は本文を読めて再送できる() throws {
         _ = NSApplication.shared
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
@@ -505,7 +474,7 @@ import KikigakiAIIO
         _ = try conversation.receive(AIReceiveEvent(request: request, kind: .failed, recordedAt: started.addingTimeInterval(340),
                                                     body: "一部の更新に失敗しました\n\n- 更新済み: A\n- 未更新: B", reason: "write_failed"),
                                      at: started.addingTimeInterval(341))
-        var state = SessionSnapshot(ai: AIViewState(conversation: conversation), state: .recording,
+        let state = SessionSnapshot(ai: AIViewState(conversation: conversation), state: .recording,
             utterances: [.init(speaker: 0, start: 320, end: 322, text: "議事録の担当を決めましょう。")],
             timeline: .init(startedAt: started), elapsed: 350, markdownURL: root.appendingPathComponent("meeting.md"))
         let window = TranscriptWindowController(shouldReduceMotion: { true })
@@ -514,30 +483,19 @@ import KikigakiAIIO
         let content = window.window!.contentView!
         window.apply(state); content.layoutSubtreeIfNeeded()
         let failed = try #require(window.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.first)
-        // 返送された失敗はCoreが未読にする。印から既読にできる。
-        #expect(failed.isFailure && failed.item.isUnread && failed.pillStyle == nil)
+        #expect(failed.isFailure && failed.pillStyle == nil)
         // 送信できなかった失敗とは言い方を分け、本文は画面から全部読める。
         #expect(failed.isReturnedFailure && failed.failureText.hasPrefix("迅雷から失敗の報告"))
         let detail = try #require(descendants(failed).compactMap { $0 as? MarkdownBodyView }.first)
         #expect(!detail.isHidden && detail.string.contains("未更新: B"))
         #expect(failed.height(for: 680) > 34 && detail.frame.maxY <= failed.height(for: 680))
         #expect(failed.statusPill.isHidden && failed.accent == Washi.red)
-        #expect(state.ai?.badges.contains("未読") == false)
         var resent: UUID?
         window.onResendAI = { resent = $0 }
         let retry = try #require(descendants(failed).compactMap { $0 as? NSButton }.first { $0.title == "再送" })
         retry.performClick(nil)
         // 再送は新規の問いではなく、元requestを渡して依頼を戻す。
         #expect(resent == request.id)
-        var read: [UUID] = []
-        window.onReadAI = { id in
-            read.append(id)
-            try! conversation.update(id) { $0.markRead() }
-            state.ai?.conversation = conversation; window.apply(state); content.layoutSubtreeIfNeeded()
-        }
-        failed.statusPill.performClick(nil)
-        #expect(read.isEmpty)
-        #expect(failed.statusPill.isHidden && state.ai?.badges.contains("未読") != true)
     }
 
     @Test func 送達不明は考え中を出さず送信の行から取り消せる() throws {

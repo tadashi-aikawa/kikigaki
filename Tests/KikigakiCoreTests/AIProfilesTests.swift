@@ -9,7 +9,7 @@ import Testing
         ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: home).aiProfiles
     }
 
-    // MARK: - 配列と単数の読み分け
+    // MARK: - 配列の読み込み
 
     @Test func 配列を順に読み1つ目を既定にする() throws {
         let profiles = try resolved("""
@@ -29,11 +29,11 @@ import Testing
         #expect(profiles[1].participantName == "ネオ")
     }
 
-    @Test func 単数の設定を1つのプロファイルとして互換で読む() throws {
-        let parsed = try ConfigLoader.parse(toml: "[ai]\naddress = \"迅雷へ\"")
-        #expect(parsed.ai?.isArrayForm == false)
-        let profiles = try resolved("[ai]\naddress = \"迅雷へ\"")
-        #expect(profiles.count == 1 && profiles[0].slot == 1 && profiles[0].name == "迅雷")
+    @Test func 単数の設定は書き方を示して拒否する() throws {
+        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "[ai]\naddress = \"迅雷へ\"") }
+        do { _ = try ConfigLoader.parse(toml: "[ai]\naddress = \"迅雷へ\"") } catch let ConfigError.invalid(description) {
+            #expect(description.contains("ai must be written as [[ai]]"))
+        }
     }
 
     /// docs/ai-profiles.md の設定例をそのまま通す。文書と実装のずれをここで落とす。
@@ -80,24 +80,6 @@ import Testing
 
     @Test func 空の配列を拒否する() throws {
         #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "ai = []") }
-    }
-
-    /// ホットキーは廃止した。どのプロファイルに書かれていても読み飛ばして通す。
-    @Test func 廃止したホットキーはどのプロファイルにあっても読み飛ばす() throws {
-        let profiles = try resolved("""
-        [[ai]]
-        name = "一"
-        [ai.hotkey]
-        modifiers = ["cmd", "shift"]
-        key = "j"
-
-        [[ai]]
-        name = "二"
-        [ai.hotkey]
-        modifiers = ["cmd", "shift"]
-        key = "j"
-        """)
-        #expect(profiles.map(\.name) == ["一", "二"])
     }
 
     // MARK: - effort
@@ -173,7 +155,7 @@ import Testing
     @Test(arguments: ["attach = true", "attach = false", "displayAgent = '迅雷'"])
     func 取り下げた接続の設定を拒否する(_ field: String) throws {
         #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "[[ai]]\nname = \"議事録\"\n" + field) }
-        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "[ai]\n" + field) }
+        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "[[ai]]\n" + field) }
     }
 
     @Test func cwdは起動時の作業ディレクトリのまま() throws {

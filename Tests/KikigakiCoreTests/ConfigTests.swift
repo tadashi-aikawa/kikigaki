@@ -92,32 +92,8 @@ import Testing
         #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "outputDir = \"meetings\"") }
     }
 
-    /// グローバルショートカットは廃止した。既存の設定ファイルを書き換えさせないため、
-    /// どんな `[hotkeys]` が書かれていても読み飛ばして通す。
-    @Test func 廃止したホットキーの設定は読み飛ばす() throws {
-        let toml = """
-            outputDir = "/meetings"
-
-            [hotkeys.toggleRecording]
-            modifiers = ["hyper"]
-            key = ""
-
-            [hotkeys.togglePause]
-            modifiers = ["hyper"]
-            key = ""
-            """
-        #expect(ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: home).outputDir.path == "/meetings")
-    }
-
     @Test func TOMLの文法エラーは不正() {
         #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "outputDir = ") }
-    }
-
-    @Test(arguments: ["true", "false", "\"true\"", "42", "1.5", "[]", "{ enabled = true }"])
-    func 廃止した相槌省略キーは値の型に関係なく読み飛ばす(_ value: String) throws {
-        let config = try ConfigLoader.parse(toml: "dropRepeatedBackchannels = \(value)\nsaveRecording = true")
-        #expect(config == KikigakiConfig(saveRecording: true))
-        #expect(ResolvedConfig(config: config, home: home).saveRecording)
     }
 
     @Test func ファイルがなければ既定設定() throws {

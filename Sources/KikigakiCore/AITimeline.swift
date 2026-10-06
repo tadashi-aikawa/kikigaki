@@ -45,7 +45,6 @@ public enum AITimeline {
         public let notes: [String]
         /// 送信の対象範囲。tooltipへ出す。
         public let timeRange: AIContextTimeRange?
-        public let isUnread: Bool
         public let needsAnswer: Bool
         /// 送信の行に取消を出すか。送達不明は返事の行を作らないので、ここでしか取り消せない。
         public let canCancel: Bool
@@ -97,7 +96,7 @@ public enum AITimeline {
                                automatic: automatic, kind: sendKind, anchor: sendAnchor,
                                slot: slot(for: sendAnchor, dates: dates, endedAt: endedAt), date: sendDate, durationSeconds: nil,
                                question: request.displayQuestion, parentNumber: parentNumber, body: "",
-                               notes: sendNotes, timeRange: request.timeRange, isUnread: false, needsAnswer: false,
+                               notes: sendNotes, timeRange: request.timeRange, needsAnswer: false,
                                // 送達不明は「考え中…」を出さないので、取消はこの行に置くしかない。
                                canCancel: question.state == .deliveryUnknown && question.isAwaitingResult),
                           rank: rank(sendAnchor), sortDate: sendDate, side: 0, order: request.number))
@@ -124,7 +123,7 @@ public enum AITimeline {
                                slot: slot(for: anchor, dates: dates, endedAt: endedAt),
                                date: waiting ? nil : arrival, durationSeconds: durationSeconds(for: question),
                                question: quote, parentNumber: parentNumber, body: question.result?.body ?? "",
-                               notes: notes, timeRange: request.timeRange, isUnread: question.isUnread,
+                               notes: notes, timeRange: request.timeRange,
                                needsAnswer: question.state == .needsInput
                                  && !AIQuestion.isAnswered(question, in: conversation.questions),
                                canCancel: false),

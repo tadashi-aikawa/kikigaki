@@ -214,7 +214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             home: FileManager.default.homeDirectoryForCurrentUser)
         do { try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true) }
         catch { Self.log("AI会議の登録先を作成できません") }
-        // herdrはPATHか既知の置き場で探し、設定 `[ai] herdrCommand` があればそれを使う(GUI起動のPATH不足への備え)。
+        // herdrはPATHか既知の置き場で探し、設定 `[[ai]]` の `herdrCommand` があればそれを使う(GUI起動のPATH不足への備え)。
         // adapterは全チャネルで共有するので、この設定はプロファイル共通で、不一致は設定エラーにしている。
         let aiStore = AIRecordStore(directory: support, makeHerdr: { [weak self] in
             AIHerdr(executable: try AIProcessRunner.executable(self?.config?.ai?.herdrCommand ?? "herdr"))
@@ -250,7 +250,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onScheduleAI = { [weak self] in self?.showScheduleSheet() }
         window.onStopScheduleAI = { [weak session] in session?.stopAISchedule() }
         window.onFireScheduleAI = { [weak session] in session?.fireAIScheduleNow() }
-        window.onReadAI = { session.readAI($0) }
         window.onCancelAI = { session.cancelAI($0) }
         window.onOpenAIPane = { session.showAIPane() }
         window.onRecreateAI = { session.recreateAI() }

@@ -4,21 +4,6 @@ import KikigakiCore
 /// 返事を1つのtextStorageに載せ、コード・表を跨ぐ選択とコピーを保つ。
 /// NSTextTableを使うためTextKit 1を明示し、計測も表示と同じlayoutManagerで行う。
 final class MarkdownBodyView: NSTextView {
-    var onClick: (() -> Void)?
-
-    override func mouseDown(with event: NSEvent) {
-        super.mouseDown(with: event)
-        // 選択の追跡を終えてから既読を保存する。ピルが消える再レイアウトで
-        // ドラッグ選択の開始位置が動かないようにする。
-        onClick?()
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        guard let onClick else { return false }
-        onClick()
-        return true
-    }
-
     private var source: String?
     private var measuredWidth: CGFloat?
     private var measuredHeight: CGFloat = 0
@@ -61,7 +46,7 @@ final class MarkdownBodyView: NSTextView {
     }
 
     func update(_ markdown: String) {
-        // 既読化・改名・録音の進行では文字列を差し替えず、選択とスクロール位置を保つ。
+        // 改名・録音の進行では文字列を差し替えず、選択とスクロール位置を保つ。
         guard source != markdown else { return }
         source = markdown
         textStorage?.setAttributedString(MarkdownBodyRenderer.render(MarkdownBlocks.parse(markdown)))

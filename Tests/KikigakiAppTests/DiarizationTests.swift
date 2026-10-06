@@ -195,7 +195,7 @@ import KikigakiCore
             func stop() {}
         }
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
-        var settings = try ConfigLoader.parse(toml: "outputDir = \"\(root.path)\"\ndropRepeatedBackchannels = true")
+        var settings = try ConfigLoader.parse(toml: "outputDir = \"\(root.path)\"")
         settings.saveRecording = false
         var modelCalls = 0
         let session = MeetingSession(config: ResolvedConfig(config: settings), models: {

@@ -330,7 +330,6 @@ final class AIConversationController {
     }
 
     func cancel(_ id: UUID) throws { try change(id) { try $0.cancel(at: Date()) } }
-    func markRead(_ id: UUID) throws { try change(id) { $0.markRead() } }
     func fail(_ id: UUID, reason: String) throws { try change(id) { try $0.failBeforeSending(reason) } }
     private func change(_ id: UUID, body: (inout AIQuestion) throws -> Void) throws {
         var next = conversation; try next.update(id, body); try commit(next); onChange?()

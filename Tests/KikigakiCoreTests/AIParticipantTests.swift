@@ -44,7 +44,7 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
 
     @Test func 未設定は無効で空テーブルは既定値で有効() throws {
         #expect(try ConfigLoader.parse(toml: "").ai == nil)
-        let config = try ConfigLoader.parse(toml: "[ai]")
+        let config = try ConfigLoader.parse(toml: "[[ai]]")
         let resolved = ResolvedConfig(config: config, home: URL(fileURLWithPath: "/home/test"))
         #expect(resolved.ai?.cli == .codex)
         #expect(resolved.ai?.participantName == "迅雷")
@@ -54,7 +54,7 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
 
     @Test func 設定を全項目解釈しホームを引数から解決する() throws {
         let parsed = try ConfigLoader.parse(toml: """
-        [ai]
+        [[ai]]
         cli = "claude"
         command = "/test/Claude Code"
         model = "test-model"
@@ -75,33 +75,13 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
     @Test(arguments: ["cli = 'unknown'", "command = 'codex'", "cwd = './work'", "model = ''", "address = 'へ'",
                       "notifySound = 'yes'", "extraArgs = ['--model=x']"])
     func 不正設定を拒否する(_ field: String) throws {
-        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "[ai]\n" + field) }
+        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "[[ai]]\n" + field) }
     }
 
     @Test func 改行とサイズ超過を拒否する() throws {
         #expect(throws: ConfigError.self) { try AIConfig(address: "人\n名").validate() }
         #expect(throws: ConfigError.self) { try AIConfig(address: " へ ").validate() }
         #expect(throws: ConfigError.self) { try AIConfig(prompt: String(repeating: "あ", count: 10923)).validate() }
-    }
-
-    /// ホットキーは廃止した。古い設定ファイルを書き換えさせないため、読み飛ばして通す。
-    @Test func 廃止したホットキーの設定は読み飛ばす() throws {
-        let parsed = try ConfigLoader.parse(toml: """
-        [hotkeys.toggleRecording]
-        modifiers = ["cmd", "shift"]
-        key = "f18"
-
-        [hotkeys.togglePause]
-        modifiers = ["invalid"]
-        key = ""
-
-        [ai]
-        address = "迅雷へ"
-        [ai.hotkey]
-        modifiers = ["control", "option", "command"]
-        key = "K"
-        """)
-        #expect(ResolvedConfig(config: parsed).ai?.participantName == "迅雷")
     }
 
     @Test(arguments: ["--settings=x", "--setting-sources=user", "--safe-mode", "--bare", "--bg", "-p", "--resume=x", "--model=x", "--", "prompt"])
@@ -404,12 +384,10 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         #expect(q.state == .deliveryUnknown)
         let answer = try AIReceiveEvent(request: r, kind: .answered, recordedAt: epoch, body: "回答")
         try q.receive(answer, at: epoch, order: 1)
-        #expect(q.state == .answered && q.contextReceived && q.isUnread)
+        #expect(q.state == .answered && q.contextReceived)
         try q.submitted()
         try q.receive(AIReceiveEvent(request: r, kind: .accept, recordedAt: epoch), at: epoch, order: 2)
         #expect(q.state == .answered)
-        q.markRead()
-        #expect(!q.isUnread)
     }
 
     @Test func 同本文の再送は時刻が違っても二重追加せず異本文を拒否() throws {
@@ -419,10 +397,8 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         try conversation.update(r.id) { try $0.beginSending(at: epoch) }
         let first = try AIReceiveEvent(request: r, kind: .answered, recordedAt: epoch, body: "先の回答")
         #expect(try conversation.receive(first, at: epoch))
-        try conversation.update(r.id) { $0.markRead() }
         let same = try AIReceiveEvent(request: r, kind: .answered, recordedAt: epoch.addingTimeInterval(5), body: "先の回答")
         #expect(try !conversation.receive(same, at: epoch))
-        #expect(!conversation.questions[0].isUnread)
         let different = try AIReceiveEvent(request: r, kind: .answered, recordedAt: epoch, body: "別の回答")
         #expect(throws: AIError.conflict) { try conversation.receive(different, at: epoch) }
         #expect(conversation.questions[0].result == first)

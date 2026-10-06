@@ -47,7 +47,7 @@ import KikigakiCore
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr()
         let config = ResolvedConfig(config: try ConfigLoader.parse(toml: """
-        [ai]
+        [[ai]]
         command = "/bin/echo"
         cwd = "\(root.path)"
         """), home: root)

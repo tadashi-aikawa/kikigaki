@@ -195,7 +195,7 @@ final class MeetingSession {
     var aiConfiguration: ResolvedAIConfig? { meetingAI }
     /// 自動送信の宛先。手動と独立に覚えるので、手動をBへ変えても自動はAのままにする
     var aiScheduleConfiguration: ResolvedAIConfig? { scheduleAI }
-    /// ホットキーと共通設定を引く先。宛先の選択では動かない
+    /// 共通設定を引く先。宛先の選択では動かない
     var aiPrimaryConfiguration: ResolvedAIConfig? { meetingAIProfiles.first }
 
     /// 宛先を選び直す。会議の固定プロファイルとその場限りの接続先だけを受け付ける。
@@ -779,7 +779,6 @@ final class MeetingSession {
         } catch { aiWarning = "取消を保存できません" }
         emit()
     }
-    func readAI(_ id: UUID) { do { try aiRecord?.controller.markRead(id) } catch { aiWarning = "既読を保存できません" }; emit() }
     func recreateAI() {
         do { try aiRecord?.controller.newGeneration(slot: meetingAI?.slot); aiWarning = nil }
         catch { aiWarning = "接続を作り直せません" }

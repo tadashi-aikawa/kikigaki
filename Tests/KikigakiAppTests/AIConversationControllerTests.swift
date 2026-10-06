@@ -238,8 +238,6 @@ import KikigakiAIIO
         #expect(recovered.conversation == state)
         #expect(!recovered.canSend && recovered.connection == nil)
         #expect(throws: AIHerdrError.notReady) { try prepare(recovered, config) }
-        try recovered.markRead(request.id)
-        #expect(!recovered.conversation.questions[0].isUnread)
     }
     @Test func 回答は質問順でなく保存時刻順に取り込む() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }

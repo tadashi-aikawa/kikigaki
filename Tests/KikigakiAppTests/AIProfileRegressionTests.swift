@@ -209,7 +209,7 @@ import KikigakiAIIO
         let decoded = try AIJSON.decode(ResolvedAIConfig.self, from: Data(legacy.utf8))
         #expect(decoded.name == long && decoded.participantName == long)
         // 設定として同じ宛名を書いても解析でき、往復しても壊れない。
-        let parsed = ResolvedConfig(config: try ConfigLoader.parse(toml: "[ai]\naddress = \"\(long)へ\""),
+        let parsed = ResolvedConfig(config: try ConfigLoader.parse(toml: "[[ai]]\naddress = \"\(long)へ\""),
                                     home: URL(fileURLWithPath: "/home/person")).aiProfiles[0]
         #expect(try AIJSON.decode(ResolvedAIConfig.self, from: AIJSON.encode(parsed)) == parsed)
         // 明示した長い name は今までどおり拒否する。

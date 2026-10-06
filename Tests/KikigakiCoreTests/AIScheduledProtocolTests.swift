@@ -5,17 +5,17 @@ import KikigakiCore
 @Suite struct AIScheduledProtocolTests {
     @Test func 設定と旧manifestの既定を検証する() throws {
         let home = URL(fileURLWithPath: "/tmp/scheduled")
-        let defaults = try #require(ResolvedConfig(config: ConfigLoader.parse(toml: "[ai]"), home: home).ai)
+        let defaults = try #require(ResolvedConfig(config: ConfigLoader.parse(toml: "[[ai]]"), home: home).ai)
         #expect(defaults.autoPrompt == "" && defaults.autoIntervalMinutes == 3)
         for minutes in [1, 7, 60] {
-            let config = try #require(ResolvedConfig(config: ConfigLoader.parse(toml: "[ai]\nautoPrompt = '議事録を更新'\nautoIntervalMinutes = \(minutes)"), home: home).ai)
+            let config = try #require(ResolvedConfig(config: ConfigLoader.parse(toml: "[[ai]]\nautoPrompt = '議事録を更新'\nautoIntervalMinutes = \(minutes)"), home: home).ai)
             let restored = try AIJSON.decode(ResolvedAIConfig.self, from: AIJSON.encode(config))
             #expect(restored.autoIntervalMinutes == minutes && restored.autoPrompt == "議事録を更新")
         }
         for value in ["0", "61", "-1", "1.5", "'3'", "true"] {
-            #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: "[ai]\nautoIntervalMinutes = \(value)") }
+            #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: "[[ai]]\nautoIntervalMinutes = \(value)") }
         }
-        #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: "[ai]\nautoPrompt = 3") }
+        #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: "[[ai]]\nautoPrompt = 3") }
         #expect(throws: (any Error).self) { try AIConfig(autoPrompt: "a\0").validate() }
         #expect(throws: (any Error).self) { try AIConfig(autoPrompt: String(repeating: "あ", count: 11_000)).validate() }
         var old = try #require(JSONSerialization.jsonObject(with: AIJSON.encode(defaults)) as? [String: Any])
@@ -52,7 +52,7 @@ import KikigakiCore
     }
 
     @Test(arguments: [AIReceiveEvent.Kind.answered, .needsInput, .failed])
-    func 自動を含む全返事の未読を保存の往復でも保持する(kind: AIReceiveEvent.Kind) throws {
+    func 自動を含む全返事を保存の往復でも保持する(kind: AIReceiveEvent.Kind) throws {
         for trigger: AIParticipantContext.Trigger? in [nil, .scheduled] {
             let request = try request(trigger: trigger)
             var conversation = AIConversation(meetingID: request.envelope.meetingID)
@@ -62,8 +62,19 @@ import KikigakiCore
                                        reason: kind == .needsInput ? "clarification" : kind == .failed ? "work_failed" : nil)
             _ = try conversation.receive(event, at: Date())
             let restored = try AIJSON.decode(AIConversation.self, from: AIJSON.encode(conversation))
-            #expect(restored.questions[0].isUnread)
+            #expect(restored.questions[0].result?.body == "結果" && restored.questions[0].state == conversation.questions[0].state)
             #expect(AIMarkdown.section(restored).contains(" (自動)") == (trigger == .scheduled))
         }
+    }
+
+    @Test func 旧版が保存した既読情報が残っていても読める() throws {
+        let request = try request(trigger: nil)
+        var conversation = AIConversation(meetingID: request.envelope.meetingID)
+        try conversation.append(request)
+        var json = try #require(JSONSerialization.jsonObject(with: AIJSON.encode(conversation)) as? [String: Any])
+        var questions = try #require(json["questions"] as? [[String: Any]])
+        questions[0]["isUnread"] = true; json["questions"] = questions
+        let restored = try AIJSON.decode(AIConversation.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(restored.questions.map(\.request.id) == [request.id])
     }
 }

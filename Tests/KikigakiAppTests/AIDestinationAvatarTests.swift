@@ -19,8 +19,8 @@ import KikigakiCore
     @Test func 会議の固定プロファイルから宛先へ画像パスを渡す() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let config = ResolvedConfig(config: try ConfigLoader.parse(toml: """
-        [ai]
-        avatar = "/tmp/avatar.png"
+        [[ai]]
+        avatar ="/tmp/avatar.png"
         """), home: root)
         let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config,
                                      aiStore: AIRecordStore(directory: root))

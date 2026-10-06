@@ -5,16 +5,16 @@ import KikigakiCore
 @Suite struct AIWorkPermissionTests {
     @Test func 作業許可の既定は有効で設定と旧会議の互換を保つ() throws {
         let home = URL(fileURLWithPath: "/tmp/work-permission")
-        let defaults = ResolvedConfig(config: try ConfigLoader.parse(toml: "[ai]"), home: home)
+        let defaults = ResolvedConfig(config: try ConfigLoader.parse(toml: "[[ai]]"), home: home)
         #expect(defaults.ai?.allowWork == true)
-        let disabled = ResolvedConfig(config: try ConfigLoader.parse(toml: "[ai]\nallowWork = false"), home: home)
+        let disabled = ResolvedConfig(config: try ConfigLoader.parse(toml: "[[ai]]\nallowWork = false"), home: home)
         #expect(disabled.ai?.allowWork == false)
         let config = try #require(disabled.ai)
         #expect(try AIJSON.decode(ResolvedAIConfig.self, from: AIJSON.encode(config)).allowWork == false)
         var old = try #require(JSONSerialization.jsonObject(with: AIJSON.encode(config)) as? [String: Any])
         old.removeValue(forKey: "allowWork")
         #expect(try AIJSON.decode(ResolvedAIConfig.self, from: JSONSerialization.data(withJSONObject: old)).allowWork)
-        #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: "[ai]\nallowWork = \"false\"") }
+        #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: "[[ai]]\nallowWork = \"false\"") }
     }
     @Test(arguments: [false, true]) func envelopeとMarkdownへ質問ごとの作業許可を固定する(allowed: Bool) throws {
         let root = URL(fileURLWithPath: "/tmp/work-permission"), meeting = UUID()

@@ -74,7 +74,7 @@ import KikigakiCore
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr()
-        let list = try profiles(root, toml: "[ai]\ncommand = \"/bin/echo\"\ncwd = \"\(root.path)\"")
+        let list = try profiles(root, toml: "[[ai]]\ncommand = \"/bin/echo\"\ncwd = \"\(root.path)\"")
         let session = session(root, profiles: list, fake: fake)
         try await submit(session, profile: list[0])
         let request = try #require(session.aiRecord?.controller.conversation.questions.first?.request)

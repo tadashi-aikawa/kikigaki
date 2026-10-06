@@ -17,7 +17,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onFireScheduleAI: (() -> Void)?
     let compactFooter = AICompactFooter()
     private let recordingRange = Washi.label(size: 11, color: Washi.muted)
-    var onReadAI: ((UUID) -> Void)?
     var onOpenAIPane: (() -> Void)?
     var onCancelAI: ((UUID) -> Void)?
     /// 失敗した依頼を送り直す。元requestを渡し、送信文・宛先・親・作業許可を戻したシートを開く。
@@ -555,7 +554,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         if let reply = view as? AIReplyRow {
             reply.updateProgress(aiProgress[id], reduceMotion: shouldReduceMotion())
             reply.updateAvatar(store: avatars)
-            reply.onRead = { [weak self] in self?.onReadAI?(id) }
             reply.onReply = { [weak self] in self?.onAskAI?(id) }
             reply.onCancel = { [weak self] in self?.onCancelAI?(id) }
             reply.onRetry = { [weak self] in self?.onResendAI?(id) }

@@ -18,7 +18,7 @@ public enum CodexUserConfig {
     }
 }
 
-/// nilと空の[ai]を区別する。環境のPATH探索・実行可能性・ディレクトリ存在確認はアプリ側。
+/// nilと空の[[ai]]を区別する。環境のPATH探索・実行可能性・ディレクトリ存在確認はアプリ側。
 public struct AIConfig: Codable, Equatable, Sendable {
     /// プロファイルの表示名。省略時は address から導く参加者名を使う
     public var name: String?
@@ -134,27 +134,25 @@ public struct AIConfig: Codable, Equatable, Sendable {
     }
 }
 
-/// 単数の `[ai]` と配列の `[[ai]]` を同じ型で読む。並び順が既定の優先順位になり、1つ目が既定。
+/// 配列の `[[ai]]` を読む。並び順が既定の優先順位になり、1つ目が既定。
 public struct AIProfileList: Codable, Equatable, Sendable {
     public var profiles: [AIConfig]
-    /// 配列表記で書かれたか。単数表記の互換読みと区別して診断へ出す
-    public let isArrayForm: Bool
     public var first: AIConfig? { profiles.first }
 
-    public init(_ profiles: [AIConfig], isArrayForm: Bool = true) {
-        self.profiles = profiles; self.isArrayForm = isArrayForm
-    }
+    public init(_ profiles: [AIConfig]) { self.profiles = profiles }
 
     public init(from decoder: any Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        // 単数のテーブルは全キーが省略可能なので配列としては復号できない。配列を先に試す。
-        if let list = try? container.decode([AIConfig].self) { profiles = list; isArrayForm = true }
-        else { profiles = [try container.decode(AIConfig.self)]; isArrayForm = false }
+        // 単数の `[ai]` は受け付けない。型の不一致のままだと直し方が伝わらないので書き方を示す。
+        guard (try? decoder.unkeyedContainer()) != nil else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                    debugDescription: "ai must be written as [[ai]]"))
+        }
+        profiles = try decoder.singleValueContainer().decode([AIConfig].self)
     }
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.singleValueContainer()
-        if isArrayForm { try container.encode(profiles) } else { try container.encode(profiles.first) }
+        try container.encode(profiles)
     }
 
     public func validate() throws {
@@ -162,7 +160,7 @@ public struct AIProfileList: Codable, Equatable, Sendable {
         guard !profiles.isEmpty else { throw invalid("must contain at least one profile") }
         var names = Set<String>()
         for (index, profile) in profiles.enumerated() {
-            try profile.validate(label: isArrayForm ? "ai[\(index)]" : "ai")
+            try profile.validate(label: "ai[\(index)]")
             // boardの重複は許す。自動送信は会議に1つで、会議の見出しは初回の自動送信で固定し異なる見出しだけを拒否する。
             // 同じ見出しを複数の宛先に持たせれば、会議の途中で担当のAIを替えても同じボードを更新し続けられる。
             guard names.insert(profile.resolvedName).inserted else {

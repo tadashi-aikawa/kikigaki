@@ -109,13 +109,13 @@ tick時に差分を確認し、既存の3秒確定待ちを終えた `capture.li
 
 送達不明は既存の `isAwaitingResult` により次の送信を止める。3回に到達するための自動取消・自動再送・世代再作成はしない。prepare前の保存失敗などrequestがない障害は既存の警告で示し、failedの架空requestを作らない。
 
-## Envelope・未読・保存
+## Envelope・保存
 
 `AIParticipantContext` に `Trigger.scheduled` の任意キー `trigger` を追加する。手動はキーを省略、旧データの欠損は手動。値の型違いと未知の値は拒否する。トップレベルとparticipantのschema_versionは1を維持する。自動プロンプトは非空なので `question_source` はtyped。triggerは起動原因、question_sourceは問いの由来として分ける。
 
 `AIRequest.trigger` は保存済みenvelopeから参照し、同じ値を別保存して不整合を作らない。確認への手動返答はtriggerを継承しない。送信印の表題を「#3 迅雷へ · 自動」、会議Markdownの送信時刻行・送信印へ「(自動)」を添える。詳細と原文の保存は維持する。
 
-`AIQuestion` の既読情報は保存形式の互換性のため保持する。画面の表示・集計では参照せず、本文クリックでも書き換えない。needs_inputの要返答バッジは返答まで残す。通知音の対象は従来どおりで、自動answeredは鳴らさない。
+`AIQuestion` は既読情報を持たない。旧版が保存した `isUnread` は読み飛ばす。needs_inputの要返答バッジは返答まで残す。通知音の対象は従来どおりで、自動answeredは鳴らさない。
 
 ## 配布用Skillとreplay
 

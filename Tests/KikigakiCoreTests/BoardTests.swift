@@ -39,7 +39,7 @@ import Testing
         let location = "~/Documents/minutes/${yyyyMMdd_HHmmss}.md として作成し、変数は現在日時"
         for custom: String? in [nil, "独自のボード"] {
             let parsed = try ConfigLoader.parse(toml: """
-            [ai]
+            [[ai]]
             board = '## ボード'
             boardLocation = '\(location)'
             \(custom.map { "boardPrompt = '\($0)'" } ?? "")
@@ -52,8 +52,8 @@ import Testing
         }
     }
     @Test func 書き先指示の孤立と不正値と組み立て後の上限を拒否する() {
-        for toml in ["[ai]\nboardLocation = '作成'", "[ai]\nboard = '## ボード'\nboardLocation = 1",
-                     "[ai]\nboard = '## ボード'\nboardLocation = ''", "[ai]\nboard = '## ボード'\nboardLocation = '  '"] {
+        for toml in ["[[ai]]\nboardLocation = '作成'", "[[ai]]\nboard = '## ボード'\nboardLocation = 1",
+                     "[[ai]]\nboard = '## ボード'\nboardLocation = ''", "[[ai]]\nboard = '## ボード'\nboardLocation = '  '"] {
             #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: toml) }
         }
         #expect(throws: (any Error).self) { try AIConfig(board: "## ボード", boardLocation: "\0").validate() }
@@ -105,7 +105,7 @@ import Testing
         #expect(throws: (any Error).self) { try AIConfig(board: heading).validate() }
     }
     @Test func 設定の孤立プロンプトと型違いを拒否する() {
-        for toml in ["[ai]\nboardPrompt = '更新'", "[ai]\nboard = 3", "[ai]\nboard = '## ボード'\nboardPrompt = ''"] {
+        for toml in ["[[ai]]\nboardPrompt = '更新'", "[[ai]]\nboard = 3", "[[ai]]\nboard = '## ボード'\nboardPrompt = ''"] {
             #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: toml) }
         }
     }

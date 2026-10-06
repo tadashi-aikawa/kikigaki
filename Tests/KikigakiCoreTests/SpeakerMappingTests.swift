@@ -18,9 +18,4 @@ import Testing
         mapping.overrides[2] = nil
         #expect(mapping.destination(for: 2) == 2)
     }
-
-    @Test func 廃止した人数上限が設定に残っていても読み込める() throws {
-        let config = try ConfigLoader.parse(toml: "maxSpeakers = 2\nsaveRecording = true")
-        #expect(ResolvedConfig(config: config).saveRecording)
-    }
 }

@@ -56,7 +56,7 @@ import KikigakiCore
 
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
 
-    @Test func 返事全体を選択でき幅の往復と既読更新で選択と高さを保つ() throws {
+    @Test func 返事全体を選択でき幅の往復で選択と高さを保つ() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -87,13 +87,8 @@ import KikigakiCore
         let content = try #require(window.contentView)
         controller.apply(state); content.layoutSubtreeIfNeeded()
         let row = try #require(controller.transcriptDocument.rows.compactMap { $0 as? AIReplyRow }.first)
-        controller.onReadAI = { id in
-            try! conversation.update(id) { $0.markRead() }
-            state.ai?.conversation = conversation
-            controller.apply(state)
-        }
-        // 展開は既定なので開く操作はない。未読の印を押して既読にする。
-        row.onRead?(); content.layoutSubtreeIfNeeded()
+        // 展開は既定なので開く操作はない。
+        content.layoutSubtreeIfNeeded()
         let body = try #require(descendants(row).compactMap { $0 as? MarkdownBodyView }.first)
         #expect(descendants(row).compactMap { $0 as? NSTextView }.count == 1)
         #expect(!body.isEditable && body.isSelectable)
