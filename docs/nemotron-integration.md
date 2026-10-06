@@ -32,7 +32,7 @@
 - 取得先は `~/Library/Application Support/FluidAudio/Models/nemotron-3-diarization`。fast128 だけを取得し、約193MB
 - 先読みと開始は `AppDelegate.loadModels` の1つの Task を共有する
     - 同じ置き場へ並行して取得すると `.partial` の移動で失敗する。実モデルのテストで観測した
-- 旧 `sortformer` のモデルはアプリから消さない。README に場所だけ書いた
+- 旧 `sortformer` のモデルはアプリから消さない。場所は `~/Library/Application Support/FluidAudio/Models/sortformer`
 
 ## 話者判別ラッパー
 
