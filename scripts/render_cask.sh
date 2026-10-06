@@ -26,6 +26,9 @@ cask "kikigaki" do
   depends_on macos: :tahoe
 
   app "KIKIGAKI.app"
+  # 同梱CLIをPATHへ通す。利用者が打つのは skill install / uninstall だけで、AIの返送は
+  # アプリが渡す絶対パスで動くので、このリンクが無くても会議参加は成立する。
+  binary "#{appdir}/KIKIGAKI.app/Contents/Helpers/kikigaki-cli"
 
   # 自己署名(未公証)のため quarantine を外さないと Gatekeeper にブロックされる。
   # 公式 tap では禁止されている手法だが、自前 tap なので postflight_steps で除去する。
@@ -44,7 +47,7 @@ cask "kikigaki" do
     会議へ AI を参加させる場合は、同梱の Skill を次のコマンドで導入してください。
     ~/.claude/skills/kikigaki と ~/.codex/skills/kikigaki へリンクします。
     既に同名のファイルがある場合は触りません。一度実行すれば brew upgrade 後も更新が届きます。
-      "#{appdir}/KIKIGAKI.app/Contents/Helpers/kikigaki-cli" skill install
+      kikigaki-cli skill install
   EOS
 end
 EOF

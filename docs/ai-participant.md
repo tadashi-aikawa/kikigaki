@@ -188,7 +188,7 @@ archiveは録音停止時と停止後の改名・統合時だけに更新し、�
 
 ## 同梱CLI
 
-実行ファイル名は `kikigaki-cli`、配置は `.app/Contents/Helpers/kikigaki-cli`。アプリが実際のbundleパスから絶対パスを作り、envelopeとフックへ渡す。PATHへのインストールは不要。アプリ更新時もプロトコル版1を読めることを後続の互換条件にする。
+実行ファイル名は `kikigaki-cli`、配置は `.app/Contents/Helpers/kikigaki-cli`。アプリが実際のbundleパスから絶対パスを作り、envelopeとフックへ渡す。返送にPATHは要らない。Caskの `binary` がPATHへ通すのは、利用者が `skill install` を打つためだけである。アプリ更新時もプロトコル版1を読めることを後続の互換条件にする。
 
 | コマンド | 入力と効果 |
 | --- | --- |
@@ -217,7 +217,7 @@ replyは通常 `context_received: true`。文脈を読めなかったcontext_mis
 
 - 同名のファイルがあれば触らない。cloneしたリポジトリへリンクを張って開発している利用者の編集対象を奪わないためである。
 - `skill uninstall` で外すのは、参照先が `KIKIGAKI.app/Contents/Resources/skills/kikigaki` で終わるリンクだけとする。
-- Caskはリンクに関与せず、caveatsでコマンドを案内する。Homebrew 7は `postflight_steps` をHOMEを一時ディレクトリへ差し替えたsandboxで走らせ、`~/.claude` の読み取りも禁じるため、Cask側からリンクを張れない。
+- CaskはSkillのリンクに関与せず、`binary` で `kikigaki-cli` をPATHへ通してcaveatsでコマンドを案内する。Homebrew 7は `postflight_steps` をHOMEを一時ディレクトリへ差し替えたsandboxで走らせ、`~/.claude` の読み取りも禁じるため、Cask側からリンクを張れない。
 
 ## フックと返し忘れ
 

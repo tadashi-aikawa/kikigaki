@@ -85,12 +85,12 @@ herdrと、CodexまたはClaude Codeが必要です。
 1. AIが会話を受け取るためのSkillを導入します。
 
     ```bash
-    /Applications/KIKIGAKI.app/Contents/Helpers/kikigaki-cli skill install
+    kikigaki-cli skill install
     ```
 
     - `~/.claude/skills/kikigaki` と `~/.codex/skills/kikigaki` へ、アプリ内のSkillを指すリンクを張ります。一度実行すれば、アプリの更新後も新しいSkillが届きます。
     - 同名のファイルが既にある場合は上書きしません。
-    - `kikigaki-cli` はPATHへ追加されません。上の絶対パスで実行してください。
+    - `kikigaki-cli` はHomebrewでの導入時にPATHへ通ります。
 
 2. 設定へ宛先を追加します。
 
