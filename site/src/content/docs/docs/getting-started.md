@@ -11,7 +11,7 @@ KIKIGAKIを入れて、会議やひとりの声を録音する準備をします
 - macOS 26以降
 - マイクへのアクセス許可
 - 初回のネットワーク接続
-    - 話者判別のモデルをダウンロードします。約193 MBです
+    - 話者判別モデル(Nemotron 3 Diarization)をダウンロードします
     - Apple Speechの日本語アセットがまだ無ければ、それもダウンロードします
 
 ## インストール
@@ -72,11 +72,10 @@ KIKIGAKIは2つのモデルを使います。
 
 - 話者判別を使う設定なら、アプリの起動時からモデルを読み込みます
 - ダウンロードが終わる前に録音を始めると、「準備中」のまま待ちます
-- 話者判別を「区別しない」で使う会議では、話者判別モデルを読み込みません
+- 話者判別を「区別しない」で使う会議では、話者判別モデル(Nemotron 3 Diarization)を読み込みません
 - ダウンロードのために、音声や書き起こしを送ることはありません
 
 話者判別モデルは [Nemotron 3 Diarization](https://huggingface.co/FluidInference/nemotron-3-diarization-coreml) です。
-利用条件は [OpenMDW License Agreement 1.1](https://openmdw.ai/license/1-1/) で、商用利用もできます。
 
 ## 最初の録音
 
