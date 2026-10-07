@@ -6,6 +6,8 @@
 
 会議の発話を聴いて、話者付きでリアルタイムに文字起こしし、Markdownで残すmacOSアプリです。
 
+[サイト](https://tadashi-aikawa.github.io/kikigaki/) / [ドキュメント](https://tadashi-aikawa.github.io/kikigaki/docs/getting-started/)
+
 ## できること
 
 - マイクの音声を端末内で文字起こし

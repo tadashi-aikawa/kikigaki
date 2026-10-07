@@ -44,6 +44,11 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 - `Resources/`: アプリバンドル用の Info.plist。マイクの `NSMicrophoneUsageDescription`、システム音声の `NSAudioCaptureUsageDescription`、URLスキームの `CFBundleURLTypes` を含む
 - `skills/kikigaki/`: AI参加者用の配布Skill。`.app` へ同梱し、同梱CLIの `skill install` が利用者のSkill置き場へリンクする
 - `web/minutes/`: 議事録の描画資産のソース。再生成は [議事録の描画と検索](docs/minutes-rendering.md)
+- `site/`: 利用者向けのサイト。Astro 1本で、トップのティザーは `src/pages/index.astro`、ドキュメントはStarlightで `src/content/docs/docs/` に置く
+  - 配信先はGitHub Pagesの `https://tadashi-aikawa.github.io/kikigaki/`。ドキュメントは `/kikigaki/docs/` 以下
+  - ビルドは `pnpm --dir site install --frozen-lockfile` と `pnpm --dir site build`。mainへのpushで `.github/workflows/pages.yml` が配備する
+  - デモ動画は `public/demos/<名前>.mp4` に置くとティザーに出る。無ければ枠ごと出さない
+  - ドキュメントは `docs/` の正本を利用者の言葉で書き直したもの。仕様を変えたら該当ページも直す
 - `experiments/nemotron/`: 話者判別モデルの比較用の独立CLI。アプリにはエンジンの切替を置かない
 - `experiments/system-audio/`: システム音声とマイクの同時取り込みを検証する独立CLI。検証記録は [システム音声取り込みの実現性試作](docs/records/system-audio-spike.md)
 - `scripts/`: アプリバンドル組み立て・リリース成果物・Cask・tap更新
