@@ -162,6 +162,6 @@ Claudeの同梱CLI限定allowは維持し、cwd外の編集は利用者の権限
 `outputDir` 外で、cwdや利用者の既存許可にも含まれない場所への書き込みは、CLIの承認の仕組み(Codexのサンドボックス外への昇格要求、Claudeの編集の承認待ち)に委ねる。利用者がペインで承認すれば保存は成功し、拒否されたときだけ `work_failed` で見える。Skillには「許可の範囲を先読みして諦めず、まず保存を試みる」と書く。場所を選ぶ操作は無条件の書き込み権限の付与ではない。
     - 経緯: 初版のSkillは「許可外なら `work_failed` を返す」と読める文言で、AIが保存を試みる前に諦め、機能追加前には承認経由で書けていた `~/Documents/minutes` へ書けなくなった
 
-この制約は `CLAUDE.md` の「変える前に知っておくこと」とREADMEの関連箇所にも記載している。
+この制約は `CLAUDE.md` の「変える前に知っておくこと」と、利用者向けサイトの `site/src/content/docs/docs/data.md` にも記載している。
 
 設計時の段ごとの検証とレビューの記録は [議事録プレビューの実装記録](records/minutes-preview-implementation.md) を参照する。

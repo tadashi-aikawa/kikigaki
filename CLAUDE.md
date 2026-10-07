@@ -96,7 +96,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 
 | `site/` のページ | 元になる正本 |
 | --- | --- |
-| `getting-started.md` | README の導入、[Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md) のモデル取得 |
+| `getting-started.md` | `site/` が正本。モデル取得は [Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md) |
 | `recording.md` | [録音開始シート](docs/start-sheet.md)、[発話の確定表示](docs/utterance-progress.md)、[話者判別の切替](docs/diarization-toggle.md)、[話者の手動統合](docs/speaker-mapping.md)、[小音量発話の除外](docs/audio-exclusion.md)、[手入力の設計](docs/typed-entry.md)、[書き起こしウィンドウ](docs/transcript-window.md) |
 | `online-meetings.md` | [システム音声の取り込み](docs/system-audio.md) |
 | `ai-participant.md` | [AI参加者の設計](docs/ai-participant.md)、[AI設定の複数プロファイル](docs/ai-profiles.md)、[AIへの定期自動送信](docs/ai-scheduled.md)、[AIを会話の参加者として並べる](docs/ai-timeline.md)、[AIへの受け渡し](docs/ai-handoff.md) |
