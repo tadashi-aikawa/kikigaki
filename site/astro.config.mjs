@@ -66,7 +66,7 @@ export default defineConfig({
       sidebar: [
         { label: "はじめに・インストール", slug: "docs/getting-started" },
         { label: "録音と書き起こし", slug: "docs/recording" },
-        { label: "オンライン会議で相手の声を取り込む", slug: "docs/online-meetings" },
+        { label: "オンライン会議で使う", slug: "docs/online-meetings" },
         { label: "AIエージェントを会議に参加させる", slug: "docs/ai-participant" },
         { label: "議事録とボード", slug: "docs/minutes-and-board" },
         { label: "データの行き先", slug: "docs/data" },

@@ -99,7 +99,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | --- | --- |
 | `getting-started.md` はじめに・インストール | README の導入、[Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md) のモデル取得 |
 | `recording.md` 録音と書き起こし | [録音開始シート](docs/start-sheet.md)、[発話の確定表示](docs/utterance-progress.md)、[話者判別の切替](docs/diarization-toggle.md)、[話者の手動統合](docs/speaker-mapping.md)、[小音量発話の除外](docs/audio-exclusion.md)、[手入力の設計](docs/typed-entry.md)、[書き起こしウィンドウ](docs/transcript-window.md) |
-| `online-meetings.md` オンライン会議で相手の声を取り込む | [システム音声の取り込み](docs/system-audio.md) |
+| `online-meetings.md` オンライン会議で使う | [システム音声の取り込み](docs/system-audio.md) |
 | `ai-participant.md` AIを会議に参加させる | [AI参加者の設計](docs/ai-participant.md)、[AI設定の複数プロファイル](docs/ai-profiles.md)、[AIへの定期自動送信](docs/ai-scheduled.md)、[AIを会話の参加者として並べる](docs/ai-timeline.md)、[AIへの受け渡し](docs/ai-handoff.md) |
 | `minutes-and-board.md` 議事録とボード | [議事録ペイン](docs/minutes-pane.md)、[議事録の描画と検索](docs/minutes-rendering.md)、[議事録プレビューの設計](docs/minutes-preview.md)、[議論のボード](docs/board.md)、[録音開始シート](docs/start-sheet.md) の `kikigaki://start` |
 | `data.md` データの行き先 | サイト側が正本。根拠は [議事録プレビューの設計](docs/minutes-preview.md) の書き込み許可、[AI参加者の設計](docs/ai-participant.md) の受け渡し、[設定リファレンス](docs/config.md) の保存物 |
