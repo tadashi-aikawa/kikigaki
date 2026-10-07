@@ -1,0 +1,807 @@
+---
+import { Image } from "astro:assets";
+import logo from "../assets/kikigaki.png";
+import Demo from "../components/Demo.astro";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const docs = (slug: string) => `${base}/docs/${slug}/`;
+const repo = "https://github.com/tadashi-aikawa/kikigaki";
+const siteUrl = "https://tadashi-aikawa.github.io/kikigaki/";
+const title = "KIKIGAKI(聞き書き)";
+const description =
+  "会議の発話を聴いて、話者付きでリアルタイムに文字起こしし、Markdownで残すmacOSアプリです。文字起こしと話者判別は端末内で処理します。";
+const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
+
+const features = [
+  {
+    title: "イヤホンでも相手の声を",
+    body: "Macで再生中の音をマイクの音と混ぜて取り込みます。オンライン会議でイヤホンを使っていても、相手の発言が文字になります。",
+    href: docs("online-meetings"),
+  },
+  {
+    title: "URLや補足、画像を書き込む",
+    body: "会議中に共有されたURLや補足、画像を、発話と同じ流れへ手入力で投稿できます。",
+    href: docs("recording"),
+  },
+  {
+    title: "議事録をその場で読む",
+    body: "AIが書いた議事録をウィンドウの右に表示します。ファイルが更新されると描き直し、変わった箇所を強調します。",
+    href: docs("minutes-and-board"),
+  },
+  {
+    title: "議論のボード",
+    body: "いま何を話しているか、何が決まって何が保留かを、AIが図にして更新し続けます。",
+    href: docs("minutes-and-board"),
+  },
+  {
+    title: "会話をコピーして任意のAIへ",
+    body: "AI参加を設定していなくても、会話をコピーして、手元のファイルを読めるAIへ渡せます。",
+    href: docs("ai-participant"),
+  },
+  {
+    title: "データは手元に",
+    body: "音声と文字起こしは端末内で処理し、端末内に保存します。外へ出るのは、AI参加を自分で設定して送った内容だけです。",
+    href: docs("data"),
+  },
+];
+---
+
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/png" href={`${base}/favicon.png`} />
+    <link rel="apple-touch-icon" href={`${base}/apple-touch-icon.png`} />
+    <link rel="canonical" href={siteUrl} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={siteUrl} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={`${siteUrl}kikigaki.png`} />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap header-inner">
+        <a class="brand" href={`${base}/`}>
+          <Image src={logo} alt="" width={32} height={32} />
+          <span>KIKIGAKI</span>
+        </a>
+        <nav aria-label="サイト">
+          <a href="#features">特徴</a>
+          <a href="#install">インストール</a>
+          <a href={docs("getting-started")}>ドキュメント</a>
+          <a href={repo}>GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="wrap hero-inner">
+          <div class="hero-copy">
+            <p class="eyebrow">macOS 26以降 · 端末内で文字起こし</p>
+            <h1><span class="phrase">会議を聴いて、</span><span class="phrase">話者付きで</span><span class="phrase">書き留める。</span></h1>
+            <p class="lead">
+              KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて、話者付きでリアルタイムに文字起こしし、Markdownで残すmacOSアプリです。
+            </p>
+            <p class="lead">文字起こしと話者判別は、Macの中で処理します。</p>
+            <div class="actions">
+              <a class="button primary" href="#install">インストール</a>
+              <a class="button" href={docs("getting-started")}>ドキュメントを読む</a>
+            </div>
+          </div>
+
+          <figure class="window" role="img" aria-label="書き起こしウィンドウのイメージ。話者ごとの発言、手入力、AIの返事が時系列に並ぶ">
+            <div class="window-bar" aria-hidden="true">
+              <Image src={logo} alt="" width={22} height={22} />
+              <span class="rec-dot"></span>
+              <span class="rec-label">録音中</span>
+              <span class="rec-time">12:34</span>
+            </div>
+            <ol class="rows" aria-hidden="true">
+              <li class="row">
+                <span class="avatar a">田</span>
+                <div>
+                  <p class="meta"><b>田中</b><time>14:32:05</time></p>
+                  <p>では次の議題、来期の予算配分に移ります。</p>
+                </div>
+              </li>
+              <li class="row">
+                <span class="avatar b">佐</span>
+                <div>
+                  <p class="meta"><b>佐藤</b><time>14:32:11</time></p>
+                  <p>広告費は前年並みにして、採用を少し厚くしたいです。</p>
+                </div>
+              </li>
+              <li class="row">
+                <span class="avatar typed">✎</span>
+                <div>
+                  <p class="meta"><b>手入力</b><time>14:32:20</time></p>
+                  <p class="link">https://example.com/budget</p>
+                </div>
+              </li>
+              <li class="row">
+                <span class="avatar a">田</span>
+                <div>
+                  <p class="meta"><b>田中</b><time>14:32:31</time></p>
+                  <p>迅雷、ここまでの論点を整理して。</p>
+                </div>
+              </li>
+              <li class="sent">└ 迅雷へ送信 · 4発言 · 14:32:33</li>
+              <li class="row">
+                <span class="avatar ai">迅</span>
+                <div>
+                  <p class="meta"><b>迅雷</b><span class="chip">AI</span><time>14:33:40</time></p>
+                  <p>論点は2つです。広告費は前年並みで合意、採用の枠は未決です。</p>
+                </div>
+              </li>
+              <li class="row tentative">
+                <span class="avatar pending"></span>
+                <div>
+                  <p class="meta"><b>聞き取り中…</b></p>
+                  <p>採用の枠は何人まで</p>
+                </div>
+              </li>
+            </ol>
+          </figure>
+        </div>
+      </section>
+
+      <section class="pillars" id="features">
+        <div class="wrap">
+          <article class="pillar">
+            <p class="pillar-no">01</p>
+            <h2>話者付きのリアルタイム文字起こし</h2>
+            <p class="pillar-lead">話すそばから、誰の発言かまで文字になります。</p>
+            <ul>
+              <li>Appleの音声認識で端末内で文字起こしし、最大8人まで話者を判別します。</li>
+              <li>先に速報を出し、精度の高い結果へ静かに差し替えます。半透明の行は、文字や話者がまだ変わる可能性がある印です。</li>
+              <li>話者名はクリックで変えられます。同じ人が2人に分かれたら、あとから統合できます。</li>
+              <li>停止すると、1会議1ファイルのMarkdownに保存します。</li>
+            </ul>
+            <p class="note">話者判別は推定です。必要に応じて書き起こしと話者を確認してください。</p>
+            <Demo src="demos/transcription.mp4" label="話者付きのリアルタイム文字起こしのデモ" />
+            <a class="more" href={docs("recording")}>録音と書き起こしの使い方 →</a>
+          </article>
+
+          <article class="pillar">
+            <p class="pillar-no">02</p>
+            <h2>AIが会議に参加する</h2>
+            <p class="pillar-lead">会議を止めずに、AIへ頼めます。</p>
+            <ul>
+              <li>CodexやClaude Codeを、herdrの専用ペインで会議の参加者として起こします。</li>
+              <li>会話の中で「迅雷、ここまでを整理して」と呼びかけるか、問いを書いて送ります。</li>
+              <li>数分おきに会話の差分を送り、議事録を書き進めてもらう自動送信もできます。</li>
+              <li>AIの返事は発話と同じ流れに並び、会議のMarkdownにも残ります。AIからの確認質問には、その場で返答できます。</li>
+            </ul>
+            <p class="note">AIへ送るのは、自分で設定して送信した内容だけです。</p>
+            <Demo src="demos/ai-participant.mp4" label="AIが会議に参加するデモ" />
+            <a class="more" href={docs("ai-participant")}>AIを会議に参加させる →</a>
+          </article>
+        </div>
+      </section>
+
+      <section class="features">
+        <div class="wrap">
+          <h2 class="section-title">そのほかにできること</h2>
+          <ul class="feature-grid">
+            {
+              features.map((feature) => (
+                <li>
+                  <a href={feature.href}>
+                    <h3>{feature.title}</h3>
+                    <p>{feature.body}</p>
+                  </a>
+                </li>
+              ))
+            }
+          </ul>
+        </div>
+      </section>
+
+      <section class="install" id="install">
+        <div class="wrap install-inner">
+          <h2 class="section-title">インストール</h2>
+          <p>Homebrewで導入します。</p>
+          <div class="command">
+            <code id="install-command">{installCommand}</code>
+            <button type="button" class="copy" data-copy="install-command">コピー</button>
+          </div>
+          <p>更新は <code>brew upgrade --cask kikigaki</code> です。</p>
+          <p class="caution">
+            自己署名のアプリです。初回起動がブロックされた場合は、システム設定 → プライバシーとセキュリティ → 「このまま開く」で許可してください。
+          </p>
+          <h3>動作環境</h3>
+          <ul>
+            <li>macOS 26以降</li>
+            <li>マイクへのアクセス許可</li>
+            <li>初回のネットワーク接続。話者判別モデルを約193 MB取得します。Apple Speechの日本語アセットが未導入なら、それも取得します</li>
+          </ul>
+          <a class="button primary" href={docs("getting-started")}>はじめに・インストールを読む</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap footer-inner">
+        <a class="brand" href={`${base}/`}>
+          <Image src={logo} alt="" width={24} height={24} />
+          <span>KIKIGAKI</span>
+        </a>
+        <nav aria-label="フッター">
+          <a href={repo}>GitHub</a>
+          <a href={docs("getting-started")}>ドキュメント</a>
+          <a href={`${repo}/blob/main/LICENSE`}>MIT License</a>
+        </nav>
+      </div>
+    </footer>
+
+    <script>
+      for (const button of document.querySelectorAll<HTMLButtonElement>("button[data-copy]")) {
+        button.addEventListener("click", async () => {
+          const target = document.getElementById(button.dataset.copy ?? "");
+          if (!target?.textContent) return;
+          try {
+            await navigator.clipboard.writeText(target.textContent);
+            button.textContent = "コピーしました";
+          } catch {
+            button.textContent = "コピーできませんでした";
+          }
+          setTimeout(() => (button.textContent = "コピー"), 2000);
+        });
+      }
+    </script>
+  </body>
+</html>
+
+<style is:global>
+  :root {
+    /* アプリの Washi パレット */
+    --paper: #f5ead9;
+    --paper-light: #fbf6ee;
+    --shade: #ede0cd;
+    --rule: #d5c6b1;
+    --ink: #221f1c;
+    --muted: #6b6157;
+    --red: #aa1405;
+    --bright-red: #cf321f;
+    --gold: #c4801f;
+    --gold-ink: #8a5a12;
+    --teal: #3e706c;
+    --sumi: #514a43;
+    --ai: #5b3e7a;
+    --font: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP",
+      "Segoe UI", sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.8;
+    color: var(--ink);
+    background: var(--paper-light);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  p,
+  ul,
+  ol,
+  figure {
+    margin: 0;
+  }
+
+  a {
+    color: var(--red);
+  }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+  }
+
+  .wrap {
+    width: 100%;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0 16px;
+  }
+
+  @media (min-width: 720px) {
+    .wrap {
+      padding: 0 32px;
+    }
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--ink);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-decoration: none;
+  }
+
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(245, 234, 217, 0.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .header-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-height: 56px;
+  }
+
+  .site-header nav,
+  .site-footer nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1.25rem;
+  }
+
+  .site-header nav a,
+  .site-footer nav a {
+    color: var(--ink);
+    font-size: 0.9rem;
+    text-decoration: none;
+  }
+
+  .site-header nav a:hover,
+  .site-footer nav a:hover {
+    color: var(--red);
+  }
+
+  @media (max-width: 560px) {
+    .site-header nav a[href="#features"] {
+      display: none;
+    }
+  }
+
+  .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 0 1.25rem;
+    border: 1px solid var(--red);
+    border-radius: 8px;
+    color: var(--red);
+    font-weight: 600;
+    text-decoration: none;
+    background: transparent;
+  }
+
+  .button:hover {
+    background: rgba(170, 20, 5, 0.08);
+  }
+
+  .button.primary {
+    color: #fff;
+    background: var(--red);
+  }
+
+  .button.primary:hover {
+    background: var(--bright-red);
+    border-color: var(--bright-red);
+  }
+
+  /* ヒーロー */
+  .hero {
+    background: var(--paper);
+    border-bottom: 1px solid var(--rule);
+    padding: 56px 0 64px;
+  }
+
+  .hero-inner {
+    display: grid;
+    gap: 48px;
+    align-items: center;
+  }
+
+  @media (min-width: 900px) {
+    .hero-inner {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .eyebrow {
+    color: var(--gold-ink);
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+  }
+
+  .hero h1 {
+    margin: 0.75rem 0 1.25rem;
+    font-size: clamp(2rem, 6vw, 3rem);
+    line-height: 1.3;
+    letter-spacing: 0.02em;
+  }
+
+  /* 見出しは文節の途中で折り返さない */
+  .phrase {
+    display: inline-block;
+  }
+
+  .lead {
+    color: var(--ink);
+    font-size: 1.05rem;
+  }
+
+  .lead + .lead {
+    margin-top: 0.5rem;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 2rem;
+  }
+
+  /* 書き起こしウィンドウのイメージ */
+  .window {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    box-shadow: 0 18px 40px rgba(34, 31, 28, 0.14), 0 2px 6px rgba(34, 31, 28, 0.08);
+    overflow: hidden;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .window-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 10px 14px;
+    background: var(--shade);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .rec-dot {
+    width: 9px;
+    height: 9px;
+    margin-left: 0.5rem;
+    border-radius: 50%;
+    background: var(--red);
+  }
+
+  .rec-label {
+    font-weight: 600;
+  }
+
+  .rec-time {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .rows {
+    list-style: none;
+    padding: 14px 16px 18px;
+    display: grid;
+    gap: 12px;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 24px 1fr;
+    gap: 10px;
+  }
+
+  .row p {
+    overflow-wrap: anywhere;
+  }
+
+  .meta {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+
+  .meta time {
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .avatar {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    margin-top: 2px;
+    border-radius: 50% 50% 50% 4px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .avatar.a {
+    background: var(--teal);
+  }
+
+  .avatar.b {
+    background: var(--gold);
+    color: var(--ink);
+  }
+
+  .avatar.typed {
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .avatar.ai {
+    background: var(--ai);
+  }
+
+  .avatar.pending {
+    border: 1.75px dashed var(--muted);
+    border-radius: 50%;
+    background: transparent;
+  }
+
+  .chip {
+    padding: 0 6px;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1.6;
+  }
+
+  .link {
+    color: var(--red);
+    text-decoration: underline;
+  }
+
+  .sent {
+    padding-left: 34px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .tentative {
+    opacity: 0.6;
+  }
+
+  /* 2本柱 */
+  .pillars {
+    padding: 72px 0;
+  }
+
+  .pillars .wrap {
+    display: grid;
+    gap: 32px;
+  }
+
+  @media (min-width: 900px) {
+    .pillars .wrap {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .pillar {
+    display: flex;
+    flex-direction: column;
+    padding: 32px 28px;
+    background: #fff;
+    border: 1px solid var(--rule);
+    border-top: 4px solid var(--red);
+    border-radius: 12px;
+  }
+
+  .pillar-no {
+    color: var(--gold);
+    font-family: var(--font-mono);
+    font-weight: 700;
+    letter-spacing: 0.1em;
+  }
+
+  .pillar h2 {
+    margin-top: 0.25rem;
+    font-size: 1.5rem;
+    line-height: 1.4;
+  }
+
+  .pillar-lead {
+    margin: 0.5rem 0 1.25rem;
+    color: var(--muted);
+  }
+
+  .pillar ul {
+    padding-left: 1.2em;
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .pillar li::marker {
+    color: var(--red);
+  }
+
+  .note {
+    margin-top: 1.25rem;
+    padding: 0.75rem 1rem;
+    background: var(--paper-light);
+    border-left: 3px solid var(--gold);
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  .more {
+    margin-top: auto;
+    padding-top: 1.5rem;
+    align-self: flex-start;
+    font-weight: 600;
+  }
+
+  /* そのほかの機能 */
+  .features {
+    padding: 64px 0;
+    background: var(--paper);
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .section-title {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .feature-grid {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    gap: 16px;
+  }
+
+  @media (min-width: 640px) {
+    .feature-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (min-width: 960px) {
+    .feature-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  .feature-grid a {
+    display: block;
+    height: 100%;
+    padding: 20px 22px;
+    background: var(--paper-light);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .feature-grid a:hover {
+    border-color: var(--gold);
+  }
+
+  .feature-grid h3 {
+    font-size: 1.05rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .feature-grid p {
+    color: var(--muted);
+    font-size: 0.92rem;
+  }
+
+  /* インストール */
+  .install {
+    padding: 72px 0;
+  }
+
+  .install-inner {
+    max-width: 760px;
+    display: grid;
+    gap: 1rem;
+    justify-items: start;
+  }
+
+  .install-inner .section-title {
+    margin-bottom: 0;
+  }
+
+  .install h3 {
+    margin-top: 1rem;
+    font-size: 1.1rem;
+  }
+
+  .install ul {
+    padding-left: 1.2em;
+  }
+
+  .command {
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+    background: var(--ink);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .command code {
+    flex: 1;
+    min-width: 0;
+    padding: 14px 16px;
+    color: var(--paper);
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .copy {
+    flex-shrink: 0;
+    padding: 0 16px;
+    border: 0;
+    border-left: 1px solid rgba(245, 234, 217, 0.2);
+    color: var(--paper);
+    background: transparent;
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+
+  .copy:hover {
+    background: rgba(245, 234, 217, 0.1);
+  }
+
+  .caution {
+    padding: 0.75rem 1rem;
+    background: var(--paper);
+    border-left: 3px solid var(--red);
+    font-size: 0.92rem;
+  }
+
+  .site-footer {
+    padding: 32px 0 40px;
+    background: var(--paper);
+    border-top: 1px solid var(--rule);
+  }
+
+  .footer-inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+</style>
