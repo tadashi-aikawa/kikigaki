@@ -15,8 +15,8 @@ public enum MeetingFiles {
                 continue
             }
             do {
-                // .atomic と .withoutOverwriting は併用不可。空の予約だけを排他的に作り、本文は後で原子的に更新する。
-                try Data().write(to: url, options: .withoutOverwriting)
+                // 0600の空ファイルを排他的に公開し、本文は後で原子的に更新する。
+                try PrivateFileIO.write(Data(), to: url, replacing: false)
                 return url
             } catch let error as CocoaError where error.code == .fileWriteFileExists {
                 suffix += 1

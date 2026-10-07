@@ -94,6 +94,8 @@ Coreへ `TranscriptEntries.merge(voice:typed:timeline:pendingVoiceRows:)` を置
 
 投稿時に `<会議名>.attachments/<UUID>.png` または `.jpg` へ保存し、絶対パスを `Utterance.imagePaths` へ入れる。保存失敗では投稿しない。その投稿で保存した画像だけを戻し、UIの下書きを残す。空本文でも画像があれば受理する。停止時は未投稿の画像を保持し、新会議開始時に消す。元ファイルの変更・削除に依存しない。
 
+添付画像とディレクトリの権限は[保存物の権限](config.md#保存物の権限)に従う。
+
 `imagePaths` がない旧archiveは空配列として読む。声への画像付与、相対パス、制御文字を含むパスは拒否する。画像は通常Markdownとarchiveに残り、投稿済みサムネイルをクリックすると既定アプリで開く。Markdownでは画像埋め込みを出力する。コピー・AI文脈ではparliamentと同じ番号付き絶対パスを同じ発話行に付け、1発話1行の契約を維持する。画像の内容を自動で文字列化するのではなく、AIがファイルを読むための参照を渡す。
 
 ### Markdownとコピー

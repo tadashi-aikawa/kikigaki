@@ -44,10 +44,7 @@ public struct MeetingArchive: Codable {
                     do {
                         // 完全な内容を同一ディレクトリへ書いてから排他的なhard linkで公開する。
                         // 初回書き込みが途中で落ちても、正式名には不完全な内容を残さない。
-                        let temporary = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
-                        defer { try? FileManager.default.removeItem(at: temporary) }
-                        try data.write(to: temporary, options: .withoutOverwriting)
-                        try FileManager.default.linkItem(at: temporary, to: url)
+                        try PrivateFileIO.write(data, to: url, replacing: false)
                     }
                     catch let error as CocoaError where error.code == .fileWriteFileExists {
                         // archiveを先に永続化し、計測を書いた直後に落ちた場合の復旧。
@@ -57,14 +54,14 @@ public struct MeetingArchive: Codable {
                               try Data(contentsOf: url) == data else { throw error }
                     }
                     ownsLevelsFile = true
-                } else { try data.write(to: url, options: .atomic) }
+                } else { try PrivateFileIO.write(data, to: url) }
             } catch {
                 levelsSucceeded = false
                 levelsWarning = "音量記録の保存に失敗: \(error.localizedDescription)"
             }
         }
         do {
-            try MeetingMarkdown.render(original).write(to: markdownURL, atomically: true, encoding: .utf8)
+            try PrivateFileIO.write(Data(MeetingMarkdown.render(original).utf8), to: markdownURL)
             var message = "保存: \(markdownURL.path)"
             if let levelsWarning { message = levelsWarning + " / " + message }
             return SaveResult(utterances: original.utterances, message: message, succeeded: true, levelsSucceeded: levelsSucceeded)

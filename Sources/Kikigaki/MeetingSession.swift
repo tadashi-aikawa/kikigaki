@@ -331,7 +331,7 @@ final class MeetingSession {
             pause.reset(startedAt: startedAt)
             snapshot.timeline = pause.timeline
             handoff = HandoffHistory(startedAt: startedAt)
-            try FileManager.default.createDirectory(at: meetingConfig.outputDir, withIntermediateDirectories: true)
+            try PrivateFileIO.createDirectory(at: meetingConfig.outputDir)
             let markdownURL = try MeetingFiles.reserveMarkdownURL(in: meetingConfig.outputDir, startedAt: startedAt)
             reservation = markdownURL
             if meetingConfig.saveRecording {

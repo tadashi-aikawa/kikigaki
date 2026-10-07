@@ -103,7 +103,14 @@ final class WavWriter {
 
     init(url: URL) throws {
         format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
-        file = try AVAudioFile(forWriting: url, settings: format.settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        // AVAudioFileに新規作成させるとumask依存になる。先に0600で排他予約する。
+        try PrivateFileIO.write(Data(), to: url, replacing: false)
+        do {
+            file = try AVAudioFile(forWriting: url, settings: format.settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
     }
 
     func write(_ samples: [Float]) throws {

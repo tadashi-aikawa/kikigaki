@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import KikigakiCore
 import UniformTypeIdentifiers
 
 /// 下書きはメモリに保持し、投稿が受理されるときだけ会議の隣へ保存する。
@@ -96,12 +97,12 @@ struct TypedImageDraft {
     static func save(_ images: [Self], beside markdownURL: URL) throws -> [String] {
         guard !images.isEmpty else { return [] }
         let directory = markdownURL.deletingPathExtension().appendingPathExtension("attachments")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try PrivateFileIO.createDirectory(at: directory)
         var saved: [URL] = []
         do {
             for image in images {
                 let url = directory.appendingPathComponent(UUID().uuidString).appendingPathExtension(image.fileExtension)
-                try image.data.write(to: url, options: .atomic)
+                try PrivateFileIO.write(image.data, to: url, replacing: false)
                 saved.append(url)
             }
             return saved.map(\.path)
