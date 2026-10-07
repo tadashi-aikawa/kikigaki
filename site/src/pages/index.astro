@@ -115,9 +115,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
       </section>
 
       <section class="first" id="features">
-        <header class="section-head">
-          <h2 class="section-kicker">二つの使い方</h2>
-        </header>
+        <h2 class="visually-hidden">二つの使い方</h2>
         <div class="pillars">
           <div class="pl">
             <div class="ill">
@@ -139,7 +137,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
               </Media>
             </div>
             <div class="tag t">会議で</div>
-            <h2>話す人ごとに、AIも席に</h2>
+            <h3>話す人ごとに、AIも席に</h3>
             <p>誰が何を言ったかを分けて書き留めます。<br />AIエージェントは流れを読んで、論点や議事録をまとめます。</p>
           </div>
 
@@ -164,7 +162,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
               </Media>
             </div>
             <div class="tag g">ひとりで</div>
-            <h2>ひとりの声を、AIと形に</h2>
+            <h3>ひとりの声を、AIと形に</h3>
             <p>プレゼンの練習やアイデアの壁打ちに。<br />話した言葉をAIエージェントが拾って、構成やメモにまとめます。</p>
           </div>
         </div>
@@ -172,10 +170,8 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
       </section>
 
       <section class="movie" id="movie">
-        <header class="section-head">
-          <h2 class="section-kicker">動いているところ</h2>
-          <p class="section-lead">3人の会議を録音中。話すと薄く出て、決まると濃くなる。頼むとAIエージェントの返事が並ぶ</p>
-        </header>
+        <h2 class="visually-hidden">動いているところ</h2>
+        <p class="section-lead">3人の会議を録音中。話すと薄く出て、決まると濃くなる。頼むとAIエージェントの返事が並ぶ</p>
         <div class="movie-frame">
           <div class="media-clip">
             <Media src="demos/transcription.mp4" alt="対面の会議を録音中の書き起こしウィンドウ">
@@ -663,21 +659,22 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     padding: 136px 120px 0;
   }
 
-  .section-head {
-    text-align: center;
-    margin-bottom: 56px;
-  }
-
-  .section-kicker {
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
     margin: 0;
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: 0.24em;
-    color: var(--washi-muted);
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 
   .section-lead {
-    margin-top: 14px;
+    margin-top: 0;
+    margin-bottom: 36px;
+    text-align: center;
     font-size: 15px;
     line-height: 1.9;
     color: var(--washi-body);
@@ -718,7 +715,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     margin-top: 18px;
   }
 
-  h2 {
+  .pl h3 {
     margin-top: 6px;
     font-size: 26px;
     font-weight: 600;
@@ -802,10 +799,6 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     margin: -0.3cqw;
   }
 
-  .movie .section-head {
-    margin-bottom: 36px;
-  }
-
   .ph-movie {
     height: 584px;
   }
@@ -833,9 +826,9 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
   .points {
     max-width: 1280px;
     margin: 0 auto;
-    padding: 120px 120px 0;
+    padding: 200px 120px 0;
     display: grid;
-    gap: 112px;
+    gap: 96px;
   }
 
   .pt {
@@ -1087,7 +1080,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     }
 
     .points {
-      padding-top: 88px;
+      padding-top: 150px;
       gap: 72px;
     }
 
