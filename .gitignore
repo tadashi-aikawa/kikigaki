@@ -3,3 +3,5 @@ dist/
 .build/
 /.claude/worktrees
 /web/minutes/node_modules/
+/site/node_modules/
+/site/.astro/

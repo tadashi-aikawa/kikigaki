@@ -1,0 +1,78 @@
+---
+import { Image } from "astro:assets";
+import logo from "../assets/kikigaki.png";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+---
+
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>ページが見つかりません | KIKIGAKI</title>
+    <link rel="icon" type="image/png" href={`${base}/favicon.png`} />
+  </head>
+  <body>
+    <main>
+      <Image src={logo} alt="KIKIGAKIのロゴ" width={96} height={96} />
+      <h1>ページが見つかりません</h1>
+      <p>URLが変わったか、ページが無くなった可能性があります。</p>
+      <nav>
+        <a class="primary" href={`${base}/`}>トップへ</a>
+        <a href={`${base}/docs/getting-started/`}>ドキュメントへ</a>
+      </nav>
+    </main>
+  </body>
+</html>
+
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    box-sizing: border-box;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP",
+      sans-serif;
+    color: #221f1c;
+    background: #f5ead9;
+    text-align: center;
+  }
+
+  h1 {
+    margin: 1.25rem 0 0.5rem;
+    font-size: 1.6rem;
+  }
+
+  p {
+    margin: 0 0 1.75rem;
+    color: #6b6157;
+  }
+
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.75rem;
+  }
+
+  a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 1.25rem;
+    border: 1px solid #aa1405;
+    border-radius: 8px;
+    color: #aa1405;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  a.primary {
+    color: #fff;
+    background: #aa1405;
+  }
+</style>

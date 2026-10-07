@@ -1,0 +1,27 @@
+/* ロゴの朱・生成り・金をドキュメントの配色へ移す。アプリの Washi パレットと同じ値 */
+
+:root {
+  --sl-color-accent-low: #3d0f09;
+  --sl-color-accent: #cf321f;
+  --sl-color-accent-high: #f2b8ab;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #f3d9cf;
+  --sl-color-accent: #aa1405;
+  --sl-color-accent-high: #6e0d03;
+
+  /* 紙面は生成りを薄めた色。本文の読みやすさを優先して地を明るく保つ */
+  --sl-color-black: #fdfaf4;
+  --sl-color-gray-6: #f5ead9;
+  --sl-color-gray-7: #faf3e8;
+  --sl-color-bg-nav: #f5ead9;
+  --sl-color-bg-sidebar: #faf3e8;
+  --sl-color-hairline-light: #e3d6c3;
+  --sl-color-hairline: #d5c6b1;
+}
+
+/* 表の見出しに和紙の影を敷き、設定リファレンスの表を追いやすくする */
+:root[data-theme="light"] .sl-markdown-content th {
+  background: #f5ead9;
+}
