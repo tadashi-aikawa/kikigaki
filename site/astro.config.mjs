@@ -7,6 +7,8 @@ import starlight from "@astrojs/starlight";
 export default defineConfig({
   site: "https://tadashi-aikawa.github.io",
   base: "/kikigaki",
+  // Astroの既定の4321はnocturneが使う。devとpreviewを別の固定ポートにして衝突させない
+  server: { port: 4330 },
   // ドキュメントの入口 /kikigaki/docs/ にはページを置かないので、最初のページへ送る
   redirects: {
     "/docs": "/kikigaki/docs/getting-started/",
