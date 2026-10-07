@@ -224,7 +224,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
           </div>
           <div class="text">
             <div class="tag g">AIも同じ流れに</div>
-            <h3>AIエージェントの返事が話と並ぶ</h3>
+            <h3>AIの返事が話と並ぶ</h3>
             <p>頼んだ返事が、話の流れの中に入ってきます。<br />返事をするのはAIエージェント。頼み方は自分で決められます。</p>
           </div>
         </div>
@@ -768,6 +768,21 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     min-width: 0;
   }
 
+  .shot .sheet.media-clip {
+    box-shadow: 0 1px 2px rgba(80, 60, 40, 0.10),
+      0 8px 24px -12px rgba(80, 60, 40, 0.22);
+  }
+
+  .shot .sheet.media-clip::after {
+    /* 切り込み済みの画像に縁を重ね、角丸と画面の大きさを保つ。 */
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 1px solid var(--washi-rule);
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
   .media-clip {
     /* 録画の黒い四隅を窓の角丸で切る。幅1040pxなら12px。 */
     border-radius: 1.153846cqw;
@@ -779,6 +794,12 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     width: calc(100% + 0.4cqw);
     margin: -0.2cqw;
     border-radius: 0;
+  }
+
+  .shot .media-clip .media {
+    /* 小さい表示で残る角の黒も、キャプチャだけ少し深く切る。 */
+    width: calc(100% + 0.6cqw);
+    margin: -0.3cqw;
   }
 
   .movie .section-head {
