@@ -126,9 +126,10 @@
   padding-inline: 0.75rem;
 }
 
-/* 短い項目名を1行に収めつつ、狭い画面の長いモデル名は折り返せる幅にする */
+/* border-boxなので、6文字分の幅に左右のpaddingを足す。
+   狭い画面の長いモデル名は引き続き折り返せる。 */
 .sl-markdown-content :is(th, td):first-child {
-  min-width: 7em;
+  min-width: calc(6em + 1.5rem);
 }
 
 .sl-markdown-content th {
