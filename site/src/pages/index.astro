@@ -7,6 +7,7 @@ import Media from "../components/Media.astro";
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const docs = `${base}/docs/getting-started/`;
 const repo = "https://github.com/tadashi-aikawa/kikigaki";
+const blog = "https://nocturne.mamansoft.net/tags/KIKIGAKI/";
 const siteUrl = "https://tadashi-aikawa.github.io/kikigaki/";
 const title = "KIKIGAKI 聞書";
 const heading = "声をすべてドキュメントに";
@@ -43,6 +44,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
         <a href="#install">導入</a>
         <a href={docs}>ドキュメント</a>
         <a href={repo}>GitHub</a>
+        <a href={blog} target="_blank" rel="noopener noreferrer">ブログ</a>
       </nav>
     </header>
 
@@ -101,10 +103,14 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
           </div>
         </div>
 
-        <p class="own">使うAIは<em>Claude Code</em>でも<em>Codex</em>でも。頼み方も自分で決めて、自分の進め方に。</p>
+        <a class="to-movie" href="#movie" aria-label="動画を見る">
+          <svg viewBox="0 0 32 40" aria-hidden="true">
+            <path d="M16 4v30M7 25l9 9 9-9"></path>
+          </svg>
+        </a>
       </section>
 
-      <section class="movie">
+      <section class="movie" id="movie">
         <div class="sheet">
           <Media src="demos/transcription.mp4" alt="対面の会議を録音中の書き起こしウィンドウ">
             <div class="ph ph-movie">
@@ -117,6 +123,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
             </div>
           </Media>
         </div>
+        <p class="movie-caption">3人の会議を録音中。話すと薄く出て、決まると濃くなる。頼むとAIの返事が並ぶ</p>
       </section>
 
       <section class="points" id="features">
@@ -148,7 +155,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
           <div class="text">
             <div class="tag g">AIも同じ流れに</div>
             <h3>AIの返事が話と並ぶ</h3>
-            <p>Claude CodeやCodexに頼んだ返事が、<br />話の流れの中に入ってきます。</p>
+            <p>頼んだ返事が、話の流れの中に入ってきます。<br />返事をするのはClaude CodeかCodex。頼み方は自分で決められます。</p>
           </div>
         </div>
 
@@ -169,6 +176,22 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
         </div>
 
         <div class="pt r">
+          <div class="shot sheet">
+            <Media src="captures/board.png" alt="議事録ペインのボードタブに、論点と決まったことが並ぶ画面">
+              <div class="ph ph-shot">
+                <div class="what"><b>キャプチャ</b>議事録ペインの「ボード」タブを開いたところ。</div>
+                <small>画面仮置き</small>
+              </div>
+            </Media>
+          </div>
+          <div class="text">
+            <div class="tag s">ボード</div>
+            <h3>いま何の話かを、一枚で</h3>
+            <p>議事録は、あとで読むもの。会議の途中で見るのはボード。論点と決まったことを、AIが一枚に更新し続けます。</p>
+          </div>
+        </div>
+
+        <div class="pt">
           <div class="shot sheet">
             <Media src="captures/earphones.png" alt="録音開始シートでシステム音声を取り込む設定">
               <div class="ph ph-shot">
@@ -206,6 +229,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
         <a href={docs}>ドキュメント</a>
         <a href={repo}>GitHub</a>
         <a href={`${repo}/blob/main/LICENSE`}>MIT License</a>
+        <a href={blog} target="_blank" rel="noopener noreferrer">ブログ</a>
       </nav>
     </footer>
 
@@ -440,17 +464,28 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     color: var(--washi-body);
   }
 
-  .own {
+  .to-movie {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     margin-top: 34px;
-    font-size: 14px;
-    line-height: 1.9;
+    width: 44px;
+    height: 44px;
     color: var(--washi-muted);
   }
 
-  .own em {
-    font-style: normal;
-    font-weight: 600;
+  .to-movie:hover {
     color: var(--washi-ink);
+  }
+
+  .to-movie svg {
+    width: 32px;
+    height: 40px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   /* 動画 */
@@ -462,6 +497,14 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
 
   .movie .sheet {
     transform: rotate(-0.25deg);
+  }
+
+  .movie-caption {
+    margin-top: 20px;
+    text-align: center;
+    font-size: 14px;
+    line-height: 1.9;
+    color: var(--washi-muted);
   }
 
   .ph-movie {
@@ -529,6 +572,10 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
 
   .pt:nth-child(4) .sheet {
     transform: rotate(0.5deg);
+  }
+
+  .pt:nth-child(5) .sheet {
+    transform: rotate(-0.4deg);
   }
 
   h3 {

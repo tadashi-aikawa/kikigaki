@@ -20,6 +20,8 @@ AIへ送るのは、手動か自動で送信したときだけです。
 
 ## 用意するもの
 
+いま対応しているCLIは、Claude CodeとCodexの2つです。
+
 - herdr
 - CodexかClaude Code
 - `kikigaki-cli`
