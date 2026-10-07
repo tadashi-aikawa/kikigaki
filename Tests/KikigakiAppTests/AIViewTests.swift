@@ -107,7 +107,7 @@ import KikigakiAIIO
     @Test func 大文字スキームのアバターもURLキャッシュから読む() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let source = "HTTPS://example.com/AI.png"
-        let data = Data("cached avatar".utf8)
+        let data = AvatarStoreTests.png
         let key = SHA256.hash(data: Data(source.utf8)).map { String(format: "%02x", $0) }.joined()
         try data.write(to: root.appendingPathComponent(key))
         #expect(try await AvatarStore.load(source, cacheDirectory: root) == data)
