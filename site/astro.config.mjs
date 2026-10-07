@@ -1,6 +1,8 @@
 // @ts-check
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import { satteri } from "@astrojs/markdown-satteri";
+import { joinJa } from "./src/mdast/join-ja.mjs";
 
 // トップ (/kikigaki/) は src/pages/index.astro のティザー。
 // ドキュメントは src/content/docs/docs/ に置き、/kikigaki/docs/<slug>/ で配信する
@@ -9,6 +11,7 @@ export default defineConfig({
   base: "/kikigaki",
   // Astroの既定の4321はnocturneが使う。devとpreviewを別の固定ポートにして衝突させない
   server: { port: 4330 },
+  markdown: { processor: satteri({ mdastPlugins: [joinJa] }) },
   // ドキュメントの入口 /kikigaki/docs/ にはページを置かないので、最初のページへ送る
   redirects: {
     "/docs": "/kikigaki/docs/getting-started/",
