@@ -47,7 +47,7 @@ KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付�
 - `site/`: 利用者向けのサイト。Astro 1本で、トップのティザーは `src/pages/index.astro`、ドキュメントはStarlightで `src/content/docs/docs/` に置く
   - 配信先はGitHub Pagesの `https://tadashi-aikawa.github.io/kikigaki/`。ドキュメントは `/kikigaki/docs/` 以下
   - ビルドは `pnpm --dir site install --frozen-lockfile` と `pnpm --dir site build`。mainへのpushで `.github/workflows/pages.yml` が配備する
-  - デモ動画は `public/demos/<名前>.mp4` に置くとティザーに出る。無ければ枠ごと出さない
+  - トップの絵・動画・キャプチャは `public/illustrations/` `public/demos/` `public/captures/` に置くと出る。無ければ仮置きを出す。ファイル名は `index.astro` の `Media` の `src`
   - ドキュメントは `docs/` の正本を利用者の言葉で書き直したもの。仕様を変えたら該当ページも直す
 - `experiments/nemotron/`: 話者判別モデルの比較用の独立CLI。アプリにはエンジンの切替を置かない
 - `experiments/system-audio/`: システム音声とマイクの同時取り込みを検証する独立CLI。検証記録は [システム音声取り込みの実現性試作](docs/records/system-audio-spike.md)

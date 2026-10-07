@@ -1,49 +1,18 @@
 ---
+import "../styles/washi.css";
 import { Image } from "astro:assets";
 import logo from "../assets/kikigaki.png";
-import Demo from "../components/Demo.astro";
+import Media from "../components/Media.astro";
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-const docs = (slug: string) => `${base}/docs/${slug}/`;
+const docs = `${base}/docs/getting-started/`;
 const repo = "https://github.com/tadashi-aikawa/kikigaki";
 const siteUrl = "https://tadashi-aikawa.github.io/kikigaki/";
-const title = "KIKIGAKI(聞き書き)";
+const title = "KIKIGAKI 聞書";
+const heading = "声をすべてドキュメントに";
 const description =
-  "会議の発話を聴いて、話者付きでリアルタイムに文字起こしし、Markdownで残すmacOSアプリです。文字起こしと話者判別は端末内で処理します。";
+  "会議やひとりの声を、話す人ごとに書き起こしてMarkdownに残すmacOSアプリ。Claude CodeやCodexも会議に参加できます。";
 const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
-
-const features = [
-  {
-    title: "イヤホンでも相手の声を",
-    body: "Macで再生中の音をマイクの音と混ぜて取り込みます。オンライン会議でイヤホンを使っていても、相手の発言が文字になります。",
-    href: docs("online-meetings"),
-  },
-  {
-    title: "URLや補足、画像を書き込む",
-    body: "会議中に共有されたURLや補足、画像を、発話と同じ流れへ手入力で投稿できます。",
-    href: docs("recording"),
-  },
-  {
-    title: "議事録をその場で読む",
-    body: "AIが書いた議事録をウィンドウの右に表示します。ファイルが更新されると描き直し、変わった箇所を強調します。",
-    href: docs("minutes-and-board"),
-  },
-  {
-    title: "議論のボード",
-    body: "いま何を話しているか、何が決まって何が保留かを、AIが図にして更新し続けます。",
-    href: docs("minutes-and-board"),
-  },
-  {
-    title: "会話をコピーして任意のAIへ",
-    body: "AI参加を設定していなくても、会話をコピーして、手元のファイルを読めるAIへ渡せます。",
-    href: docs("ai-participant"),
-  },
-  {
-    title: "データは手元に",
-    body: "音声と文字起こしは端末内で処理し、端末内に保存します。外へ出るのは、AI参加を自分で設定して送った内容だけです。",
-    href: docs("data"),
-  },
-];
 ---
 
 <!doctype html>
@@ -58,186 +27,186 @@ const features = [
     <link rel="canonical" href={siteUrl} />
     <meta property="og:type" content="website" />
     <meta property="og:url" content={siteUrl} />
-    <meta property="og:title" content={title} />
+    <meta property="og:title" content={`${title} | ${heading}`} />
     <meta property="og:description" content={description} />
     <meta property="og:image" content={`${siteUrl}kikigaki.png`} />
     <meta name="twitter:card" content="summary" />
   </head>
   <body>
-    <header class="site-header">
-      <div class="wrap header-inner">
-        <a class="brand" href={`${base}/`}>
-          <Image src={logo} alt="" width={32} height={32} />
-          <span>KIKIGAKI</span>
-        </a>
-        <nav aria-label="サイト">
-          <a href="#features">特徴</a>
-          <a href="#install">インストール</a>
-          <a href={docs("getting-started")}>ドキュメント</a>
-          <a href={repo}>GitHub</a>
-        </nav>
-      </div>
+    <header class="nav">
+      <a class="brand" href={`${base}/`}>
+        <Image src={logo} alt="" width={24} height={24} />
+        <b>KIKIGAKI</b><i>聞書</i>
+      </a>
+      <nav aria-label="サイト">
+        <a href="#features">機能</a>
+        <a href="#install">導入</a>
+        <a href={docs}>ドキュメント</a>
+        <a href={repo}>GitHub</a>
+      </nav>
     </header>
 
     <main>
-      <section class="hero">
-        <div class="wrap hero-inner">
-          <div class="hero-copy">
-            <p class="eyebrow">macOS 26以降 · 端末内で文字起こし</p>
-            <h1><span class="phrase">会議を聴いて、</span><span class="phrase">話者付きで</span><span class="phrase">書き留める。</span></h1>
-            <p class="lead">
-              KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて、話者付きでリアルタイムに文字起こしし、Markdownで残すmacOSアプリです。
-            </p>
-            <p class="lead">文字起こしと話者判別は、Macの中で処理します。</p>
-            <div class="actions">
-              <a class="button primary" href="#install">インストール</a>
-              <a class="button" href={docs("getting-started")}>ドキュメントを読む</a>
+      <section class="first">
+        <h1>{heading}</h1>
+
+        <div class="pillars">
+          <div class="pl">
+            <div class="sheet ill">
+              <Media src="illustrations/meeting.png" alt="会議の場面のイラスト">
+                <div class="ph ph-ill">
+                  <svg viewBox="0 0 340 180" aria-hidden="true">
+                    <ellipse cx="170" cy="128" rx="120" ry="30"></ellipse>
+                    <circle cx="70" cy="62" r="13"></circle><path d="M48 104q22-30 44 0"></path>
+                    <circle cx="170" cy="40" r="13"></circle><path d="M148 82q22-30 44 0"></path>
+                    <circle cx="270" cy="62" r="13"></circle><path d="M248 104q22-30 44 0"></path>
+                    <path d="M150 132h40l6-26h-52z"></path><path d="M156 116h26M156 122h20"></path>
+                    <path d="M92 50h28v14h-22l-6 6z" stroke="#3E706C"></path>
+                    <path d="M192 26h28v14h-22l-6 6z" stroke="#C4801F"></path>
+                    <path d="M228 50h-28v14h22l6 6z" stroke="#514A43"></path>
+                    <rect x="296" y="96" width="26" height="18" rx="5" stroke="#3E706C" stroke-dasharray="3 3"></rect>
+                  </svg>
+                  <small>イラスト仮置き</small>
+                </div>
+              </Media>
             </div>
+            <div class="tag t">会議で</div>
+            <h2>話す人ごとに、AIも席に</h2>
+            <p>誰が何を言ったかを分けて書き留めます。<br />AIは流れを読んで、論点や議事録をまとめます。</p>
           </div>
 
-          <figure class="window" role="img" aria-label="書き起こしウィンドウのイメージ。話者ごとの発言、手入力、AIの返事が時系列に並ぶ">
-            <div class="window-bar" aria-hidden="true">
-              <Image src={logo} alt="" width={22} height={22} />
-              <span class="rec-dot"></span>
-              <span class="rec-label">録音中</span>
-              <span class="rec-time">12:34</span>
+          <div class="pl">
+            <div class="sheet ill">
+              <Media src="illustrations/solo.png" alt="ひとりで話す場面のイラスト">
+                <div class="ph ph-ill">
+                  <svg viewBox="0 0 340 180" aria-hidden="true">
+                    <circle cx="70" cy="70" r="14"></circle><path d="M44 130q4-42 40-40"></path>
+                    <path d="M30 140h150"></path><path d="M110 138l10-34h40l-6 34"></path>
+                    <path d="M90 66q14-8 24 0t24 0" stroke="#3E706C"></path>
+                    <rect x="150" y="40" width="18" height="14" stroke="#C4801F"></rect>
+                    <rect x="176" y="62" width="18" height="14" stroke="#3E706C"></rect>
+                    <rect x="160" y="84" width="18" height="14" stroke="#514A43"></rect>
+                    <path d="M200 70h30" stroke-dasharray="3 4"></path>
+                    <rect x="240" y="34" width="66" height="90" rx="2"></rect>
+                    <path d="M252 50h34M252 66h42M252 78h38M252 90h30"></path>
+                    <rect x="290" y="112" width="26" height="18" rx="5" stroke="#3E706C" stroke-dasharray="3 3"></rect>
+                  </svg>
+                  <small>イラスト仮置き</small>
+                </div>
+              </Media>
             </div>
-            <ol class="rows" aria-hidden="true">
-              <li class="row">
-                <span class="avatar a">田</span>
-                <div>
-                  <p class="meta"><b>田中</b><time>14:32:05</time></p>
-                  <p>では次の議題、来期の予算配分に移ります。</p>
-                </div>
-              </li>
-              <li class="row">
-                <span class="avatar b">佐</span>
-                <div>
-                  <p class="meta"><b>佐藤</b><time>14:32:11</time></p>
-                  <p>広告費は前年並みにして、採用を少し厚くしたいです。</p>
-                </div>
-              </li>
-              <li class="row">
-                <span class="avatar typed">✎</span>
-                <div>
-                  <p class="meta"><b>手入力</b><time>14:32:20</time></p>
-                  <p class="link">https://example.com/budget</p>
-                </div>
-              </li>
-              <li class="row">
-                <span class="avatar a">田</span>
-                <div>
-                  <p class="meta"><b>田中</b><time>14:32:31</time></p>
-                  <p>迅雷、ここまでの論点を整理して。</p>
-                </div>
-              </li>
-              <li class="sent">└ 迅雷へ送信 · 4発言 · 14:32:33</li>
-              <li class="row">
-                <span class="avatar ai">迅</span>
-                <div>
-                  <p class="meta"><b>迅雷</b><span class="chip">AI</span><time>14:33:40</time></p>
-                  <p>論点は2つです。広告費は前年並みで合意、採用の枠は未決です。</p>
-                </div>
-              </li>
-              <li class="row tentative">
-                <span class="avatar pending"></span>
-                <div>
-                  <p class="meta"><b>聞き取り中…</b></p>
-                  <p>採用の枠は何人まで</p>
-                </div>
-              </li>
-            </ol>
-          </figure>
+            <div class="tag g">ひとりで</div>
+            <h2>ひとりの声を、AIと形に</h2>
+            <p>プレゼンの練習やアイデアの壁打ちに。<br />話した言葉をAIが拾って、構成やメモにまとめます。</p>
+          </div>
+        </div>
+
+        <p class="own">使うAIは<em>Claude Code</em>でも<em>Codex</em>でも。頼み方も自分で決めて、自分の進め方に。</p>
+      </section>
+
+      <section class="movie">
+        <div class="sheet">
+          <Media src="demos/transcription.mp4" alt="対面の会議を録音中の書き起こしウィンドウ">
+            <div class="ph ph-movie">
+              <div class="what">
+                <div class="play"></div>
+                <b>動画 15〜20秒・無音ループ</b>
+                対面の会議を録音中の書き起こしウィンドウ。<br />3人の発話が話者色つきで薄く出て、濃く決まっていく。<br />途中でAIの返事が1つ、発話の間に入る。
+              </div>
+              <small>動画仮置き</small>
+            </div>
+          </Media>
         </div>
       </section>
 
-      <section class="pillars" id="features">
-        <div class="wrap">
-          <article class="pillar">
-            <p class="pillar-no">01</p>
-            <h2>話者付きのリアルタイム文字起こし</h2>
-            <p class="pillar-lead">話すそばから、誰の発言かまで文字になります。</p>
-            <ul>
-              <li>Appleの音声認識で端末内で文字起こしし、最大8人まで話者を判別します。</li>
-              <li>先に速報を出し、精度の高い結果へ静かに差し替えます。半透明の行は、文字や話者がまだ変わる可能性がある印です。</li>
-              <li>話者名はクリックで変えられます。同じ人が2人に分かれたら、あとから統合できます。</li>
-              <li>停止すると、1会議1ファイルのMarkdownに保存します。</li>
-            </ul>
-            <p class="note">話者判別は推定です。必要に応じて書き起こしと話者を確認してください。</p>
-            <Demo src="demos/transcription.mp4" label="話者付きのリアルタイム文字起こしのデモ" />
-            <a class="more" href={docs("recording")}>録音と書き起こしの使い方 →</a>
-          </article>
+      <section class="points" id="features">
+        <div class="pt">
+          <div class="shot sheet">
+            <Media src="captures/speakers.png" alt="3人の会議の書き起こし。最後の行が半透明">
+              <div class="ph ph-shot">
+                <div class="what"><b>キャプチャ</b>3人の会議の書き起こし。<br />上の行は濃く、最後の1〜2行が半透明。<br />話者名は付け直した名前で。</div>
+                <small>画面仮置き</small>
+              </div>
+            </Media>
+          </div>
+          <div class="text">
+            <div class="tag t">話す人ごとに</div>
+            <h3>誰の声かを分けて書く</h3>
+            <p>まだ変わるかもしれない行は薄く、<br />決まると濃くなります。<br />名前はあとから付け直せます。</p>
+          </div>
+        </div>
 
-          <article class="pillar">
-            <p class="pillar-no">02</p>
-            <h2>AIが会議に参加する</h2>
-            <p class="pillar-lead">会議を止めずに、AIへ頼めます。</p>
-            <ul>
-              <li>CodexやClaude Codeを、herdrの専用ペインで会議の参加者として起こします。</li>
-              <li>会話の中で「迅雷、ここまでを整理して」と呼びかけるか、問いを書いて送ります。</li>
-              <li>数分おきに会話の差分を送り、議事録を書き進めてもらう自動送信もできます。</li>
-              <li>AIの返事は発話と同じ流れに並び、会議のMarkdownにも残ります。AIからの確認質問には、その場で返答できます。</li>
-            </ul>
-            <p class="note">AIへ送るのは、自分で設定して送信した内容だけです。</p>
-            <Demo src="demos/ai-participant.mp4" label="AIが会議に参加するデモ" />
-            <a class="more" href={docs("ai-participant")}>AIを会議に参加させる →</a>
-          </article>
+        <div class="pt r">
+          <div class="shot sheet">
+            <Media src="captures/ai-reply.png" alt="発話の行の間に並ぶAIの返事">
+              <div class="ph ph-shot">
+                <div class="what"><b>キャプチャ</b>発話の行の間に、AIの返事の行が並ぶところ。<br />返事は見出しと箇条書きのある短いまとめ。</div>
+                <small>画面仮置き</small>
+              </div>
+            </Media>
+          </div>
+          <div class="text">
+            <div class="tag g">AIも同じ流れに</div>
+            <h3>AIの返事が話と並ぶ</h3>
+            <p>Claude CodeやCodexに頼んだ返事が、<br />話の流れの中に入ってきます。</p>
+          </div>
+        </div>
+
+        <div class="pt">
+          <div class="shot sheet">
+            <Media src="captures/minutes.png" alt="書き起こしの右に議事録ペインを開いた画面">
+              <div class="ph ph-shot">
+                <div class="what"><b>キャプチャ</b>書き起こしの右に議事録ペインを開いた全体。<br />左に会話、右にAIが書いた議事録。</div>
+                <small>画面仮置き</small>
+              </div>
+            </Media>
+          </div>
+          <div class="text">
+            <div class="tag s">議事録</div>
+            <h3>議事録をその場で読む</h3>
+            <p>AIが書いた議事録を、<br />書き起こしの右に開いて読めます。<br />書き換わると表示も追いつきます。</p>
+          </div>
+        </div>
+
+        <div class="pt r">
+          <div class="shot sheet">
+            <Media src="captures/earphones.png" alt="録音開始シートでシステム音声を取り込む設定">
+              <div class="ph ph-shot">
+                <div class="what"><b>キャプチャ</b>録音開始シートで<br />マイクとシステム音声の混合を選んだところ。</div>
+                <small>画面仮置き</small>
+              </div>
+            </Media>
+          </div>
+          <div class="text">
+            <div class="tag t">イヤホンでも</div>
+            <h3>相手の声も聞き取る</h3>
+            <p>オンライン会議では、Macで流れる相手の声も<br />マイクと一緒に取り込みます。</p>
+          </div>
         </div>
       </section>
 
-      <section class="features">
-        <div class="wrap">
-          <h2 class="section-title">そのほかにできること</h2>
-          <ul class="feature-grid">
-            {
-              features.map((feature) => (
-                <li>
-                  <a href={feature.href}>
-                    <h3>{feature.title}</h3>
-                    <p>{feature.body}</p>
-                  </a>
-                </li>
-              ))
-            }
-          </ul>
-        </div>
-      </section>
+      <p class="more"><span>URLや画像の手入力</span><span>会話をコピーしてほかのAIへ</span><span>会議ごとにMarkdownで保存</span></p>
 
       <section class="install" id="install">
-        <div class="wrap install-inner">
-          <h2 class="section-title">インストール</h2>
-          <p>Homebrewで導入します。</p>
-          <div class="command">
-            <code id="install-command">{installCommand}</code>
-            <button type="button" class="copy" data-copy="install-command">コピー</button>
-          </div>
-          <p>更新は <code>brew upgrade --cask kikigaki</code> です。</p>
-          <p class="caution">
-            自己署名のアプリです。初回起動がブロックされた場合は、システム設定 → プライバシーとセキュリティ → 「このまま開く」で許可してください。
-          </p>
-          <h3>動作環境</h3>
-          <ul>
-            <li>macOS 26以降</li>
-            <li>マイクへのアクセス許可</li>
-            <li>初回のネットワーク接続。話者判別モデルを約193 MB取得します。Apple Speechの日本語アセットが未導入なら、それも取得します</li>
-          </ul>
-          <a class="button primary" href={docs("getting-started")}>はじめに・インストールを読む</a>
+        <h3>入れる</h3>
+        <div class="cmd">
+          <span><i>$</i> <code id="install-command">{installCommand}</code></span>
+          <button type="button" data-copy="install-command">コピー</button>
         </div>
+        <p>macOS 26以降。<br />初めて使うときに、話者判別のモデル(約193 MB)を取得します。</p>
       </section>
     </main>
 
-    <footer class="site-footer">
-      <div class="wrap footer-inner">
-        <a class="brand" href={`${base}/`}>
-          <Image src={logo} alt="" width={24} height={24} />
-          <span>KIKIGAKI</span>
-        </a>
-        <nav aria-label="フッター">
-          <a href={repo}>GitHub</a>
-          <a href={docs("getting-started")}>ドキュメント</a>
-          <a href={`${repo}/blob/main/LICENSE`}>MIT License</a>
-        </nav>
-      </div>
+    <footer>
+      <a class="brand" href={`${base}/`}>
+        <Image src={logo} alt="" width={22} height={22} />
+        <b>KIKIGAKI</b><em>聞書</em>
+      </a>
+      <nav aria-label="フッター">
+        <a href={docs}>ドキュメント</a>
+        <a href={repo}>GitHub</a>
+        <a href={`${repo}/blob/main/LICENSE`}>MIT License</a>
+      </nav>
     </footer>
 
     <script>
@@ -249,7 +218,7 @@ const features = [
             await navigator.clipboard.writeText(target.textContent);
             button.textContent = "コピーしました";
           } catch {
-            button.textContent = "コピーできませんでした";
+            button.textContent = "コピーできません";
           }
           setTimeout(() => (button.textContent = "コピー"), 2000);
         });
@@ -259,30 +228,9 @@ const features = [
 </html>
 
 <style is:global>
-  :root {
-    /* アプリの Washi パレット */
-    --paper: #f5ead9;
-    --paper-light: #fbf6ee;
-    --shade: #ede0cd;
-    --rule: #d5c6b1;
-    --ink: #221f1c;
-    --muted: #6b6157;
-    --red: #aa1405;
-    --bright-red: #cf321f;
-    --gold: #c4801f;
-    --gold-ink: #8a5a12;
-    --teal: #3e706c;
-    --sumi: #514a43;
-    --ai: #5b3e7a;
-    --font: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP",
-      "Segoe UI", sans-serif;
-    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  }
-
-  *,
-  *::before,
-  *::after {
+  * {
     box-sizing: border-box;
+    margin: 0;
   }
 
   html {
@@ -296,512 +244,497 @@ const features = [
   }
 
   body {
-    margin: 0;
-    font-family: var(--font);
-    font-size: 16px;
-    line-height: 1.8;
-    color: var(--ink);
-    background: var(--paper-light);
+    color: var(--washi-ink);
+    font-family: var(--washi-font);
+    background: var(--washi-paper) var(--washi-noise);
     -webkit-font-smoothing: antialiased;
   }
 
-  h1,
-  h2,
-  h3,
-  p,
-  ul,
-  ol,
-  figure {
-    margin: 0;
-  }
-
   a {
-    color: var(--red);
+    color: inherit;
+    text-decoration: none;
   }
 
-  code {
-    font-family: var(--font-mono);
-    font-size: 0.92em;
-  }
-
-  .wrap {
-    width: 100%;
-    max-width: 1080px;
+  /* ヘッダーとフッター */
+  .nav,
+  footer {
+    max-width: 1280px;
     margin: 0 auto;
-    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 32px;
+    color: var(--washi-muted);
   }
 
-  @media (min-width: 720px) {
-    .wrap {
-      padding: 0 32px;
-    }
+  .nav {
+    min-height: 64px;
+    padding: 0 72px;
+    font-size: 13px;
+  }
+
+  footer {
+    margin-top: 120px;
+    padding: 28px 72px 36px;
+    font-size: 13px;
   }
 
   .brand {
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    color: var(--ink);
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-decoration: none;
+    margin-right: auto;
   }
 
-  .site-header {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    background: rgba(245, 234, 217, 0.92);
-    backdrop-filter: blur(8px);
-    border-bottom: 1px solid var(--rule);
+  .brand img {
+    margin-right: 10px;
   }
 
-  .header-inner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    min-height: 56px;
+  .brand b {
+    color: var(--washi-ink);
+    font-size: 14px;
+    letter-spacing: 0.18em;
   }
 
-  .site-header nav,
-  .site-footer nav {
+  footer .brand b {
+    font-size: 13px;
+  }
+
+  .brand i,
+  .brand em {
+    font-style: normal;
+    margin-left: 10px;
+  }
+
+  .nav nav,
+  footer nav {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.25rem 1.25rem;
+    gap: 8px 32px;
   }
 
-  .site-header nav a,
-  .site-footer nav a {
-    color: var(--ink);
-    font-size: 0.9rem;
-    text-decoration: none;
+  .nav nav a:hover,
+  footer nav a:hover {
+    color: var(--washi-ink);
   }
 
-  .site-header nav a:hover,
-  .site-footer nav a:hover {
-    color: var(--red);
+  /* 紙の面 */
+  .sheet {
+    position: relative;
+    background: var(--washi-sheet);
+    border-radius: 4px;
+    box-shadow: var(--washi-sheet-shadow);
+    overflow: hidden;
   }
 
-  @media (max-width: 560px) {
-    .site-header nav a[href="#features"] {
-      display: none;
-    }
-  }
-
-  .button {
-    display: inline-flex;
+  .ph {
+    position: relative;
+    display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 44px;
-    padding: 0 1.25rem;
-    border: 1px solid var(--red);
-    border-radius: 8px;
-    color: var(--red);
-    font-weight: 600;
-    text-decoration: none;
-    background: transparent;
+    text-align: center;
   }
 
-  .button:hover {
-    background: rgba(170, 20, 5, 0.08);
-  }
-
-  .button.primary {
-    color: #fff;
-    background: var(--red);
-  }
-
-  .button.primary:hover {
-    background: var(--bright-red);
-    border-color: var(--bright-red);
-  }
-
-  /* ヒーロー */
-  .hero {
-    background: var(--paper);
-    border-bottom: 1px solid var(--rule);
-    padding: 56px 0 64px;
-  }
-
-  .hero-inner {
-    display: grid;
-    gap: 48px;
-    align-items: center;
-  }
-
-  @media (min-width: 900px) {
-    .hero-inner {
-      grid-template-columns: 1fr 1fr;
-    }
-  }
-
-  .eyebrow {
-    color: var(--gold-ink);
-    font-size: 0.85rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-  }
-
-  .hero h1 {
-    margin: 0.75rem 0 1.25rem;
-    font-size: clamp(2rem, 6vw, 3rem);
-    line-height: 1.3;
-    letter-spacing: 0.02em;
-  }
-
-  /* 見出しは文節の途中で折り返さない */
-  .phrase {
-    display: inline-block;
-  }
-
-  .lead {
-    color: var(--ink);
-    font-size: 1.05rem;
-  }
-
-  .lead + .lead {
-    margin-top: 0.5rem;
-  }
-
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    margin-top: 2rem;
-  }
-
-  /* 書き起こしウィンドウのイメージ */
-  .window {
-    background: var(--paper);
-    border: 1px solid var(--rule);
-    border-radius: 12px;
-    box-shadow: 0 18px 40px rgba(34, 31, 28, 0.14), 0 2px 6px rgba(34, 31, 28, 0.08);
-    overflow: hidden;
-    font-size: 14px;
-    line-height: 1.6;
-  }
-
-  .window-bar {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 10px 14px;
-    background: var(--shade);
-    border-bottom: 1px solid var(--rule);
-  }
-
-  .rec-dot {
-    width: 9px;
-    height: 9px;
-    margin-left: 0.5rem;
-    border-radius: 50%;
-    background: var(--red);
-  }
-
-  .rec-label {
-    font-weight: 600;
-  }
-
-  .rec-time {
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .rows {
-    list-style: none;
-    padding: 14px 16px 18px;
-    display: grid;
-    gap: 12px;
-  }
-
-  .row {
-    display: grid;
-    grid-template-columns: 24px 1fr;
-    gap: 10px;
-  }
-
-  .row p {
-    overflow-wrap: anywhere;
-  }
-
-  .meta {
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-  }
-
-  .meta time {
-    color: var(--muted);
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .avatar {
-    display: grid;
-    place-items: center;
-    width: 24px;
-    height: 24px;
-    margin-top: 2px;
-    border-radius: 50% 50% 50% 4px;
-    color: #fff;
-    font-size: 11px;
-    font-weight: 700;
-  }
-
-  .avatar.a {
-    background: var(--teal);
-  }
-
-  .avatar.b {
-    background: var(--gold);
-    color: var(--ink);
-  }
-
-  .avatar.typed {
-    border-radius: 50%;
-    background: var(--ink);
-    color: var(--paper);
-  }
-
-  .avatar.ai {
-    background: var(--ai);
-  }
-
-  .avatar.pending {
-    border: 1.75px dashed var(--muted);
-    border-radius: 50%;
-    background: transparent;
-  }
-
-  .chip {
-    padding: 0 6px;
-    border: 1px solid var(--rule);
-    border-radius: 4px;
-    color: var(--muted);
+  .ph small {
+    position: absolute;
+    bottom: 8px;
+    right: 12px;
     font-size: 10px;
-    line-height: 1.6;
+    color: var(--washi-placeholder);
   }
 
-  .link {
-    color: var(--red);
-    text-decoration: underline;
+  .what {
+    padding: 0 24px;
+    font-size: 14px;
+    line-height: 1.9;
+    color: var(--washi-muted);
   }
 
-  .sent {
-    padding-left: 34px;
-    color: var(--muted);
-    font-size: 11px;
+  .what b {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: var(--washi-placeholder);
   }
 
-  .tentative {
-    opacity: 0.6;
+  .tag {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
   }
 
-  /* 2本柱 */
+  .tag.t {
+    color: var(--washi-teal);
+  }
+
+  .tag.g {
+    color: var(--washi-gold);
+  }
+
+  .tag.s {
+    color: var(--washi-sumi);
+  }
+
+  /* ファーストビュー */
+  .first {
+    max-width: 1280px;
+    margin: 0 auto;
+    text-align: center;
+    padding: 44px 120px 0;
+  }
+
+  h1 {
+    font-size: clamp(34px, 6vw, 60px);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    line-height: 1.2;
+  }
+
   .pillars {
-    padding: 72px 0;
-  }
-
-  .pillars .wrap {
     display: grid;
-    gap: 32px;
+    grid-template-columns: 1fr 1fr;
+    gap: 88px;
+    padding-top: 52px;
   }
 
-  @media (min-width: 900px) {
-    .pillars .wrap {
-      grid-template-columns: 1fr 1fr;
-    }
+  .ph-ill {
+    height: 240px;
   }
 
-  .pillar {
-    display: flex;
-    flex-direction: column;
-    padding: 32px 28px;
-    background: #fff;
-    border: 1px solid var(--rule);
-    border-top: 4px solid var(--red);
-    border-radius: 12px;
+  .pl:first-child .ill {
+    transform: rotate(-0.6deg);
   }
 
-  .pillar-no {
-    color: var(--gold);
-    font-family: var(--font-mono);
-    font-weight: 700;
-    letter-spacing: 0.1em;
+  .pl:last-child .ill {
+    transform: rotate(0.5deg);
   }
 
-  .pillar h2 {
-    margin-top: 0.25rem;
-    font-size: 1.5rem;
-    line-height: 1.4;
+  .ill svg {
+    width: 340px;
+    max-width: 100%;
+    height: auto;
+    fill: none;
+    stroke: var(--washi-ink);
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
-  .pillar-lead {
-    margin: 0.5rem 0 1.25rem;
-    color: var(--muted);
+  .pl .tag {
+    display: inline-block;
+    margin-top: 26px;
   }
 
-  .pillar ul {
-    padding-left: 1.2em;
+  h2 {
+    margin-top: 6px;
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+
+  .pl p {
+    margin-top: 10px;
+    font-size: 14.5px;
+    line-height: 1.85;
+    color: var(--washi-body);
+  }
+
+  .own {
+    margin-top: 34px;
+    font-size: 14px;
+    line-height: 1.9;
+    color: var(--washi-muted);
+  }
+
+  .own em {
+    font-style: normal;
+    font-weight: 600;
+    color: var(--washi-ink);
+  }
+
+  /* 動画 */
+  .movie {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 96px 120px 0;
+  }
+
+  .movie .sheet {
+    transform: rotate(-0.25deg);
+  }
+
+  .ph-movie {
+    height: 584px;
+  }
+
+  .play {
+    position: relative;
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 18px;
+    border: 1.4px solid var(--washi-placeholder);
+    border-radius: 50%;
+  }
+
+  .play::after {
+    content: "";
+    position: absolute;
+    left: 22px;
+    top: 17px;
+    border-left: 16px solid var(--washi-placeholder);
+    border-top: 11px solid transparent;
+    border-bottom: 11px solid transparent;
+  }
+
+  /* ポイント */
+  .points {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 120px 120px 0;
     display: grid;
-    gap: 0.5rem;
+    gap: 112px;
   }
 
-  .pillar li::marker {
-    color: var(--red);
+  .pt {
+    display: grid;
+    grid-template-columns: 600px 1fr;
+    gap: 72px;
+    align-items: center;
   }
 
-  .note {
-    margin-top: 1.25rem;
-    padding: 0.75rem 1rem;
-    background: var(--paper-light);
-    border-left: 3px solid var(--gold);
-    color: var(--muted);
-    font-size: 0.9rem;
+  .pt.r {
+    grid-template-columns: 1fr 600px;
+  }
+
+  .pt.r .shot {
+    order: 2;
+  }
+
+  .ph-shot {
+    height: 380px;
+  }
+
+  .pt:nth-child(1) .sheet {
+    transform: rotate(-0.5deg);
+  }
+
+  .pt:nth-child(2) .sheet {
+    transform: rotate(0.45deg);
+  }
+
+  .pt:nth-child(3) .sheet {
+    transform: rotate(-0.4deg);
+  }
+
+  .pt:nth-child(4) .sheet {
+    transform: rotate(0.5deg);
+  }
+
+  h3 {
+    margin-top: 8px;
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+
+  .pt p {
+    margin-top: 14px;
+    font-size: 14.5px;
+    line-height: 1.9;
+    color: var(--washi-body);
   }
 
   .more {
-    margin-top: auto;
-    padding-top: 1.5rem;
-    align-self: flex-start;
-    font-weight: 600;
+    margin-top: 96px;
+    padding: 0 16px;
+    text-align: center;
+    font-size: 14px;
+    line-height: 2;
+    color: var(--washi-muted);
   }
 
-  /* そのほかの機能 */
-  .features {
-    padding: 64px 0;
-    background: var(--paper);
-    border-top: 1px solid var(--rule);
-    border-bottom: 1px solid var(--rule);
+  .more span {
+    display: inline-block;
   }
 
-  .section-title {
-    font-size: 1.5rem;
-    margin-bottom: 1.5rem;
+  .more span + span::before {
+    content: "・";
+    margin: 0 14px;
+    color: var(--washi-placeholder);
   }
 
-  .feature-grid {
-    list-style: none;
-    padding: 0;
-    display: grid;
-    gap: 16px;
-  }
-
-  @media (min-width: 640px) {
-    .feature-grid {
-      grid-template-columns: repeat(2, 1fr);
-    }
-  }
-
-  @media (min-width: 960px) {
-    .feature-grid {
-      grid-template-columns: repeat(3, 1fr);
-    }
-  }
-
-  .feature-grid a {
-    display: block;
-    height: 100%;
-    padding: 20px 22px;
-    background: var(--paper-light);
-    border: 1px solid var(--rule);
-    border-radius: 10px;
-    color: var(--ink);
-    text-decoration: none;
-  }
-
-  .feature-grid a:hover {
-    border-color: var(--gold);
-  }
-
-  .feature-grid h3 {
-    font-size: 1.05rem;
-    margin-bottom: 0.4rem;
-  }
-
-  .feature-grid p {
-    color: var(--muted);
-    font-size: 0.92rem;
-  }
-
-  /* インストール */
+  /* 導入 */
   .install {
-    padding: 72px 0;
-  }
-
-  .install-inner {
-    max-width: 760px;
-    display: grid;
-    gap: 1rem;
-    justify-items: start;
-  }
-
-  .install-inner .section-title {
-    margin-bottom: 0;
+    padding: 136px 16px 0;
+    text-align: center;
   }
 
   .install h3 {
-    margin-top: 1rem;
-    font-size: 1.1rem;
+    margin: 0;
   }
 
-  .install ul {
-    padding-left: 1.2em;
+  .cmd {
+    display: inline-flex;
+    align-items: center;
+    gap: 20px;
+    max-width: 100%;
+    margin-top: 24px;
+    padding: 16px 18px 16px 26px;
+    font: 15px/1 var(--washi-font-mono);
+    background: var(--washi-sheet);
+    border-radius: 4px;
+    box-shadow: var(--washi-sheet-shadow);
   }
 
-  .command {
-    display: flex;
-    align-items: stretch;
-    width: 100%;
-    background: var(--ink);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .command code {
-    flex: 1;
+  .cmd > span {
     min-width: 0;
-    padding: 14px 16px;
-    color: var(--paper);
     overflow-x: auto;
     white-space: nowrap;
+    text-align: left;
   }
 
-  .copy {
-    flex-shrink: 0;
-    padding: 0 16px;
-    border: 0;
-    border-left: 1px solid rgba(245, 234, 217, 0.2);
-    color: var(--paper);
-    background: transparent;
+  .cmd i {
+    font-style: normal;
+    color: var(--washi-placeholder);
+  }
+
+  .cmd code {
     font: inherit;
-    font-size: 0.85rem;
+  }
+
+  .cmd button {
+    flex-shrink: 0;
+    padding: 8px 16px;
+    border: 0;
+    border-radius: 999px;
+    font: 600 12px var(--washi-font);
+    color: var(--washi-sheet);
+    background: var(--washi-red);
     cursor: pointer;
   }
 
-  .copy:hover {
-    background: rgba(245, 234, 217, 0.1);
+  .cmd button:hover {
+    background: var(--washi-bright-red);
   }
 
-  .caution {
-    padding: 0.75rem 1rem;
-    background: var(--paper);
-    border-left: 3px solid var(--red);
-    font-size: 0.92rem;
+  .install p {
+    margin-top: 18px;
+    font-size: 13px;
+    line-height: 1.9;
+    color: var(--washi-muted);
   }
 
-  .site-footer {
-    padding: 32px 0 40px;
-    background: var(--paper);
-    border-top: 1px solid var(--rule);
+  /* 狭い画面: 余白を詰める */
+  @media (max-width: 1100px) {
+    .first,
+    .movie,
+    .points {
+      padding-left: 48px;
+      padding-right: 48px;
+    }
+
+    .pillars {
+      gap: 48px;
+    }
+
+    .pt,
+    .pt.r {
+      grid-template-columns: 1.4fr 1fr;
+      gap: 48px;
+    }
+
+    .pt.r {
+      grid-template-columns: 1fr 1.4fr;
+    }
   }
 
-  .footer-inner {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
+  /* 2本柱とポイントを縦に積む */
+  @media (max-width: 760px) {
+    .nav,
+    footer {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+
+    .nav nav,
+    footer nav {
+      gap: 8px 20px;
+    }
+
+    .first,
+    .movie,
+    .points {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+
+    .first {
+      padding-top: 32px;
+    }
+
+    .pillars {
+      grid-template-columns: 1fr;
+      gap: 56px;
+      padding-top: 36px;
+    }
+
+    .ph-ill {
+      height: 200px;
+    }
+
+    .movie {
+      padding-top: 72px;
+    }
+
+    .ph-movie {
+      height: 360px;
+    }
+
+    .points {
+      padding-top: 88px;
+      gap: 72px;
+    }
+
+    .pt,
+    .pt.r {
+      grid-template-columns: 1fr;
+      gap: 28px;
+    }
+
+    .pt.r .shot {
+      order: 0;
+    }
+
+    .ph-shot {
+      height: 260px;
+    }
+
+    .pl p br,
+    .pt p br {
+      display: none;
+    }
+
+    .more {
+      margin-top: 72px;
+    }
+
+    .more span + span::before {
+      margin: 0 8px;
+    }
+
+    .install {
+      padding-top: 104px;
+    }
+
+    .cmd {
+      gap: 12px;
+      padding: 14px 14px 14px 18px;
+      font-size: 13px;
+    }
+
+    footer {
+      margin-top: 96px;
+    }
   }
 </style>

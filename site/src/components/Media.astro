@@ -1,0 +1,37 @@
+---
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
+interface Props {
+  /** public/ からの相対パス。例: captures/speakers.png */
+  src: string;
+  alt: string;
+}
+
+const { src, alt } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+// 本番の素材は後から置く。public/ にあれば出し、無ければ仮置き(slot)を出す
+const exists = existsSync(join(process.cwd(), "public", src));
+const isVideo = src.endsWith(".mp4");
+---
+
+{
+  exists ? (
+    isVideo ? (
+      <video class="media" src={`${base}/${src}`} aria-label={alt} autoplay loop muted playsinline preload="metadata" />
+    ) : (
+      <img class="media" src={`${base}/${src}`} alt={alt} loading="lazy" decoding="async" />
+    )
+  ) : (
+    <slot />
+  )
+}
+
+<style>
+  .media {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 4px;
+  }
+</style>

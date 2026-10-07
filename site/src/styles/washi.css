@@ -1,0 +1,23 @@
+/* トップとドキュメントで共有する色と書体。値はアプリの Washi パレットと同じ */
+:root {
+  --washi-paper: #f5ead9;
+  --washi-sheet: #fbf5ea;
+  --washi-shade: #ede0cd;
+  --washi-rule: #d5c6b1;
+  --washi-ink: #221f1c;
+  --washi-body: #3b3530;
+  --washi-muted: #6b6157;
+  --washi-placeholder: #a99c8c;
+  --washi-red: #aa1405;
+  --washi-bright-red: #cf321f;
+  --washi-teal: #3e706c;
+  --washi-gold: #c4801f;
+  --washi-sumi: #514a43;
+  --washi-font: "Hiragino Sans", "Hiragino Kaku Gothic ProN", -apple-system, BlinkMacSystemFont, "Noto Sans JP",
+    "Yu Gothic", sans-serif;
+  --washi-font-mono: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
+  /* 和紙の地のノイズ。外部ファイルを読まずにSVGで描く */
+  --washi-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .28 0 0 0 0 .2 0 0 0 .06 0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E");
+  /* 傾けた紙の面の影 */
+  --washi-sheet-shadow: 0 1px 2px rgba(80, 60, 40, 0.08), 0 8px 24px -12px rgba(80, 60, 40, 0.18);
+}
