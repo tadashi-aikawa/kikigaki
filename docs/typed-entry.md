@@ -112,19 +112,19 @@ Markdownのメタ情報にある「話者」の一覧には手入力を含めな
 
 手動コピーは既に `snapshot.utterances` → `TranscriptRenderer.lines` を通るので、併合結果がそのまま入る。コピーは毎回全文なので、手入力後に遅れた音声が途中へ挿入されても次のコピーにそのまま入る。過去の固定済み会話ファイルは変更しない。
 
-### AI送信は別経路への対応が必要
+### AI送信は手入力を固定して併合する
 
-現在の `submitAI` は画面の配列を使わず、`AICapture` が音声tokensから会話を再構築する。Rendererの表示名変更だけでは手入力が入らない。
+`submitAI` は画面の配列を使わず、`AICapture` が音声tokensから会話を再構築する。手入力は次の形で併合する。
 
 1. `submitAI` の呼び出し時点で、cutoff・names・timelineとともにtypedEntriesの値コピーを固定する。最初の `await` より前に行う。
-2. `AICapture` にtypedの引数を追加する。確定した声の行を作った後、固定したtypedのうち `start <= cutoff` の行を併合し、`TranscriptRenderer.lines` へ渡す。
+2. `AICapture` は確定した声の行を作った後、固定したtypedのうち `start <= cutoff` の行を併合し、`TranscriptRenderer.lines` へ渡す。
 3. 確定待ちの再試行でも同じtypedの値コピーを渡す。待ち中に投稿された行は、同じ音声位置であっても今回の送信には混ぜない。
 4. `voice`・`voiceUtteranceStart`・`tail`・`needsConfirmation` は声だけから導く。手入力のURLを「空欄なら声の末尾」の問いへ転用しない。
-5. 停止後の送信経路にも固定したtypedを渡す。AIプレビューは既に併合済みsnapshotを使うため、実送信と手入力の有無がずれないようにする。
+5. 停止後の送信経路にも固定したtypedを渡す。AIプレビューは併合済みsnapshotを使うため、実送信と手入力の有無がずれない。
 
-同時刻のtypedを含める `<=` は、声のtokensを切る既存の `< cutoff` とは意図的に異なる。typedは投稿時点で全文が確定しており、一時停止中は音声位置が進まないため、等号を落とすと投稿が次回も送られない。
+同時刻のtypedを含める `<=` は、声のtokensを切る `< cutoff` とは意図的に異なる。typedは投稿時点で全文が確定しており、一時停止中は音声位置が進まないため、等号を落とすと投稿が次回も送られない。
 
-`AIRequest.voiceAnchorIndex` はkindがvoiceの行だけを候補にする。現在は同じstartの最後の行を選ぶため、修正しないと声の送信印がtypedへ付く。Markdownとウィンドウの両方が同じアンカー関数を使う。
+`AIRequest.voiceAnchorIndex` はkindがvoiceの行だけを候補にする。これにより声の送信印がtypedへ付かない。Markdownとウィンドウの両方が同じアンカー関数を使う。
 
 既存の `AIParticipantContext.QuestionSource.typed` はAI送信シートへ書いた問いの由来であり、今回の `Utterance.Kind.typed` とは別の情報である。envelopeや作業許可の契約は変えない。手入力のみの会議をAIへ送る場合は、シートに問いを入力する既存の経路を使う。
 
