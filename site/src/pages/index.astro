@@ -306,6 +306,22 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     </footer>
 
     <script>
+      const nav = document.querySelector<HTMLElement>(".nav");
+      if (nav) {
+        let last = window.scrollY;
+        const updateNav = () => {
+          const y = window.scrollY;
+          nav.classList.toggle("is-stuck", y > 8);
+          if (y <= 64 || y < last) nav.classList.remove("is-hidden");
+          else if (y > last) nav.classList.add("is-hidden");
+          last = y;
+        };
+        // JavaScriptが動く場合だけ追従させる。無効なら元の絶対配置のまま。
+        nav.classList.add("is-enhanced");
+        window.addEventListener("scroll", updateNav, { passive: true });
+        updateNav();
+      }
+
       for (const button of document.querySelectorAll<HTMLButtonElement>("button[data-copy]")) {
         button.addEventListener("click", async () => {
           const target = document.getElementById(button.dataset.copy ?? "");
@@ -341,6 +357,10 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     .scroll-cue {
       animation: none !important;
     }
+
+    .nav.is-enhanced {
+      transition: none !important;
+    }
   }
 
   body {
@@ -375,6 +395,31 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     min-height: 64px;
     padding: 0 72px;
     font-size: 13px;
+  }
+
+  .nav.is-enhanced {
+    position: fixed;
+    max-width: none;
+    padding: 0 max(72px, calc((100vw - 1280px) / 2 + 72px));
+    border-bottom: 1px solid transparent;
+    transition: background-color 0.2s, border-color 0.2s, min-height 0.2s, transform 0.25s ease;
+  }
+
+  .nav.is-stuck {
+    min-height: 52px;
+    background-color: rgba(245, 234, 217, 0.94);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    border-bottom-color: var(--washi-rule);
+  }
+
+  .nav.is-hidden {
+    transform: translateY(-100%);
+  }
+
+  /* 上へ戻るリンクではナビが出るため、飛び先にバーと余白を確保する。 */
+  main section[id] {
+    scroll-margin-top: 64px;
   }
 
   footer {
@@ -999,6 +1044,39 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     .nav nav,
     footer nav {
       gap: 8px 20px;
+    }
+
+    .nav.is-enhanced {
+      padding: 0 16px;
+    }
+
+    .nav.is-stuck {
+      flex-wrap: nowrap;
+      min-height: 48px;
+    }
+
+    .nav.is-stuck .brand i {
+      display: none;
+    }
+
+    .nav.is-stuck .brand {
+      flex: none;
+    }
+
+    .nav.is-stuck nav {
+      min-width: 0;
+      flex-wrap: nowrap;
+      gap: 0 16px;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    .nav.is-stuck nav a {
+      flex: none;
+    }
+
+    main section[id] {
+      scroll-margin-top: 60px;
     }
 
     /* 既存ナビの全リンクを残し、2行になっても絵と重ねない */
