@@ -176,29 +176,33 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
           <h2 class="section-kicker">動いているところ</h2>
           <p class="section-lead">3人の会議を録音中。話すと薄く出て、決まると濃くなる。頼むとAIエージェントの返事が並ぶ</p>
         </header>
-        <div class="sheet">
-          <Media src="demos/transcription.mp4" alt="対面の会議を録音中の書き起こしウィンドウ">
-            <div class="ph ph-movie">
-              <div class="what">
-                <div class="play"></div>
-                <b>動画 15〜20秒・無音ループ</b>
-                対面の会議を録音中の書き起こしウィンドウ。<br />3人の発話が話者色つきで薄く出て、濃く決まっていく。<br />途中でAIエージェントの返事が1つ、発話の間に入る。
+        <div class="movie-frame">
+          <div class="media-clip">
+            <Media src="demos/transcription.mp4" alt="対面の会議を録音中の書き起こしウィンドウ">
+              <div class="ph ph-movie">
+                <div class="what">
+                  <div class="play"></div>
+                  <b>動画 15〜20秒・無音ループ</b>
+                  対面の会議を録音中の書き起こしウィンドウ。<br />3人の発話が話者色つきで薄く出て、濃く決まっていく。<br />途中でAIエージェントの返事が1つ、発話の間に入る。
+                </div>
+                <small>動画仮置き</small>
               </div>
-              <small>動画仮置き</small>
-            </div>
-          </Media>
+            </Media>
+          </div>
         </div>
       </section>
 
       <section class="points">
         <div class="pt">
-          <div class="shot sheet">
-            <Media src="captures/speakers.png" alt="3人の会議の書き起こし。最後の行が半透明">
-              <div class="ph ph-shot">
-                <div class="what"><b>キャプチャ</b>3人の会議の書き起こし。<br />上の行は濃く、最後の1〜2行が半透明。<br />話者名は付け直した名前で。</div>
-                <small>画面仮置き</small>
-              </div>
-            </Media>
+          <div class="shot">
+            <div class="sheet media-clip">
+              <Media src="captures/speakers.png" alt="3人の会議の書き起こし。最後の行が半透明">
+                <div class="ph ph-shot">
+                  <div class="what"><b>キャプチャ</b>3人の会議の書き起こし。<br />上の行は濃く、最後の1〜2行が半透明。<br />話者名は付け直した名前で。</div>
+                  <small>画面仮置き</small>
+                </div>
+              </Media>
+            </div>
           </div>
           <div class="text">
             <div class="tag t">話す人ごとに</div>
@@ -208,13 +212,15 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
         </div>
 
         <div class="pt r">
-          <div class="shot sheet">
-            <Media src="captures/ai-reply.png" alt="発話の行の間に並ぶAIエージェントの返事">
-              <div class="ph ph-shot">
-                <div class="what"><b>キャプチャ</b>発話の行の間に、AIエージェントの返事の行が並ぶところ。<br />返事は見出しと箇条書きのある短いまとめ。</div>
-                <small>画面仮置き</small>
-              </div>
-            </Media>
+          <div class="shot">
+            <div class="sheet media-clip">
+              <Media src="captures/ai-reply.png" alt="発話の行の間に並ぶAIエージェントの返事">
+                <div class="ph ph-shot">
+                  <div class="what"><b>キャプチャ</b>発話の行の間に、AIエージェントの返事の行が並ぶところ。<br />返事は見出しと箇条書きのある短いまとめ。</div>
+                  <small>画面仮置き</small>
+                </div>
+              </Media>
+            </div>
           </div>
           <div class="text">
             <div class="tag g">AIも同じ流れに</div>
@@ -224,13 +230,15 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
         </div>
 
         <div class="pt">
-          <div class="shot sheet">
-            <Media src="captures/minutes.png" alt="書き起こしの右に議事録ペインを開いた画面">
-              <div class="ph ph-shot">
-                <div class="what"><b>キャプチャ</b>書き起こしの右に議事録ペインを開いた全体。<br />左に会話、右にAIエージェントが書いた議事録。</div>
-                <small>画面仮置き</small>
-              </div>
-            </Media>
+          <div class="shot">
+            <div class="sheet media-clip">
+              <Media src="captures/minutes.png" alt="書き起こしの右に議事録ペインを開いた画面">
+                <div class="ph ph-shot">
+                  <div class="what"><b>キャプチャ</b>書き起こしの右に議事録ペインを開いた全体。<br />左に会話、右にAIエージェントが書いた議事録。</div>
+                  <small>画面仮置き</small>
+                </div>
+              </Media>
+            </div>
           </div>
           <div class="text">
             <div class="tag s">議事録</div>
@@ -240,13 +248,15 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
         </div>
 
         <div class="pt r">
-          <div class="shot sheet">
-            <Media src="captures/board.png" alt="議事録ペインのボードタブに、論点と決まったことが並ぶ画面">
-              <div class="ph ph-shot">
-                <div class="what"><b>キャプチャ</b>議事録ペインの「ボード」タブを開いたところ。</div>
-                <small>画面仮置き</small>
-              </div>
-            </Media>
+          <div class="shot">
+            <div class="sheet media-clip">
+              <Media src="captures/board.png" alt="議事録ペインのボードタブに、論点と決まったことが並ぶ画面">
+                <div class="ph ph-shot">
+                  <div class="what"><b>キャプチャ</b>議事録ペインの「ボード」タブを開いたところ。</div>
+                  <small>画面仮置き</small>
+                </div>
+              </Media>
+            </div>
           </div>
           <div class="text">
             <div class="tag s">ボード</div>
@@ -256,13 +266,15 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
         </div>
 
         <div class="pt">
-          <div class="shot sheet">
-            <Media src="captures/earphones.png" alt="録音開始シートでシステム音声を取り込む設定">
-              <div class="ph ph-shot">
-                <div class="what"><b>キャプチャ</b>録音開始シートで<br />マイクとシステム音声の混合を選んだところ。</div>
-                <small>画面仮置き</small>
-              </div>
-            </Media>
+          <div class="shot">
+            <div class="sheet media-clip">
+              <Media src="captures/earphones.png" alt="録音開始シートでシステム音声を取り込む設定">
+                <div class="ph ph-shot">
+                  <div class="what"><b>キャプチャ</b>録音開始シートで<br />マイクとシステム音声の混合を選んだところ。</div>
+                  <small>画面仮置き</small>
+                </div>
+              </Media>
+            </div>
           </div>
           <div class="text">
             <div class="tag t">イヤホンでも</div>
@@ -741,8 +753,32 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     padding: 176px 120px 0;
   }
 
-  .movie .sheet {
-    transform: rotate(-0.25deg);
+  .movie-frame {
+    container-type: inline-size;
+    padding: 12px;
+    border-radius: 20px;
+    background: #2b2724;
+    box-shadow: inset 0 0 0 1px #ffffff14,
+      0 2px 4px #3b302624,
+      0 28px 56px -20px #3b302673;
+  }
+
+  .shot {
+    container-type: inline-size;
+    min-width: 0;
+  }
+
+  .media-clip {
+    /* 録画の黒い四隅を窓の角丸で切る。幅1040pxなら12px。 */
+    border-radius: 1.153846cqw;
+    overflow: hidden;
+  }
+
+  .media-clip .media {
+    /* 角丸の外からにじんだ黒も、画面端のわずかな切り込みで除く。 */
+    width: calc(100% + 0.4cqw);
+    margin: -0.2cqw;
+    border-radius: 0;
   }
 
   .movie .section-head {
@@ -936,6 +972,10 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
 
   /* 2本柱とポイントを縦に積む */
   @media (max-width: 760px) {
+    .movie-frame {
+      padding: 6px;
+    }
+
     .nav,
     footer {
       padding-left: 16px;
