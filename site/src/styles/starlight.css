@@ -1,27 +1,110 @@
-/* ロゴの朱・生成り・金をドキュメントの配色へ移す。アプリの Washi パレットと同じ値 */
+/* ドキュメントをトップと同じ和紙の見た目にする。色と書体の値は washi.css */
 
 :root {
+  --sl-font: var(--washi-font);
+  --sl-font-mono: var(--washi-font-mono);
+
+  /* 見出しは本文に対して控えめにする */
+  --sl-text-h1: 2rem;
+  --sl-text-h2: 1.5rem;
+  --sl-text-h3: 1.2rem;
+  --sl-text-h4: 1.05rem;
+
+  /* ダーク: 墨の地に生成りの文字 */
+  --sl-color-white: #fbf5ea;
+  --sl-color-gray-1: #f5ead9;
+  --sl-color-gray-2: #e3d6c3;
+  --sl-color-gray-3: #b5a898;
+  --sl-color-gray-4: #7d7166;
+  --sl-color-gray-5: #4a433c;
+  --sl-color-gray-6: #2f2a26;
+  --sl-color-black: #221f1c;
   --sl-color-accent-low: #3d0f09;
   --sl-color-accent: #cf321f;
   --sl-color-accent-high: #f2b8ab;
+
+  /* コードブロックの地と罫。astro.config.mjs の expressiveCode から参照する */
+  --washi-code-bg: #2f2a26;
+  --washi-code-rule: #4a433c;
 }
 
 :root[data-theme="light"] {
-  --sl-color-accent-low: #f3d9cf;
-  --sl-color-accent: #aa1405;
-  --sl-color-accent-high: #6e0d03;
-
-  /* 紙面は生成りを薄めた色。本文の読みやすさを優先して地を明るく保つ */
-  --sl-color-black: #fdfaf4;
-  --sl-color-gray-6: #f5ead9;
-  --sl-color-gray-7: #faf3e8;
-  --sl-color-bg-nav: #f5ead9;
-  --sl-color-bg-sidebar: #faf3e8;
-  --sl-color-hairline-light: #e3d6c3;
-  --sl-color-hairline: #d5c6b1;
+  /* ライト: 生成りの地に墨の文字。アクセントは朱 */
+  --sl-color-white: var(--washi-ink);
+  --sl-color-gray-1: #2c2824;
+  --sl-color-gray-2: var(--washi-body);
+  --sl-color-gray-3: var(--washi-muted);
+  --sl-color-gray-4: var(--washi-placeholder);
+  --sl-color-gray-5: var(--washi-rule);
+  --sl-color-gray-6: var(--washi-shade);
+  --sl-color-gray-7: var(--washi-sheet);
+  --sl-color-black: var(--washi-paper);
+  --sl-color-accent-low: #f0d6cc;
+  --sl-color-accent: var(--washi-red);
+  --sl-color-accent-high: #7a0e03;
+  --sl-color-bg-nav: var(--washi-paper);
+  --sl-color-bg-sidebar: var(--washi-paper);
+  --sl-color-hairline-light: var(--washi-shade);
+  --sl-color-hairline: var(--washi-rule);
+  --sl-color-hairline-shade: var(--washi-rule);
+  --washi-code-bg: var(--washi-shade);
+  --washi-code-rule: var(--washi-rule);
 }
 
-/* 表の見出しに和紙の影を敷き、設定リファレンスの表を追いやすくする */
-:root[data-theme="light"] .sl-markdown-content th {
-  background: #f5ead9;
+:root[data-theme="light"] body,
+:root[data-theme="light"] .header,
+:root[data-theme="light"] .sidebar-pane {
+  background-image: var(--washi-noise);
+}
+
+/* サイドバー: 塗りをやめ、左の朱の細い罫と文字色で選択を示す */
+.sidebar-content a[aria-current="page"],
+.sidebar-content a[aria-current="page"]:hover,
+.sidebar-content a[aria-current="page"]:focus {
+  color: var(--sl-color-text-accent);
+  background: transparent;
+  border-radius: 0;
+  box-shadow: inset 2px 0 0 var(--sl-color-accent);
+}
+
+/* 見出し: h2の下に細い罫。h2は幅が文字に縮む包みの中にあるので、包みに引く */
+.sl-markdown-content .sl-heading-wrapper.level-h2 {
+  padding-bottom: 0.35em;
+  border-bottom: 1px solid var(--sl-color-hairline);
+}
+
+/* 注意書き: 地の塗りをやめ、左の罫だけにする */
+.starlight-aside {
+  background: transparent;
+}
+
+/* コードブロックの地。Starlightがテーマごとに付ける枠の変数を、枠の要素で上書きする */
+.expressive-code .frame {
+  --ec-frm-edBg: var(--washi-code-bg);
+  --ec-frm-edActTabBg: var(--washi-code-bg);
+  --ec-frm-edTabBarBg: var(--washi-code-bg);
+  --ec-frm-trmBg: var(--washi-code-bg);
+  --ec-frm-trmTtbBg: var(--washi-code-bg);
+}
+
+/* 表の見出しに和紙の影 */
+.sl-markdown-content th {
+  background: var(--sl-color-gray-6);
+}
+
+/* 右の目次: 本文より目立たせない */
+starlight-toc h2,
+.right-sidebar-panel h2 {
+  font-size: var(--sl-text-xs);
+  color: var(--sl-color-gray-3);
+}
+
+starlight-toc a {
+  font-size: var(--sl-text-xs);
+  color: var(--sl-color-gray-3);
+}
+
+starlight-toc a[aria-current="true"],
+starlight-toc a:hover {
+  color: var(--sl-color-text-accent);
 }

@@ -13,14 +13,15 @@ export default defineConfig({
   },
   integrations: [
     starlight({
-      title: "KIKIGAKI",
+      title: "KIKIGAKI 聞書",
       description:
         "会議の発話を聴いて、話者付きでリアルタイムに文字起こしし、Markdownで残すmacOSアプリ",
       defaultLocale: "root",
       locales: {
         root: { label: "日本語", lang: "ja" },
       },
-      logo: { src: "./src/assets/kikigaki.png", alt: "KIKIGAKIのロゴ" },
+      // ロゴと題はトップのヘッダーと揃えるため SiteTitle を差し替えて描く
+      components: { SiteTitle: "./src/components/SiteTitle.astro" },
       favicon: "/favicon.png",
       head: [
         {
@@ -35,7 +36,25 @@ export default defineConfig({
           href: "https://github.com/tadashi-aikawa/kikigaki",
         },
       ],
-      customCss: ["./src/styles/starlight.css"],
+      customCss: ["./src/styles/washi.css", "./src/styles/starlight.css"],
+      // コードブロックは窓枠の飾りを外し、生成りの濃い地を罫で囲む。
+      // 色はテーマごとに starlight.css の変数で切り替える。ec.config.mjs に関数で書くと、
+      // ページが参照するCSSと書き出すCSSのハッシュが食い違ってスタイルが外れた
+      expressiveCode: {
+        defaultProps: { frame: "code" },
+        styleOverrides: {
+          borderRadius: "4px",
+          borderColor: "var(--washi-code-rule)",
+          codeBackground: "var(--washi-code-bg)",
+          codeFontFamily: "var(--washi-font-mono)",
+          uiFontFamily: "var(--washi-font)",
+          // 枠の地はStarlightがテーマごとに上書きするので、starlight.css で枠の変数を差し替える
+          frames: {
+            frameBoxShadowCssValue: "none",
+            terminalTitlebarDotsOpacity: "0",
+          },
+        },
+      },
       // 404 はティザーと同じ見た目で src/pages/404.astro に置く。Starlight の 404 は
       // ドキュメントのサイドバー付きで出るうえ、上書き用の docs/404.md はslugルートと衝突する
       disable404Route: true,
