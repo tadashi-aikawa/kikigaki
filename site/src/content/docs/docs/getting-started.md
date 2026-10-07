@@ -58,10 +58,17 @@ Dockには出ません。
 KIKIGAKIは2つのモデルを使います。
 初回にダウンロードした後は、Macの中にあるものを使います。
 
-| モデル | 用途 | 取得元 | 置き場 |
-| --- | --- | --- | --- |
-| Nemotron 3 Diarization | 話者判別 | Hugging Face | `~/Library/Application Support/FluidAudio/Models/nemotron-3-diarization` |
-| Apple Speechの日本語アセット | 文字起こし | Apple | macOSが管理 |
+| モデル | 用途 | 取得元 |
+| --- | --- | --- |
+| Nemotron 3 Diarization | 話者判別 | Hugging Face |
+| Apple Speechの日本語アセット | 文字起こし | Apple |
+
+モデルの置き場は次のとおりです。
+
+- Nemotron 3 Diarization
+    - 置き場: `~/Library/Application Support/FluidAudio/Models/nemotron-3-diarization`
+- Apple Speechの日本語アセット
+    - 置き場: macOSが管理
 
 - 話者判別を使う設定なら、アプリの起動時からモデルを読み込みます
 - ダウンロードが終わる前に録音を始めると、「準備中」のまま待ちます

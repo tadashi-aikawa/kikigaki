@@ -58,6 +58,28 @@
 }
 
 /* サイドバー: 塗りをやめ、左の朱の細い罫と文字色で選択を示す */
+/* 最長の題も14pxで1行に収めるため、ulが持つ左右の余白を8pxから6pxへ縮める */
+.sidebar-content ul {
+  --sl-sidebar-item-padding-inline: 0.375rem;
+}
+
+.sidebar-content .large {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--sl-color-gray-2);
+  text-wrap: balance;
+}
+
+.sidebar-content .large:hover {
+  color: var(--sl-color-white);
+}
+
+@media (min-width: 50rem) {
+  .sidebar-content .large {
+    font-size: 14px;
+  }
+}
+
 .sidebar-content a[aria-current="page"],
 .sidebar-content a[aria-current="page"]:hover,
 .sidebar-content a[aria-current="page"]:focus {
@@ -65,6 +87,14 @@
   background: transparent;
   border-radius: 0;
   box-shadow: inset 2px 0 0 var(--sl-color-accent);
+}
+
+/* 長いページ題の折り返しを均す。インラインのspanではbalanceが効かない */
+.pagination-links .link-title {
+  display: block;
+  font-size: 18px;
+  line-height: 1.5;
+  text-wrap: balance;
 }
 
 /* 見出し: h2の下に細い罫。h2は幅が文字に縮む包みの中にあるので、包みに引く */
@@ -88,6 +118,19 @@
 }
 
 /* 表の見出しに和紙の影 */
+.sl-markdown-content table {
+  font-size: 15px;
+}
+
+.sl-markdown-content :is(th, td) {
+  padding-inline: 0.75rem;
+}
+
+/* 短い項目名を1行に収めつつ、狭い画面の長いモデル名は折り返せる幅にする */
+.sl-markdown-content :is(th, td):first-child {
+  min-width: 7em;
+}
+
 .sl-markdown-content th {
   background: var(--sl-color-gray-6);
 }
