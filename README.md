@@ -26,7 +26,7 @@
 - macOS 26以降
 - マイクへのアクセス許可
 - 初回のネットワーク接続
-    - 話者判別モデルを約193 MB取得します
+    - 話者判別モデル(Nemotron 3 Diarization)を取得します
     - Apple Speechの日本語アセットが未導入の場合は、それも取得します
 
 ## インストール
@@ -67,7 +67,7 @@ brew install --cask tadashi-aikawa/tap/kikigaki
 - モデルの取得ではHugging FaceとAppleへ接続します。音声や文字起こしは送りません。
 - アバターや議事録に外部の画像URLを書いた場合は、その配信元へ接続します。
 
-話者判別モデルは [Nemotron 3 Diarization](https://huggingface.co/FluidInference/nemotron-3-diarization-coreml) です。利用条件は [OpenMDW License Agreement 1.1](https://openmdw.ai/license/1-1/) で、商用利用もできます。
+話者判別モデルは [Nemotron 3 Diarization](https://huggingface.co/FluidInference/nemotron-3-diarization-coreml) です。
 
 ## 設定
 
