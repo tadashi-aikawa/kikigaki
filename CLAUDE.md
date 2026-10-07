@@ -2,7 +2,7 @@
 
 ## プロダクト
 
-KIKIGAKI(聞き書き)は、会議の発話をマイクから聴いて話者付きでリアルタイムに文字起こしし、Markdown で残す macOS ネイティブアプリ (Swift) です。
+KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きでリアルタイムに文字起こしし、Markdown で残す macOS ネイティブアプリ (Swift) です。
 
 - 文字起こし: Apple の Speech フレームワーク `SpeechTranscriber` (macOS 26 以降、端末内処理)
 - 話者判別: FluidAudio の Nemotron 3 Diarization fast128 (ストリーミング、最大8話者)。FluidAudio への依存はこのためだけ。設計は [Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md)
