@@ -49,9 +49,72 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     </header>
 
     <main>
-      <section class="first">
-        <h1>{heading}</h1>
+      <section class="hero">
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <div class="wordmark">
+              <Image src={logo} alt="" width={76} height={76} />
+              <span class="name"><b>KIKIGAKI</b><i>聞書</i></span>
+            </div>
+            <h1>{heading}</h1>
+            <p class="sub">会議も、ひとりの声も、話す人ごとにMarkdownへ</p>
+            <div class="hero-command">
+              <code id="hero-install-command">{installCommand}</code>
+              <button type="button" data-copy="hero-install-command" aria-label="インストールコマンドをコピー">コピー</button>
+            </div>
+            <div class="cta">
+              <a class="button primary" href="#features">
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
+                機能を見る
+              </a>
+              <a class="button" href={docs}>
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+                ドキュメント
+              </a>
+              <a class="button" href={repo}>
+                <svg aria-hidden="true" viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8"/></svg>
+                GitHub
+              </a>
+            </div>
+          </div>
 
+          <div class="hero-visual" aria-hidden="true">
+            <Media src="illustrations/hero.png" alt="">
+              <svg viewBox="0 0 520 500" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <g stroke-width="2" stroke-dasharray="2 7">
+                  <path d="M120 112 C 190 120, 230 170, 262 214" stroke="#3E706C"/>
+                  <path d="M92 232 C 160 236, 210 250, 250 270" stroke="#C4801F"/>
+                  <path d="M132 356 C 190 350, 226 330, 254 318" stroke="#514A43"/>
+                </g>
+                <g stroke-width="2.2">
+                  <path d="M40 72 h92 a16 16 0 0 1 16 16 v32 a16 16 0 0 1 -16 16 h-58 l-16 16 v-16 h-18 a16 16 0 0 1 -16 -16 v-32 a16 16 0 0 1 16 -16 z" fill="#fbf5ea" stroke="#3E706C"/>
+                  <path d="M60 104 h52 M60 116 h30" stroke="#3E706C" stroke-width="2"/>
+                  <path d="M20 196 h72 a16 16 0 0 1 16 16 v28 a16 16 0 0 1 -16 16 h-14 v16 l-16 -16 h-42 a16 16 0 0 1 -16 -16 v-28 a16 16 0 0 1 16 -16 z" fill="#fbf5ea" stroke="#C4801F"/>
+                  <path d="M38 222 h44 M38 234 h24" stroke="#C4801F" stroke-width="2"/>
+                  <path d="M56 320 h80 a16 16 0 0 1 16 16 v30 a16 16 0 0 1 -16 16 h-50 l-18 16 v-16 h-12 a16 16 0 0 1 -16 -16 v-30 a16 16 0 0 1 16 -16 z" fill="#fbf5ea" stroke="#514A43"/>
+                  <path d="M74 348 h46 M74 360 h28" stroke="#514A43" stroke-width="2"/>
+                </g>
+                <g transform="rotate(3 390 260)">
+                  <rect x="268" y="70" width="230" height="330" rx="6" fill="#ede0cd" transform="translate(6 8)"/>
+                  <rect x="268" y="70" width="230" height="330" rx="6" fill="#fbf5ea" stroke="#514A43" stroke-width="2.2"/>
+                  <path d="M292 106 h110" stroke="#221f1c" stroke-width="5"/>
+                  <g stroke-width="3">
+                    <circle cx="296" cy="148" r="4" fill="#3E706C" stroke="none"/><path d="M310 148 h160 M310 164 h120" stroke="#3E706C" opacity=".75"/>
+                    <circle cx="296" cy="200" r="4" fill="#C4801F" stroke="none"/><path d="M310 200 h140 M310 216 h160 M310 232 h70" stroke="#C4801F" opacity=".75"/>
+                    <circle cx="296" cy="270" r="4" fill="#514A43" stroke="none"/><path d="M310 270 h150 M310 286 h96" stroke="#514A43" opacity=".75"/>
+                    <circle cx="296" cy="332" r="4" fill="#3E706C" stroke="none"/><path d="M310 332 h130 M310 348 h80" stroke="#3E706C" opacity=".75"/>
+                  </g>
+                </g>
+              </svg>
+            </Media>
+          </div>
+        </div>
+        <a class="scroll-cue" href="#features" aria-label="下へスクロール">
+          <svg aria-hidden="true" viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </a>
+      </section>
+
+      <section class="first" id="features">
         <div class="pillars">
           <div class="pl">
             <div class="sheet ill">
@@ -102,12 +165,6 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
             <p>プレゼンの練習やアイデアの壁打ちに。<br />話した言葉をAIが拾って、構成やメモにまとめます。</p>
           </div>
         </div>
-
-        <a class="to-movie" href="#movie" aria-label="動画を見る">
-          <svg viewBox="0 0 32 40" aria-hidden="true">
-            <path d="M16 4v30M7 25l9 9 9-9"></path>
-          </svg>
-        </a>
       </section>
 
       <section class="movie" id="movie">
@@ -126,7 +183,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
         <p class="movie-caption">3人の会議を録音中。話すと薄く出て、決まると濃くなる。頼むとAIの返事が並ぶ</p>
       </section>
 
-      <section class="points" id="features">
+      <section class="points">
         <div class="pt">
           <div class="shot sheet">
             <Media src="captures/speakers.png" alt="3人の会議の書き起こし。最後の行が半透明">
@@ -265,6 +322,10 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     html {
       scroll-behavior: auto;
     }
+
+    .scroll-cue {
+      animation: none !important;
+    }
   }
 
   body {
@@ -292,6 +353,10 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
   }
 
   .nav {
+    /* ナビを重ね、ヒーローだけで最初の1画面を満たす */
+    position: absolute;
+    inset: 0 0 auto;
+    z-index: 2;
     min-height: 64px;
     padding: 0 72px;
     font-size: 13px;
@@ -401,25 +466,188 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
   }
 
   /* ファーストビュー */
+  .hero {
+    position: relative;
+    min-height: 100vh;
+    min-height: 100svh;
+    display: flex;
+    align-items: center;
+    padding: 64px 40px 72px;
+  }
+
+  .hero-grid {
+    width: 100%;
+    max-width: 1160px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: 48px;
+    align-items: center;
+  }
+
+  .hero-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  .wordmark {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .wordmark img {
+    display: block;
+    width: 76px;
+    height: 76px;
+  }
+
+  .wordmark .name {
+    display: flex;
+    flex-direction: column;
+    line-height: 1;
+  }
+
+  .wordmark b {
+    font-size: 60px;
+    font-weight: 800;
+    color: var(--washi-ink);
+    letter-spacing: 0.06em;
+  }
+
+  .wordmark i {
+    margin-top: 8px;
+    padding-left: 0.2em;
+    font-size: 15px;
+    font-style: normal;
+    color: var(--washi-muted);
+    letter-spacing: 0.4em;
+  }
+
+  .hero h1 {
+    margin-top: 18px;
+    font-size: 40px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 1.35;
+  }
+
+  .hero .sub {
+    margin-top: -10px;
+    font-size: 17px;
+    line-height: 1.8;
+    color: var(--washi-muted);
+  }
+
+  .hero-command {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    max-width: 100%;
+    margin-top: 6px;
+    background: var(--washi-sheet);
+    box-shadow: var(--washi-sheet-shadow);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .hero-command code {
+    min-width: 0;
+    padding: 12px 16px;
+    font: 14px var(--washi-font-mono);
+    white-space: nowrap;
+    overflow-x: auto;
+  }
+
+  .hero-command code::before {
+    content: "$ ";
+    color: var(--washi-placeholder);
+  }
+
+  .hero-command button {
+    flex-shrink: 0;
+    padding: 12px 16px;
+    border: 0;
+    border-left: 1px solid var(--washi-shade);
+    background: transparent;
+    font: 13px var(--washi-font);
+    white-space: nowrap;
+    color: var(--washi-muted);
+    cursor: pointer;
+  }
+
+  .hero-command button:hover {
+    color: var(--washi-ink);
+    background: var(--washi-shade);
+  }
+
+  .cta {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    background: var(--washi-sheet);
+    color: var(--washi-ink);
+    box-shadow: var(--washi-sheet-shadow);
+  }
+
+  .button.primary {
+    background: var(--washi-red);
+    color: #fff;
+  }
+
+  .button.primary:hover {
+    background: var(--washi-bright-red);
+  }
+
+  .button svg {
+    flex: none;
+  }
+
+  .hero-visual svg {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  .scroll-cue {
+    position: absolute;
+    left: 50%;
+    bottom: 20px;
+    transform: translateX(-50%);
+    color: var(--washi-muted);
+    opacity: 0.8;
+    animation: cue 2.4s ease-in-out infinite;
+  }
+
+  @keyframes cue {
+    0%, 100% { transform: translate(-50%, 0); }
+    50% { transform: translate(-50%, 6px); }
+  }
+
+  /* 会議で・ひとりで */
   .first {
     max-width: 1280px;
     margin: 0 auto;
     text-align: center;
-    padding: 44px 120px 0;
-  }
-
-  h1 {
-    font-size: clamp(34px, 6vw, 60px);
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    line-height: 1.2;
+    padding: 96px 120px 0;
   }
 
   .pillars {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 88px;
-    padding-top: 52px;
   }
 
   .ph-ill {
@@ -462,30 +690,6 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     font-size: 14.5px;
     line-height: 1.85;
     color: var(--washi-body);
-  }
-
-  .to-movie {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin-top: 34px;
-    width: 44px;
-    height: 44px;
-    color: var(--washi-muted);
-  }
-
-  .to-movie:hover {
-    color: var(--washi-ink);
-  }
-
-  .to-movie svg {
-    width: 32px;
-    height: 40px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.4;
-    stroke-linecap: round;
-    stroke-linejoin: round;
   }
 
   /* 動画 */
@@ -709,6 +913,65 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
       gap: 8px 20px;
     }
 
+    /* 既存ナビの全リンクを残し、2行になっても絵と重ねない */
+    .hero {
+      padding: 88px 16px 72px;
+    }
+
+    .hero-grid {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 24px;
+    }
+
+    .hero-visual {
+      order: -1;
+      width: 100%;
+      max-width: 300px;
+      margin: 0 auto;
+    }
+
+    .wordmark img {
+      width: 52px;
+      height: 52px;
+    }
+
+    .wordmark b {
+      font-size: 40px;
+    }
+
+    .hero h1 {
+      font-size: 28px;
+    }
+
+    .hero .sub {
+      font-size: 15px;
+    }
+
+    .hero-command {
+      display: flex;
+      width: 100%;
+    }
+
+    .hero-command code {
+      flex: 1 1 auto;
+      padding: 10px 12px;
+      font-size: 11px;
+      text-align: left;
+    }
+
+    .hero-command button {
+      padding: 10px 12px;
+    }
+
+    .cta {
+      gap: 8px;
+    }
+
+    .button {
+      padding: 10px 14px;
+      font-size: 14px;
+    }
+
     .first,
     .movie,
     .points {
@@ -717,13 +980,12 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     }
 
     .first {
-      padding-top: 32px;
+      padding-top: 72px;
     }
 
     .pillars {
       grid-template-columns: 1fr;
       gap: 56px;
-      padding-top: 36px;
     }
 
     .ph-ill {
