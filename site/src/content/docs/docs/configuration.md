@@ -3,7 +3,7 @@ title: 設定リファレンス
 description: config.toml に書ける設定と、画面で選ぶもの
 ---
 
-保存先やAIへの頼み方を、`~/.config/kikigaki/config.toml` で決められます。
+保存先やAIエージェント(Claude Code か Codex のCLI)への頼み方を、`~/.config/kikigaki/config.toml` で決められます。
 書けるすべてのキーと、既定値・設定例をまとめます。
 
 ## 設定ファイルの基本
@@ -13,7 +13,7 @@ description: config.toml に書ける設定と、画面で選ぶもの
     - 動き: 省略したキーは既定値になります
 - ファイルが無くても起動します
 - 書き換えたら、メニューバーのメニューの「設定を再読込」で読み直します
-    - 反映: AIの設定は会議の開始時に決まります。次の会議から効きます
+    - 反映: AIエージェントの設定は会議の開始時に決まります。次の会議から効きます
 - 書式や値が正しくないと、読み直しを止めて理由を表示します
 - 開始シートや画面で決めた値は、設定ファイルへ書き戻しません
 
@@ -36,7 +36,7 @@ avatar = "~/Pictures/avatars/tanaka.png"
 name = "迅雷"
 avatar = "https://example.com/jinrai.webp"
 
-# AI参加を有効にする。書かなければAI機能は無効。1つ目が既定
+# AIエージェントの参加を有効にする。書かなければ無効。1つ目が既定
 [[ai]]
 name = "議事録"           # 省略時は address から導く名前。重複は不可
 cli = "codex"
@@ -66,7 +66,7 @@ address = "ネオへ"
 | `measureAudioLevels` | `false` | `true` で、発話ごとの音量と小音量の候補を画面に出し、`.levels.json` とMarkdown末尾の表に残す。音量を調べるための表示。次の会議から効く |
 
 - `measureAudioLevels` は、小さな声を除外する設定とは別です
-- `outputDir` は、AI参加でCodexに書き込みを許可する場所でもあります
+- `outputDir` は、AIエージェントの参加でCodexに書き込みを許可する場所でもあります
     - 詳細: [データの行き先](../data/)
 - 保存されるファイルの名前と中身は [録音と書き起こし](../recording/) を参照してください
 
@@ -94,13 +94,13 @@ avatar = "~/Pictures/avatars/tanaka.png"
 - URL画像の読み込み失敗の記録には、接続方法・サーバー名・画像のパスだけを残します
 - 候補の変更も「設定を再読込」で反映します
 
-## AI参加 `[[ai]]`
+## AIエージェントの参加 `[[ai]]`
 
-`[[ai]]` を書くと、[herdr](https://herdr.dev/) の専用ペインでCodex・Claude Codeが会議に参加します。
-書かなければAI機能は無効です。
+`[[ai]]` を書くと、[herdr](https://herdr.dev/) の専用ペインでAIエージェントが会議に参加します。
+書かなければAIエージェントの機能は無効です。
 複数書くと、送信ごとに宛先を選べます。1つ目が既定です。
 
-使い方は [AIを会議に参加させる](../ai-participant/) を参照してください。
+使い方は [AIエージェントを会議に参加させる](../ai-participant/) を参照してください。
 
 ### 宛先と起動
 
@@ -112,9 +112,9 @@ avatar = "~/Pictures/avatars/tanaka.png"
 | `herdrCommand` | 自動で探す | herdrの絶対パス。全宛先で共通。2つ目以降は省略でき、先頭の値を引き継ぐ。先頭と違う値を書くと設定エラー |
 | `model` | CLIの既定 | モデル名 |
 | `effort` | CLIの既定 | 推論の強さ。値は下記 |
-| `address` | `迅雷へ` | 宛名。末尾の「へ」を除いた部分が会議でのAIの名前になる |
-| `avatar` | 紫のイニシャル | AIの返事の行に出す画像。`[[speakers]]` と同じくローカルパスかHTTP・HTTPSのURL |
-| `cwd` | `~/Library/Application Support/KIKIGAKI/ai-work/` | AIを起動する作業ディレクトリ。絶対パスか `~/` から始まるパスで、存在するディレクトリを書く |
+| `address` | `迅雷へ` | 宛名。末尾の「へ」を除いた部分が会議でのAIエージェントの名前になる |
+| `avatar` | 紫のイニシャル | AIエージェントの返事の行に出す画像。`[[speakers]]` と同じくローカルパスかHTTP・HTTPSのURL |
+| `cwd` | `~/Library/Application Support/KIKIGAKI/ai-work/` | AIエージェントを起動する作業ディレクトリ。絶対パスか `~/` から始まるパスで、存在するディレクトリを書く |
 | `extraArgs` | 空 | CLIへの追加の引数。使える指定は下記 |
 
 ### 送信
@@ -139,7 +139,7 @@ avatar = "~/Pictures/avatars/tanaka.png"
 | --- | --- | --- |
 | `board` | なし | ボードとして自動送信で更新する見出し。`## ボード` のような1行のMarkdown見出し。複数の宛先で同じ見出しを使える |
 | `boardPrompt` | 内蔵 | ボードのプロンプトを全文差し替える。`board` があるときだけ書ける |
-| `boardLocation` | なし | 議事録のパスが無いときの書き先をAIに伝える。`board` があるときだけ書ける。`${...}` や `~` はAIが解釈する |
+| `boardLocation` | なし | 議事録のパスが無いときの書き先をAIエージェントに伝える。`board` があるときだけ書ける。`${...}` や `~` はAIエージェントが解釈する |
 
 ボードの使い方は [議事録とボード](../minutes-and-board/) を参照してください。
 
@@ -196,7 +196,7 @@ herdrが見つからない間も、「会話をコピー」は使えます。
 | キー | 扱い |
 | --- | --- |
 | 単数の `[ai]` | 設定エラー。`[[ai]]` と書き直す |
-| `[[ai]]` の `attach` と `displayAgent` | 設定エラー。起動中のherdrのペインへつなぐ機能は無くなった。KIKIGAKIが自分でAIを起動する |
+| `[[ai]]` の `attach` と `displayAgent` | 設定エラー。起動中のherdrのペインへつなぐ機能は無くなった。KIKIGAKIが自分でAIエージェントを起動する |
 
 「準備済みAIセッション」の機能も無くなりました。
 以前の `~/Library/Application Support/KIKIGAKI/ai-prepared.json` と準備用の置き場は残ります。

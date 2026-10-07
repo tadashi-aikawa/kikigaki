@@ -12,7 +12,7 @@ const siteUrl = "https://tadashi-aikawa.github.io/kikigaki/";
 const title = "KIKIGAKI 聞書";
 const heading = "声をすべてドキュメントに";
 const description =
-  "会議やひとりの声を、話す人ごとに書き起こしてMarkdownに残すmacOSアプリ。Claude CodeやCodexも会議に参加できます。";
+  "会議やひとりの声を、話す人ごとに書き起こしてMarkdownに残すmacOSアプリ。AIエージェントも会議に参加できます。";
 const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
 ---
 
@@ -140,7 +140,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
             </div>
             <div class="tag t">会議で</div>
             <h2>話す人ごとに、AIも席に</h2>
-            <p>誰が何を言ったかを分けて書き留めます。<br />AIは流れを読んで、論点や議事録をまとめます。</p>
+            <p>誰が何を言ったかを分けて書き留めます。<br />AIエージェントは流れを読んで、論点や議事録をまとめます。</p>
           </div>
 
           <div class="pl">
@@ -165,16 +165,16 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
             </div>
             <div class="tag g">ひとりで</div>
             <h2>ひとりの声を、AIと形に</h2>
-            <p>プレゼンの練習やアイデアの壁打ちに。<br />話した言葉をAIが拾って、構成やメモにまとめます。</p>
+            <p>プレゼンの練習やアイデアの壁打ちに。<br />話した言葉をAIエージェントが拾って、構成やメモにまとめます。</p>
           </div>
         </div>
-        <p class="ai-need">AIとつなぐには、Claude Code か Codex のCLIと、<a href="https://herdr.dev/" target="_blank" rel="noopener noreferrer">herdr</a> を入れておきます</p>
+        <p class="ai-need">裏で動くのはAIエージェント(Claude Code か Codex のCLI)です。聞書とつなぐには <a href="https://herdr.dev/" target="_blank" rel="noopener noreferrer">herdr</a> を入れておきます</p>
       </section>
 
       <section class="movie" id="movie">
         <header class="section-head">
           <h2 class="section-kicker">動いているところ</h2>
-          <p class="section-lead">3人の会議を録音中。話すと薄く出て、決まると濃くなる。頼むとAIの返事が並ぶ</p>
+          <p class="section-lead">3人の会議を録音中。話すと薄く出て、決まると濃くなる。頼むとAIエージェントの返事が並ぶ</p>
         </header>
         <div class="sheet">
           <Media src="demos/transcription.mp4" alt="対面の会議を録音中の書き起こしウィンドウ">
@@ -182,7 +182,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
               <div class="what">
                 <div class="play"></div>
                 <b>動画 15〜20秒・無音ループ</b>
-                対面の会議を録音中の書き起こしウィンドウ。<br />3人の発話が話者色つきで薄く出て、濃く決まっていく。<br />途中でAIの返事が1つ、発話の間に入る。
+                対面の会議を録音中の書き起こしウィンドウ。<br />3人の発話が話者色つきで薄く出て、濃く決まっていく。<br />途中でAIエージェントの返事が1つ、発話の間に入る。
               </div>
               <small>動画仮置き</small>
             </div>
@@ -209,17 +209,17 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
 
         <div class="pt r">
           <div class="shot sheet">
-            <Media src="captures/ai-reply.png" alt="発話の行の間に並ぶAIの返事">
+            <Media src="captures/ai-reply.png" alt="発話の行の間に並ぶAIエージェントの返事">
               <div class="ph ph-shot">
-                <div class="what"><b>キャプチャ</b>発話の行の間に、AIの返事の行が並ぶところ。<br />返事は見出しと箇条書きのある短いまとめ。</div>
+                <div class="what"><b>キャプチャ</b>発話の行の間に、AIエージェントの返事の行が並ぶところ。<br />返事は見出しと箇条書きのある短いまとめ。</div>
                 <small>画面仮置き</small>
               </div>
             </Media>
           </div>
           <div class="text">
             <div class="tag g">AIも同じ流れに</div>
-            <h3>AIの返事が話と並ぶ</h3>
-            <p>頼んだ返事が、話の流れの中に入ってきます。<br />返事をするのはClaude CodeかCodex。頼み方は自分で決められます。</p>
+            <h3>AIエージェントの返事が話と並ぶ</h3>
+            <p>頼んだ返事が、話の流れの中に入ってきます。<br />返事をするのはAIエージェント。頼み方は自分で決められます。</p>
           </div>
         </div>
 
@@ -227,7 +227,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
           <div class="shot sheet">
             <Media src="captures/minutes.png" alt="書き起こしの右に議事録ペインを開いた画面">
               <div class="ph ph-shot">
-                <div class="what"><b>キャプチャ</b>書き起こしの右に議事録ペインを開いた全体。<br />左に会話、右にAIが書いた議事録。</div>
+                <div class="what"><b>キャプチャ</b>書き起こしの右に議事録ペインを開いた全体。<br />左に会話、右にAIエージェントが書いた議事録。</div>
                 <small>画面仮置き</small>
               </div>
             </Media>
@@ -235,7 +235,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
           <div class="text">
             <div class="tag s">議事録</div>
             <h3>議事録をその場で読む</h3>
-            <p>AIが書いた議事録を、<br />書き起こしの右に開いて読めます。<br />書き換わると表示も追いつきます。</p>
+            <p>AIエージェントが書いた議事録を、<br />書き起こしの右に開いて読めます。<br />書き換わると表示も追いつきます。</p>
           </div>
         </div>
 
@@ -251,7 +251,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
           <div class="text">
             <div class="tag s">ボード</div>
             <h3>いま何の話かを、一枚で</h3>
-            <p>議事録は、あとで読むもの。会議の途中で見るのはボード。論点と決まったことを、AIが一枚に更新し続けます。</p>
+            <p>議事録は、あとで読むもの。会議の途中で見るのはボード。論点と決まったことを、AIエージェントが一枚に更新し続けます。</p>
           </div>
         </div>
 
@@ -272,7 +272,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
         </div>
       </section>
 
-      <p class="more"><span>URLや画像の手入力</span><span>会話をコピーしてほかのAIへ</span><span>会議ごとにMarkdownで保存</span></p>
+      <p class="more"><span>URLや画像の手入力</span><span>会話をコピーしてほかのAIエージェントへ</span><span>会議ごとにMarkdownで保存</span></p>
 
       <section class="install" id="install">
         <h3>入れる</h3>

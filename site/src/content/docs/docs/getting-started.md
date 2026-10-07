@@ -28,8 +28,8 @@ brew install --cask tadashi-aikawa/tap/kikigaki
 brew upgrade --cask kikigaki
 ```
 
-Homebrewで入れると、AI参加に使う `kikigaki-cli` も端末から呼び出せます。
-使い方は [AIを会議に参加させる](../ai-participant/) で説明します。
+Homebrewで入れると、AIエージェント(Claude Code か Codex のCLI)の参加に使う `kikigaki-cli` も端末から呼び出せます。
+使い方は [AIエージェントを会議に参加させる](../ai-participant/) で説明します。
 
 ## 初回起動の許可
 
