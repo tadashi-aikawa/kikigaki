@@ -67,4 +67,58 @@ import Testing
             #expect(throws: SkillCommand.Failure.arguments) { try SkillCommand(arguments) }
         }
     }
+
+    @Test(arguments: ["-custom", "/child", "/../custom", "/../../kikigaki-custom"])
+    func 類似名と子ディレクトリと正規化後の別名を所有扱いしない(_ suffix: String) throws {
+        let f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.root) }
+        for relative in SkillCommand.homes {
+            let target = f.home.appending(path: relative)
+            try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let destination = f.source.path + suffix
+            try FileManager.default.createSymbolicLink(atPath: target.path, withDestinationPath: destination)
+        }
+        #expect(try f.run("install") == [.skipped, .skipped])
+        #expect(try f.run("uninstall") == [.skipped, .skipped])
+        for relative in SkillCommand.homes { #expect(f.link(relative) == f.source.path + suffix) }
+    }
+
+    @Test func app名の部分一致も所有扱いしない() throws {
+        let f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.root) }
+        let destination = f.source.path.replacingOccurrences(of: "/KIKIGAKI.app/", with: "/CustomKIKIGAKI.app/")
+        for relative in SkillCommand.homes {
+            let target = f.home.appending(path: relative)
+            try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(atPath: target.path, withDestinationPath: destination)
+        }
+        #expect(try f.run("install") == [.skipped, .skipped])
+        #expect(try f.run("uninstall") == [.skipped, .skipped])
+    }
+
+    @Test func 相対リンクは親から正規化して同梱ルートだけ認める() throws {
+        let f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.root) }
+        for (index, relative) in SkillCommand.homes.enumerated() {
+            let target = f.home.appending(path: relative)
+            try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let destination = "../../../Applications/KIKIGAKI.app/Contents/Resources/skills/./kikigaki"
+                + (index == 0 ? "" : "-custom")
+            try FileManager.default.createSymbolicLink(atPath: target.path, withDestinationPath: destination)
+        }
+        #expect(try f.run("install") == [.unchanged, .skipped])
+        #expect(try f.run("uninstall") == [.removed, .skipped])
+    }
+
+    @Test func 消えた旧appへの相対リンクも張り直せる() throws {
+        let f = try Fixture()
+        defer { try? FileManager.default.removeItem(at: f.root) }
+        for relative in SkillCommand.homes {
+            let target = f.home.appending(path: relative)
+            try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(atPath: target.path,
+                withDestinationPath: "../../../Old/KIKIGAKI.app/Contents/Resources/skills/kikigaki")
+        }
+        #expect(try f.run("install") == [.relinked, .relinked])
+    }
 }

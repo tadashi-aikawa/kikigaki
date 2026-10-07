@@ -13,6 +13,11 @@ struct SkillCommand: Sendable {
     static let bundledMarker = "KIKIGAKI.app/Contents/Resources/skills/kikigaki"
     static let homes = [".claude/skills/kikigaki", ".codex/skills/kikigaki"]
 
+    private static func isBundledRoot(_ url: URL) -> Bool {
+        let components = bundledMarker.split(separator: "/").map(String.init)
+        return url.standardizedFileURL.pathComponents.suffix(components.count).elementsEqual(components)
+    }
+
     let action: Action
 
     init(_ arguments: [String]) throws {
@@ -24,7 +29,7 @@ struct SkillCommand: Sendable {
     static func bundledSkill(executable: URL) throws -> URL {
         let helpers = executable.resolvingSymlinksInPath().deletingLastPathComponent()
         let skill = helpers.deletingLastPathComponent().appending(path: "Resources/skills/kikigaki")
-        guard helpers.lastPathComponent == "Helpers", skill.path.hasSuffix(bundledMarker),
+        guard helpers.lastPathComponent == "Helpers", isBundledRoot(skill),
               FileManager.default.fileExists(atPath: skill.appending(path: "SKILL.md").path) else { throw Failure.bundledSkillNotFound }
         return skill
     }
@@ -36,10 +41,14 @@ struct SkillCommand: Sendable {
             // 切れたリンクも「ある」と扱うため、参照先を辿らないattributesOfItemで確かめる。
             let existing = (try? files.attributesOfItem(atPath: target.path)) != nil
             let destination = try? files.destinationOfSymbolicLink(atPath: target.path)
-            let ours = destination?.contains(Self.bundledMarker) == true
+            // 相対リンクはリンクの親を基点にする。実在しない旧.appも扱うため字句的に正規化する。
+            let referenced = destination.map {
+                URL(fileURLWithPath: $0, relativeTo: target.deletingLastPathComponent()).standardizedFileURL
+            }
+            let ours = referenced.map(Self.isBundledRoot) == true
             switch action {
             case .install:
-                if destination == source.path { return ("~/" + relative, .unchanged) }
+                if ours && referenced?.path == source.standardizedFileURL.path { return ("~/" + relative, .unchanged) }
                 if existing && !ours { return ("~/" + relative, .skipped) }
                 if existing { try files.removeItem(at: target) }
                 try files.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)

@@ -216,7 +216,9 @@ replyは通常 `context_received: true`。文脈を読めなかったcontext_mis
 そのため `Contents/Resources/skills/kikigaki` を `.app` へ同梱し、利用者が同梱CLIの `kikigaki-cli skill install` で `~/.claude/skills/kikigaki` と `~/.codex/skills/kikigaki` へリンクする。リンクなので `.app` を入れ替えるだけでSkillも新しくなる。
 
 - 同名のファイルがあれば触らない。cloneしたリポジトリへリンクを張って開発している利用者の編集対象を奪わないためである。
-- `skill uninstall` で外すのは、参照先が `KIKIGAKI.app/Contents/Resources/skills/kikigaki` で終わるリンクだけとする。
+- `skill install`で更新し、`skill uninstall`で外せるのは、参照先の終端5要素がちょうど`KIKIGAKI.app/Contents/Resources/skills/kikigaki`に一致するリンクだけとする。
+    - 正規化: 相対リンクはリンクの親を基点に絶対化し、`.`・`..`を字句的に正規化する。旧.appへの切れたリンクも照合する。
+    - 保護: `CustomKIKIGAKI.app`、`kikigaki-custom`、同梱Skillの子ディレクトリへのリンクは変更・削除しない。
 - CaskはSkillのリンクに関与せず、`binary` で `kikigaki-cli` をPATHへ通してcaveatsでコマンドを案内する。Homebrew 7は `postflight_steps` をHOMEを一時ディレクトリへ差し替えたsandboxで走らせ、`~/.claude` の読み取りも禁じるため、Cask側からリンクを張れない。
 
 ## フックと返し忘れ
