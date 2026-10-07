@@ -41,10 +41,27 @@ final class AvatarStore {
                 images[source] = image
                 onChange?()
             } catch {
-                self?.log("アバターを読み込めません: \(source): \(error.localizedDescription)")
+                self?.log(Self.failureMessage(source: source, error: error))
             }
         }
         return nil
+    }
+
+    nonisolated static func failureMessage(source: String, error: Error) -> String {
+        guard source.lowercased().hasPrefix("https://") || source.lowercased().hasPrefix("http://") else {
+            return "アバターを読み込めません: \(source): \(error.localizedDescription)"
+        }
+        var identifier = "<不正な画像URL>"
+        if let components = URLComponents(string: source), let host = components.host, !host.isEmpty {
+            var safe = URLComponents()
+            safe.scheme = components.scheme
+            safe.host = host
+            safe.percentEncodedPath = components.percentEncodedPath
+            identifier = safe.string ?? identifier
+        }
+        // localizedDescriptionにも失敗URLが含まれ得るため、URL取得のエラーはdomainとcodeだけ残す。
+        let failure = error as NSError
+        return "アバターを読み込めません: \(identifier): \(failure.domain) \(failure.code)"
     }
 
     nonisolated static func load(_ source: String, cacheDirectory: URL, session: URLSession = networkSession) async throws -> Data {

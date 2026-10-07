@@ -24,6 +24,7 @@ private final class AvatarProtocol: URLProtocol {
 
 @Suite(.timeLimit(.minutes(1))) struct AvatarStoreTests {
     static let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aH1sAAAAASUVORK5CYII=")!
+    static let dummyUserinfo = "user:password@"
     private func root() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -36,6 +37,39 @@ private final class AvatarProtocol: URLProtocol {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [AvatarProtocol.self]
         return URLSession(configuration: config)
+    }
+
+    @Test(arguments: [
+        ("https://" + AvatarStoreTests.dummyUserinfo + "avatar.test:8443/images/me.png?token=secret#private", "https://avatar.test/images/me.png"),
+        ("HTTP://" + AvatarStoreTests.dummyUserinfo + "avatar.test/images/me%20icon.png?token=secret#private", "HTTP://avatar.test/images/me%20icon.png"),
+        ("https://avatar.test", "https://avatar.test"),
+        ("https://[::1]:8443/avatar.png?token=secret#private", "https://[::1]/avatar.png"),
+        ("https://[invalid?token=secret#private", "<不正な画像URL>")
+    ])
+    func 取得失敗ログはschemeとhostとpathだけを残す(_ source: String, _ expected: String) {
+        let error = NSError(domain: NSURLErrorDomain, code: URLError.badServerResponse.rawValue,
+            userInfo: [NSLocalizedDescriptionKey: "Failed to load " + source])
+        let message = AvatarStore.failureMessage(source: source, error: error)
+        #expect(message == "アバターを読み込めません: \(expected): NSURLErrorDomain -1011")
+        for secret in ["user", "password", "token", "secret", "private", "8443"] {
+            #expect(!message.contains(secret))
+        }
+    }
+
+    @Test func ローカル画像の失敗はパスと理由を残す() {
+        let path = "~/Pictures/avatar.png"
+        let error = NSError(domain: NSCocoaErrorDomain, code: 4, userInfo: [NSLocalizedDescriptionKey: "見つかりません"])
+        #expect(AvatarStore.failureMessage(source: path, error: error) == "アバターを読み込めません: \(path): 見つかりません")
+    }
+
+    @Test @MainActor func 実際の取得失敗ログにも不正URLの秘密を残さない() async throws {
+        let root = try root()
+        defer { try? FileManager.default.removeItem(at: root) }
+        var logged = ""
+        let store = AvatarStore(cacheDirectory: root, log: { logged = $0 })
+        #expect(store.image(for: "https://[invalid?token=secret#private") == nil)
+        for _ in 0..<100 where logged.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(logged == "アバターを読み込めません: <不正な画像URL>: NSURLErrorDomain -1000")
     }
 
     @Test func 応答を検証してから保存し不正キャッシュは取り直す() async throws {
