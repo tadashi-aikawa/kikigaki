@@ -48,7 +48,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - 配信先はGitHub Pagesの `https://tadashi-aikawa.github.io/kikigaki/`。ドキュメントは `/kikigaki/docs/` 以下
   - ビルドは `pnpm --dir site install --frozen-lockfile` と `pnpm --dir site build`。mainへのpushで `.github/workflows/pages.yml` が配備する
   - トップの絵・動画・キャプチャは `public/illustrations/` `public/demos/` `public/captures/` に置くと出る。無ければ仮置きを出す。ファイル名は `index.astro` の `Media` の `src`
-  - ドキュメントは `docs/` の正本を利用者の言葉で書き直したもの。仕様を変えたら該当ページも直す
+  - ドキュメントは `docs/` の正本を利用者の言葉で書き直したもの。分担と対応表は「変える前に知っておくこと」の「利用者向けドキュメントとの分担」
 - `experiments/nemotron/`: 話者判別モデルの比較用の独立CLI。アプリにはエンジンの切替を置かない
 - `experiments/system-audio/`: システム音声とマイクの同時取り込みを検証する独立CLI。検証記録は [システム音声取り込みの実現性試作](docs/records/system-audio-spike.md)
 - `scripts/`: アプリバンドル組み立て・リリース成果物・Cask・tap更新
@@ -84,6 +84,24 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - 試験・検証の記録、廃止した機能の条件、設計時の実装順は `docs/records/` へ置く。冒頭に時点と「現行の仕様ではない」旨を書き、本文は書き換えない
   - 文書を移す・消すときは、この索引と `README.md`、`Sources/` ・ `Tests/` ・ `scripts/` のコメントにある文書パスを直す
   - このファイルには機能ごとの振る舞いを書かない。振る舞いは正本の文書へ書く
+- 利用者向けドキュメント (`site/src/content/docs/docs/`) との分担
+  - 読み手が違う。`docs/` は開発者とAIエージェント向けの仕様、`site/` は利用者向け。実装名・ファイル名・設計の理由・受け入れたリスクの内訳は `site/` に書かない
+  - 振る舞いを変えたら、`docs/` の正本を直し、下の「利用者向けページの対応」で該当ページを引いて同じ変更で直す。片方だけ直したコミットを作らない
+  - 両方に書く情報は、利用者の言葉で言い直した重複として許す。ただし値 (既定値、上限、ファイル名、コマンド) は `docs/` を正本にし、食い違ったら `site/` を直す
+  - 利用者だけに要る情報 (導入手順、データの行き先の表、業務利用の注意) は `site/` を正本にしてよい。その場合は `docs/` に書かず、必要なら `docs/` からサイトのページへリンクする
+  - 事実は `docs/` とコードで確かめてから書く。README・記憶・既存のサイト本文から写さない
+
+### 利用者向けページの対応
+
+| 利用者向けページ | 元になる正本 |
+| --- | --- |
+| `getting-started.md` はじめに・インストール | README の導入、[Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md) のモデル取得 |
+| `recording.md` 録音と書き起こし | [録音開始シート](docs/start-sheet.md)、[発話の確定表示](docs/utterance-progress.md)、[話者判別の切替](docs/diarization-toggle.md)、[話者の手動統合](docs/speaker-mapping.md)、[小音量発話の除外](docs/audio-exclusion.md)、[手入力の設計](docs/typed-entry.md)、[書き起こしウィンドウ](docs/transcript-window.md) |
+| `online-meetings.md` オンライン会議で相手の声を取り込む | [システム音声の取り込み](docs/system-audio.md) |
+| `ai-participant.md` AIを会議に参加させる | [AI参加者の設計](docs/ai-participant.md)、[AI設定の複数プロファイル](docs/ai-profiles.md)、[AIへの定期自動送信](docs/ai-scheduled.md)、[AIを会話の参加者として並べる](docs/ai-timeline.md)、[AIへの受け渡し](docs/ai-handoff.md) |
+| `minutes-and-board.md` 議事録とボード | [議事録ペイン](docs/minutes-pane.md)、[議事録の描画と検索](docs/minutes-rendering.md)、[議事録プレビューの設計](docs/minutes-preview.md)、[議論のボード](docs/board.md)、[録音開始シート](docs/start-sheet.md) の `kikigaki://start` |
+| `data.md` データの行き先 | サイト側が正本。根拠は [議事録プレビューの設計](docs/minutes-preview.md) の書き込み許可、[AI参加者の設計](docs/ai-participant.md) の受け渡し、[設定リファレンス](docs/config.md) の保存物 |
+| `configuration.md` 設定リファレンス | [設定リファレンス](docs/config.md)、[AI設定の複数プロファイル](docs/ai-profiles.md) |
 
 ## 文書の索引
 
