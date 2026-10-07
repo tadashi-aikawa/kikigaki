@@ -55,7 +55,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `make-app.sh`: `Contents/Helpers/kikigaki-cli` と `Contents/Resources/skills/kikigaki`、本体と第三者のライセンスを置く `Contents/Resources/licenses` を同梱し、helperを先に署名してから.appを署名する。配布ZIPでもhelperとSkillの存在、helperの署名を検証する
   - `build_release.sh`: リリース成果物 (ZIP) を作る
   - `render_cask.sh`: Cask本文を標準出力へ書く
-  - `update_tap.sh`: 本文をtapへ置くだけにして、pushせずに `brew audit --cask` や手元tapでの導入・削除を試せるようにする
+  - `update_tap.sh`: Caskをtapへcommit・pushする。認証と一時領域の後始末は [Homebrew tapの更新](docs/tap-update.md)
   - `make-icon.sh`: 配布用アイコンの再生成。手順は [ロゴの管理](docs/logo.md)
 
 設計上の前提と判断の理由は各ファイルのコメントに書いてあります (プロトで反証された仮定を含む)。変える前に読んでください。
@@ -133,6 +133,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | [議事録プレビューの表示例](docs/minutes-preview-example.md) | 描画の確認に使う議事録の例 | 描画を目で確かめるとき |
 | [議論のボード](docs/board.md) | ボードの設定、内蔵プロンプト、見出しの扱い | ボード・`BoardPrompt` を変える前。テストが本文を読む |
 | [AI参加者の設計](docs/ai-participant.md) | 会議参加モードの契約、envelope、受信箱、同梱CLI、Skill、フック、停止後の後片付け | AI参加・同梱CLI・返送・Skillを変える前 |
+| [Homebrew tapの更新](docs/tap-update.md) | tap更新の認証と一時領域の後始末 | `update_tap.sh`を変える前 |
 | [AIへの受け渡し](docs/ai-handoff.md) | 「会話をコピー」と会話ファイルの契約 | 手動コピーを変える前 |
 | [AI設定の複数プロファイル](docs/ai-profiles.md) | `[[ai]]` のキー・検証、宛先の選択 | `AIConfig` ・宛先選択を変える前 |
 | [AIへの定期自動送信](docs/ai-scheduled.md) | 自動送信の状態機械、ロボットの操作、最後の1回 | 自動送信・ロボットの表示を変える前 |

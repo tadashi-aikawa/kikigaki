@@ -16,10 +16,30 @@ if [[ -z "${TAP_GITHUB_TOKEN:-}" ]]; then
   exit 1
 fi
 
-SHA256=$(shasum -a 256 "$ARCHIVE" | cut -d' ' -f1)
-TAP_DIR="$(mktemp -d)/tap"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/kikigaki-tap.XXXXXX")"
+trap 'rm -rf "$WORK_DIR"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+TAP_DIR="$WORK_DIR/tap"
 
-git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/tadashi-aikawa/homebrew-tap.git" "$TAP_DIR"
+# トークン自体をURL・引数・ファイルへ書かず、Gitの認証要求にだけ環境変数から返す。
+# CIでも対話入力や利用者のcredential helperへ依存しない。
+cat > "$WORK_DIR/askpass" <<'ASKPASS'
+#!/usr/bin/env bash
+case "$1" in
+  *Username*) printf '%s\n' 'x-access-token' ;;
+  *Password*) printf '%s\n' "$TAP_GITHUB_TOKEN" ;;
+  *) exit 1 ;;
+esac
+ASKPASS
+chmod 700 "$WORK_DIR/askpass"
+export GIT_ASKPASS="$WORK_DIR/askpass"
+export GIT_TERMINAL_PROMPT=0
+export LC_ALL=C
+
+SHA256=$(shasum -a 256 "$ARCHIVE" | cut -d' ' -f1)
+
+git -c credential.helper= clone "https://github.com/tadashi-aikawa/homebrew-tap.git" "$TAP_DIR"
 cd "$TAP_DIR"
 mkdir -p Casks
 
@@ -32,6 +52,6 @@ git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 git add Casks/kikigaki.rb
 git commit -m "kikigaki $VERSION"
-git push
+git -c credential.helper= push
 
 echo "Updated homebrew-tap: kikigaki $VERSION ($SHA256)"
