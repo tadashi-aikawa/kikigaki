@@ -1,18 +1,20 @@
 ---
 title: 設定リファレンス
-description: config.toml の全キー、既定値、廃止したキー、画面で決める値
+description: config.toml に書ける設定と、画面で選ぶもの
 ---
 
-`~/.config/kikigaki/config.toml` に書ける全キーを、既定値と例付きでまとめます。
+保存先やAIへの頼み方を、`~/.config/kikigaki/config.toml` で決められます。
+書けるすべてのキーと、既定値・設定例をまとめます。
 
 ## 設定ファイルの基本
 
 - 書式はTOMLです
-- すべてのキーを省略できます。省略したキーは既定値になります
+- どのキーも省略できます
+    - 動き: 省略したキーは既定値になります
 - ファイルが無くても起動します
 - 書き換えたら、メニューバーのメニューの「設定を再読込」で読み直します
-    - AIの設定は会議の開始時に固定します。進行中の会議には効かず、次の会議から効きます
-- 書式や値が正しくないと読み直しは止まり、理由を表示します
+    - 反映: AIの設定は会議の開始時に決まります。次の会議から効きます
+- 書式や値が正しくないと、読み直しを止めて理由を表示します
 - 開始シートや画面で決めた値は、設定ファイルへ書き戻しません
 
 ## 設定例
@@ -61,9 +63,11 @@ address = "ネオへ"
 | --- | --- | --- |
 | `outputDir` | `~/Documents/KIKIGAKI` | Markdownと録音WAVの保存先。絶対パスか `~` から始まるパスで書く。相対パスと空文字は設定エラー |
 | `saveRecording` | `false` | `true` で、録音WAVをMarkdownと同じ名前で並べて残す |
-| `measureAudioLevels` | `false` | `true` で、発話ごとの音量と小音量の候補を画面に表示し、`.levels.json` とMarkdown末尾の表に残す。小さな声の除外とは別の診断用。次の会議から効く |
+| `measureAudioLevels` | `false` | `true` で、発話ごとの音量と小音量の候補を画面に出し、`.levels.json` とMarkdown末尾の表に残す。音量を調べるための表示。次の会議から効く |
 
-- `outputDir` は、AI参加でCodexに書き込みを許可する場所でもあります。詳しくは [データの行き先](../data/) を参照してください
+- `measureAudioLevels` は、小さな声を除外する設定とは別です
+- `outputDir` は、AI参加でCodexに書き込みを許可する場所でもあります
+    - 詳細: [データの行き先](../data/)
 - 保存されるファイルの名前と中身は [録音と書き起こし](../recording/) を参照してください
 
 ## 話者の候補 `[[speakers]]`
@@ -82,13 +86,13 @@ name = "田中"
 avatar = "~/Pictures/avatars/tanaka.png"
 ```
 
-- 取得できない画像は、話者の色の地に名前の頭文字で表示します
-- URLの画像は `~/Library/Caches/kikigaki/avatars/` へキャッシュします
+- 画像を読み込めないときは、話者の色の上に名前の頭文字が出ます
+- URLの画像は `~/Library/Caches/kikigaki/avatars/` に保存します
 - 候補の変更も「設定を再読込」で反映します
 
 ## AI参加 `[[ai]]`
 
-`[[ai]]` を書くと、herdrの専用ペインで動くCodex・Claude Codeを会議へ参加させられます。
+`[[ai]]` を書くと、[herdr](https://herdr.dev/) の専用ペインでCodex・Claude Codeが会議に参加します。
 書かなければAI機能は無効です。
 複数書くと、送信ごとに宛先を選べます。1つ目が既定です。
 
@@ -98,7 +102,7 @@ avatar = "~/Pictures/avatars/tanaka.png"
 
 | キー | 既定 | 説明 |
 | --- | --- | --- |
-| `name` | `address` から導く名前 | 宛先の表示名。重複は設定エラー。明示した場合は64バイトまで |
+| `name` | `address` から決まる名前 | 宛先の表示名。重複は設定エラー。自分で書く場合は64バイトまで |
 | `cli` | `codex` | `codex` か `claude` |
 | `command` | 自動で探す | CLIの絶対パス。見つからないときだけ書く |
 | `herdrCommand` | 自動で探す | herdrの絶対パス。全宛先で共通。2つ目以降は省略でき、先頭の値を引き継ぐ。先頭と違う値を書くと設定エラー |
@@ -130,10 +134,12 @@ avatar = "~/Pictures/avatars/tanaka.png"
 | キー | 既定 | 説明 |
 | --- | --- | --- |
 | `board` | なし | ボードとして自動送信で更新する見出し。`## ボード` のような1行のMarkdown見出し。複数の宛先で同じ見出しを使える |
-| `boardPrompt` | 内蔵 | ボードのプロンプトの全文の差し替え。`board` があるときだけ書ける |
-| `boardLocation` | なし | 議事録のパスが無いときに、AIへ伝える書き先の作り方。`board` があるときだけ書ける。`${...}` や `~` はAIが解釈し、KIKIGAKIでは展開しない |
+| `boardPrompt` | 内蔵 | ボードのプロンプトを全文差し替える。`board` があるときだけ書ける |
+| `boardLocation` | なし | 議事録のパスが無いときの書き先をAIに伝える。`board` があるときだけ書ける。`${...}` や `~` はAIが解釈する |
 
 ボードの使い方は [議事録とボード](../minutes-and-board/) を参照してください。
+
+`boardLocation` の変数は、KIKIGAKIでは展開しません。
 
 ### `effort` の値
 
@@ -142,8 +148,10 @@ avatar = "~/Pictures/avatars/tanaka.png"
 | `codex` | `none` `minimal` `low` `medium` `high` `xhigh` `max` `ultra` | `-c model_reasoning_effort="<値>"` |
 | `claude` | `low` `medium` `high` `xhigh` `max` | `--effort <値>` |
 
-- 実際に使える値はモデルによります。CLIが受け付けなかった場合は、起動の失敗として表示します
-- `extraArgs` で推論の強さを指定すると設定エラーです。`effort` に書いてください
+- 使える値はモデルによります
+    - 例外: CLIが受け付けないと、起動に失敗したことを表示します
+- 推論の強さは `effort` に書いてください
+    - 制約: `extraArgs` に書くと設定エラーです
 
 ### `extraArgs` で使える指定
 
@@ -159,8 +167,10 @@ extraArgs = ["--search", "--add-dir", "/Users/you/work/shared"]
 | `claude` | `--verbose` | `--permission-mode`: `default` `manual` `acceptEdits` `plan` `auto` `dontAsk` | `--add-dir` |
 
 - `--key=value` の形でも書けます
-- 表に無い指定は設定エラーです。起動時のプロンプト、サブコマンド、短い指定の連結、Codexの `-c` / `--config` も受け付けません
-- 権限モードは、ここで明示したときだけ渡します。KIKIGAKIが自分で足すことはありません
+- 表に無い指定は設定エラーです
+    - 対象: 起動時のプロンプト、サブコマンド、短い指定の連結、Codexの `-c` と `--config` も受け付けません
+- 権限モードは、自分で書いたときだけ渡します
+    - 動き: KIKIGAKIが自分で足すことはありません
 
 ### CLIとherdrの探し方
 
@@ -171,7 +181,7 @@ extraArgs = ["--search", "--add-dir", "/Users/you/work/shared"]
 3. `/opt/homebrew/bin`
 4. `/usr/local/bin`
 
-Finderなどから起動したKIKIGAKIには、普段のシェルのPATHが効きません。
+Finderなどから起動したKIKIGAKIでは、普段のシェルのPATHが使えません。
 見つからないときは、絶対パスを書いてください。
 herdrが見つからない間も、「会話をコピー」は使えます。
 
@@ -184,8 +194,11 @@ herdrが見つからない間も、「会話をコピー」は使えます。
 | 単数の `[ai]` | 設定エラー。`[[ai]]` と書き直す |
 | `[[ai]]` の `attach` と `displayAgent` | 設定エラー。起動中のherdrのペインへつなぐ機能は無くなった。KIKIGAKIが自分でAIを起動する |
 
-会議に紐づかない「準備済みAIセッション」の機能も撤去しました。
-以前に使っていた場合の台帳 `~/Library/Application Support/KIKIGAKI/ai-prepared.json` と準備用の置き場は、KIKIGAKIが読まず、消しもしません。不要なら手で消してください。
+「準備済みAIセッション」の機能も無くなりました。
+以前の `~/Library/Application Support/KIKIGAKI/ai-prepared.json` と準備用の置き場は残ります。
+KIKIGAKIは読みません。
+
+不要なら、手で消してください。
 
 単数の `[ai]` は、次のように `[[ai]]` へ書き直します。
 
