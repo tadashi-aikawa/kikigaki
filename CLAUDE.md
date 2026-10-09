@@ -18,6 +18,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `SpeakerIslands.swift`: 話し手の声が重なった短い別話者の島を両隣の話者へ戻す。判定は毎回補正前のラベルで行う
   - `SpeakerRuns.swift`: 話者判別の10ms確率を届いた分から話者区間へ畳む。確率の履歴は持たず、食い違った出力は取り込まない
   - `MeetingArchive.swift`: 会議の本文と設定の保存。改名・再判定・AIの更新でMarkdownを生成し直す
+  - `SpeakerSuggestions.swift`: 話者名の候補。議事録の `attendees` と直近の会議Markdownから毎回導き、専用の履歴は持たない
   - `SpeakerNames.swift` / `TranscriptRenderer.swift` / `MeetingMarkdown.swift` / `MeetingFiles.swift`: 話者名の枡・行の整形・Markdown 生成・ファイル命名
   - `Config.swift` / `AIConfig.swift`: 設定ファイルのパースと既定値。キーの一覧は [設定リファレンス](docs/config.md)
   - `RecordingState.swift`: 録音状態とメニュー表題

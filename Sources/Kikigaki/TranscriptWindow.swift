@@ -691,10 +691,19 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         guard snapshot.canShare, (0..<SpeakerNames.slotCount).contains(slot) else { return }
         speakerSettingsPopover?.close()
         renamePopover?.close()
-        let popover = SpeakerPopover(slot: slot, names: snapshot.names, speakers: snapshot.speakers, avatars: avatars)
+        let popover = makeSpeakerPopover(slot: slot)
         popover.onRename = { [weak self] name in self?.onRename?(slot, name) }
         renamePopover = popover
         // 行が再分割で消えても編集は維持するため、安定したscrollViewをアンカーにする。
         popover.present(relativeTo: scrollView.convert(view.bounds, from: view), of: scrollView)
+    }
+    /// 表示と生成を分け、会議・議事録の読み取りをウィンドウの焦点に依存させない。
+    func makeSpeakerPopover(slot: Int) -> SpeakerPopover {
+        let minutesPath = minutesStore?.state.minutesPath ?? (minutesStore == nil ? waitingMinutesPath : nil)
+        let attendees = SpeakerSuggestions.attendees(at: minutesPath.map { URL(fileURLWithPath: $0) })
+        let frequent = SpeakerSuggestions.frequentNames(in: snapshot.markdownURL?.deletingLastPathComponent(),
+                                                       excluding: snapshot.markdownURL)
+        return SpeakerPopover(slot: slot, names: snapshot.names, speakers: snapshot.speakers, avatars: avatars,
+                              attendees: attendees, frequentNames: frequent)
     }
 }
