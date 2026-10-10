@@ -31,6 +31,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     var onCancel: (() -> Void)?
     /// 「区別する」を選んだ時点で話者モデルを先読みする。次回設定は書き換えない
     var onDiarizationPreload: (() -> Void)?
+    /// 予約だけを店から削除する。失敗してもシートの候補は取り除く。
+    var onRemoveNextMeeting: ((UUID) -> Void)?
 
     private let profiles: [ResolvedAIConfig]
     private let avatars = AvatarStore()
@@ -38,11 +40,13 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     private var drafts: [Int: AIScheduleSheet.Draft] = [:]
     /// 表示中の宛先。nilは「送らない」
     private(set) var selectedSlot: Int?
-    let nextMeetings: [NextMeeting]
+    private(set) var nextMeetings: [NextMeeting]
     private var selectedNextMeetingID: UUID?
     private(set) var nextButtons: [NSButton] = []
+    private(set) var nextRemoveButtons: [NSButton] = []
     private(set) var nextTitles: [NSTextField] = []
     private(set) var nextDetails: [NSTextField] = []
+    private let nextChoices = NSStackView()
 
     private let stack = NSStackView()
     /// 本文の自然な高さとシートの高さを分け、画面下端で止めたぶんをスクロールする。
@@ -237,6 +241,11 @@ final class StartSheet: NSObject, NSTextViewDelegate {
 
     /// 全候補を見せる。ポップアップへ隠すと、次の議事録の取り違えを開始前に見つけにくい。
     private func buildNextMeetings() -> NSView {
+        for view in nextChoices.arrangedSubviews {
+            nextChoices.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        nextButtons = []; nextRemoveButtons = []; nextTitles = []; nextDetails = []; nextImages = []
         var choices: [NSView] = []
         for (index, meeting) in nextMeetings.enumerated() {
             let title = Washi.label(Self.nextTitle(meeting), size: 13)
@@ -264,20 +273,41 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             radio.tag = index
             radio.setAccessibilityLabel(title.stringValue + " " + label.stringValue)
             radio.setContentHuggingPriority(.required, for: .horizontal)
-            let choice = NextMeetingChoiceRow(views: [radio, text])
+            let remove = NSButton()
+            remove.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "この予約を削除")
+            remove.imagePosition = .imageOnly; remove.imageScaling = .scaleProportionallyDown
+            remove.isBordered = false; remove.contentTintColor = Washi.muted
+            remove.toolTip = "この予約を削除"; remove.setAccessibilityLabel("この予約を削除")
+            remove.target = self; remove.action = #selector(removeNextMeeting(_:)); remove.isHidden = true
+            // ×を隠しても置き場を残す。ホバーで題の幅やシート高が変わらないようにする。
+            let removeSlot = NSView()
+            removeSlot.widthAnchor.constraint(equalToConstant: 16).isActive = true
+            removeSlot.heightAnchor.constraint(equalToConstant: 16).isActive = true
+            removeSlot.addSubview(remove); remove.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                remove.centerXAnchor.constraint(equalTo: removeSlot.centerXAnchor),
+                remove.centerYAnchor.constraint(equalTo: removeSlot.centerYAnchor),
+                remove.widthAnchor.constraint(equalToConstant: 16),
+                remove.heightAnchor.constraint(equalToConstant: 16)
+            ])
+            let choice = NextMeetingChoiceRow(views: [radio, text, removeSlot])
+            choice.removeButton = remove
             choice.onChoose = { [weak self] in self?.selectNextMeeting(at: index) }
             choice.orientation = .horizontal; choice.alignment = .top; choice.spacing = 6
             text.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            text.trailingAnchor.constraint(equalTo: choice.trailingAnchor).isActive = true
+            removeSlot.trailingAnchor.constraint(equalTo: choice.trailingAnchor).isActive = true
             choice.toolTip = meeting.minutesPath
             choices.append(choice)
+            nextRemoveButtons.append(remove)
             nextButtons.append(radio); nextTitles.append(title); nextDetails.append(label)
         }
         let none = NSButton(radioButtonWithTitle: "指定しない", target: self, action: #selector(nextMeetingChanged(_:)))
         none.tag = nextMeetings.count; nextButtons.append(none)
         choices.append(none)
         refreshNextImages()
-        return column(choices, spacing: 8)
+        nextChoices.orientation = .vertical; nextChoices.alignment = .leading; nextChoices.spacing = 8
+        for view in choices { add(view, to: nextChoices) }
+        return nextChoices
     }
     private func refreshNextImages() {
         for (index, image) in nextImages.enumerated() {
@@ -304,6 +334,24 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         return time + (title ?? url.lastPathComponent)
     }
     @objc func nextMeetingChanged(_ sender: NSButton) { selectNextMeeting(at: sender.tag) }
+
+    @objc func removeNextMeeting(_ sender: NSButton) {
+        guard let index = nextRemoveButtons.firstIndex(where: { $0 === sender }) else { return }
+        let meeting = nextMeetings.remove(at: index)
+        let wasSelected = selectedNextMeetingID == meeting.id
+        // 最後の1件を消しても「指定しない」は残す。選び直した状態を見せ、区画を急に消さない。
+        _ = buildNextMeetings()
+        if wasSelected {
+            selectNextMeeting(at: 0)
+        } else {
+            // 未選択の候補を消しても、議事録や宛先の手編集は保持する。
+            let selected = nextMeetings.firstIndex(where: { $0.id == selectedNextMeetingID }) ?? nextMeetings.count
+            for (offset, button) in nextButtons.enumerated() { button.state = offset == selected ? .on : .off }
+        }
+        // 初回に確保した高さを使う。候補が減ってもreserveBodyHeightで測り直さない。
+        fit()
+        onRemoveNextMeeting?(meeting.id)
+    }
 
     func selectNextMeeting(at index: Int) {
         guard nextButtons.indices.contains(index) else { return }
@@ -732,9 +780,22 @@ final class StartSheet: NSObject, NSTextViewDelegate {
 /// ラジオの標準操作を残し、題・宛先・行内の余白も同じ選択として受ける。
 @MainActor private final class NextMeetingChoiceRow: NSStackView {
     var onChoose: (() -> Void)?
+    weak var removeButton: NSButton?
+    private var tracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area); tracking = area
+    }
+    override func mouseEntered(with event: NSEvent) { removeButton?.isHidden = false }
+    override func mouseExited(with event: NSEvent) { removeButton?.isHidden = true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard let hit = super.hitTest(point) else { return nil }
+        // ×は行の選択へ転送せず、ラジオと同様にボタン自身へ渡す。
         return hit is NSButton ? hit : self
     }
 

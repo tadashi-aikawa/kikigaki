@@ -355,6 +355,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                     .flatMap(SystemAudioMode.init(rawValue:)) ?? .automatic,
                                outputKind: SystemAudioOutput.current)
         sheet.onDiarizationPreload = { [weak self] in self?.preloadModels() }
+        sheet.onRemoveNextMeeting = { [weak self] id in self?.removeNextMeeting(id: id) }
         sheet.onCancel = { [weak self] in self?.startSheet = nil }
         sheet.onStart = { [weak self] options in
             UserDefaults.standard.set(options.systemAudioMode.rawValue, forKey: StartSheet.systemAudioDefaultsKey)
@@ -457,6 +458,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Self.log("replay を開始できなかったので終了する")
             exit(1)
         }
+    }
+
+    /// シートの×は予約ファイルだけを消す。失敗は診断ログだけに残す。
+    func removeNextMeeting(id: UUID) {
+        do { try nextMeetingStore?.remove(id) }
+        catch { Self.log("次の会議を削除できません: \(error)") }
     }
 
     /// 開始結果が確定してから、シートが使った予約1件だけを消費する。

@@ -341,7 +341,7 @@ import KikigakiCore
                 #expect(sheet.nextButtons.map(\.state) == (0...meetings.count).map { $0 == index ? .on : .off })
             }
             let choice = try #require(sheet.nextButtons[index].superview as? NSStackView)
-            let text = try #require(choice.arrangedSubviews.last as? NSStackView)
+            let text = try #require(choice.arrangedSubviews[1] as? NSStackView)
             let details = try #require(text.arrangedSubviews.last as? NSStackView)
             let avatar = try #require(details.arrangedSubviews.first)
             sheet.selectNextMeeting(at: meetings.count)
@@ -361,6 +361,140 @@ import KikigakiCore
         sheet.nextButtons.last?.performClick(nil)
         #expect(sheet.options?.minutesPath == nil && sheet.selectedSlot == 2)
         sheet.close()
+    }
+
+    @Test func 乗せた行だけに薄墨の削除ボタンが出て押してもその行を選ばない() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meetings = try ["定例", "相談"].map { title in
+            let path = root.appendingPathComponent("\(title).md")
+            try Data("# \(title)の議事録\n".utf8).write(to: path)
+            return try NextMeeting(minutesPath: path.path, ai: title == "定例" ? "議事録" : "相談")
+        }
+        let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true,
+                               exclusion: AudioExclusion(), nextMeetings: meetings)
+        defer { sheet.close() }
+        let content = try #require(sheet.window.contentView)
+        content.layoutSubtreeIfNeeded()
+        let row = try #require(sheet.nextButtons[1].superview)
+        let button = sheet.nextRemoveButtons[1]
+        let titleFrame = sheet.nextTitles[1].frame
+        let windowFrame = sheet.window.frame
+        #expect(sheet.nextRemoveButtons.allSatisfy { $0.isHidden })
+        let enter = try hoverEvent(on: sheet, type: .mouseEntered)
+        row.mouseEntered(with: enter)
+        content.layoutSubtreeIfNeeded()
+        #expect(sheet.nextRemoveButtons[0].isHidden && !button.isHidden)
+        #expect(button.image != nil && button.contentTintColor == Washi.muted && !button.isBordered)
+        #expect(button.toolTip == "この予約を削除" && button.accessibilityLabel() == "この予約を削除")
+        #expect(button.alignmentRect(forFrame: button.frame).size == NSSize(width: 16, height: 16))
+        #expect(sheet.nextTitles[1].frame == titleFrame && sheet.window.frame == windowFrame)
+        try capture("next-remove-hover", sheet)
+        row.mouseExited(with: try hoverEvent(on: sheet, type: .mouseExited))
+        #expect(button.isHidden)
+        row.mouseEntered(with: enter)
+        let point = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: row.superview)
+        let hit = try #require(row.hitTest(point) as? NSButton)
+        #expect(hit === button)
+        var removed: [UUID] = []
+        sheet.onRemoveNextMeeting = { removed.append($0) }
+        hit.performClick(nil)
+        #expect(removed == [meetings[1].id] && sheet.nextMeetings == [meetings[0]])
+        #expect(sheet.minutesBox.stringValue == meetings[0].minutesPath && sheet.selectedSlot == 2)
+        #expect(sheet.options?.nextMeetingID == meetings[0].id && sheet.nextButtons[0].state == .on)
+        #expect(row.superview == nil)
+    }
+
+    @Test(arguments: [0, 1, 2])
+    func 選択中の予約を消すと残りの先頭で議事録と宛先を埋め直す(_ index: Int) throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meetings = try (0..<3).map {
+            try NextMeeting(minutesPath: root.appendingPathComponent("\($0).md").path,
+                            ai: $0 == 0 ? "議事録" : "相談", createdAt: Date(timeIntervalSince1970: Double($0)))
+        }
+        let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true,
+                               exclusion: AudioExclusion(), nextMeetings: meetings)
+        defer { sheet.close() }
+        sheet.selectNextMeeting(at: index)
+        // 手編集していても、選択中の候補を削除した場合は残りの予約で埋め直す。
+        sheet.minutesBox.stringValue = root.appendingPathComponent("手編集.md").path
+        sheet.destination.selectItem(withTag: 0); sheet.destinationChanged()
+        var remaining = meetings
+        remaining.remove(at: index)
+        sheet.nextRemoveButtons[index].performClick(nil)
+        #expect(sheet.nextMeetings == remaining && sheet.nextTitles.count == 2 && sheet.nextDetails.count == 2)
+        #expect(sheet.nextRemoveButtons.count == 2 && sheet.nextButtons.map(\.tag) == [0, 1, 2])
+        #expect(sheet.nextButtons.map(\.state) == [.on, .off, .off])
+        #expect(sheet.minutesBox.stringValue == remaining[0].minutesPath)
+        #expect(sheet.selectedSlot == (remaining[0].ai == "議事録" ? 2 : 1))
+        #expect(sheet.options?.nextMeetingID == remaining[0].id)
+        // 削除後に詰め直したラジオと行全体のクリックも、現在の候補を選ぶ。
+        sheet.nextButtons[1].performClick(nil)
+        #expect(sheet.options?.nextMeetingID == remaining[1].id)
+        let firstRow = try #require(sheet.nextButtons[0].superview)
+        let click = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero,
+            modifierFlags: [], timestamp: 0, windowNumber: sheet.window.windowNumber,
+            context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        firstRow.mouseDown(with: click)
+        #expect(sheet.options?.nextMeetingID == remaining[0].id)
+    }
+
+    @Test(arguments: [false, true])
+    func 未選択の予約を消しても選択と手編集と下書きを保持する(_ chooseNone: Bool) throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meetings = try (0..<3).map {
+            try NextMeeting(minutesPath: root.appendingPathComponent("\($0).md").path,
+                            ai: "議事録", createdAt: Date(timeIntervalSince1970: Double($0)))
+        }
+        let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true,
+                               exclusion: AudioExclusion(), nextMeetings: meetings)
+        defer { sheet.close() }
+        sheet.selectNextMeeting(at: chooseNone ? 3 : 2)
+        let editedPath = root.appendingPathComponent("手編集.md").path
+        sheet.minutesBox.stringValue = editedPath
+        sheet.destination.selectItem(withTag: 1); sheet.destinationChanged()
+        sheet.editor.string = "手で直した依頼"; sheet.interval.selectItem(withTag: 3)
+        sheet.nextRemoveButtons[0].performClick(nil)
+        #expect(sheet.nextMeetings == Array(meetings.dropFirst()))
+        #expect(sheet.minutesBox.stringValue == editedPath && sheet.selectedSlot == 1)
+        #expect(sheet.editor.string == "手で直した依頼" && sheet.interval.selectedTag() == 3)
+        #expect(sheet.nextButtons.map(\.state) == (chooseNone ? [.off, .off, .on] : [.off, .on, .off]))
+        sheet.nextRemoveButtons[0].performClick(nil)
+        #expect(sheet.nextMeetings == [meetings[2]])
+        #expect(sheet.nextButtons.map(\.state) == (chooseNone ? [.off, .on] : [.on, .off]))
+        #expect(sheet.minutesBox.stringValue == editedPath && sheet.editor.string == "手で直した依頼")
+    }
+
+    @Test func 最後まで候補を消すと次の会議行に指定しないだけを残す() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meetings = try (0..<3).map {
+            try NextMeeting(minutesPath: root.appendingPathComponent("\($0).md").path,
+                            ai: "相談", createdAt: Date(timeIntervalSince1970: Double($0)))
+        }
+        let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true,
+                               exclusion: AudioExclusion(), nextMeetings: meetings)
+        defer { sheet.close() }
+        let choices = try #require(sheet.nextButtons.last?.superview as? NSStackView)
+        let row = try #require(choices.superview as? NSStackView)
+        for _ in meetings {
+            sheet.nextRemoveButtons[0].performClick(nil)
+            #expect(sheet.window.attachedSheet == nil && sheet.minutesHintText.isEmpty)
+        }
+        #expect(sheet.nextMeetings.isEmpty && sheet.nextRemoveButtons.isEmpty && sheet.nextTitles.isEmpty)
+        #expect(choices.arrangedSubviews.count == 1 && row.superview != nil)
+        #expect((row.arrangedSubviews.first as? NSTextField)?.stringValue == "次の会議")
+        #expect(sheet.nextButtons.count == 1 && sheet.nextButtons[0].title == "指定しない")
+        #expect(sheet.nextButtons[0].state == .on && sheet.minutesBox.stringValue.isEmpty)
+        #expect(sheet.selectedSlot == 2 && sheet.options?.nextMeetingID == nil)
+        try capture("next-remove-last", sheet)
+    }
+
+    private func hoverEvent(on sheet: StartSheet, type: NSEvent.EventType) throws -> NSEvent {
+        try #require(NSEvent.enterExitEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: sheet.window.windowNumber, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil))
     }
 
     @Test func 次の会議の指定しないと仕切り線の間に上下と同じ余白を保つ() throws {
@@ -445,6 +579,17 @@ import KikigakiCore
         #expect(sheet.window.frame == initial)
         #expect(document.frame.height <= scroll.contentSize.height)
         sheet.setMinutesPath("/手入力.md")
+        #expect(sheet.window.frame == initial)
+        // 実シートの候補を最後まで削除しても、初回に確保した高さと上端は維持する。
+        let documentHeight = document.frame.height
+        for _ in meetings {
+            sheet.nextRemoveButtons[0].performClick(nil)
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(sheet.window.frame == initial && document.frame.height == documentHeight)
+        }
+        #expect(sheet.nextButtons.count == 1 && sheet.nextButtons[0].state == .on)
+        sheet.destination.selectItem(withTag: 0); sheet.destinationChanged()
+        sheet.showMinutesHint("絶対パスの.mdファイルを指定してください")
         #expect(sheet.window.frame == initial)
     }
 

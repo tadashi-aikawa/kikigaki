@@ -6,7 +6,7 @@ import KikigakiAIIO
 @testable import Kikigaki
 
 @Suite(.serialized, .timeLimit(.minutes(1))) @MainActor struct NextMeetingAppTests {
-    @Test func シートを開く時だけ失効分を消し取消は予約を残す() throws {
+    @Test func シートを開く時だけ失効分を消し取消は予約を残す() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let store = NextMeetingStore(directory: root.appendingPathComponent("next"))
@@ -25,6 +25,7 @@ import KikigakiAIIO
         defer { window.window?.orderOut(nil) }
         let app = AppDelegate(testingSession: session, config: config, window: window, nextMeetingStore: store)
         app.presentStartSheet()
+        try await Task.sleep(for: .milliseconds(300))
         let sheet = try #require(app.startSheet)
         // 録音ボタンの二重押しでも同じシートへ焦点を戻す。
         app.presentStartSheet()
@@ -38,8 +39,14 @@ import KikigakiAIIO
         #expect(app.startSheet == nil)
         #expect(try store.load().meetings.map(\.id) == [next.id])
         app.presentStartSheet()
+        try await Task.sleep(for: .milliseconds(300))
         #expect(app.startSheet?.minutesBox.stringValue == next.minutesPath)
+        // 実際のpresentStartSheetが店への削除コールバックをつなぐことも確かめる。
+        app.startSheet?.nextRemoveButtons[0].performClick(nil)
+        #expect(try store.load().meetings.isEmpty)
+        #expect(app.startSheet?.nextMeetings.isEmpty == true)
         app.startSheet?.cancelPressed()
+        try await Task.sleep(for: .milliseconds(100))
     }
 
     @Test(arguments: ["選択", "別のパス", "指定しない", "開始失敗", "不正パス", "取消"])
@@ -85,5 +92,39 @@ import KikigakiAIIO
             #expect(submitted != nil)
             #expect(submitted?.nextMeetingID == nil)
         }
+    }
+
+    @Test(arguments: [false, true])
+    func シートの削除は予約だけを消し店で失敗しても候補を取り除く(_ alreadyRemoved: Bool) throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let store = NextMeetingStore(directory: root.appendingPathComponent("next"))
+        let minutes = root.appendingPathComponent("議事録.md")
+        let contents = Data("# 消してはいけない議事録\n".utf8)
+        try contents.write(to: minutes)
+        let meeting = try NextMeeting(minutesPath: minutes.path)
+        try store.add(meeting)
+        let config = ResolvedConfig(config: KikigakiConfig(), home: root)
+        let session = MeetingSession(config: config, models: { throw CancellationError() }, log: { _ in },
+                                     aiStore: AIRecordStore(directory: root))
+        let app = AppDelegate(testingSession: session, config: config, nextMeetingStore: store)
+        let sheet = StartSheet(profiles: [], diarizationEnabled: true, exclusion: AudioExclusion(),
+                               nextMeetings: try store.load().candidates)
+        defer { sheet.close() }
+        sheet.onRemoveNextMeeting = { app.removeNextMeeting(id: $0) }
+        if alreadyRemoved { try store.remove(meeting.id) }
+        sheet.nextRemoveButtons[0].performClick(nil)
+        #expect(try store.load().meetings.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: store.directory.appendingPathComponent(meeting.id.uuidString + ".json").path))
+        #expect(try Data(contentsOf: minutes) == contents)
+        #expect(sheet.nextMeetings.isEmpty && sheet.minutesBox.stringValue.isEmpty)
+        #expect(sheet.nextButtons.count == 1 && sheet.nextButtons[0].state == .on)
+        #expect(sheet.minutesHintText.isEmpty && sheet.window.attachedSheet == nil)
+        // 取消後に開く別のシートでも消した予約は復活しない。
+        sheet.cancelPressed()
+        let reopened = StartSheet(profiles: [], diarizationEnabled: true, exclusion: AudioExclusion(),
+                                  nextMeetings: try store.load().candidates)
+        defer { reopened.close() }
+        #expect(reopened.nextMeetings.isEmpty && reopened.nextButtons.isEmpty)
     }
 }
