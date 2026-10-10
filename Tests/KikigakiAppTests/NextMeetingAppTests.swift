@@ -6,7 +6,7 @@ import KikigakiAIIO
 @testable import Kikigaki
 
 @Suite(.serialized, .timeLimit(.minutes(1))) @MainActor struct NextMeetingAppTests {
-    @Test func シートを開く時だけ失効分を消し取消は予約を残す() async throws {
+    @Test func シートを開く時だけ失効分を消し取消は予約を残す() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let store = NextMeetingStore(directory: root.appendingPathComponent("next"))
@@ -25,7 +25,6 @@ import KikigakiAIIO
         defer { window.window?.orderOut(nil) }
         let app = AppDelegate(testingSession: session, config: config, window: window, nextMeetingStore: store)
         app.presentStartSheet()
-        try await Task.sleep(for: .milliseconds(300))
         let sheet = try #require(app.startSheet)
         // 録音ボタンの二重押しでも同じシートへ焦点を戻す。
         app.presentStartSheet()
@@ -39,14 +38,13 @@ import KikigakiAIIO
         #expect(app.startSheet == nil)
         #expect(try store.load().meetings.map(\.id) == [next.id])
         app.presentStartSheet()
-        try await Task.sleep(for: .milliseconds(300))
         #expect(app.startSheet?.minutesBox.stringValue == next.minutesPath)
         // 実際のpresentStartSheetが店への削除コールバックをつなぐことも確かめる。
-        app.startSheet?.nextRemoveButtons[0].performClick(nil)
+        let remove = try #require(app.startSheet?.nextRemoveButtons.first)
+        try sendAction(remove)
         #expect(try store.load().meetings.isEmpty)
         #expect(app.startSheet?.nextMeetings.isEmpty == true)
         app.startSheet?.cancelPressed()
-        try await Task.sleep(for: .milliseconds(100))
     }
 
     @Test(arguments: ["選択", "別のパス", "指定しない", "開始失敗", "不正パス", "取消"])
@@ -113,7 +111,7 @@ import KikigakiAIIO
         defer { sheet.close() }
         sheet.onRemoveNextMeeting = { app.removeNextMeeting(id: $0) }
         if alreadyRemoved { try store.remove(meeting.id) }
-        sheet.nextRemoveButtons[0].performClick(nil)
+        try sendAction(sheet.nextRemoveButtons[0])
         #expect(try store.load().meetings.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: store.directory.appendingPathComponent(meeting.id.uuidString + ".json").path))
         #expect(try Data(contentsOf: minutes) == contents)
@@ -126,5 +124,12 @@ import KikigakiAIIO
                                   nextMeetings: try store.load().candidates)
         defer { reopened.close() }
         #expect(reopened.nextMeetings.isEmpty && reopened.nextButtons.isEmpty)
+    }
+
+    /// 削除はボタン自身を取り除く。performClickの押下演出中にビューを組み直すと、
+    /// 一括テストのイベント処理を巻き込んで集計前に終了するため、target/actionだけを送る。
+    private func sendAction(_ button: NSButton) throws {
+        let action = try #require(button.action)
+        #expect(button.sendAction(action, to: button.target))
     }
 }

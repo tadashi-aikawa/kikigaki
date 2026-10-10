@@ -398,7 +398,7 @@ import KikigakiCore
         #expect(hit === button)
         var removed: [UUID] = []
         sheet.onRemoveNextMeeting = { removed.append($0) }
-        hit.performClick(nil)
+        try sendAction(hit)
         #expect(removed == [meetings[1].id] && sheet.nextMeetings == [meetings[0]])
         #expect(sheet.minutesBox.stringValue == meetings[0].minutesPath && sheet.selectedSlot == 2)
         #expect(sheet.options?.nextMeetingID == meetings[0].id && sheet.nextButtons[0].state == .on)
@@ -422,7 +422,7 @@ import KikigakiCore
         sheet.destination.selectItem(withTag: 0); sheet.destinationChanged()
         var remaining = meetings
         remaining.remove(at: index)
-        sheet.nextRemoveButtons[index].performClick(nil)
+        try sendAction(sheet.nextRemoveButtons[index])
         #expect(sheet.nextMeetings == remaining && sheet.nextTitles.count == 2 && sheet.nextDetails.count == 2)
         #expect(sheet.nextRemoveButtons.count == 2 && sheet.nextButtons.map(\.tag) == [0, 1, 2])
         #expect(sheet.nextButtons.map(\.state) == [.on, .off, .off])
@@ -456,12 +456,12 @@ import KikigakiCore
         sheet.minutesBox.stringValue = editedPath
         sheet.destination.selectItem(withTag: 1); sheet.destinationChanged()
         sheet.editor.string = "手で直した依頼"; sheet.interval.selectItem(withTag: 3)
-        sheet.nextRemoveButtons[0].performClick(nil)
+        try sendAction(sheet.nextRemoveButtons[0])
         #expect(sheet.nextMeetings == Array(meetings.dropFirst()))
         #expect(sheet.minutesBox.stringValue == editedPath && sheet.selectedSlot == 1)
         #expect(sheet.editor.string == "手で直した依頼" && sheet.interval.selectedTag() == 3)
         #expect(sheet.nextButtons.map(\.state) == (chooseNone ? [.off, .off, .on] : [.off, .on, .off]))
-        sheet.nextRemoveButtons[0].performClick(nil)
+        try sendAction(sheet.nextRemoveButtons[0])
         #expect(sheet.nextMeetings == [meetings[2]])
         #expect(sheet.nextButtons.map(\.state) == (chooseNone ? [.off, .on] : [.on, .off]))
         #expect(sheet.minutesBox.stringValue == editedPath && sheet.editor.string == "手で直した依頼")
@@ -480,7 +480,7 @@ import KikigakiCore
         let choices = try #require(sheet.nextButtons.last?.superview as? NSStackView)
         let row = try #require(choices.superview as? NSStackView)
         for _ in meetings {
-            sheet.nextRemoveButtons[0].performClick(nil)
+            try sendAction(sheet.nextRemoveButtons[0])
             #expect(sheet.window.attachedSheet == nil && sheet.minutesHintText.isEmpty)
         }
         #expect(sheet.nextMeetings.isEmpty && sheet.nextRemoveButtons.isEmpty && sheet.nextTitles.isEmpty)
@@ -495,6 +495,13 @@ import KikigakiCore
     private func hoverEvent(on sheet: StartSheet, type: NSEvent.EventType) throws -> NSEvent {
         try #require(NSEvent.enterExitEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0,
             windowNumber: sheet.window.windowNumber, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil))
+    }
+
+    /// ヒットしたボタンのtarget/actionを検証する。削除でボタン自身が取り除かれるので、
+    /// 一括テストのイベント処理を巻き込むperformClickの押下演出は再生しない。
+    private func sendAction(_ button: NSButton) throws {
+        let action = try #require(button.action)
+        #expect(button.sendAction(action, to: button.target))
     }
 
     @Test func 次の会議の指定しないと仕切り線の間に上下と同じ余白を保つ() throws {
@@ -583,7 +590,7 @@ import KikigakiCore
         // 実シートの候補を最後まで削除しても、初回に確保した高さと上端は維持する。
         let documentHeight = document.frame.height
         for _ in meetings {
-            sheet.nextRemoveButtons[0].performClick(nil)
+            try sendAction(sheet.nextRemoveButtons[0])
             try await Task.sleep(for: .milliseconds(100))
             #expect(sheet.window.frame == initial && document.frame.height == documentHeight)
         }
