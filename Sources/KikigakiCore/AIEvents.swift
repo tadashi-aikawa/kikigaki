@@ -25,7 +25,7 @@ public struct AIRequest: Codable, Equatable, Sendable {
         }
         timeRange = snapshot?.timeRange
         self.voiceUtteranceStart = envelope.participant.questionSource == .voice ? voiceUtteranceStart : nil
-        displayQuestion = envelope.participant.questionSource == .typed ? envelope.participant.question : voiceQuestion
+        displayQuestion = envelope.participant.questionSource == .typed ? envelope.participant.userQuestion : voiceQuestion
         try validate()
     }
 
@@ -38,7 +38,7 @@ public struct AIRequest: Codable, Equatable, Sendable {
             guard envelope.participant.questionSource == .voice, start.isFinite, start >= 0,
                   start <= envelope.participant.audioCutoffSeconds else { throw AIError.invalid("voice utterance start") }
         }
-        if envelope.participant.questionSource == .typed, displayQuestion != envelope.participant.question {
+        if envelope.participant.questionSource == .typed, displayQuestion != envelope.participant.userQuestion {
             throw AIError.mismatch
         }
     }
@@ -237,10 +237,17 @@ public struct AIConversation: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let meetingID: UUID
     public private(set) var questions: [AIQuestion] = []
+    /// 名前と人の確認状態はstateにも保存する。archiveはこの値を使って再生成する。
+    public private(set) var speakerNames: SpeakerNames?
+    public private(set) var speakerAssignments: [AISpeakerEvent] = []
+    public private(set) var processedSpeakerIDs: Set<String> = []
     private var nextEventOrder = 1
     public init(meetingID: UUID) { self.meetingID = meetingID; schemaVersion = 1 }
 
-    enum CodingKeys: String, CodingKey { case schemaVersion = "schema_version", meetingID = "meeting_id", questions, nextEventOrder = "next_event_order" }
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version", meetingID = "meeting_id", questions, nextEventOrder = "next_event_order"
+        case speakerNames, speakerAssignments, processedSpeakerIDs
+    }
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -248,6 +255,9 @@ public struct AIConversation: Codable, Equatable, Sendable {
         meetingID = try container.decode(UUID.self, forKey: .meetingID)
         questions = try container.decode([AIQuestion].self, forKey: .questions)
         nextEventOrder = try container.decode(Int.self, forKey: .nextEventOrder)
+        speakerNames = try container.decodeIfPresent(SpeakerNames.self, forKey: .speakerNames)
+        speakerAssignments = try container.decodeIfPresent([AISpeakerEvent].self, forKey: .speakerAssignments) ?? []
+        processedSpeakerIDs = try container.decodeIfPresent(Set<String>.self, forKey: .processedSpeakerIDs) ?? []
         guard schemaVersion == 1, nextEventOrder > 0 else { throw AIError.invalid("conversation version/order") }
         var ids = Set<UUID>(), orders = Set<Int>()
         for (index, question) in questions.enumerated() {
@@ -273,6 +283,26 @@ public struct AIConversation: Codable, Equatable, Sendable {
                     && $0.request.envelope.participant.inReplyToRequestID == question.request.id }) else { throw AIError.mismatch }
             }
         }
+        var speakerIDs = Set<String>()
+        for event in speakerAssignments {
+            guard let request = questions.first(where: { $0.request.id == event.requestID })?.request,
+                  processedSpeakerIDs.contains(event.eventID), speakerIDs.insert(event.eventID).inserted else { throw AIError.mismatch }
+            try event.validate(for: request)
+        }
+        for attribution in speakerNames?.attributions.values ?? Dictionary<Int, SpeakerAttribution>().values {
+            guard speakerAssignments.contains(attribution.event),
+                  questions.first(where: { $0.request.id == attribution.event.requestID })?.request.envelope.participant.participantName
+                    == attribution.participant else { throw AIError.mismatch }
+        }
+    }
+
+    public mutating func setSpeakerNames(_ names: SpeakerNames) { speakerNames = names }
+
+    public mutating func recordSpeaker(_ event: AISpeakerEvent, names: SpeakerNames?) throws {
+        guard let request = questions.first(where: { $0.request.id == event.requestID })?.request else { throw AIError.mismatch }
+        try event.validate(for: request)
+        guard processedSpeakerIDs.insert(event.eventID).inserted else { return }
+        if let names { speakerNames = names; speakerAssignments.append(event) }
     }
 
     public mutating func append(_ request: AIRequest) throws {

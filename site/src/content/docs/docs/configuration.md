@@ -126,6 +126,7 @@ avatar = "~/Pictures/avatars/tanaka.png"
 | --- | --- | --- |
 | `prompt` | 空 | すべての送信に付ける追加の指示。32 KiBまで |
 | `allowWork` | `true` | 送信シートの「作業を許可する」の初期値 |
+| `identifySpeakers` | `false` | `true` で、会話を送るときにAIへ話者名の割当も頼む。名乗りなどの根拠がある名前だけを付ける |
 | `notifySound` | `false` | `true` で、この宛先から返事や確認質問が届いたときに通知音を鳴らす。自動送信への通常の返事では鳴らさない |
 
 ### 自動送信

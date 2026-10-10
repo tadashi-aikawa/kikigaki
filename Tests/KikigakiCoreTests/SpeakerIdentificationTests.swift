@@ -1,0 +1,144 @@
+import Foundation
+import Testing
+@testable import KikigakiCore
+
+@Suite struct SpeakerIdentificationTests {
+    private func request(question: String = "質問", fixed: SpeakerIdentification? = .init(unresolved: ["A", "C"], candidates: ["タダシ", "田中"])) throws -> AIRequest {
+        let meeting = UUID(), root = URL(fileURLWithPath: "/tmp/speaker-core")
+        var history = try AIStreamHistory(meetingID: meeting)
+        let snapshot = try history.prepare(lines: ["[14:05:10] 話者A: タダシです"], outputDirectory: root)
+        let p = AIParticipantContext(streamID: snapshot.streamID, requestID: UUID(), sessionGeneration: 1,
+            participantName: "迅雷", cliPath: "/tmp/helper", sessionPath: root.appendingPathComponent(
+                ".kikigaki-context/\(meeting)/ai/sessions/1.json").path, requestToken: "token",
+            question: question, capturedAt: Date(timeIntervalSince1970: 100), audioCutoffSeconds: 1, speakerIdentification: fixed)
+        return try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: p), number: 1,
+                             voiceQuestion: "声の問い", snapshot: snapshot, voiceUtteranceStart: 0)
+    }
+    @Test func 未確定枠は検出と改名と人の確認と統合を反映する() {
+        var names = SpeakerNames([1: "名前"])
+        names.confirm("", for: 2)
+        #expect(names.unresolvedSlots(detected: [7, 3, 2, 1, 0, 0, 8, -1], mapping: [3: 0]) == [0, 7])
+        names.diarizationEnabled = false
+        #expect(names.unresolvedSlots(detected: [0, 7], mapping: [:]).isEmpty)
+        #expect(SpeakerIdentification.make(names: names, detected: [0], mapping: [:], participants: [], speakers: [], frequent: []) == nil)
+    }
+    @Test func 参加者があればその名前だけを候補にし無ければ台帳と履歴を使う() throws {
+        let speakers: [KikigakiConfig.Speaker] = [.init(name: "台帳"), .init(name: "共通")]
+        let participants = SpeakerSuggestions.participants(in: "---\nattendees: [田中, 田中, タダシ]\n---", key: "attendees")
+        let first = try #require(SpeakerIdentification.make(names: SpeakerNames(), detected: [0, 2], mapping: [:],
+            participants: participants, speakers: speakers, frequent: ["履歴", "共通"]))
+        #expect(first == .init(unresolved: ["A", "C"], candidates: ["田中", "タダシ"]))
+        let fallback = try #require(SpeakerIdentification.make(names: SpeakerNames(), detected: [0], mapping: [:],
+            participants: [], speakers: speakers, frequent: ["履歴", "共通", " 台帳 "]))
+        #expect(fallback.candidates == ["台帳", "共通", "履歴"])
+    }
+    @Test(arguments: ["", "質問"])
+    func envelopeの任意キーと内蔵節と元の問いの表示を維持する(_ question: String) throws {
+        let r = try request(question: question)
+        let data = try AIJSON.encode(r.envelope)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let p = try #require(json["participant"] as? [String: Any])
+        let fixed = try #require(p["speaker_identification"] as? [String: Any])
+        #expect(fixed["unresolved"] as? [String] == ["A", "C"])
+        #expect(r.envelope.participant.question.hasSuffix(SpeakerIdentificationPrompt.builtIn))
+        #expect(r.displayQuestion == (question.isEmpty ? "声の問い" : question))
+        #expect(r.envelope.participant.questionSource == (question.isEmpty ? .voice : .typed))
+        #expect(r.voiceUtteranceStart == (question.isEmpty ? 0 : nil))
+        #expect(try AIJSON.decode(AIRequest.self, from: AIJSON.encode(r)) == r)
+        let old = try request(fixed: nil)
+        #expect(!String(decoding: try AIJSON.encode(old.envelope), as: UTF8.self).contains("speaker_identification"))
+        #expect(!old.envelope.participant.question.contains(SpeakerIdentificationPrompt.builtIn))
+    }
+    @Test(arguments: ["null", "invalid", "empty", "duplicate", "bad-slot"])
+    func envelopeの不正な指定は拒否する(_ kind: String) throws {
+        var p = try #require(JSONSerialization.jsonObject(with: AIJSON.encode(try request().envelope.participant)) as? [String: Any])
+        switch kind {
+        case "null": p["speaker_identification"] = NSNull()
+        case "invalid": p["speaker_identification"] = "A"
+        case "empty": p["speaker_identification"] = ["unresolved": [], "candidates": ["田中"]]
+        case "duplicate": p["speaker_identification"] = ["unresolved": ["A", "A"], "candidates": ["田中"]]
+        default: p["speaker_identification"] = ["unresolved": ["I"], "candidates": ["田中"]]
+        }
+        #expect(throws: (any Error).self) { try AIJSON.decode(AIParticipantContext.self, from: JSONSerialization.data(withJSONObject: p)) }
+    }
+    @Test(arguments: ["", "質問"])
+    func 内蔵文面が改訂されても保存済みの問いを復元できる(_ question: String) throws {
+        var p = try #require(JSONSerialization.jsonObject(with: AIJSON.encode(try request(question: question).envelope.participant)) as? [String: Any])
+        p["question"] = question + "\n\n以前の内蔵文面"
+        let restored = try AIJSON.decode(AIParticipantContext.self, from: JSONSerialization.data(withJSONObject: p))
+        #expect(restored.userQuestion == question)
+        #expect(restored.questionSource == (question.isEmpty ? .voice : .typed))
+        p["original_question"] = nil
+        #expect(throws: (any Error).self) { try AIJSON.decode(AIParticipantContext.self, from: JSONSerialization.data(withJSONObject: p)) }
+    }
+    @Test func 引用時刻はすべて実在する行に対応し不正な時刻を無視しない() {
+        let lines = ["[14:05:10] 話者A: タダシです", "[14:05:11] 話者C: 田中です"]
+        #expect(SpeakerEvidence.exists("[14:05:10] タダシです\n[14:05:11] 田中です", in: lines))
+        for evidence in ["時刻なし", "[14:05:12] 存在しない", "[14:05:10] タダシです\n[99:99:99] 不正"] {
+            #expect(!SpeakerEvidence.exists(evidence, in: lines))
+        }
+    }
+    @Test func 内蔵文面を仕様書と機械照合する() throws {
+        let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let doc = try String(contentsOf: repo.appendingPathComponent("docs/ai-participant.md"), encoding: .utf8)
+        let start = try #require(doc.range(of: "````text\n"))
+        let end = try #require(doc.range(of: "\n````", range: start.upperBound..<doc.endIndex))
+        #expect(String(doc[start.upperBound..<end.lowerBound]) == SpeakerIdentificationPrompt.builtIn)
+    }
+    @Test func イベントの固定情報と名前とファイル名を検証する() throws {
+        let r = try request()
+        let event = try AISpeakerEvent(request: r, slot: "A", name: " タダシ ", evidence: "[14:05:10] タダシです", recordedAt: Date(timeIntervalSince1970: 100))
+        #expect(event.eventID == "\(r.id)/speaker/A" && event.filename == "\(r.id).speaker.A.json")
+        #expect(try AIInbox.decodeSpeaker(AIJSON.encode(event), filename: event.filename, for: r) == event)
+        #expect(throws: AIError.mismatch) { try AIInbox.decodeSpeaker(AIJSON.encode(event), filename: "\(r.id).speaker.C.json", for: r) }
+        #expect(throws: AIError.mismatch) { try event.validate(for: request()) }
+    }
+    @Test(arguments: ["タダシ", "別名", ""])
+    func 人の確認は点を消して会議の間AIから除外しarchiveとstateへ残る(_ name: String) throws {
+        let r = try request()
+        let event = try AISpeakerEvent(request: r, slot: "A", name: "タダシ", evidence: "[14:05:10] タダシです", recordedAt: Date(timeIntervalSince1970: 100))
+        var names = SpeakerNames()
+        try names.identify(event, participant: "迅雷", detected: [0], mapping: [:], lines: ["[14:05:10] 話者A: タダシです"])
+        #expect(names.attributions[0]?.tooltip == "迅雷の推定 · 14:05:10「タダシです」")
+        #expect(names.unresolvedSlots(detected: [0], mapping: [:]).isEmpty)
+        names.confirm(name, for: 0)
+        #expect(names.humanTouched == [0] && names.attributions.isEmpty)
+        #expect(throws: (any Error).self) { try names.identify(event, participant: "迅雷", detected: [0], mapping: [:], lines: ["[14:05:10] 行"]) }
+        var conversation = AIConversation(meetingID: r.envelope.meetingID)
+        try conversation.append(r); try conversation.recordSpeaker(event, names: names)
+        let restored = try AIJSON.decode(AIConversation.self, from: AIJSON.encode(conversation))
+        #expect(restored.speakerNames == names && restored.speakerAssignments == [event])
+        let meeting = MeetingMarkdown.Meeting(startedAt: Date(), duration: 1, utterances: [], names: names)
+        let archive = MeetingArchive(original: meeting, markdownURL: URL(fileURLWithPath: "/tmp/unused.md"))
+        #expect(try AIJSON.decode(MeetingArchive.self, from: AIJSON.encode(archive)).original.names == names)
+    }
+    @Test func Markdownの話者行に出所を混ぜずAI節に割当を残す() throws {
+        let r = try request()
+        let event = try AISpeakerEvent(request: r, slot: "A", name: "タダシ", evidence: "[14:05:10] タダシです", recordedAt: Date())
+        var names = SpeakerNames()
+        try names.identify(event, participant: "迅雷", detected: [0], mapping: [:], lines: ["[14:05:10] 行"])
+        var conversation = AIConversation(meetingID: r.envelope.meetingID)
+        try conversation.append(r); try conversation.recordSpeaker(event, names: names)
+        let meeting = MeetingMarkdown.Meeting(startedAt: Date(), duration: 1,
+            utterances: [.init(speaker: 0, start: 0, end: 1, text: "タダシです")], names: names, ai: conversation)
+        let markdown = MeetingMarkdown.render(meeting)
+        let speakerLine = try #require(markdown.components(separatedBy: "\n").first { $0.hasPrefix("- 話者:") })
+        #expect(speakerLine == "- 話者: A=タダシ")
+        #expect(SpeakerSuggestions.names(inSpeakerLine: speakerLine) == ["タダシ"])
+        #expect(markdown.contains("- 話者の割当: A → タダシ(根拠: [14:05:10] タダシです)"))
+    }
+    @Test func キーの既定とmanifest互換と型を検証する() throws {
+        let old = ResolvedAIConfig(config: AIConfig(), home: URL(fileURLWithPath: "/tmp"))
+        let enabled = ResolvedAIConfig(config: AIConfig(identifySpeakers: true), home: URL(fileURLWithPath: "/tmp"))
+        #expect(!old.identifySpeakers && enabled.identifySpeakers)
+        #expect(try ConfigLoader.parse(toml: "[[ai]]\nidentifySpeakers = true").ai?.first?.identifySpeakers == true)
+        for raw in ["1", "\"true\"", "[]"] {
+            #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: "[[ai]]\nidentifySpeakers = \(raw)") }
+        }
+        var json = try #require(JSONSerialization.jsonObject(with: AIJSON.encode(enabled)) as? [String: Any])
+        json["identifySpeakers"] = nil
+        #expect(try !AIJSON.decode(ResolvedAIConfig.self, from: JSONSerialization.data(withJSONObject: json)).identifySpeakers)
+        json["identifySpeakers"] = "true"
+        #expect(throws: (any Error).self) { try AIJSON.decode(ResolvedAIConfig.self, from: JSONSerialization.data(withJSONObject: json)) }
+    }
+}

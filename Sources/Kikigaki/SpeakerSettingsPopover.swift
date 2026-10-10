@@ -19,7 +19,7 @@ final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
         "統合先の名前へ直接まとめます。統合は連鎖しません。\n新しい録音を始めるとリセットします。")
     private let meetingSection = NSStackView()
     private let stack = NSStackView()
-    private var rows: [(view: NSStackView, label: NSTextField, choice: NSPopUpButton)] = []
+    private var rows: [(view: NSStackView, label: NSTextField, dot: SpeakerAttributionDot, choice: NSPopUpButton)] = []
     private var detectedSlots: [Int] = []
     private var snapshot: SessionSnapshot
     var isShown: Bool { popover.isShown }
@@ -49,14 +49,17 @@ final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
         for _ in 0..<SpeakerNames.slotCount {
             let label = Washi.label()
             label.lineBreakMode = .byTruncatingTail
-            label.widthAnchor.constraint(equalToConstant: 126).isActive = true
+            label.widthAnchor.constraint(equalToConstant: 113).isActive = true
+            let dot = SpeakerAttributionDot()
+            dot.widthAnchor.constraint(equalToConstant: 5).isActive = true
+            dot.heightAnchor.constraint(equalToConstant: 5).isActive = true
             let choice = NSPopUpButton()
             choice.widthAnchor.constraint(equalToConstant: 248).isActive = true
             choice.target = self; choice.action = #selector(mappingChanged(_:))
-            let row = NSStackView(views: [label, choice])
+            let row = NSStackView(views: [label, dot, choice])
             row.spacing = 10
             meetingSection.addArrangedSubview(row)
-            rows.append((row, label, choice))
+            rows.append((row, label, dot, choice))
         }
         mappingHint.font = .systemFont(ofSize: 11); mappingHint.textColor = Washi.muted
         mappingHint.widthAnchor.constraint(equalToConstant: 384).isActive = true
@@ -139,6 +142,7 @@ final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
             row.view.isHidden = !visible
             guard visible else { continue }
             let slot = slots[index]
+            row.dot.update(snapshot.names.attributions[slot])
             let original = SpeakerNames.defaultName(for: slot)
             row.label.stringValue = snapshot.names.customName(for: slot).map { original + " / " + $0 } ?? original
             row.label.toolTip = row.label.stringValue

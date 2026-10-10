@@ -563,8 +563,11 @@ final class MeetingSession {
     func rename(slot: Int, to name: String) {
         guard snapshot.canShare, snapshot.names.diarizationEnabled, (0..<SpeakerNames.slotCount).contains(slot) else { return }
         var names = snapshot.names
-        names.set(name, for: slot)
+        names.confirm(name, for: slot)
         guard names != snapshot.names else { return }
+        // stateを先に更新する。人の確認状態が保存できないときはAIが再度触る恐れがある。
+        do { try aiRecord?.controller.setSpeakerNames(names) }
+        catch { log("話者名の確認を保存できません: \(error)"); return }
         snapshot.names = names
         if archive != nil {
             archive?.original.names = names
@@ -827,9 +830,12 @@ final class MeetingSession {
         // 書き先は送信操作の入口で固定する。ボードの会議は人の指定が無ければAI通知を引き継ぐ。
         let minutesPath: String?
         let boardHeading: String?
+        let participantNames: [String]
         do {
             let state = try aiStore.minutesStores.store(meetingID: meetingID, markdownURL: url).state
             minutesPath = state.participantMinutesPath
+            participantNames = SpeakerSuggestions.participants(at: state.minutesPath.map { URL(fileURLWithPath: $0) },
+                                                               key: snapshot.participantsKey)
             // ボードを持たない宛先の自動送信を、ボードの更新として記録・解釈しない。
             // 手動は宛先を問わず会議のボードを保護する。
             boardHeading = trigger == .scheduled ? config.board : state.boardHeading
@@ -838,6 +844,11 @@ final class MeetingSession {
         // 開始時のプロンプトを使い回すと初版の作成指示が残る。毎回、固定したパスに合わせる。
         let question = trigger == .scheduled && config.board != nil
             ? config.scheduledPrompt(minutesPath: minutesPath) : question
+        let identification = config.identifySpeakers ? SpeakerIdentification.make(
+            names: snapshot.names, detected: snapshot.detectedSpeakerSlots, mapping: snapshot.speakerMapping,
+            participants: participantNames,
+            speakers: snapshot.speakers,
+            frequent: SpeakerSuggestions.frequentNames(in: url.deletingLastPathComponent(), excluding: url)) : nil
         let names = snapshot.names, timeline = snapshot.timeline, typed = typedEntries
         let exclusion = audioExclusion
         let workAllowed = suppliedWorkAllowed ?? aiWorkAllowed
@@ -860,6 +871,8 @@ final class MeetingSession {
             }
             do {
                 let record = try aiStore.begin(meetingID: meetingID, markdownURL: url, profiles: meetingAIProfiles)
+                configureSpeakerIdentification(record.controller)
+                try record.controller.setSpeakerNames(snapshot.names)
                 if let slot = rangeAutomaticSlot { aiStore.setAutomaticSlot(slot, for: record) }
                 try record.controller.register(meetingAIProfiles)
                 guard record.controller.canSend(slot: config.slot) else { throw AIHerdrError.notReady }
@@ -901,7 +914,7 @@ final class MeetingSession {
                 let fixed = try record.controller.prepare(lines: capture.lines, question: question, voiceQuestion: capture.voice,
                     capturedAt: capturedAt, cutoff: cutoff, tail: capture.tail, config: config, helper: helper, parent: parent, full: full,
                     workAllowed: workAllowed, voiceUtteranceStart: capture.voiceUtteranceStart, trigger: trigger,
-                    minutesPath: minutesPath, boardHeading: boardHeading)
+                    minutesPath: minutesPath, boardHeading: boardHeading, speakerIdentification: identification)
                 request = fixed
                 aiRequestOwners[fixed.id] = owner
                 if trigger == .scheduled, let scheduleRun {
@@ -952,11 +965,26 @@ final class MeetingSession {
     }
 
     private func aiChanged() {
+        if let names = aiRecord?.controller.conversation.speakerNames {
+            snapshot.names = names
+            archive?.original.names = names
+        }
         observeAIScheduleResults()
         if snapshot.state == .idle, let result = aiRecord?.saveResult {
             snapshot.saved = result.succeeded; snapshot.message = result.message
         }
         emit()
+    }
+
+    /// 会議IDを捕捉し、次の録音が始まったあとの旧会議への適用を防ぐ。
+    func configureSpeakerIdentification(_ controller: AIConversationController) {
+        let meetingID = handoff.meetingID
+        controller.speakerDiagnostic = log
+        controller.speakerContext = { [weak self] in
+            guard let self, self.handoff.meetingID == meetingID else { return nil }
+            return (self.snapshot.names, self.snapshot.detectedSpeakerSlots, self.snapshot.speakerMapping,
+                TranscriptRenderer.lines(self.snapshot.utterances, names: self.snapshot.names, timeline: self.snapshot.timeline))
+        }
     }
 
 #if DEBUG
@@ -1373,9 +1401,9 @@ extension MeetingSession {
         consumedAudioTime = meter.track().duration; snapshot.elapsed = consumedAudioTime
         emit()
     }
-    func setScheduleTranscriptForTesting(_ text: String) {
+    func setScheduleTranscriptForTesting(_ text: String, speaker: Int? = nil) {
         finalTokens = [.init(text: text, phraseId: 0, start: 0, end: 0)]
-        snapshot.utterances = [.init(speaker: nil, start: 0, end: 0, text: text)]
+        snapshot.utterances = [.init(speaker: speaker, start: 0, end: 0, text: text)]
         consumedAudioTime = 1; snapshot.elapsed = 1
         emit()
     }

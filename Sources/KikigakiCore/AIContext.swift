@@ -101,20 +101,29 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     /// 議事録の書き先。ボードの会議では人の指定が無い場合にAI通知のパスを引き継ぐ。
     public let minutesPath: String?
     public let boardHeading: String?
+    public let speakerIdentification: SpeakerIdentification?
+    /// 文面の改訂後も過去requestを読めるよう、内蔵節の切り取りで元の問いを復元しない。
+    /// 声の問いと送信印の位置・表示は、送信時に固定した元の問いで決める。
+    public let originalQuestion: String?
+    public var userQuestion: String { originalQuestion ?? question }
 
     public init(streamID: UUID, requestID: UUID, sessionGeneration: Int, participantName: String,
                 cliPath: String, sessionPath: String, requestToken: String, question: String,
                 capturedAt: Date, audioCutoffSeconds: Double, tentativeTail: AITentativeTail? = nil,
                 inReplyToRequestID: UUID? = nil, inReplyToEventID: String? = nil, workAllowed: Bool = true,
                 trigger: Trigger? = nil, profile: String? = nil, profileSlot: Int? = nil,
-                minutesPath: String? = nil, boardHeading: String? = nil) {
+                minutesPath: String? = nil, boardHeading: String? = nil,
+                speakerIdentification: SpeakerIdentification? = nil) {
+        self.speakerIdentification = speakerIdentification
+        originalQuestion = speakerIdentification == nil ? nil : question
         self.boardHeading = boardHeading
         self.minutesPath = minutesPath
         self.trigger = trigger; self.profile = profile; self.profileSlot = profileSlot
         schemaVersion = 1; mode = "meeting"; self.streamID = streamID; self.requestID = requestID
         self.sessionGeneration = sessionGeneration; self.participantName = participantName
         self.cliPath = cliPath; self.sessionPath = sessionPath; self.requestToken = requestToken
-        self.question = question; questionSource = question.isEmpty ? .voice : .typed
+        self.question = SpeakerIdentificationPrompt.compose(question: question, identification: speakerIdentification)
+        questionSource = question.isEmpty ? .voice : .typed
         self.workAllowed = workAllowed
         self.capturedAt = capturedAt; self.audioCutoffSeconds = audioCutoffSeconds
         self.tentativeTail = tentativeTail; self.inReplyToRequestID = inReplyToRequestID
@@ -122,6 +131,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     }
 
     public func validate() throws {
+        try speakerIdentification?.validate()
         if let minutesPath { try MinutesPath.validate(minutesPath) }
         if let boardHeading { try BoardHeading.validate(boardHeading) }
         guard schemaVersion == 1, mode == "meeting", sessionGeneration > 0,
@@ -129,7 +139,8 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
               AIValidation.absolutePath(sessionPath), AIValidation.singleLine(requestToken),
               requestToken.utf8.count <= 256, audioCutoffSeconds.isFinite, audioCutoffSeconds >= 0,
               capturedAt.timeIntervalSince1970.isFinite,
-              questionSource == (question.isEmpty ? .voice : .typed),
+              (speakerIdentification == nil) == (originalQuestion == nil),
+              questionSource == (userQuestion.isEmpty ? .voice : .typed),
               (inReplyToRequestID == nil) == (inReplyToEventID == nil),
               // 片方だけのプロファイル指定は、パス検証も表示も決められないので拒否する。
               (profile == nil) == (profileSlot == nil) else { throw AIError.invalid("participant") }
@@ -141,6 +152,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
                   !profile.trimmingCharacters(in: .whitespaces).isEmpty else { throw AIError.invalid("profile") }
         }
         try AIValidation.text(question, limit: AILimits.questionBytes)
+        if let originalQuestion { try AIValidation.text(originalQuestion, limit: AILimits.questionBytes) }
         if trigger == .scheduled {
             try AIValidation.text(question, limit: AILimits.questionBytes, nonempty: true)
             guard inReplyToRequestID == nil else { throw AIError.invalid("scheduled parent") }
@@ -160,6 +172,8 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
         case trigger, profile
         case minutesPath = "minutes_path"
         case boardHeading = "board_heading"
+        case speakerIdentification = "speaker_identification"
+        case originalQuestion = "original_question"
         case profileSlot = "profile_slot"
         case schemaVersion = "schema_version", mode, streamID = "stream_id", requestID = "request_id"
         case sessionGeneration = "session_generation", participantName = "participant_name"
@@ -174,6 +188,10 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
         trigger = try values.contains(.trigger) ? values.decode(Trigger.self, forKey: .trigger) : nil
         minutesPath = try values.contains(.minutesPath) ? values.decode(String.self, forKey: .minutesPath) : nil
         boardHeading = try values.contains(.boardHeading) ? values.decode(String.self, forKey: .boardHeading) : nil
+        speakerIdentification = try values.contains(.speakerIdentification)
+            ? values.decode(SpeakerIdentification.self, forKey: .speakerIdentification) : nil
+        originalQuestion = try values.contains(.originalQuestion)
+            ? values.decode(String.self, forKey: .originalQuestion) : nil
         // 複数プロファイル以前のrequestはこのキーを持たない。欠損は既定プロファイルとして読む。
         profile = try values.decodeIfPresent(String.self, forKey: .profile)
         profileSlot = try values.decodeIfPresent(Int.self, forKey: .profileSlot)

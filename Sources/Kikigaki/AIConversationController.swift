@@ -46,6 +46,9 @@ final class AIConversationController {
     private(set) var progressReports: [UUID: AIProgressReport] = [:]
     private var lastScanReturnStatus: [UUID: Bool] = [:]
     var onChange: (() -> Void)?
+    /// 現在表示している会議だけが返す。旧会議・再起動回収では割当を適用しない。
+    var speakerContext: (() -> (names: SpeakerNames, detected: [Int], mapping: [Int: Int], lines: [String])?)?
+    var speakerDiagnostic: (String) -> Void = { NSLog("%@", $0) }
     /// 明示的なreplay検証だけで、受信直前に人のパス指定を再現する。
     var beforeMinutesScanForReplay: (() -> Void)?
     /// 返事が届いた枠。通知音は返答元のプロファイルの設定で決める
@@ -190,7 +193,7 @@ final class AIConversationController {
                  tail: AITentativeTail?, config: ResolvedAIConfig, helper: URL, parent: UUID? = nil,
                  full: Bool = false, workAllowed: Bool? = nil, voiceUtteranceStart: Double? = nil,
                  trigger: AIParticipantContext.Trigger? = nil, minutesPath: String? = nil,
-                 boardHeading: String? = nil) throws -> AIRequest {
+                 boardHeading: String? = nil, speakerIdentification: SpeakerIdentification? = nil) throws -> AIRequest {
         if let minutesPath { try minutes.validateTarget(minutesPath) }
         try register([config])
         let channel = try channel(config.slot)
@@ -205,11 +208,12 @@ final class AIConversationController {
         let participant = AIParticipantContext(streamID: channel.history.streamID, requestID: UUID(),
             sessionGeneration: channel.generation,
             participantName: config.participantName, cliPath: helper.path, sessionPath: sessionPath,
-            requestToken: UUID().uuidString + UUID().uuidString, question: question, capturedAt: capturedAt,
+            requestToken: UUID().uuidString + UUID().uuidString,
+            question: question, capturedAt: capturedAt,
             audioCutoffSeconds: cutoff, tentativeTail: tail, inReplyToRequestID: parent,
             inReplyToEventID: parent.map { "\($0.uuidString)/result" }, workAllowed: workAllowed ?? config.allowWork,
             trigger: trigger, profile: slot == nil ? nil : config.name, profileSlot: slot,
-            minutesPath: minutesPath, boardHeading: boardHeading)
+            minutesPath: minutesPath, boardHeading: boardHeading, speakerIdentification: speakerIdentification)
         let request = try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant),
             number: conversation.questions.count + 1, voiceQuestion: voiceQuestion, snapshot: snapshot, voiceUtteranceStart: voiceUtteranceStart)
         var next = conversation
@@ -377,6 +381,51 @@ final class AIConversationController {
 
     // MARK: - 受信
 
+    func setSpeakerNames(_ names: SpeakerNames) throws {
+        guard conversation.speakerNames != names else { return }
+        var next = conversation
+        next.setSpeakerNames(names)
+        try commit(next)
+        onChange?()
+    }
+
+    /// 先にstateへ保存し、その通知からUIとarchiveへ反映する。保存失敗時に名前だけを変えない。
+    private func scanSpeakers() {
+        var events: [AISpeakerEvent] = []
+        for q in conversation.questions where q.sendAttemptedAt != nil && q.request.envelope.participant.speakerIdentification != nil {
+            for letter in SpeakerNames.letters {
+                let filename = "\(q.request.id.uuidString).speaker.\(letter).json"
+                do {
+                    let bytes = try files.read(base + ["inbox", filename], limit: AILimits.eventBytes)
+                    let event = try AIInbox.decodeSpeaker(bytes, filename: filename, for: q.request)
+                    if !conversation.processedSpeakerIDs.contains(event.eventID) { events.append(event) }
+                } catch AIFileError.missing { continue }
+                catch { speakerDiagnostic("話者の割当を破棄: \(filename): \(error)") }
+            }
+        }
+        guard !events.isEmpty else { return }
+        events.sort { $0.recordedAt == $1.recordedAt ? $0.eventID < $1.eventID : $0.recordedAt < $1.recordedAt }
+        var next = conversation
+        let context = speakerContext?()
+        var names = context?.names
+        for event in events {
+            var accepted: SpeakerNames?
+            do {
+                guard let context, var current = names,
+                      let request = conversation.questions.first(where: { $0.request.id == event.requestID })?.request else {
+                    throw AIError.invalid("not the current meeting")
+                }
+                try current.identify(event, participant: request.envelope.participant.participantName,
+                                     detected: context.detected, mapping: context.mapping, lines: context.lines)
+                accepted = current; names = current
+            } catch { speakerDiagnostic("話者の割当を破棄: \(event.eventID): \(error)") }
+            do { try next.recordSpeaker(event, names: accepted) }
+            catch { speakerDiagnostic("話者の割当を記録できません: \(event.eventID): \(error)") }
+        }
+        do { try commit(next); onChange?() }
+        catch { speakerDiagnostic("話者の割当の保存に失敗: \(error)") }
+    }
+
     func scan() {
         guard !discarded else { return }
         let oldWarning = warning, oldInvalid = invalidInboxFiles
@@ -387,6 +436,7 @@ final class AIConversationController {
         beforeMinutesScanForReplay?()
         // resultのcommit/onChangeより先に議事録の保存失敗を確定し、登録簿から脱落させない。
         minutes.scan(questions: conversation.questions)
+        scanSpeakers()
         var events: [AIReceiveEvent] = []
         for q in conversation.questions where q.sendAttemptedAt != nil {
             for suffix in ["accept", "result"] {

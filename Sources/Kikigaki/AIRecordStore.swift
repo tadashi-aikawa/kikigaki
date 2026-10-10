@@ -230,6 +230,7 @@ final class AIRecordStore {
         do {
             try validate(archive, manifest: record.manifest)
             archive.original.ai = record.controller.conversation
+            if let names = record.controller.conversation.speakerNames { archive.original.names = names }
             let files = AIFileStore(root: archive.markdownURL.deletingLastPathComponent())
             let path = Self.base(record.manifest.meetingID) + ["archive.json"]
             // Markdownの前に原データ。失敗時は既存Markdownへ手を付けない。

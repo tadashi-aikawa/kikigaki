@@ -121,6 +121,7 @@ address = "ネオへ"
 | `prompt` | 空 | 全送信に付く追加指示 |
 | `notifySound` | `false` | 返事が届いたときの通知音。返答元の設定で鳴らす |
 | `allowWork` | `true` | 送信シートの「作業を許可する」の初期値 |
+| `identifySpeakers` | `false` | 送信に話者名の割当を同梱する。詳細は [AI参加者の設計](ai-participant.md#話者名の割当) |
 | `autoStart` | `false` | 録音開始シートの自動送信の宛先の既定にする。配列全体で1つまで。`board` を指定しない宛先は `autoPrompt` が必要 |
 | `autoPrompt` | 空 | 手動・自動実行シートと録音開始シートのプロンプト初期値 |
 | `autoIntervalMinutes` | `3` | 自動送信の間隔。1〜60分 |

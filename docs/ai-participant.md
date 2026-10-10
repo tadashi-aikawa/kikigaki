@@ -115,6 +115,8 @@ UUIDとパス・時刻は書式の説明用。実データでは生成した値�
 - `trigger`: 定期自動送信のとき `scheduled`。手動は付けない。
 - `minutes_path`: 議事録の書き先。人の指定を優先して固定し、ボードの会議では人の指定が無いときに通知パスを引き継ぐ。
 - `board_heading`: ボードの自動送信が更新する見出し。
+- `speaker_identification`: 話者名の割当の固定情報。`unresolved` は未確定枠の記号、`candidates` は候補名の配列。契約は「[話者名の割当](#話者名の割当)」を参照。
+    - 補足: このキーがあるときだけ `original_question` に内蔵節を付ける前の問いを保存する。`question_source` は元の問いが空ならvoice、それ以外はtyped。
 
 snapshotは従来どおり確定済みの会話全文だけを固定保存する。暫定末尾はparticipantの付帯データであり、行数・差分・次回の基準へ含めない。次回に文字が確定したら、通常の文脈差分として訂正する。回答の根拠に暫定を含んだ事実は質問記録へ残す。AI回答や参照印もsnapshotへ混ぜない。
 
@@ -144,6 +146,7 @@ ai/
   inbox/<request_id>.progress.editing.json
   inbox/<request_id>.progress.replying.json
   inbox/<request_id>.minutes.json
+  inbox/<request_id>.speaker.<A〜H>.json
   inbox/notify-<event_id>.json
   state.json                    送信試行、取り込み順、表示状態
   archive.json                  最後に永続化した人間の保存用データ
@@ -356,6 +359,63 @@ AI節は送信時の問い・固定snapshot参照・暫定末尾・結果イベ�
 Markdownの書き手はKIKIGAKIだけ。録音中のAI受領では受信箱と画面を先に更新し、会議Markdownは従来どおり録音停止時に生成する。停止後の回答や改名ではMarkdownを再生成する。保存用archiveを先に永続化し、Markdownは再生成できる状態を作ってから置き換える。archiveとMarkdownの更新途中に失敗してもAIイベントは失わず、保存状態をファイルごとに保持して再試行できるようにする。
 
 Markdownはアプリが管理する生成物として扱う。外部編集の自動検知はしない。再起動後の過去会議の話者再編集UIも持たない。
+
+## 話者名の割当
+
+`[[ai]]` の `identifySpeakers = true` で、その宛先への定期・手動・最後の1回の送信に割当を同梱する。既定はfalse。専用のAIセッションやタイマーは作らない。
+
+- 対象は検出済みの未確定枠だけ。
+    - 除外: 名前を付けた枠、人が触った枠、統合先が別枠になっている枠、話者判別を無効にした会議。
+    - 人の操作: 改名・同じ名前でのReturn・既定への復帰を、会議中は確認済みとして保持する。
+- 候補は議事録のfrontmatterの参加者だけ。
+    - キー: `participantsKey`。参加者がなければ `[[speakers]]` とよく使う名前を使う。参加者があるときは台帳・履歴を混ぜない。
+- 未確定枠と候補は送信受付時に固定する。
+    - envelope: `participant.speaker_identification` に `{"unresolved":["A","C"],"candidates":["タダシ","田中"]}` を置く。欠損は未指定、明示nullと不正な型は拒否する。
+    - 問い: 内蔵節を `participant.question` の末尾へ付ける。元の問いは `participant.original_question` に固定する。`question_source` と画面の送信文・声の送信印は元の問いで決める。
+
+### 内蔵プロンプト全文
+
+`SpeakerIdentificationPrompt.builtIn` とテストで機械照合する。
+
+````text
+## 話者名の割当
+participant.speaker_identification があるときだけ、通常の依頼に加えて話者名を割り当ててください。
+新しく読んだ範囲に直接の根拠がある未確定の枠だけが対象です。直接の根拠は本人の名乗り、または名前で呼ばれて直後に応答した発言です。
+役割・口調・消去法から名前を類推してはいけません。候補名の中で一意に対応するときだけ返し、確信が無ければ何も返さないでください。
+accept の後、progress --replying と reply の前に、該当する枠ごとに同梱CLIの speaker を呼んでください。作業許可が無効でも speaker は返せます。
+--slot は unresolved の A〜H、--name は candidates の名前を使います。--session、--request、--token はこの依頼の固定値です。
+根拠は新しく読んだ会話の行を [HH:MM:SS] 付きで引用し、stdin へ渡してください。根拠はUTF-8で2 KiB以内です。
+````
+
+### CLIと取り込み
+
+```text
+<cli_path> speaker --session <session_path> --request <request_id> --token <request_token> --slot A --name タダシ
+```
+
+- 根拠はstdinのUTF-8本文で渡す。
+    - 上限: 2 KiB。NULと空の根拠を拒否し、切り詰めない。
+- `minutes` と同じsession・request・token・fd・原子的保存の検証を使う。
+    - 固定情報: 枠が `unresolved` に含まれ、正規化後の名前が `candidates` と完全一致するときだけ保存する。
+    - イベント: `kind: speaker`、IDは `<request_id>/speaker/<letter>`、ファイルは `<request_id>.speaker.<letter>.json`。共通の会議・request・世代・snapshot・記録時刻に `slot`、`name`、`evidence` を添える。
+    - 再実行: 同内容なら同じ成功を返す。内容が違えば競合し、最初のイベントを保持する。
+- アプリは現在の会議で、枠がまだ未確定、別枠へ統合されておらず、名前が他枠で使われていない場合だけ取り込む。
+    - 根拠: 引用の `[HH:MM:SS]` が会話の行に存在することを機械判定する。意味や本人性はAIに課した規則に委ねる。
+    - 先勝ち: 同名が2枠へ返った場合も、複数プロファイルで有効にした場合も、取り込み順で最初だけを受け入れる。
+    - 旧会議: 次の録音が始まった後の返送や再起動回収は適用しない。拒否は診断ログへ残す。
+- 割当は一方通行で、AIが後から翻さない。
+    - 保存: 人が触った枠と、AIが付けた枠・宛先名・根拠を `SpeakerNames` に持ち、stateとarchiveへ残す。
+    - Markdown: 話者行には出所を加えない。対応する `### AI #n` に `- 話者の割当: A → タダシ(根拠: [14:05:10] タダシです)` を残す。
+    - 表示: 点と根拠の行は [書き起こしウィンドウ](transcript-window.md#aiが付けた名前) を参照する。
+
+### 受け入れる限界
+
+- 自動送信が回っていない会議では継続的に働かない。
+    - 手動: 有効な宛先へ手動送信した回には同梱する。
+- 名乗りが初回送信より前で、枠の検出が遅れた場合は逃す。
+- AIの割当も改名なので、次のtickの差分が大きくなる。
+- 候補が薄い会議では効かない。
+- 未確認のまま保存した名前も、よく使う名前の集計へ含める。
 
 ## 設定
 

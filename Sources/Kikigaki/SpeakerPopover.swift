@@ -11,6 +11,8 @@ final class SpeakerPopover: NSObject, NSTextFieldDelegate {
     private var avatarRows: [(AvatarView, String?)] = []
     private let slot: Int
     private let candidates: [SpeakerSuggestions.Candidate]
+    private let names: SpeakerNames
+    let evidenceLabel = Washi.label(size: 11, color: Washi.muted)
     private var edited = false
     private var rows: [Row] = []
     private var selected: Int?
@@ -27,6 +29,7 @@ final class SpeakerPopover: NSObject, NSTextFieldDelegate {
          participants: [String] = [], frequentNames: [String] = []) {
         self.avatars = avatars
         self.slot = slot
+        self.names = names
         candidates = SpeakerSuggestions.candidates(participants: participants, frequent: frequentNames,
                                                    speakers: speakers, names: names, excluding: slot)
         super.init()
@@ -34,7 +37,9 @@ final class SpeakerPopover: NSObject, NSTextFieldDelegate {
         popover.animates = false
         // contentSizeを入力中に変更しない。上向きの表示でも入力欄の画面位置を維持する。
         let listHeight = CGFloat(min(8, max(2, candidates.count)) * 28)
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 104 + listHeight))
+        let attribution = names.attributions[slot]
+        let evidenceHeight: CGFloat = attribution == nil ? 0 : 22
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 104 + listHeight + evidenceHeight))
         Washi.surface(content, color: Washi.paper)
         let badge = AvatarView(frame: NSRect(x: 18, y: content.bounds.height - 43, width: 22, height: 23))
         badge.slot = slot
@@ -47,6 +52,13 @@ final class SpeakerPopover: NSObject, NSTextFieldDelegate {
         field.setAccessibilityLabel("話者\(SpeakerNames.letter(for: slot))の名前")
         field.delegate = self
         content.addSubview(field)
+        evidenceLabel.stringValue = attribution?.detail ?? ""
+        evidenceLabel.toolTip = attribution?.tooltip
+        evidenceLabel.setAccessibilityLabel(attribution?.tooltip)
+        evidenceLabel.isHidden = attribution == nil
+        evidenceLabel.lineBreakMode = .byTruncatingTail
+        evidenceLabel.frame = NSRect(x: 48, y: content.bounds.height - 67, width: 274, height: 18)
+        content.addSubview(evidenceLabel)
         scroll.frame = NSRect(x: 14, y: 50, width: 312, height: listHeight)
         scroll.drawsBackground = false
         scroll.autohidesScrollers = true
@@ -146,6 +158,12 @@ final class SpeakerPopover: NSObject, NSTextFieldDelegate {
             }
             label.lineBreakMode = .byTruncatingTail
             list.addSubview(label)
+            if let used = row.candidate?.usedBySlot, let attribution = names.attributions[used] {
+                let dot = SpeakerAttributionDot(frame: NSRect(x: min(label.frame.maxX - 8,
+                    label.frame.minX + ceil(label.intrinsicContentSize.width) + 5), y: y + 11.5, width: 5, height: 5))
+                dot.update(attribution)
+                list.addSubview(dot)
+            }
             if selected == index {
                 let enter = Washi.label("⏎", size: 14, color: Washi.muted)
                 enter.frame = NSRect(x: 290, y: y + 4, width: 18, height: 20)

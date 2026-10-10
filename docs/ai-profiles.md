@@ -52,6 +52,7 @@ address = "ネオへ"                # cwd を省いたので既定のディレ�
 | prompt | 空文字列。利用者が指定する追加指示。32 KiBまで。接続プロトコルを上書きする位置へ置かない。 |
 | notifySound | false。trueのときだけ、返事が届いた枠の設定でアプリから通知音を鳴らす。 |
 | allowWork | true。送信シートの「作業を許可する」の初期値。会議内の変更を次の質問にも引き継ぎ、新しい録音で設定値へ戻す。 |
+| identifySpeakers | false。trueの宛先の送信に話者名の割当を同梱する。真偽値だけを認める。契約は [AI参加者の設計](ai-participant.md#話者名の割当) を参照。 |
 | autoStart | false。trueは配列全体で1つまで。`board` を指定しない宛先は `autoPrompt` が空なら設定エラー。録音開始シートの宛先の既定になる。 |
 | autoPrompt | 空文字列。手動・自動実行シートと録音開始シートのプロンプトの初期値。32 KiBまで。 |
 | autoIntervalMinutes | 3。1〜60分。 |

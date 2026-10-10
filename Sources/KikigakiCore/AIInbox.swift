@@ -18,6 +18,19 @@ public struct AIInbox: Sendable {
         try Self.decodeMinutes(readBytes(filename: filename, for: request, suffixes: ["minutes"]), filename: filename, for: request)
     }
 
+    public func readSpeaker(filename: String, for request: AIRequest) throws -> AISpeakerEvent {
+        try Self.decodeSpeaker(readBytes(filename: filename, for: request,
+            suffixes: SpeakerNames.letters.map { "speaker.\($0)" }), filename: filename, for: request)
+    }
+
+    public static func decodeSpeaker(_ data: Data, filename: String, for request: AIRequest) throws -> AISpeakerEvent {
+        guard data.count <= AILimits.eventBytes else { throw AIError.tooLarge }
+        let event = try AIJSON.decode(AISpeakerEvent.self, from: data)
+        try event.validate(for: request)
+        guard filename == event.filename else { throw AIError.mismatch }
+        return event
+    }
+
     /// 段ごとに別ファイル。名前の段とJSONの段が食い違えば検証で弾く。
     public func readProgress(_ phase: AIProgressEvent.Phase, for request: AIRequest) throws -> AIProgressEvent {
         let filename = AIProgressEvent.filename(requestID: request.id, phase: phase)

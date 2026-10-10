@@ -87,6 +87,9 @@ public enum AIMarkdown {
             let times = request.timeRange.map { "(\($0.start)〜\($0.end))" } ?? ""
             lines.append("- 対象: \(range)\(times)" + (participant.tentativeTail == nil ? "" : "。暫定末尾を含む"))
             lines.append("- 作業許可: " + (participant.workAllowed ? "あり" : "なし"))
+            for event in conversation.speakerAssignments where event.requestID == request.id {
+                lines.append("- 話者の割当: \(event.slot) → \(oneLine(event.name))(根拠: \(oneLine(event.evidence)))")
+            }
             if let accepted = question.acceptance { lines.append("- 受領: " + date(accepted.recordedAt, timeZone: timeZone)) }
             if let result = question.result {
                 lines.append("- 返事: " + date(result.recordedAt, timeZone: timeZone))

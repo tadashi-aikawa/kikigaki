@@ -8,6 +8,8 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
     public static var slotCount: Int { letters.count }
 
     private var names: [Int: String] = [:]
+    public private(set) var humanTouched: Set<Int> = []
+    public private(set) var attributions: [Int: SpeakerAttribution] = [:]
     /// 会議開始で固定する。名前と同じ保存・コピー経路を通し、次回設定で過去会議を変えない。
     public var diarizationEnabled = true
 
@@ -51,6 +53,33 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
         }
     }
 
+    /// 同じ名前でのReturnと既定への復帰も、人による確認として会議中は保持する。
+    public mutating func confirm(_ name: String, for slot: Int) {
+        set(name, for: slot)
+        humanTouched.insert(slot)
+        attributions[slot] = nil
+    }
+
+    public func unresolvedSlots(detected: [Int], mapping: [Int: Int]) -> [Int] {
+        guard diarizationEnabled else { return [] }
+        return Set(detected).filter {
+            Self.letters.indices.contains($0) && customName(for: $0) == nil && !humanTouched.contains($0)
+                && (mapping[$0] ?? $0) == $0
+        }.sorted()
+    }
+
+    public mutating func identify(_ event: AISpeakerEvent, participant: String, detected: [Int],
+                                 mapping: [Int: Int], lines: [String]) throws {
+        guard let slot = Self.letters.firstIndex(of: event.slot),
+              unresolvedSlots(detected: detected, mapping: mapping).contains(slot),
+              otherSlot(using: event.name, excluding: slot) == nil,
+              event.name != Self.defaultName(for: slot), SpeakerEvidence.exists(event.evidence, in: lines) else {
+            throw AIError.invalid("speaker current state or evidence")
+        }
+        set(event.name, for: slot)
+        attributions[slot] = SpeakerAttribution(event: event, participant: participant)
+    }
+
     public static func normalized(_ name: String) -> String {
         name
             .replacingOccurrences(of: "\r\n", with: " ")
@@ -64,10 +93,16 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
         return (0..<Self.slotCount).first { $0 != slot && self.name(for: $0) == name }
     }
 
-    private enum CodingKeys: String, CodingKey { case names, diarizationEnabled }
+    private enum CodingKeys: String, CodingKey { case names, diarizationEnabled, humanTouched, attributions }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         names = try values.decode([Int: String].self, forKey: .names)
         diarizationEnabled = try values.decodeIfPresent(Bool.self, forKey: .diarizationEnabled) ?? true
+        humanTouched = try values.decodeIfPresent(Set<Int>.self, forKey: .humanTouched) ?? []
+        attributions = try values.decodeIfPresent([Int: SpeakerAttribution].self, forKey: .attributions) ?? [:]
+        guard humanTouched.allSatisfy(Self.letters.indices.contains), attributions.allSatisfy({ slot, value in
+            Self.letters.indices.contains(slot) && !humanTouched.contains(slot)
+                && value.event.slot == Self.letter(for: slot) && names[slot] == value.event.name
+        }) else { throw AIError.invalid("speaker names attribution") }
     }
 }

@@ -41,6 +41,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var prompt: String?
     public var notifySound: Bool?
     public var allowWork: Bool?
+    public var identifySpeakers: Bool?
     public var autoPrompt: String?
     public var board: String?
     public var boardPrompt: String?
@@ -55,7 +56,9 @@ public struct AIConfig: Codable, Equatable, Sendable {
                 extraArgs: [String]? = nil, prompt: String? = nil, notifySound: Bool? = nil,
                 allowWork: Bool? = nil,
                 autoPrompt: String? = nil, autoIntervalMinutes: Int? = nil, autoStart: Bool? = nil,
-                board: String? = nil, boardPrompt: String? = nil, boardLocation: String? = nil) {
+                board: String? = nil, boardPrompt: String? = nil, boardLocation: String? = nil,
+                identifySpeakers: Bool? = nil) {
+        self.identifySpeakers = identifySpeakers
         self.board = board; self.boardPrompt = boardPrompt; self.boardLocation = boardLocation
         self.name = name
         self.cli = cli; self.command = command; self.herdrCommand = herdrCommand; self.model = model; self.effort = effort
@@ -196,6 +199,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public let prompt: String
     public let notifySound: Bool
     public let allowWork: Bool
+    public let identifySpeakers: Bool
     public let autoPrompt: String
     public let board: String?
     public let boardPrompt: String?
@@ -228,6 +232,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         extraArgs = config.extraArgs ?? []; prompt = config.prompt ?? ""
         notifySound = config.notifySound ?? false
         allowWork = config.allowWork ?? true
+        identifySpeakers = config.identifySpeakers ?? false
         autoPrompt = config.autoPrompt ?? ""; autoIntervalMinutes = config.autoIntervalMinutes ?? 3
         board = config.board; boardPrompt = config.boardPrompt; boardLocation = config.boardLocation
         autoStart = config.autoStart ?? false
@@ -236,7 +241,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case cli, command, herdrCommand, model, address, cwd, extraArgs, prompt, notifySound, allowWork
         case autoPrompt, autoIntervalMinutes, board, boardPrompt, boardLocation
-        case slot, name, effort, autoStart, avatar
+        case slot, name, effort, autoStart, avatar, identifySpeakers
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -252,6 +257,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         notifySound = try values.decode(Bool.self, forKey: .notifySound)
         // 旧会議のmanifestにこのキーが無い場合だけ、以前の作業可能な契約を引き継ぐ。
         allowWork = try values.contains(.allowWork) ? values.decode(Bool.self, forKey: .allowWork) : true
+        identifySpeakers = try values.contains(.identifySpeakers) ? values.decode(Bool.self, forKey: .identifySpeakers) : false
         autoPrompt = try values.contains(.autoPrompt) ? values.decode(String.self, forKey: .autoPrompt) : ""
         board = try values.contains(.board) ? values.decode(String.self, forKey: .board) : nil
         boardPrompt = try values.contains(.boardPrompt) ? values.decode(String.self, forKey: .boardPrompt) : nil

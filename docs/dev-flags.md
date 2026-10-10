@@ -108,7 +108,7 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
     - `KIKIGAKI_PATH_CAPTURE`: `MinutesWindowRevisionTests`
     - `KIKIGAKI_STATE_CAPTURE`: `AIRobotTests`
     - `KIKIGAKI_DIARIZATION_CAPTURE`: `DiarizationTests`
-    - `KIKIGAKI_SPEAKER_CAPTURE`: `SpeakerPopoverTests`。話者名のポップオーバーを、入力していない状態・絞り込み中・0件の3状態で撮る
+    - `KIKIGAKI_SPEAKER_CAPTURE`: `SpeakerPopoverTests` と `SpeakerIdentificationAppTests`。話者名の候補と、AIが付けた名前の点・話者一覧・根拠の行を撮る
     - `KIKIGAKI_UI_MENU_CAPTURE=1`: `AIViewTests` が宛先のメニューを撮る。`KIKIGAKI_UI_MENU_WIDTH` でウィンドウ幅を指定する。既定は600
     - `KIKIGAKI_UI_AVATAR=<画像>`: `AIProfileReviewTests` が宛先のメニューを画像付きで撮る
     - `KIKIGAKI_SCHEDULE_REVIEW_AI=<入力>`: `AIScheduleReviewTests` が、実herdrの保存済み会議を土台に自動送信のUIを撮る

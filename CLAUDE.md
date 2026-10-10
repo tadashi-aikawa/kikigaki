@@ -28,7 +28,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - AI設定、独立stream履歴、envelope、質問と受信イベント、AIの返事のMarkdownもここに置く。契約は [AI参加者の設計](docs/ai-participant.md)
 - `Sources/KikigakiAIIO/`: アプリと返送CLIが共有するfd検証、原子的な保存、sessionとフック観測の型
 - `Sources/KikigakiCLI/`: 同梱CLI `kikigaki-cli`。配置は `.app/Contents/Helpers/kikigaki-cli`
-  - コマンド: `accept`・`reply`・`progress`・`notify`・`minutes`・`skill`・`next`。書式は `ReturnCommand.swift`、`SkillCommand.swift`、`NextCommand.swift`
+  - コマンド: `accept`・`reply`・`progress`・`notify`・`minutes`・`speaker`・`skill`・`next`。書式は `ReturnCommand.swift`、`SkillCommand.swift`、`NextCommand.swift`
   - `reply` の本文はstdinから読み、固定requestの受信箱へ排他公開する。`minutes` は議事録の絶対パスを独立イベントとして同じ検証で保存する。会議Markdownへは直接書かない
   - `skill install|uninstall` は利用者が端末で打つ配布Skillの導入口。モデルの返送では使わない
 - `Sources/Kikigaki/`: 実行ターゲット (AppKit + Speech + FluidAudio)。Swift 5 言語モード (非 Sendable な型を音声スレッドと MainActor で受け渡すため)
@@ -83,7 +83,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - 話者補正が残す限界。吸収の廃止で元の形に戻る事例を含む。[話者の割当と固定](docs/speaker-assignment.md) の「受け入れた限界」
   - 議事録に書かれた外部画像は、表示時に配信元へ通信する。議事録の外にあるローカル画像も絶対パスで指せば表示する。議事録を書くのは利用者自身と利用者が設定したAIで、信頼できない相手が書く前提を置かない。表示側で塞いでもAIは自分のネットワークを持つため、塞ぐ効果が薄い。[議事録の描画と検索](docs/minutes-rendering.md)
   - 診断用の環境変数を付けると、製品版でも会話の本文がログに出る。診断に要る情報なので削らない。診断ログは会議の本文と同じ機密として扱う。[開発用のフラグと環境変数](docs/dev-flags.md)
-- テストが本文を読む文書: `docs/board.md` の内蔵プロンプトの全文はテストが `BoardPrompt.builtIn` と機械照合する。囲みのコードフェンスを崩さない。[議論のボード](docs/board.md)
+- テストが本文を読む文書: `docs/board.md` と `docs/ai-participant.md` の内蔵プロンプトはコードと機械照合する。囲みのコードフェンスを崩さない。
 - 文書の置き場
   - `docs/` 直下は現行仕様の正本だけを置く。同じ仕様を複数の文書に書かず、正本を1つに決めて他は1行とリンクにする
   - 試験・検証の記録、廃止した機能の条件、設計時の実装順は `docs/records/` へ置く。冒頭に時点と「現行の仕様ではない」旨を書き、本文は書き換えない

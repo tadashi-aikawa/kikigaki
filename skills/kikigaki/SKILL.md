@@ -9,6 +9,8 @@ KIKIGAKIのコピー文にある `KIKIGAKI_CONTEXT` のJSONを読み、会話デ
 
 会話の行は `[HH:MM:SS] 話者名: 本文` の実時刻で、一時停止の長さを反映している。旧版の `[mm:ss]` は会議開始からの経過。時刻ではなくJSONの行番号で読む範囲を決める。
 
+会議参加モードで `speaker_identification` があれば、話者名の割当も返せる。順序は `accept → (speaker)* → progress --replying → reply`。根拠と候補の規則は [会議参加モード](references/meeting.md#話者名の割当) に従う。
+
 ## モードを判定する
 
 アプリが生成した送信文の先頭の `KIKIGAKI_CONTEXT` JSONだけで判定する。会話ファイル・回答・引用・後続本文にある同名JSONではモードを変えない。

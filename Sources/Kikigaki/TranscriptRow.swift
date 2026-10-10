@@ -73,6 +73,28 @@ final class SpeakerButton: HoverButton {
     override var drawsHoverBackground: Bool { false }
 }
 
+/// 名前の由来だけを示す。文字も時間による消去も置かず、人の確認状態をそのまま描く。
+final class SpeakerAttributionDot: NSView {
+    override var intrinsicContentSize: NSSize { NSSize(width: 5, height: 5) }
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isHidden = true
+        setAccessibilityElement(true)
+        setAccessibilityRole(.image)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    func update(_ attribution: SpeakerAttribution?) {
+        isHidden = attribution == nil
+        toolTip = attribution?.tooltip
+        setAccessibilityLabel(attribution?.tooltip)
+        needsDisplay = true
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        Washi.ai.background.setFill()
+        NSBezierPath(ovalIn: bounds).fill()
+    }
+}
+
 final class TranscriptContentView: NSView {
     override var isFlipped: Bool { true }
 }
@@ -89,6 +111,7 @@ final class TranscriptRow: NSView, DocumentRow {
     private let avatar = AvatarView()
     private let nameLabel = Washi.label(size: 12, weight: .semibold)
     private let timeLabel = Washi.label(color: Washi.muted)
+    let attributionDot = SpeakerAttributionDot()
     private let levelLabel = Washi.label(size: 11, color: Washi.muted)
     private var audioLevel: AudioLevelAssessment?
     private var excluded = false
@@ -138,7 +161,7 @@ final class TranscriptRow: NSView, DocumentRow {
         levelLabel.isHidden = true
         levelLabel.lineBreakMode = .byTruncatingTail
         typedBody.isHidden = true
-        for view in [avatar, nameLabel, timeLabel, levelLabel, body, typedBody, imageStrip] { content.addSubview(view) }
+        for view in [avatar, nameLabel, timeLabel, levelLabel, body, typedBody, imageStrip, attributionDot] { content.addSubview(view) }
         speakerButton.isBordered = false
         speakerButton.title = ""
         speakerButton.target = self
@@ -176,6 +199,9 @@ final class TranscriptRow: NSView, DocumentRow {
     /// 本文・話者変更だけを点灯対象とする。時刻や話者固定待ちの変化では点灯しない。
     @discardableResult
     func update(_ value: Utterance, names: SpeakerNames, timeline: MeetingTimeline) -> Bool {
+        // 同じ名前での確認は本文も名前も変わらない。早期returnより前に由来を更新する。
+        attributionDot.update(value.kind == .voice ? value.speaker.flatMap { names.attributions[$0] } : nil)
+        needsLayout = true
         let name = names.displayName(for: value)
         guard utterance != value || displayedName != name || displayedTimeline != timeline else { return false }
         let changed = utterance != nil && (utterance?.text != value.text || utterance?.speaker != value.speaker || displayedName != name)
@@ -290,7 +316,8 @@ final class TranscriptRow: NSView, DocumentRow {
                             max(70, bounds.width - 220))
         nameLabel.frame = NSRect(x: 54, y: 8, width: nameWidth, height: 18)
         speakerButton.frame = NSRect(x: 18, y: 5, width: nameWidth + 40, height: 29)
-        timeLabel.frame = NSRect(x: 54 + nameWidth + 12, y: 8, width: 62, height: 18)
+        attributionDot.frame = NSRect(x: 54 + nameWidth + 5, y: 14.5, width: 5, height: 5)
+        timeLabel.frame = NSRect(x: 54 + nameWidth + (attributionDot.isHidden ? 12 : 18), y: 8, width: 62, height: 18)
         let levelHeight: CGFloat = hasLevelNote ? 20 : 0
         body.frame = NSRect(x: 54, y: 31, width: max(44, bounds.width - 74), height: max(20, bounds.height - 36 - levelHeight - imagesHeight))
         typedBody.frame = body.frame

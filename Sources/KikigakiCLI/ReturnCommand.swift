@@ -9,7 +9,7 @@ struct ReturnCommand: Sendable {
     let options: [String: String]
     let payload: String?
     init(_ arguments: [String]) throws {
-        guard let action = arguments.first, ["accept", "reply", "notify", "minutes", "progress"].contains(action) else { throw AIError.invalid("command") }
+        guard let action = arguments.first, ["accept", "reply", "notify", "minutes", "progress", "speaker"].contains(action) else { throw AIError.invalid("command") }
         self.action = action
         var options: [String: String] = [:], payload: String?, index = 1
         while index < arguments.count {
@@ -19,7 +19,7 @@ struct ReturnCommand: Sendable {
                 guard action == "progress", options[name] == nil else { throw AIError.invalid("arguments") }
                 options[name] = "true"; index += 1
             } else if name.hasPrefix("--") {
-                guard ["--session", "--request", "--token", "--kind", "--reason", "--provider", "--path", "--total"].contains(name),
+                guard ["--session", "--request", "--token", "--kind", "--reason", "--provider", "--path", "--total", "--slot", "--name"].contains(name),
                       options[name] == nil, index + 1 < arguments.count else { throw AIError.invalid("arguments") }
                 options[name] = arguments[index + 1]; index += 2
             } else {
@@ -29,6 +29,7 @@ struct ReturnCommand: Sendable {
         }
         var required: Set<String> = action == "notify" ? ["--session", "--token", "--provider"] : ["--session", "--token", "--request"]
         if action == "minutes" { required.insert("--path") }
+        if action == "speaker" { required.formUnion(["--slot", "--name"]) }
         let allowed = action == "reply" ? required.union(["--kind", "--reason"])
             : action == "progress" ? required.union(["--editing", "--replying", "--total"]) : required
         // 段はどちらか1つ必須。総数は編集にしか添えられない。
@@ -89,6 +90,24 @@ struct ReturnCommand: Sendable {
               request.envelope.participant.sessionGeneration == generation,
               request.envelope.participant.sessionPath == path,
               options["--token"] == request.envelope.participant.requestToken else { throw AIError.mismatch }
+        if action == "speaker" {
+            let bytes = try input()
+            guard bytes.count <= AISpeakerEvent.evidenceBytes else { throw AIError.tooLarge }
+            guard let evidence = String(data: bytes, encoding: .utf8) else { throw AIError.invalid("UTF-8") }
+            let event = try AISpeakerEvent(request: request, slot: options["--slot"]!, name: options["--name"]!,
+                                           evidence: evidence, recordedAt: now)
+            let encoded = try AIJSON.encode(event)
+            guard encoded.count <= AILimits.eventBytes else { throw AIError.tooLarge }
+            try saveIdentity(session: session, environment: environment, files: files, sessions: sessions, generation: generation)
+            let target = base + ["inbox", event.filename]
+            do { try files.write(encoded, to: target, replacing: false) }
+            catch AIError.conflict {
+                let previous = try AIInbox.decodeSpeaker(files.read(target, limit: AILimits.eventBytes), filename: event.filename, for: request)
+                guard previous.sameContent(as: event) else { throw AIError.conflict }
+                try files.syncDirectory(Array(target.dropLast()))
+            }
+            return event.eventID
+        }
         if action == "minutes" {
             do { try MinutesPath.validate(options["--path"]!) }
             catch { throw MinutesCommandError.invalidPath }
