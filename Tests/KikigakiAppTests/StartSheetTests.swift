@@ -294,6 +294,93 @@ import KikigakiCore
         try capture("next-none", empty)
     }
 
+    @Test func 次の会議は題と二段目と行の余白をクリックして選べる() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meetings = try ["定例", "相談"].map {
+            try NextMeeting(minutesPath: root.appendingPathComponent("\($0).md").path, title: $0, ai: $0 == "定例" ? "議事録" : "相談")
+        }
+        let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true,
+                               exclusion: AudioExclusion(), nextMeetings: meetings)
+        let content = try #require(sheet.window.contentView)
+        func click(_ view: NSView, at point: NSPoint) throws {
+            content.layoutSubtreeIfNeeded()
+            let location = view.convert(point, to: nil)
+            let hitPoint = try #require(content.superview).convert(location, from: nil)
+            let hit = try #require(content.hitTest(hitPoint))
+            let event = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: location,
+                modifierFlags: [], timestamp: 0, windowNumber: sheet.window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            hit.mouseDown(with: event)
+        }
+        // 選択済みの行へのクリックでは成功を見逃すので、毎回「指定しない」へ戻す。
+        for index in meetings.indices {
+            for label in [sheet.nextTitles[index], sheet.nextDetails[index]] {
+                sheet.selectNextMeeting(at: meetings.count)
+                try click(label, at: NSPoint(x: 8, y: label.bounds.midY))
+                #expect(sheet.options?.minutesPath == meetings[index].minutesPath)
+                #expect(sheet.selectedSlot == (index == 0 ? 2 : 1))
+                #expect(sheet.nextButtons.map(\.state) == (0...meetings.count).map { $0 == index ? .on : .off })
+            }
+            let choice = try #require(sheet.nextButtons[index].superview as? NSStackView)
+            let text = try #require(choice.arrangedSubviews.last as? NSStackView)
+            let details = try #require(text.arrangedSubviews.last as? NSStackView)
+            let avatar = try #require(details.arrangedSubviews.first)
+            sheet.selectNextMeeting(at: meetings.count)
+            try click(avatar, at: NSPoint(x: avatar.bounds.midX, y: avatar.bounds.midY))
+            #expect(sheet.options?.minutesPath == meetings[index].minutesPath)
+            sheet.selectNextMeeting(at: meetings.count)
+            try click(choice, at: NSPoint(x: choice.bounds.maxX - 1, y: choice.bounds.midY))
+            #expect(sheet.options?.minutesPath == meetings[index].minutesPath)
+            // 丸のイベントは標準のラジオへ届く。
+            let radio = sheet.nextButtons[index]
+            let point = choice.convert(NSPoint(x: radio.bounds.midX, y: radio.bounds.midY), from: radio)
+            #expect(choice.hitTest(choice.convert(point, to: choice.superview)) === radio)
+            sheet.selectNextMeeting(at: meetings.count)
+            radio.performClick(nil)
+            #expect(sheet.options?.minutesPath == meetings[index].minutesPath)
+        }
+        sheet.nextButtons.last?.performClick(nil)
+        #expect(sheet.options?.minutesPath == nil && sheet.selectedSlot == 2)
+        sheet.close()
+    }
+
+    @Test func 次の会議の指定しないと仕切り線の間に上下と同じ余白を保つ() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meetings = try ["定例", "相談"].map { title in
+            let path = root.appendingPathComponent("\(title).md")
+            try Data("# \(title)の議事録\n".utf8).write(to: path)
+            return try NextMeeting(minutesPath: path.path, ai: title == "定例" ? "議事録" : "相談")
+        }
+        let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true,
+                               exclusion: AudioExclusion(), nextMeetings: meetings)
+        let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 800),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        func checkPadding() throws {
+            let content = try #require(sheet.window.contentView)
+            content.layoutSubtreeIfNeeded()
+            let choices = try #require(sheet.nextButtons.last?.superview)
+            let row = try #require(choices.superview as? NSStackView)
+            let rows = try #require(row.superview as? NSStackView)
+            let none = try #require(sheet.nextButtons.last)
+            let separator = rows.arrangedSubviews[1]
+            let bottomGap = none.convert(none.bounds, to: content).minY - separator.convert(separator.bounds, to: content).maxY
+            let topGap = row.convert(row.bounds, to: content).maxY - choices.convert(choices.bounds, to: content).maxY
+            #expect(abs(bottomGap - 10) < 0.5)
+            #expect(abs(topGap - bottomGap) < 0.5)
+        }
+        try checkPadding()
+        sheet.present(on: parent)
+        try checkPadding()
+        try capture("next-two-sheet", sheet)
+        sheet.destination.selectItem(withTag: 0); sheet.destinationChanged()
+        try checkPadding()
+        sheet.destination.selectItem(withTag: 2); sheet.destinationChanged()
+        try checkPadding()
+        sheet.close()
+    }
+
     /// 検証用の撮影。モックとの突き合わせに使い、通常のテストでは何もしない。
     private func capture(_ name: String, _ sheet: StartSheet) throws {
         guard let directory = ProcessInfo.processInfo.environment["KIKIGAKI_START_SHEET_CAPTURE"],

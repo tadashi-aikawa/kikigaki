@@ -97,7 +97,12 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         rows.orientation = .vertical; rows.alignment = .leading; rows.spacing = 0
 
         if !self.nextMeetings.isEmpty {
-            add(row("次の会議", buildNextMeetings()), to: rows)
+            let choices = buildNextMeetings()
+            let nextRow = row("次の会議", choices)
+            // 横向き・上揃えのstackは下側のedgeInsetsを高さへ含めない。
+            // 複数行の値が仕切り線まで伸びないよう、上下10ptを高さでも保証する。
+            nextRow.heightAnchor.constraint(greaterThanOrEqualTo: choices.heightAnchor, constant: 20).isActive = true
+            add(nextRow, to: rows)
             add(separator(), to: rows)
         }
 
@@ -230,7 +235,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             radio.tag = index
             radio.setAccessibilityLabel(title.stringValue + " " + label.stringValue)
             radio.setContentHuggingPriority(.required, for: .horizontal)
-            let choice = NSStackView(views: [radio, text])
+            let choice = NextMeetingChoiceRow(views: [radio, text])
+            choice.onChoose = { [weak self] in self?.selectNextMeeting(at: index) }
             choice.orientation = .horizontal; choice.alignment = .top; choice.spacing = 6
             text.setContentHuggingPriority(.defaultLow, for: .horizontal)
             text.trailingAnchor.constraint(equalTo: choice.trailingAnchor).isActive = true
@@ -629,6 +635,18 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         systemAudioAutomatic.title = SystemAudioMode.automatic.includes(outputKind())
             ? "自動(いまは取り込む)" : "自動(いまは取り込まない)"
     }
+}
+
+/// ラジオの標準操作を残し、題・宛先・行内の余白も同じ選択として受ける。
+@MainActor private final class NextMeetingChoiceRow: NSStackView {
+    var onChoose: (() -> Void)?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        return hit is NSButton ? hit : self
+    }
+
+    override func mouseDown(with event: NSEvent) { onChoose?() }
 }
 
 /// ⌘⏎でも開始する。焦点がどこにあっても同じ操作で始められるようにする。
