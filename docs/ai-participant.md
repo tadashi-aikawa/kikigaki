@@ -188,7 +188,7 @@ archiveは録音停止時と停止後の改名・統合時だけに更新し、�
 
 ## 同梱CLI
 
-実行ファイル名は `kikigaki-cli`、配置は `.app/Contents/Helpers/kikigaki-cli`。アプリが実際のbundleパスから絶対パスを作り、envelopeとフックへ渡す。返送にPATHは要らない。Caskの `binary` がPATHへ通すのは、利用者が `skill install` を打つためだけである。アプリ更新時もプロトコル版1を読めることを後続の互換条件にする。
+実行ファイル名は `kikigaki-cli`、配置は `.app/Contents/Helpers/kikigaki-cli`。アプリが実際のbundleパスから絶対パスを作り、envelopeとフックへ渡す。返送にPATHは要らない。Caskの `binary` がPATHへ通すのは、利用者が `skill` と `next` を打つためである。アプリ更新時もプロトコル版1を読めることを後続の互換条件にする。
 
 | コマンド | 入力と効果 |
 | --- | --- |
@@ -202,6 +202,23 @@ archiveは録音停止時と停止後の改名・統合時だけに更新し、�
 | `notify --provider codex --session <path> --token <session-token> <payload-json>` | Codexの最後のJSON引数を解釈し、フック観測を保存する。 |
 | `notify --provider claude --session <path> --token <session-token>` | Claudeのstdin JSONからフック観測を保存する。 |
 | `skill install` / `skill uninstall` | 利用者が端末で打つ。配布Skillのリンクを張る・外す。モデルの返送では使わない。 |
+| `next add --minutes <path> [--title <題>] [--at <HH:mm\|YYYY-MM-DDTHH:mm>] [--ai <name>]` | 次の会議の予約を登録し、採番したUUIDを1行で返す。 |
+| `next list` | 全予約を予定時刻順で1行ずつ出す。列はタブ区切りでid・日時・題・宛先・議事録パス。省略値は `-`。 |
+| `next remove <id>` | UUIDで指定した予約を削除する。無いidは終了コード1と `not_found`。 |
+
+`next` は設定ファイルを読まない。`--minutes` は絶対パスか `~/` の `.md` を `MinutesPath.validate` で検証する。ファイルは未作成でもよい。
+
+- `--at` は `HH:mm` を登録日の時刻として解釈する。
+  - 保存: 日付付きの指定とともに、`YYYY-MM-DDTHH:mm` のローカル日時として保存する。秒とタイムゾーンは付けない。
+- `--ai` は文字で保存する。
+  - 照合: 開始シートで設定の宛先名と照合する。
+- `next add` は `~/Library/Application Support/KIKIGAKI/next/<UUID>.json` へ1件1ファイルで原子的に保存する。
+  - 試験版: `KIKIGAKI-Trial/next/` へ分離する。同梱helperは親 `.app` の識別子を使う。
+  - JSON: `id`、`minutes_path`、`created_at` が必須。`title`、`at`、`ai` は省略可能。`created_at` は小数を含むUnix秒で、登録順の精度を保つ。
+- `next` の失敗は終了コード1と `kikigaki-cli: <理由>` を標準エラーへ出す。
+  - 理由: 引数不正は `usage`、パス不正は `invalid_path`、日時不正は `invalid_at`。
+
+候補の表示と寿命は [録音開始シートの「次の会議」](start-sheet.md#次の会議) を参照する。
 
 replyは通常 `context_received: true`。文脈を読めなかったcontext_missingやread_failedではfalseとし、CLIがreasonから値を決める。質問対象が不明でも文脈を読めたならaccept後にclarificationを返す。成功時stdoutはevent IDを含む短いJSON、失敗時は非0と短い理由。本文をstdoutへ再表示しない。
 

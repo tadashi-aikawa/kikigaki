@@ -82,6 +82,20 @@ public struct AIFileStore: Sendable {
             guard sync(parent) == 0 else { throw AIError.unsafeFile }
         }
     }
+    /// 読書きと同じfd検証で削除する。リンクや所有者の違うファイルを消さない。
+    public func remove(_ parts: [String]) throws {
+        guard let name = parts.last else { throw AIError.unsafeFile }
+        try checkName(name)
+        try withDirectory(Array(parts.dropLast()), create: false) { parent in
+            var info = stat()
+            guard fstatat(parent, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else {
+                if errno == ENOENT { throw AIFileError.missing }
+                throw AIError.unsafeFile
+            }
+            try checkRegular(info)
+            guard unlinkat(parent, name, 0) == 0, sync(parent) == 0 else { throw AIError.unsafeFile }
+        }
+    }
     private func checkName(_ name: String) throws {
         guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains("\0") else { throw AIError.unsafeFile }
     }

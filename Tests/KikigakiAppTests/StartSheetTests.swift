@@ -3,7 +3,8 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
-@Suite(.timeLimit(.minutes(1))) @MainActor struct StartSheetTests {
+// 実シートの焦点と閉じる操作を確かめるため、同時に複数のシートを開かない。
+@Suite(.serialized, .timeLimit(.minutes(1))) @MainActor struct StartSheetTests {
     @Test func システム音声の自動判定が追従し開始時に固定する() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         var kind: AudioOutputKind = .headphones
@@ -180,9 +181,12 @@ import KikigakiCore
         let controller = TranscriptWindowController(shouldReduceMotion: { true }, minutesDefaults: defaults)
         controller.window?.setFrameAutosaveName("")
         let parent = try #require(controller.window)
-        let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true, exclusion: AudioExclusion())
+        let next = try NextMeeting(minutesPath: root.appendingPathComponent("定例.md").path, ai: "議事録")
+        let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true, exclusion: AudioExclusion(),
+                               nextMeetings: [next])
         sheet.present(on: parent)
         #expect(parent.attachedSheet === sheet.window)
+        #expect(sheet.window.firstResponder === sheet.startButton)
         #expect(sheet.window.frame.width == StartSheet.width)
         // 「送らない」で詳細を畳むと高さだけが変わる。幅は動かさない。
         let expanded = sheet.window.frame.height
@@ -202,6 +206,92 @@ import KikigakiCore
         sheet.onCancel = { cancelled = true }
         sheet.cancelPressed()
         #expect(!started && cancelled)
+    }
+
+    @Test func 次の会議を先頭から選び議事録と宛先を切り替える() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let firstPath = root.appendingPathComponent("定例.md"), secondPath = root.appendingPathComponent("相談.md")
+        try Data("---\nparticipants: [Tadashi]\n---\n# 定例の議事録\n\n本文".utf8).write(to: firstPath)
+        try Data("# 相談の見出し\n".utf8).write(to: secondPath)
+        let first = try NextMeeting(minutesPath: firstPath.path, at: "2026-10-10T13:00", ai: "議事録")
+        let second = try NextMeeting(minutesPath: secondPath.path, title: "プロダクト相談", at: "2026-10-10T14:00", ai: "相談")
+        let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true, exclusion: AudioExclusion(),
+                               nextMeetings: [second, first])
+        #expect(sheet.nextMeetings == [first, second])
+        #expect(sheet.nextButtons.count == 3 && sheet.nextButtons[0].state == .on)
+        #expect(sheet.nextButtons.last?.title == "指定しない")
+        #expect(sheet.nextTitles.map(\.stringValue) == ["13:00 定例の議事録", "14:00 プロダクト相談"])
+        #expect(sheet.nextDetails[0].stringValue == "議事録 · 定例.md")
+        #expect(sheet.minutesBox.stringValue == firstPath.path)
+        #expect(sheet.options?.minutesPath == firstPath.path && sheet.options?.scheduleSlot == 2)
+        #expect(sheet.interval.selectedTag() == 5 && sheet.work.state == .off)
+        #expect(sheet.diarizeOn.state == .on && sheet.systemAudioAutomatic.state == .on)
+        try capture("next-two", sheet)
+        #expect(sheet.window.frame.width == 640)
+        sheet.nextMeetingChanged(sheet.nextButtons[1])
+        #expect(sheet.minutesBox.stringValue == secondPath.path && sheet.selectedSlot == 1)
+        #expect(sheet.nextButtons[0].state == .off && sheet.nextButtons[1].state == .on)
+        #expect(sheet.options?.schedule?.prompt == "気になった点を3つまで挙げてください")
+        // 手で直した値は予約へ書き戻さず、開始時の指定としてそのまま使う。
+        sheet.minutesBox.stringValue = "/手で変えた.md"
+        sheet.destination.selectItem(withTag: 0); sheet.destinationChanged()
+        #expect(sheet.options?.minutesPath == "/手で変えた.md" && sheet.options?.scheduleSlot == nil)
+        sheet.nextMeetingChanged(sheet.nextButtons[2])
+        #expect(sheet.minutesBox.stringValue.isEmpty && sheet.selectedSlot == 2)
+        #expect(sheet.options?.minutesPath == nil && sheet.options?.scheduleSlot == 2)
+        sheet.close()
+    }
+
+    @Test func 設定にない宛先と未作成ファイルを金色で示して送らない() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let missing = root.appendingPathComponent("未作成.md")
+        let meeting = try NextMeeting(minutesPath: missing.path, ai: "廃止した宛先")
+        let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true,
+                               exclusion: AudioExclusion(), nextMeetings: [meeting])
+        #expect(sheet.nextTitles[0].stringValue == "未作成.md")
+        #expect(sheet.nextDetails[0].stringValue == "廃止した宛先 · 未作成.md · 設定にありません · 見つかりません")
+        #expect(sheet.nextDetails[0].textColor == Washi.gold)
+        #expect(sheet.selectedSlot == nil && sheet.options?.schedule == nil)
+        #expect(sheet.options?.minutesPath == missing.path)
+        sheet.selectNextMeeting(at: 1)
+        #expect(sheet.selectedSlot == 2 && sheet.minutesBox.stringValue.isEmpty)
+    }
+
+    @Test func 宛先省略は送らず指定しないで既定へ戻る() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let path = root.appendingPathComponent("見出しなし.md")
+        try Data("本文だけ\n".utf8).write(to: path)
+        let meeting = try NextMeeting(minutesPath: path.path)
+        let sheet = StartSheet(profiles: try profiles(root, toml: "[[ai]]\nname = \"相談\""),
+                               diarizationEnabled: true, exclusion: AudioExclusion(), nextMeetings: [meeting])
+        #expect(sheet.nextTitles[0].stringValue == "見出しなし.md")
+        #expect(sheet.nextDetails[0].stringValue == "送らない · 見出しなし.md")
+        #expect(sheet.nextDetails[0].textColor == Washi.muted)
+        #expect(sheet.selectedSlot == nil)
+        sheet.selectNextMeeting(at: 1)
+        #expect(sheet.selectedSlot == nil && sheet.minutesBox.stringValue.isEmpty)
+    }
+
+    @Test func 次の会議は三件まで表示しゼロ件なら行を置かない() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meetings = try (1...4).map { try NextMeeting(minutesPath: root.appendingPathComponent("\($0).md").path,
+                                                        createdAt: Date(timeIntervalSince1970: Double($0))) }
+        let sheet = StartSheet(profiles: [], diarizationEnabled: true, exclusion: AudioExclusion(), nextMeetings: meetings)
+        #expect(sheet.nextMeetings.count == 3 && sheet.nextButtons.count == 4)
+        var cancelled = false
+        sheet.onCancel = { cancelled = true }; sheet.cancelPressed()
+        #expect(cancelled && sheet.nextMeetings.count == 3)
+        let empty = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true, exclusion: AudioExclusion())
+        #expect(empty.nextButtons.isEmpty && empty.nextTitles.isEmpty)
+        func labels(_ view: NSView) -> [String] {
+            (view as? NSTextField).map { [$0.stringValue] } ?? view.subviews.flatMap(labels)
+        }
+        #expect(!labels(try #require(empty.window.contentView)).contains("次の会議"))
+        try capture("next-none", empty)
     }
 
     /// 検証用の撮影。モックとの突き合わせに使い、通常のテストでは何もしない。

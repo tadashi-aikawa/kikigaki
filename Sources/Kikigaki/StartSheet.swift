@@ -36,6 +36,10 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     private var drafts: [Int: AIScheduleSheet.Draft] = [:]
     /// 表示中の宛先。nilは「送らない」
     private(set) var selectedSlot: Int?
+    let nextMeetings: [NextMeeting]
+    private(set) var nextButtons: [NSButton] = []
+    private(set) var nextTitles: [NSTextField] = []
+    private(set) var nextDetails: [NSTextField] = []
 
     private let stack = NSStackView()
     static let systemAudioDefaultsKey = "KikigakiSystemAudioMode"
@@ -63,20 +67,25 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     let final = NSButton(checkboxWithTitle: "録音停止時に最後の1回を送る", target: nil, action: nil)
     let aiDetails = NSStackView()
     /// 開始は録音ボタンと同じ朱の面にする。取消と並べても「始めるもの」が一目で分かる。
-    private let startButton = WashiActionButton()
+    let startButton = WashiActionButton()
 
     init(profiles: [ResolvedAIConfig], diarizationEnabled: Bool, exclusion: AudioExclusion,
          minutesPath: String? = nil, minutesHistory: [String] = [],
+         nextMeetings: [NextMeeting] = [],
          systemAudioMode: SystemAudioMode = .automatic,
          outputKind: @escaping () -> AudioOutputKind = { .unknown }) {
         self.profiles = profiles
+        self.nextMeetings = NextMeetings(nextMeetings).candidates
         self.outputKind = outputKind
         window = StartSheetWindow(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 400),
                                   styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
         window.appearance = NSAppearance(named: .aqua)
         window.backgroundColor = Washi.paper
-        avatars.onChange = { [weak self] in self?.refreshDestinationImages() }
+        avatars.onChange = { [weak self] in
+            self?.refreshDestinationImages()
+            self?.refreshNextImages()
+        }
 
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
@@ -86,6 +95,11 @@ final class StartSheet: NSObject, NSTextViewDelegate {
 
         let rows = NSStackView()
         rows.orientation = .vertical; rows.alignment = .leading; rows.spacing = 0
+
+        if !self.nextMeetings.isEmpty {
+            add(row("次の会議", buildNextMeetings()), to: rows)
+            add(separator(), to: rows)
+        }
 
         // 前回値の保存は開始確定側だけが行う。シート内の選び直しと取消は記憶しない。
         let audioRadios = [systemAudioAutomatic, systemAudioInclude, systemAudioExclude]
@@ -179,10 +193,97 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         editor.onCancel = { [weak self] in self?.cancelPressed() }
         minutesHint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         selectDestination(profiles.first(where: \.autoStart)?.slot)
+        if !self.nextMeetings.isEmpty { selectNextMeeting(at: 0) }
         fit()
     }
 
     // MARK: - 組み立て
+
+    private var nextImages: [NSImageView] = []
+
+    /// 全候補を見せる。ポップアップへ隠すと、次の議事録の取り違えを開始前に見つけにくい。
+    private func buildNextMeetings() -> NSView {
+        var choices: [NSView] = []
+        for (index, meeting) in nextMeetings.enumerated() {
+            let title = Washi.label(Self.nextTitle(meeting), size: 13)
+            title.lineBreakMode = .byTruncatingTail
+            title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let profile = meeting.ai.flatMap { name in profiles.first { $0.name == name } }
+            let unknown = meeting.ai != nil && profile == nil
+            let missing = !FileManager.default.fileExists(atPath: meeting.minutesPath)
+            var details = [meeting.ai ?? "送らない", (meeting.minutesPath as NSString).lastPathComponent]
+            if unknown { details.append("設定にありません") }
+            if missing { details.append("見つかりません") }
+            let label = Washi.label(details.joined(separator: " · "), size: 11,
+                                   color: unknown || missing ? Washi.gold : Washi.muted)
+            label.lineBreakMode = .byTruncatingMiddle
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let image = NSImageView()
+            image.widthAnchor.constraint(equalToConstant: 16).isActive = true
+            image.heightAnchor.constraint(equalToConstant: 16).isActive = true
+            image.isHidden = meeting.ai == nil
+            nextImages.append(image)
+            let detailRow = NSStackView(views: [image, label])
+            detailRow.orientation = .horizontal; detailRow.alignment = .centerY; detailRow.spacing = 5
+            let text = column([title, detailRow], spacing: 2)
+            let radio = NSButton(radioButtonWithTitle: "", target: self, action: #selector(nextMeetingChanged(_:)))
+            radio.tag = index
+            radio.setAccessibilityLabel(title.stringValue + " " + label.stringValue)
+            radio.setContentHuggingPriority(.required, for: .horizontal)
+            let choice = NSStackView(views: [radio, text])
+            choice.orientation = .horizontal; choice.alignment = .top; choice.spacing = 6
+            text.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            text.trailingAnchor.constraint(equalTo: choice.trailingAnchor).isActive = true
+            choice.toolTip = meeting.minutesPath
+            choices.append(choice)
+            nextButtons.append(radio); nextTitles.append(title); nextDetails.append(label)
+        }
+        let none = NSButton(radioButtonWithTitle: "指定しない", target: self, action: #selector(nextMeetingChanged(_:)))
+        none.tag = nextMeetings.count; nextButtons.append(none)
+        choices.append(none)
+        refreshNextImages()
+        return column(choices, spacing: 8)
+    }
+    private func refreshNextImages() {
+        for (index, image) in nextImages.enumerated() {
+            guard let name = nextMeetings[index].ai else { continue }
+            image.image = AIProfileAvatar.image(name: name,
+                source: profiles.first(where: { $0.name == name })?.avatar, store: avatars)
+        }
+    }
+    /// 議事録は大きくなり得るので、話者候補と同じく先頭64KiBだけ読む。
+    static func nextTitle(_ meeting: NextMeeting) -> String {
+        let url = URL(fileURLWithPath: meeting.minutesPath)
+        var title = meeting.title
+        if title == nil, (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+           let handle = try? FileHandle(forReadingFrom: url) {
+            defer { try? handle.close() }
+            if let bytes = try? handle.read(upToCount: 64 * 1024) {
+                title = String(decoding: bytes, as: UTF8.self).split(separator: "\n")
+                    .first(where: { $0.hasPrefix("# ") })
+                    .map { String($0.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines) }
+                if title?.isEmpty == true { title = nil }
+            }
+        }
+        let time = meeting.at.map { String($0.suffix(5)) + " " } ?? ""
+        return time + (title ?? url.lastPathComponent)
+    }
+    @objc func nextMeetingChanged(_ sender: NSButton) { selectNextMeeting(at: sender.tag) }
+
+    func selectNextMeeting(at index: Int) {
+        guard nextButtons.indices.contains(index) else { return }
+        for (offset, button) in nextButtons.enumerated() { button.state = offset == index ? .on : .off }
+        if let previous = selectedSlot { drafts[previous] = currentDraft }
+        if nextMeetings.indices.contains(index) {
+            let meeting = nextMeetings[index]
+            minutesBox.stringValue = meeting.minutesPath
+            selectDestination(meeting.ai.flatMap { name in profiles.first { $0.name == name }?.slot })
+        } else {
+            minutesBox.stringValue = ""
+            selectDestination(profiles.first(where: \.autoStart)?.slot)
+        }
+        showMinutesHint(nil)
+    }
 
     private func add(_ view: NSView, to stack: NSStackView) {
         stack.addArrangedSubview(view)
@@ -460,7 +561,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             MainActor.assumeIsolated { self?.refreshSystemAudioOutput() }
         }
         parent.beginSheet(window)
-        window.makeFirstResponder(nil)
+        window.makeFirstResponder(nextMeetings.isEmpty ? nil : startButton)
     }
     func close() {
         outputTimer?.invalidate(); outputTimer = nil

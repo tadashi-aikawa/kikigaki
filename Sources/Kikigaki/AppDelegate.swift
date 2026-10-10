@@ -141,6 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var aiSheetSlot: Int?
     /// 開いている開始シート。録音を始めるまでは何も起きていない
     private(set) var startSheet: StartSheet?
+    private var nextMeetingStore: NextMeetingStore?
     private let replayDebug: ReplayDebugOptions
     private var nextDebugQuestion = 0
     private var nextDebugTyped = 0
@@ -160,10 +161,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     init(replayDebug: ReplayDebugOptions = .init()) { self.replayDebug = replayDebug; super.init() }
 
     convenience init(testingSession: MeetingSession, config: ResolvedConfig,
-                     window: TranscriptWindowController? = nil) {
+                     window: TranscriptWindowController? = nil, nextMeetingStore: NextMeetingStore? = nil) {
         self.init()
         self.session = testingSession; self.config = config
         self.window = window
+        self.nextMeetingStore = nextMeetingStore
     }
 
     /// URLの受け口は配線より前に開ける。`open kikigaki://…` での起動では、この登録が
@@ -186,8 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 識別子を分けてもUserDefaultsが別になるだけで、この置き場は変わらないため
     nonisolated static func aiSupportDirectory(isolatedReplay: Bool, bundleIdentifier: String?, outputDir: URL, home: URL) -> URL {
         if isolatedReplay { return outputDir.appendingPathComponent(".typed-test-support") }
-        let name = bundleIdentifier == trialBundleIdentifier ? "KIKIGAKI-Trial" : "KIKIGAKI"
-        return home.appendingPathComponent("Library/Application Support/\(name)")
+        return NextMeetingStore.supportDirectory(home: home, bundleIdentifier: bundleIdentifier)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -220,6 +221,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AIHerdr(executable: try AIProcessRunner.executable(self?.config?.ai?.herdrCommand ?? "herdr"))
         })
         self.aiStore = aiStore
+        nextMeetingStore = NextMeetingStore(directory: support.appendingPathComponent("next"))
         aiStore.recover()
         // 通知音は返答元のプロファイルの設定で決める。先頭の設定で全チャネルを鳴らさない。
         aiStore.onNewResult = { [weak self] id, slot in
@@ -385,14 +387,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         guard let parent = window?.window else { return }
+        let nextMeetings: [NextMeeting]
+        do { nextMeetings = try nextMeetingStore?.expire().candidates ?? [] }
+        catch { Self.log("次の会議を読み込めません: \(error)"); nextMeetings = [] }
         let sheet = StartSheet(profiles: config.aiProfiles,
                                diarizationEnabled: session.snapshot.nextDiarizationEnabled,
                                exclusion: session.snapshot.audioExclusion,
                                minutesPath: minutesPath ?? session.waitingMinutesPath,
                                minutesHistory: window?.minutesSplit.preview.history.paths ?? [],
+                               nextMeetings: nextMeetings,
                                systemAudioMode: UserDefaults.standard.string(forKey: StartSheet.systemAudioDefaultsKey)
                                     .flatMap(SystemAudioMode.init(rawValue:)) ?? .automatic,
                                outputKind: SystemAudioOutput.current)
+        // 明示的に渡されたパスは、シート内の手編集と同じく予約の初期値より優先する。
+        if let minutesPath { sheet.setMinutesPath(minutesPath) }
         sheet.onDiarizationPreload = { [weak self] in self?.preloadModels() }
         sheet.onCancel = { [weak self] in self?.startSheet = nil }
         sheet.onStart = { [weak self] options in
@@ -467,6 +475,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch { Self.log("replay 自動送信の指定が不正: \(error)"); exit(1) }
         }
         let started = await session.start(source: source)
+        if started, let path = options?.minutesPath {
+            // 準備に失敗した会議は予約を残す。取消やシートでの選び直しも消費しない。
+            do { try nextMeetingStore?.consume(minutesPath: path) }
+            catch { Self.log("次の会議を消費できません: \(error)") }
+        }
         // 議事録を指定したら、開始と同時に右のペインへ出す。
         if started, options?.minutesPath != nil || replayDebug.minutesPath != nil { window?.showMinutes() }
         // 宛先の指定は録音開始のリセットより後に当てる。start()が先頭へ戻すので、

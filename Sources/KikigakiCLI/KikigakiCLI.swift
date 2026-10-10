@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import KikigakiCore
+import KikigakiAIIO
 
 @main struct KikigakiCLI {
     static func main() {
@@ -9,9 +10,11 @@ import KikigakiCore
             print("kikigaki-cli minutes --session <session_path> --request <request_id> --token <request_token> --path <absolute.md>")
             print("kikigaki-cli progress --session <session_path> --request <request_id> --token <request_token> --editing [--total <1-999>]")
             print("kikigaki-cli skill install|uninstall")
+            print(NextCommand.usage)
             return
         }
         if CommandLine.arguments.dropFirst().first == "skill" { runSkill(); return }
+        if CommandLine.arguments.dropFirst().first == "next" { runNext(); return }
         do {
             let command = try ReturnCommand(Array(CommandLine.arguments.dropFirst()))
             let id = try command.execute(input: {
@@ -37,6 +40,30 @@ import KikigakiCore
             case AIError.conflict: reason = "conflict"
             case AIError.mismatch: reason = "mismatch"
             case AIError.unsafeFile: reason = "unsafe_file"
+            default: reason = "invalid_input_or_unavailable_file"
+            }
+            FileHandle.standardError.write(Data(("kikigaki-cli: " + reason + "\n").utf8))
+            exit(1)
+        }
+    }
+
+    static func runNext() {
+        do {
+            let command = try NextCommand(Array(CommandLine.arguments.dropFirst()))
+            let executable = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            let support = NextMeetingStore.supportDirectory(home: home,
+                bundleIdentifier: NextMeetingStore.bundledIdentifier(executable: executable))
+            for line in try command.execute(store: NextMeetingStore(directory: support.appendingPathComponent("next"))) { print(line) }
+        } catch {
+            let reason: String
+            switch error {
+            case NextCommand.Failure.arguments: reason = "usage: " + NextCommand.usage
+            case NextCommand.Failure.invalidPath: reason = "invalid_path"
+            case NextCommand.Failure.invalidAt: reason = "invalid_at"
+            case NextCommand.Failure.missing: reason = "not_found"
+            case AIError.unsafeFile: reason = "unsafe_file"
+            case AIError.conflict: reason = "conflict"
             default: reason = "invalid_input_or_unavailable_file"
             }
             FileHandle.standardError.write(Data(("kikigaki-cli: " + reason + "\n").utf8))
