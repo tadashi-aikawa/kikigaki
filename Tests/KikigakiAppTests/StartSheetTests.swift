@@ -358,7 +358,7 @@ import KikigakiCore
         let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 800),
                               styleMask: [.titled], backing: .buffered, defer: false)
         func checkPadding() throws {
-            let content = try #require(sheet.window.contentView)
+            let content = try #require((sheet.window.contentView as? NSScrollView)?.documentView)
             content.layoutSubtreeIfNeeded()
             let choices = try #require(sheet.nextButtons.last?.superview)
             let row = try #require(choices.superview as? NSStackView)
@@ -381,13 +381,104 @@ import KikigakiCore
         sheet.close()
     }
 
+    @Test func 親より長い実シートも候補と宛先の切替で上端を固定する() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let screen = try #require(NSScreen.main)
+        let meetings = try ["議事録", "送らない"].map {
+            try NextMeeting(minutesPath: root.appendingPathComponent("\($0).md").path,
+                            ai: $0 == "議事録" ? $0 : nil)
+        }
+        let parent = NSWindow(contentRect: NSRect(x: screen.visibleFrame.midX - 400,
+                                                  y: screen.visibleFrame.maxY - 260,
+                                                  width: 800, height: 200),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        parent.orderFront(nil)
+        let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true,
+                               exclusion: AudioExclusion(), nextMeetings: meetings)
+        defer { sheet.close(); parent.orderOut(nil) }
+        sheet.present(on: parent)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(parent.attachedSheet === sheet.window)
+        #expect(sheet.window.frame.height > parent.frame.height)
+        let top = sheet.window.frame.maxY
+        let expanded = sheet.window.frame.height
+        #expect(abs(top - parent.convertToScreen(parent.contentLayoutRect).maxY) < 0.5)
+        for _ in 0..<2 {
+            sheet.selectNextMeeting(at: 1)
+            #expect(abs(sheet.window.frame.maxY - top) < 0.5)
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(sheet.window.frame.height < expanded)
+            #expect(abs(sheet.window.frame.maxY - top) < 0.5)
+            sheet.selectNextMeeting(at: 0)
+            #expect(abs(sheet.window.frame.maxY - top) < 0.5)
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(abs(sheet.window.frame.maxY - top) < 0.5)
+            #expect(abs(sheet.window.frame.height - expanded) < 0.5)
+        }
+        sheet.destination.selectItem(withTag: 0); sheet.destinationChanged()
+        #expect(abs(sheet.window.frame.maxY - top) < 0.5)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(abs(sheet.window.frame.maxY - top) < 0.5)
+        sheet.destination.selectItem(withTag: 2); sheet.destinationChanged()
+        #expect(abs(sheet.window.frame.maxY - top) < 0.5)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(abs(sheet.window.frame.maxY - top) < 0.5)
+        try capture("fixed-top-expanded", sheet)
+    }
+
+    @Test func 実シートの下端を画面内に収め本文をスクロールできる() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let screen = try #require(NSScreen.main)
+        let parent = NSWindow(contentRect: NSRect(x: screen.visibleFrame.midX - 400,
+                                                  y: screen.visibleFrame.minY + 180,
+                                                  width: 800, height: 200),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        parent.orderFront(nil)
+        let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true,
+                               exclusion: AudioExclusion())
+        sheet.destination.selectItem(withTag: 0); sheet.destinationChanged()
+        defer { sheet.close(); parent.orderOut(nil) }
+        sheet.present(on: parent)
+        try await Task.sleep(for: .milliseconds(300))
+        let top = sheet.window.frame.maxY
+        sheet.destination.selectItem(withTag: 2); sheet.destinationChanged()
+        #expect(abs(sheet.window.frame.maxY - top) < 0.5)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(parent.attachedSheet === sheet.window)
+        #expect(abs(sheet.window.frame.maxY - top) < 0.5)
+        #expect(abs(sheet.window.frame.minY - screen.visibleFrame.minY) < 0.5)
+        let scroll = try #require(sheet.window.contentView as? NSScrollView)
+        let document = try #require(scroll.documentView)
+        #expect(scroll.hasVerticalScroller)
+        #expect(document.frame.height > scroll.contentView.bounds.height)
+        #expect(abs(scroll.documentVisibleRect.maxY - document.bounds.maxY) < 0.5)
+        #expect(!scroll.documentVisibleRect.intersects(sheet.startButton.convert(sheet.startButton.bounds, to: document)))
+        try capture("screen-limited-top", sheet)
+        document.scroll(NSPoint(x: 0, y: 0))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        #expect(abs(scroll.documentVisibleRect.minY) < 0.5)
+        #expect(scroll.documentVisibleRect.maxY < document.bounds.maxY)
+        #expect(scroll.documentVisibleRect.contains(sheet.startButton.convert(sheet.startButton.bounds, to: document)))
+        try capture("screen-limited-bottom", sheet)
+        sheet.destination.selectItem(withTag: 0); sheet.destinationChanged()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(abs(sheet.window.frame.maxY - top) < 0.5)
+        #expect(!scroll.hasVerticalScroller)
+    }
+
     /// 検証用の撮影。モックとの突き合わせに使い、通常のテストでは何もしない。
     private func capture(_ name: String, _ sheet: StartSheet) throws {
         guard let directory = ProcessInfo.processInfo.environment["KIKIGAKI_START_SHEET_CAPTURE"],
-              let view = sheet.window.contentView else { return }
+              let scroll = sheet.window.contentView as? NSScrollView,
+              let view = scroll.documentView else { return }
         view.layoutSubtreeIfNeeded()
-        let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-        view.cacheDisplay(in: view.bounds, to: bitmap)
+        // スクロールビュー越しのキャッシュでは、入れ子のプロンプト欄のクリップがずれる。
+        // 本文の可視範囲を直接撮り、画面内に収めた高さも画像へ反映する。
+        let bounds = scroll.documentVisibleRect
+        let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: bounds))
+        view.cacheDisplay(in: bounds, to: bitmap)
         try #require(bitmap.representation(using: .png, properties: [:]))
             .write(to: URL(fileURLWithPath: directory).appendingPathComponent(name + ".png"))
     }

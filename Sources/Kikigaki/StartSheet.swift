@@ -42,6 +42,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     private(set) var nextDetails: [NSTextField] = []
 
     private let stack = NSStackView()
+    /// 本文の自然な高さとシートの高さを分け、画面下端で止めたぶんをスクロールする。
+    private let bodyScroll = NSScrollView()
     static let systemAudioDefaultsKey = "KikigakiSystemAudioMode"
     let systemAudioAutomatic = NSButton(radioButtonWithTitle: "自動(いまは取り込まない)", target: nil, action: nil)
     let systemAudioInclude = NSButton(radioButtonWithTitle: "取り込む", target: nil, action: nil)
@@ -191,7 +193,12 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         for view in [rows, actions] {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
         }
-        window.contentView = stack
+        bodyScroll.borderType = .noBorder
+        bodyScroll.drawsBackground = false
+        bodyScroll.scrollerStyle = .overlay
+        bodyScroll.hasHorizontalScroller = false
+        bodyScroll.documentView = stack
+        window.contentView = bodyScroll
         (window as? StartSheetWindow)?.onDismiss = { [weak self] in self?.cancelPressed() }
         (window as? StartSheetWindow)?.onCommandReturn = { [weak self] in self?.startPressed() }
         editor.onSubmit = { [weak self] in self?.startPressed() }
@@ -555,8 +562,27 @@ final class StartSheet: NSObject, NSTextViewDelegate {
 
     /// 中身に合わせて高さを詰める。AI区画の畳み・プロンプトの展開で変わる。
     private func fit() {
+        let previousFrame = window.frame
         stack.layoutSubtreeIfNeeded()
-        window.setContentSize(NSSize(width: Self.width, height: ceil(stack.fittingSize.height)))
+        let bodySize = NSSize(width: Self.width, height: ceil(stack.fittingSize.height))
+        stack.setFrameSize(bodySize)
+        if let parent = window.sheetParent {
+            // 初回位置はbeginSheetへ任せる。表示後だけ、位置と高さを同時に指定する。
+            var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: bodySize))
+            if let screen = parent.screen {
+                frame.size.height = min(frame.height, max(1, previousFrame.maxY - screen.visibleFrame.minY))
+            }
+            frame.origin = NSPoint(x: previousFrame.minX, y: previousFrame.maxY - frame.height)
+            window.setFrame(frame, display: true)
+        } else {
+            window.setContentSize(bodySize)
+        }
+        bodyScroll.hasVerticalScroller = bodySize.height > bodyScroll.contentSize.height
+        bodyScroll.layoutSubtreeIfNeeded()
+        stack.layoutSubtreeIfNeeded()
+        // 非反転のスタックは上端がmaxY。高さの変更後も本文の先頭を見せる。
+        stack.scroll(NSPoint(x: 0, y: max(0, bodySize.height - bodyScroll.contentSize.height)))
+        bodyScroll.reflectScrolledClipView(bodyScroll.contentView)
     }
     /// シートの幅。既定のウィンドウ(600pt)より広いが、議事録の絶対パスを縮めずに読めることを優先する。
     static let width: CGFloat = 640
