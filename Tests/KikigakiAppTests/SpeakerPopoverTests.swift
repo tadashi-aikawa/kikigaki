@@ -9,7 +9,7 @@ import KikigakiAIIO
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
 
     private func show(names: SpeakerNames = SpeakerNames([0: "タダシ"]),
-                      attendees: [String] = ["松岡", "Bob", "Tadashi Aikawa"],
+                      participants: [String] = ["松岡", "Bob", "Tadashi Aikawa"],
                       frequent: [String] = ["松岡", "Bob", "Tadashi Aikawa", "伊藤", "本田", "松本"],
                       anchorNearTop: Bool = false) throws -> (SpeakerPopover, NSWindow, NSTextField, NSView) {
         NSApplication.shared.setActivationPolicy(.prohibited)
@@ -20,7 +20,7 @@ import KikigakiAIIO
         let anchor = try #require(window.contentView)
         let popover = SpeakerPopover(slot: 1, names: names, speakers: [.init(name: "タダシ")],
             avatars: AvatarStore(cacheDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("speaker-test-avatars")),
-            attendees: attendees, frequentNames: frequent)
+            participants: participants, frequentNames: frequent)
         popover.present(relativeTo: NSRect(x: 200, y: anchorNearTop ? 380 : 10, width: 22, height: 22), of: anchor)
         let field = try #require(descendants(popover.contentView)
             .compactMap { $0 as? NSTextField }.first { $0.isEditable && $0.accessibilityLabel() == "話者Bの名前" })
@@ -162,7 +162,7 @@ import KikigakiAIIO
     }
 
     @Test func 八行超はスクロールし変換確定のReturnでは改名しない() throws {
-        let (popover, window, field, content) = try show(attendees: (0..<12).map { "候補\($0)" }, frequent: [])
+        let (popover, window, field, content) = try show(participants: (0..<12).map { "候補\($0)" }, frequent: [])
         defer { popover.close(); window.close() }
         let scroll = try #require(descendants(content).compactMap { $0 as? NSScrollView }.first)
         #expect(scroll.frame.height == CGFloat(8 * 28))
@@ -187,7 +187,7 @@ import KikigakiAIIO
         let past = root.appendingPathComponent("2026-10-08_1000.md")
         try "# KIKIGAKI 2026-10-08 10:00\n- 話者: A=過去の名前\n\n## 書き起こし\n".write(to: past, atomically: true, encoding: .utf8)
         let minutes = root.appendingPathComponent("AI議事録.md")
-        try "---\nattendees: [松岡]\n---\n".write(to: minutes, atomically: true, encoding: .utf8)
+        try "---\nparticipants: [松岡]\n---\n".write(to: minutes, atomically: true, encoding: .utf8)
         let meetingID = UUID()
         var history = try AIStreamHistory(meetingID: meetingID)
         let source = try history.prepare(lines: [], outputDirectory: root)
@@ -220,13 +220,21 @@ import KikigakiAIIO
             #expect(labels(popover.contentView).contains("過去の名前"))
             #expect(!labels(popover.contentView).contains("現在だけの名前"))
             // 外部エディタで更新した後の再生成も本番の入口で確かめる。
-            try "---\nattendees: [松本]\n---\n".write(to: minutes, atomically: true, encoding: .utf8)
+            try "---\nparticipants: [松本]\n---\n".write(to: minutes, atomically: true, encoding: .utf8)
             popover.close()
             let reopened = controller.makeSpeakerPopover(slot: 1)
             #expect(labels(reopened.contentView).contains("松本"))
             #expect(!labels(reopened.contentView).contains("松岡"))
             reopened.close()
-            try "---\nattendees: [松岡]\n---\n".write(to: minutes, atomically: true, encoding: .utf8)
+            try "---\nparticipants: [松岡]\n---\n".write(to: minutes, atomically: true, encoding: .utf8)
         }
+        // 設定で変えたキーを本番の入口で読む。
+        try "---\nparticipants: [松岡]\nattendees: [伊藤]\n---\n".write(to: minutes, atomically: true, encoding: .utf8)
+        controller.apply(SessionSnapshot(state: .idle, utterances: [.init(speaker: 1, start: 0, end: 1, text: "改名の検証")],
+                                         participantsKey: "attendees", markdownURL: current, saved: true))
+        let custom = controller.makeSpeakerPopover(slot: 1)
+        defer { custom.close() }
+        #expect(labels(custom.contentView).contains("伊藤"))
+        #expect(!labels(custom.contentView).contains("松岡"))
     }
 }

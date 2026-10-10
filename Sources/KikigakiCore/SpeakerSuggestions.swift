@@ -4,26 +4,28 @@ import Foundation
 public enum SpeakerSuggestions {
     public struct Candidate: Equatable, Sendable {
         public let name: String
-        public let isAttendee: Bool
+        public let isParticipant: Bool
         public let avatar: String?
         public let usedBySlot: Int?
         public var isSelectable: Bool { usedBySlot == nil }
     }
 
-    public static func attendees(at url: URL?) -> [String] {
+    public static func participants(at url: URL?, key: String = ResolvedConfig.defaultParticipantsKey) -> [String] {
         guard let url, let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
-        return attendees(in: text)
+        return participants(in: text, key: key)
     }
 
     /// frontmatterの文字列リストだけを読む。YAMLのオブジェクト・タグ・アンカーは名前にしない。
-    public static func attendees(in markdown: String) -> [String] {
+    /// キーは行頭の完全一致で探す。入れ子のキーと引用符付きのキーは読まない。
+    public static func participants(in markdown: String, key name: String = ResolvedConfig.defaultParticipantsKey) -> [String] {
+        let label = name + ":"
         let text = markdown.replacingOccurrences(of: "\r\n", with: "\n")
         let lines = text.components(separatedBy: "\n")
         guard lines.first?.trimmingCharacters(in: CharacterSet(charactersIn: "\u{FEFF}")) == "---",
               let end = lines.dropFirst().firstIndex(where: { $0 == "---" || $0 == "..." }) else { return [] }
         let header = Array(lines[1..<end])
-        guard let key = header.firstIndex(where: { $0.hasPrefix("attendees:") }) else { return [] }
-        let value = String(header[key].dropFirst("attendees:".count)).trimmingCharacters(in: .whitespaces)
+        guard let key = header.firstIndex(where: { $0.hasPrefix(label) }) else { return [] }
+        let value = String(header[key].dropFirst(label.count)).trimmingCharacters(in: .whitespaces)
         var raw: [String] = []
         if value.hasPrefix("[") {
             let flow = ([value] + Array(header.dropFirst(key + 1))).joined(separator: "\n")
@@ -109,22 +111,22 @@ public enum SpeakerSuggestions {
         return result
     }
 
-    public static func candidates(attendees: [String], frequent: [String], speakers: [KikigakiConfig.Speaker],
+    public static func candidates(participants: [String], frequent: [String], speakers: [KikigakiConfig.Speaker],
                                   names: SpeakerNames, excluding slot: Int) -> [Candidate] {
         var rank: [String: Int] = [:]
         for (index, name) in frequent.enumerated() where rank[name] == nil { rank[name] = index }
-        let sortedAttendees = attendees.enumerated().sorted {
+        let sortedParticipants = participants.enumerated().sorted {
             let lhs = rank[$0.element] ?? Int.max, rhs = rank[$1.element] ?? Int.max
             return lhs == rhs ? $0.offset < $1.offset : lhs < rhs
         }.map(\.element)
-        let attendeeSet = Set(attendees)
+        let participantSet = Set(participants)
         var avatars: [String: String] = [:]
         for speaker in speakers { avatars[speaker.name] = speaker.avatar }
         let used = (0..<SpeakerNames.slotCount).filter { $0 != slot }.compactMap { names.customName(for: $0) }
         var seen = Set<String>()
-        let all = (sortedAttendees + frequent + speakers.map(\.name) + used).compactMap { name -> Candidate? in
+        let all = (sortedParticipants + frequent + speakers.map(\.name) + used).compactMap { name -> Candidate? in
             guard !name.isEmpty, seen.insert(name).inserted else { return nil }
-            return Candidate(name: name, isAttendee: attendeeSet.contains(name), avatar: avatars[name],
+            return Candidate(name: name, isParticipant: participantSet.contains(name), avatar: avatars[name],
                              usedBySlot: names.otherSlot(using: name, excluding: slot))
         }
         return all.filter(\.isSelectable) + all.filter { !$0.isSelectable }

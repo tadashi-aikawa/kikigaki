@@ -26,6 +26,8 @@ outputDir = "~/Documents/KIKIGAKI"
 saveRecording = false
 # 発話ごとの音量と除外候補を表示・保存する診断表示。既定: false
 measureAudioLevels = false
+# 話者名の候補に使う、議事録の先頭の参加者のキー。既定: participants
+participantsKey = "participants"
 
 # 話者名の候補とアバター
 [[speakers]]
@@ -64,6 +66,7 @@ address = "ネオへ"
 | `outputDir` | `~/Documents/KIKIGAKI` | Markdownと録音WAVの保存先。絶対パスか `~` から始まるパスで書く。相対パスと空文字は設定エラー |
 | `saveRecording` | `false` | `true` で、録音WAVをMarkdownと同じ名前で並べて残す |
 | `measureAudioLevels` | `false` | `true` で、発話ごとの音量と小音量の候補を画面に出し、`.levels.json` とMarkdown末尾の表に残す。音量を調べるための表示。次の会議から効く |
+| `participantsKey` | `participants` | 話者名の候補に「参加者」として出す名前を、議事録の先頭のどのキーから読むか。`attendees` などに変えられる。空白・`:`・`#`・`,`・引用符・括弧を含む名前、空文字、`-` で始まる名前は設定エラー |
 
 - `measureAudioLevels` は、小さな声を除外する設定とは別です
 - `outputDir` は、AIエージェントの参加でCodexに書き込みを許可する場所でもあります

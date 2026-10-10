@@ -251,6 +251,7 @@ final class MeetingSession {
         if let data = diarizationDefaults?.data(forKey: Self.audioExclusionDefaultsKey),
            let saved = try? JSONDecoder().decode(AudioExclusion.self, from: data) { audioExclusion = saved }
         snapshot.speakers = config.speakers
+        snapshot.participantsKey = config.participantsKey
         aiStore?.onChange = { [weak self] in self?.aiChanged() }
         emit()
     }
@@ -259,6 +260,7 @@ final class MeetingSession {
     func update(config: ResolvedConfig) {
         self.config = config
         snapshot.speakers = config.speakers
+        snapshot.participantsKey = config.participantsKey
         emit()
     }
 
@@ -298,7 +300,7 @@ final class MeetingSession {
         cachedAudioLevels = [:]
         showAudioLevels = meetingConfig.measureAudioLevels
         // 開始・停止の進捗は状態チップに任せ、短時間のメッセージでヘッダーを伸縮させない。
-        snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers)
+        snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers, participantsKey: config.participantsKey)
         // 開始シートの指定はここで待機指定へ移す。前の会議のMarkdownはもう snapshot にない。
         if let pendingMinutes { waitingMinutesPath = pendingMinutes.path }
         pendingMinutes = nil
@@ -391,6 +393,7 @@ final class MeetingSession {
             }
             snapshot = SessionSnapshot(state: .idle, message: "開始に失敗: \(error.localizedDescription)")
             snapshot.speakers = config.speakers
+            snapshot.participantsKey = config.participantsKey
             emit()
             return false
         }

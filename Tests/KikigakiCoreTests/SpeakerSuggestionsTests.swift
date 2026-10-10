@@ -7,7 +7,7 @@ import Testing
         let text = """
         ---
         title: 会議
-        attendees:
+        participants:
           - Bob
           - "Tadashi Aikawa" # コメント
           - 'O''Brien'
@@ -17,44 +17,52 @@ import Testing
         ---
         本文
         """
-        #expect(SpeakerSuggestions.attendees(in: text) == ["Bob", "Tadashi Aikawa", "O'Brien", "松岡, 太郎"])
+        #expect(SpeakerSuggestions.participants(in: text) == ["Bob", "Tadashi Aikawa", "O'Brien", "松岡, 太郎"])
     }
 
     @Test func フローリストとエスケープを読む() {
-        let text = #"---\nattendees: [Bob, "Tadashi Aikawa", 'O''Brien', "Bob, Jr.", "Say \"Hi\""] # comment\n---\n本文"#
+        let text = #"---\nparticipants: [Bob, "Tadashi Aikawa", 'O''Brien', "Bob, Jr.", "Say \"Hi\""] # comment\n---\n本文"#
             .replacingOccurrences(of: #"\n"#, with: "\n")
-        #expect(SpeakerSuggestions.attendees(in: text) == ["Bob", "Tadashi Aikawa", "O'Brien", "Bob, Jr.", "Say \"Hi\""])
-        #expect(SpeakerSuggestions.attendees(in: "---\nattendees: [\n  Bob,\n  '松岡'\n]\n---") == ["Bob", "松岡"])
+        #expect(SpeakerSuggestions.participants(in: text) == ["Bob", "Tadashi Aikawa", "O'Brien", "Bob, Jr.", "Say \"Hi\""])
+        #expect(SpeakerSuggestions.participants(in: "---\nparticipants: [\n  Bob,\n  '松岡'\n]\n---") == ["Bob", "松岡"])
     }
 
     @Test func frontmatterが無いか不正なら空() {
-        for text in ["本文\nattendees: [Bob]", "attendees: [Bob]", "---\ntitle: Bob\n---",
-                     "---\nattendees: [Bob]", "---\nattendees: Bob\n---", "---\nattendees: ['Bob]\n---",
-                     "---\nattendees:\n  - {name: Bob}\n---", "---\nattendees: []\n---"] {
-            #expect(SpeakerSuggestions.attendees(in: text).isEmpty)
+        for text in ["本文\nparticipants: [Bob]", "participants: [Bob]", "---\ntitle: Bob\n---",
+                     "---\nparticipants: [Bob]", "---\nparticipants: Bob\n---", "---\nparticipants: ['Bob]\n---",
+                     "---\nparticipants:\n  - {name: Bob}\n---", "---\nparticipants: []\n---"] {
+            #expect(SpeakerSuggestions.participants(in: text).isEmpty)
         }
     }
 
     @Test func YAMLのUnicodeエスケープと引用符を含む平文とフロー内コメントを読む() {
-        let text = #"---\nattendees: ["Tadashi\x20Aikawa", "\u677e\u5ca1", "\U0001F600", O'Brien, # comment\n Bob, null]\n---"#
+        let text = #"---\nparticipants: ["Tadashi\x20Aikawa", "\u677e\u5ca1", "\U0001F600", O'Brien, # comment\n Bob, null]\n---"#
             .replacingOccurrences(of: #"\n"#, with: "\n")
-        #expect(SpeakerSuggestions.attendees(in: text) == ["Tadashi Aikawa", "松岡", "😀", "O'Brien", "Bob"])
+        #expect(SpeakerSuggestions.participants(in: text) == ["Tadashi Aikawa", "松岡", "😀", "O'Brien", "Bob"])
+    }
+
+    @Test func 指定したキーだけを読み接頭辞が同じキーや入れ子は読まない() {
+        let text = "---\nparticipants: [Bob]\nattendees: [松岡]\nmembers_old: [伊藤]\nmeta:\n  members: [本田]\n---"
+        #expect(SpeakerSuggestions.participants(in: text) == ["Bob"])
+        #expect(SpeakerSuggestions.participants(in: text, key: "attendees") == ["松岡"])
+        #expect(SpeakerSuggestions.participants(in: text, key: "members").isEmpty)
+        #expect(SpeakerSuggestions.participants(in: "---\n参加者:\n  - 松岡\n---", key: "参加者") == ["松岡"])
     }
 
     @Test func 改行形式とインデント無しのリストを読む() {
-        #expect(SpeakerSuggestions.attendees(in: "\u{FEFF}---\r\nattendees:\r\n- Bob\r\n- '松岡'\r\n...\r\n") == ["Bob", "松岡"])
+        #expect(SpeakerSuggestions.participants(in: "\u{FEFF}---\r\nparticipants:\r\n- Bob\r\n- '松岡'\r\n...\r\n") == ["Bob", "松岡"])
     }
 
     @Test func ファイルは毎回読み直し欠損を無視する() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("minutes.md")
-        #expect(SpeakerSuggestions.attendees(at: nil).isEmpty)
-        #expect(SpeakerSuggestions.attendees(at: url).isEmpty)
-        try "---\nattendees: [Bob]\n---".write(to: url, atomically: true, encoding: .utf8)
-        #expect(SpeakerSuggestions.attendees(at: url) == ["Bob"])
-        try "---\nattendees: [松岡]\n---".write(to: url, atomically: true, encoding: .utf8)
-        #expect(SpeakerSuggestions.attendees(at: url) == ["松岡"])
+        #expect(SpeakerSuggestions.participants(at: nil).isEmpty)
+        #expect(SpeakerSuggestions.participants(at: url).isEmpty)
+        try "---\nparticipants: [Bob]\n---".write(to: url, atomically: true, encoding: .utf8)
+        #expect(SpeakerSuggestions.participants(at: url) == ["Bob"])
+        try "---\nparticipants: [松岡]\n---".write(to: url, atomically: true, encoding: .utf8)
+        #expect(SpeakerSuggestions.participants(at: url) == ["松岡"])
     }
 
     @Test func 会議数で集計し既定名は除く() throws {
@@ -102,17 +110,17 @@ import Testing
     }
 
     @Test func 参加者を頻度順にし重複を除き台帳の画像を引き継ぐ() {
-        let candidates = SpeakerSuggestions.candidates(attendees: ["Bob", "初参加", "松岡", "未使用"],
+        let candidates = SpeakerSuggestions.candidates(participants: ["Bob", "初参加", "松岡", "未使用"],
             frequent: ["松岡", "Bob", "伊藤"], speakers: [.init(name: "Bob", avatar: "bob.webp"), .init(name: "本田")],
             names: SpeakerNames(), excluding: 1)
         #expect(candidates.map(\.name) == ["松岡", "Bob", "初参加", "未使用", "伊藤", "本田"])
-        #expect(candidates.prefix(4).allSatisfy { $0.isAttendee })
+        #expect(candidates.prefix(4).allSatisfy { $0.isParticipant })
         #expect(candidates[1].avatar == "bob.webp")
         #expect(candidates[0].avatar == nil)
     }
 
     @Test func 使用中は出どころに関係なく末尾で選択不可() {
-        let candidates = SpeakerSuggestions.candidates(attendees: ["タダシ", "Bob"], frequent: ["伊藤"],
+        let candidates = SpeakerSuggestions.candidates(participants: ["タダシ", "Bob"], frequent: ["伊藤"],
             speakers: [.init(name: "本田")], names: SpeakerNames([0: "タダシ", 1: "Bob", 2: "会議だけの名前"]), excluding: 1)
         #expect(candidates.map(\.name) == ["Bob", "伊藤", "本田", "タダシ", "会議だけの名前"])
         #expect(candidates[0].isSelectable)
@@ -122,7 +130,7 @@ import Testing
     }
 
     @Test func 前方一致を優先し大小文字を区別せず各群の元の順位を保つ() {
-        let candidates = SpeakerSuggestions.candidates(attendees: ["Mr. Tadashi", "Tadashi Aikawa", "TADASHI"],
+        let candidates = SpeakerSuggestions.candidates(participants: ["Mr. Tadashi", "Tadashi Aikawa", "TADASHI"],
             frequent: ["tadashi junior"], speakers: [], names: SpeakerNames([0: "tadashi used"]), excluding: 1)
         #expect(SpeakerSuggestions.filtered(candidates, query: "tadashi").map(\.name)
                 == ["Tadashi Aikawa", "TADASHI", "tadashi junior", "tadashi used", "Mr. Tadashi"])
@@ -131,7 +139,7 @@ import Testing
     }
 
     @Test func 完全一致は選べる名前だけで大小も区別する() {
-        let candidates = SpeakerSuggestions.candidates(attendees: ["Bob", "Tadashi"], frequent: [], speakers: [],
+        let candidates = SpeakerSuggestions.candidates(participants: ["Bob", "Tadashi"], frequent: [], speakers: [],
             names: SpeakerNames([0: "Tadashi"]), excluding: 1)
         #expect(SpeakerSuggestions.exactMatch(in: candidates, query: "Bob")?.name == "Bob")
         #expect(SpeakerSuggestions.exactMatch(in: candidates, query: "bob") == nil)

@@ -700,10 +700,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     /// 表示と生成を分け、会議・議事録の読み取りをウィンドウの焦点に依存させない。
     func makeSpeakerPopover(slot: Int) -> SpeakerPopover {
         let minutesPath = minutesStore?.state.minutesPath ?? (minutesStore == nil ? waitingMinutesPath : nil)
-        let attendees = SpeakerSuggestions.attendees(at: minutesPath.map { URL(fileURLWithPath: $0) })
+        let participants = SpeakerSuggestions.participants(at: minutesPath.map { URL(fileURLWithPath: $0) },
+                                                          key: snapshot.participantsKey)
         let frequent = SpeakerSuggestions.frequentNames(in: snapshot.markdownURL?.deletingLastPathComponent(),
                                                        excluding: snapshot.markdownURL)
         return SpeakerPopover(slot: slot, names: snapshot.names, speakers: snapshot.speakers, avatars: avatars,
-                              attendees: attendees, frequentNames: frequent)
+                              participants: participants, frequentNames: frequent)
     }
 }

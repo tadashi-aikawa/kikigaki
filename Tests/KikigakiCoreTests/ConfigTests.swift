@@ -65,6 +65,7 @@ import Testing
         #expect(resolved.outputDir.path == "/Users/test/Documents/KIKIGAKI")
         #expect(resolved.saveRecording == false)
         #expect(resolved.measureAudioLevels == false)
+        #expect(resolved.participantsKey == "participants")
     }
 
     @Test func 全項目を読める() throws {
@@ -72,11 +73,22 @@ import Testing
             outputDir = "~/work/minerva/Notes/meetings"
             saveRecording = true
             measureAudioLevels = true
+            participantsKey = "attendees"
             """
         let resolved = ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: home)
         #expect(resolved.outputDir.path == "/Users/test/work/minerva/Notes/meetings")
         #expect(resolved.saveRecording == true)
         #expect(resolved.measureAudioLevels == true)
+        #expect(resolved.participantsKey == "attendees")
+    }
+
+    @Test func 参加者のキーはfrontmatterの行頭で照合できる名前だけを受け付ける() throws {
+        #expect(try ConfigLoader.parse(toml: #"participantsKey = "参加者""#).participantsKey == "参加者")
+        for key in ["", " ", "a b", "a:b", "#a", "-a", "\"a\"", "[a]"] {
+            #expect(throws: ConfigError.self) {
+                try ConfigLoader.parse(toml: "participantsKey = \"\(key.replacingOccurrences(of: "\"", with: "\\\""))\"")
+            }
+        }
     }
 
     @Test func 絶対パスはそのまま() throws {

@@ -24,10 +24,10 @@ final class SpeakerPopover: NSObject, NSTextFieldDelegate {
     }
 
     init(slot: Int, names: SpeakerNames, speakers: [KikigakiConfig.Speaker], avatars: AvatarStore,
-         attendees: [String] = [], frequentNames: [String] = []) {
+         participants: [String] = [], frequentNames: [String] = []) {
         self.avatars = avatars
         self.slot = slot
-        candidates = SpeakerSuggestions.candidates(attendees: attendees, frequent: frequentNames,
+        candidates = SpeakerSuggestions.candidates(participants: participants, frequent: frequentNames,
                                                    speakers: speakers, names: names, excluding: slot)
         super.init()
         popover.behavior = .transient
@@ -128,7 +128,7 @@ final class SpeakerPopover: NSObject, NSTextFieldDelegate {
                 label.attributedStringValue = attributed
                 let hint: String
                 if let used = candidate.usedBySlot { hint = "話者\(SpeakerNames.letter(for: used))で使用中" }
-                else { hint = candidate.isAttendee ? "参加者" : "" }
+                else { hint = candidate.isParticipant ? "参加者" : "" }
                 let hintWidth: CGFloat = candidate.usedBySlot != nil ? 104 : (hint.isEmpty ? 0 : 42)
                 label.frame = NSRect(x: 34, y: y + 5, width: 250 - hintWidth, height: 18)
                 if !hint.isEmpty {
@@ -160,7 +160,7 @@ final class SpeakerPopover: NSObject, NSTextFieldDelegate {
             button.action = #selector(candidatePressed(_:))
             let usedHint = row.candidate?.usedBySlot.map { "、話者\(SpeakerNames.letter(for: $0))で使用中" } ?? ""
             button.setAccessibilityLabel((row.candidate == nil ? "「\(row.name)」をそのまま使う" : row.name)
-                + usedHint + (row.candidate?.isAttendee == true ? "、参加者" : ""))
+                + usedHint + (row.candidate?.isParticipant == true ? "、参加者" : ""))
             button.toolTip = row.name
             list.addSubview(button)
         }

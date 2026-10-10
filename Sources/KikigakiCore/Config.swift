@@ -14,15 +14,19 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     public var saveRecording: Bool?
     /// 小音量候補の計測・表示だけを行う。本文からの除外はしない。
     public var measureAudioLevels: Bool?
+    /// 話者名の候補に使う、議事録のfrontmatterのキー
+    public var participantsKey: String?
     public var speakers: [Speaker]?
     /// 配列の `[[ai]]`
     public var ai: AIProfileList?
 
     public init(outputDir: String? = nil, saveRecording: Bool? = nil,
-                speakers: [Speaker]? = nil, ai: AIProfileList? = nil, measureAudioLevels: Bool? = nil) {
+                speakers: [Speaker]? = nil, ai: AIProfileList? = nil, measureAudioLevels: Bool? = nil,
+                participantsKey: String? = nil) {
         self.outputDir = outputDir
         self.saveRecording = saveRecording
         self.measureAudioLevels = measureAudioLevels
+        self.participantsKey = participantsKey
         self.speakers = speakers
         self.ai = ai
     }
@@ -32,12 +36,15 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
 public struct ResolvedConfig: Equatable, Sendable {
     /// 既定の保存先。人が開く Markdown なので隠しディレクトリではなく書類フォルダに置く
     public static let defaultOutputDir = "~/Documents/KIKIGAKI"
+    /// タダシの議事録が使うキー。`attendees` などの流儀の人は設定で変える
+    public static let defaultParticipantsKey = "participants"
 
     public var outputDir: URL
     /// 録音WAVは既定では残さない。通常利用では不要でディスクを食うだけで、要るのはデバッグや
     /// 別エンジンでの再処理のとき(タダシの決定)
     public var saveRecording: Bool
     public var measureAudioLevels: Bool
+    public var participantsKey: String
     public var speakers: [KikigakiConfig.Speaker]
     /// 設定順のプロファイル。slotは1始まりで、この並びが宛先ポップアップの並びになる
     public var aiProfiles: [ResolvedAIConfig]
@@ -57,6 +64,7 @@ public struct ResolvedConfig: Equatable, Sendable {
         outputDir = Self.expand(config.outputDir ?? Self.defaultOutputDir, home: home)
         saveRecording = config.saveRecording ?? false
         measureAudioLevels = config.measureAudioLevels ?? false
+        participantsKey = config.participantsKey ?? Self.defaultParticipantsKey
         speakers = (config.speakers ?? []).map { speaker in
             var speaker = speaker
             speaker.name = SpeakerNames.normalized(speaker.name)
@@ -118,6 +126,11 @@ public enum ConfigLoader {
             guard !name.isEmpty, speakerNames.insert(name).inserted else {
                 throw ConfigError.invalid(description: "speakers.name must be non-empty and unique: \(name)")
             }
+        }
+        // frontmatterの行頭で `<キー>:` と照合するため、区切りになる文字と空白を含むキーは読めない
+        if let key = config.participantsKey,
+           key.isEmpty || key.hasPrefix("-") || key.contains(where: { $0.isWhitespace || ":#\"'[]{},".contains($0) }) {
+            throw ConfigError.invalid(description: "participantsKey must be a plain frontmatter key (got: \(key))")
         }
         if let dir = config.outputDir {
             if dir.trimmingCharacters(in: .whitespaces).isEmpty {

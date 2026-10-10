@@ -15,6 +15,8 @@ outputDir = "~/Documents/KIKIGAKI"
 saveRecording = false
 # 診断表示: 発話ごとの音量と候補を表示・別途保存する。除外設定とは独立。既定: false
 measureAudioLevels = false
+# 話者名の候補の「参加者」を読む、議事録のfrontmatterのキー。既定: participants
+participantsKey = "participants"
 
 # 話者候補とアバター。省略可
 [[speakers]]
@@ -56,6 +58,7 @@ address = "ネオへ"
 | `outputDir` | `~/Documents/KIKIGAKI` | Markdown (と録音WAV) の保存先。絶対パスか `~` 始まりだけを受け付ける。相対パスと空文字は設定エラー |
 | `saveRecording` | `false` | 録音WAVを Markdown と並べて残す |
 | `measureAudioLevels` | `false` | 発話ごとの音量と小音量候補の診断表示と保存。除外の設定とは独立。次の会議から効く。詳細は [小音量発話の計測](audio-levels.md) |
+| `participantsKey` | `participants` | 話者名の候補の「参加者」を読む、議事録のfrontmatterのキー。空白・`:`・`#`・引用符・`[]{},` を含む値、空文字、`-` 始まりは設定エラー。読み方は [書き起こしウィンドウ](transcript-window.md) の「候補の出どころ」 |
 
 `outputDir` は Codex の書き込み許可にも追加する。議事録を書けるようにするためで、許可の範囲と受け入れたリスクは [議事録プレビューの設計](minutes-preview.md) の「Skillの規則と書き込み許可」を参照する。
 

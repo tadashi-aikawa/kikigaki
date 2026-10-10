@@ -21,6 +21,7 @@ struct SessionSnapshot {
     var timeline = MeetingTimeline(startedAt: Date())
     var names = SpeakerNames()
     var speakers: [KikigakiConfig.Speaker] = []
+    var participantsKey = ResolvedConfig.defaultParticipantsKey
     /// 一時停止中を除いた会議の経過秒。
     var elapsed: Double = 0
     var markdownURL: URL?
