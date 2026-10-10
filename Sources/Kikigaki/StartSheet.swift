@@ -562,13 +562,13 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         setMinutesPath(historyPaths[sender.tag])
     }
 
-    /// URLスキームやドロップから、開いている最中に議事録を差し替える入口。
+    /// ファイル選択・履歴・ドロップから、開いている最中に議事録を差し替える入口。
     func setMinutesPath(_ path: String) {
         minutesBox.stringValue = path
         showMinutesHint(nil)
     }
     /// パス欄の下の1行。指定が読めないときだけ出し、普段は空ける。
-    /// URLスキームが読めない議事録を渡してきたときも、パス欄は触らずここだけを出す。
+    /// 議事録の指定に問題があるとき、パス欄は触らず理由を出す。
     func showMinutesHint(_ problem: String?) {
         minutesHint.stringValue = problem ?? ""
         minutesHint.isHidden = problem == nil

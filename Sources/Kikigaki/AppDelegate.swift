@@ -156,8 +156,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 宛先の指定を当て終えるまでデバッグ送信を保留する。0秒指定の質問は start 内の
     /// 通知から呼ばれるため、保留しないと先頭宛で飛んでしまう
     private var replayDestinationPending = false
-    /// 起動と同時に届いた `kikigaki://`。配線が済むまで持っておき、最後にまとめて流す
-    private var pendingURL: String?
     init(replayDebug: ReplayDebugOptions = .init()) { self.replayDebug = replayDebug; super.init() }
 
     convenience init(testingSession: MeetingSession, config: ResolvedConfig,
@@ -166,19 +164,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.session = testingSession; self.config = config
         self.window = window
         self.nextMeetingStore = nextMeetingStore
-    }
-
-    /// URLの受け口は配線より前に開ける。`open kikigaki://…` での起動では、この登録が
-    /// 終わる前に届いたイベントが捨てられてしまう。
-    func applicationWillFinishLaunching(_ notification: Notification) {
-        NSAppleEventManager.shared().setEventHandler(
-            self, andSelector: #selector(handleGetURLEvent(_:withReplyEvent:)),
-            forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
-    }
-
-    @objc private func handleGetURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
-        guard let text = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue else { return }
-        open(url: text)
     }
 
     /// `KIKIGAKI_TRIAL=1 ./scripts/make-app.sh` が組む試験用 `.app` の識別子
@@ -314,34 +299,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if replayURL != nil {
             toggleRecording()
         }
-        #if DEBUG
-        // 検証用の入口。実際のリンクと同じ経路へ流す。replayとは併用しない
-        if replayURL == nil, let text = Self.argument(after: "--open-url") { pendingURL = text }
-        #endif
-        if let text = pendingURL {
-            pendingURL = nil
-            open(url: text)
-        }
-    }
-
-    // MARK: - URLスキーム
-
-    /// `kikigaki://start?minutes=…` を受ける。開けるのは録音開始シートまでで、録音は始めない。
-    /// 待機中でなければシートを出さず、理由だけをヘッダーへ出す。始まっている会議の指定を
-    /// 後から差し替えると、どの会議の議事録なのかが分からなくなる。
-    func open(url text: String) {
-        guard let start = KikigakiURL.start(text) else { return }
-        // 配線の前に届いたものは持っておく。`open kikigaki://…` での起動がこれになる
-        guard let session, let window else { pendingURL = text; return }
-        // replayは開始シートを出さない経路なので、リンクも受けない
-        guard replayURL == nil else { return }
-        guard session.snapshot.state.canStart else {
-            window.show()
-            window.showNotice("\(session.snapshot.state.statusLabel)のため、リンクの指定は受け取れません")
-            return
-        }
-        presentStartSheet(minutesPath: start.minutesPath)
-        if let problem = start.problem { startSheet?.showMinutesHint(problem) }
     }
 
     /// 録音中・停止処理中に終了されたら、保存してから終了する(書き起こしを失わないため)
@@ -377,11 +334,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// 録音を始める前に、その会議だけの指定を決めるシートを出す。
-    /// `minutesPath` はURLスキームなど外からの指定で、開いている最中なら差し替える。
-    func presentStartSheet(minutesPath: String? = nil) {
+    func presentStartSheet() {
         guard let session, let config, session.snapshot.state.canStart, replayURL == nil else { return }
         if let startSheet {
-            if let minutesPath { startSheet.setMinutesPath(minutesPath) }
             startSheet.focus()
             return
         }
@@ -393,14 +348,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let sheet = StartSheet(profiles: config.aiProfiles,
                                diarizationEnabled: session.snapshot.nextDiarizationEnabled,
                                exclusion: session.snapshot.audioExclusion,
-                               minutesPath: minutesPath ?? session.waitingMinutesPath,
+                               minutesPath: session.waitingMinutesPath,
                                minutesHistory: window?.minutesSplit.preview.history.paths ?? [],
                                nextMeetings: nextMeetings,
                                systemAudioMode: UserDefaults.standard.string(forKey: StartSheet.systemAudioDefaultsKey)
                                     .flatMap(SystemAudioMode.init(rawValue:)) ?? .automatic,
                                outputKind: SystemAudioOutput.current)
-        // 明示的に渡されたパスは、シート内の手編集と同じく予約の初期値より優先する。
-        if let minutesPath { sheet.setMinutesPath(minutesPath) }
         sheet.onDiarizationPreload = { [weak self] in self?.preloadModels() }
         sheet.onCancel = { [weak self] in self?.startSheet = nil }
         sheet.onStart = { [weak self] options in

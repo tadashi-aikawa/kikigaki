@@ -24,7 +24,6 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `Config.swift` / `AIConfig.swift`: 設定ファイルのパースと既定値。キーの一覧は [設定リファレンス](docs/config.md)
   - `RecordingState.swift`: 録音状態とメニュー表題
   - `SystemAudioMix.swift`: システム音声の3択、出力の3値判定、16kHzの加算とピーク保護
-  - `URLScheme.swift`: `kikigaki://start` の解析。開始シートの入口だけを開け、録音は始めない
   - AI設定、独立stream履歴、envelope、質問と受信イベント、AIの返事のMarkdownもここに置く。契約は [AI参加者の設計](docs/ai-participant.md)
 - `Sources/KikigakiAIIO/`: アプリと返送CLIが共有するfd検証、原子的な保存、sessionとフック観測の型
 - `Sources/KikigakiCLI/`: 同梱CLI `kikigaki-cli`。配置は `.app/Contents/Helpers/kikigaki-cli`
@@ -43,7 +42,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `KikigakiCoreTests`: ロジック層。主戦場
   - `KikigakiAppTests`: AppKitとセッション。撮影用の環境変数は [開発用のフラグと環境変数](docs/dev-flags.md)
   - `KikigakiCLITests`: 同梱CLI
-- `Resources/`: アプリバンドル用の Info.plist。マイクの `NSMicrophoneUsageDescription`、システム音声の `NSAudioCaptureUsageDescription`、URLスキームの `CFBundleURLTypes` を含む
+- `Resources/`: アプリバンドル用の Info.plist。マイクの `NSMicrophoneUsageDescription`、システム音声の `NSAudioCaptureUsageDescription` を含む
 - `skills/kikigaki/`: AI参加者用の配布Skill。`.app` へ同梱し、同梱CLIの `skill install` が利用者のSkill置き場へリンクする
 - `web/minutes/`: 議事録の描画資産のソース。再生成は [議事録の描画と検索](docs/minutes-rendering.md)
 - `site/`: 利用者向けのサイト。Astro 1本で、トップのティザーは `src/pages/index.astro`、ドキュメントはStarlightで `src/content/docs/docs/` に置く
@@ -70,6 +69,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 - 設定ファイルへ書き戻さない: 録音開始シートや画面で決めた値はその会議だけに効く。書き戻すと設定ファイルの正本が2つになる。[録音開始シート](docs/start-sheet.md)
 - 廃止して戻さないと決めたもの: 詳細は各リンク先
   - グローバルショートカット。[録音開始シート](docs/start-sheet.md)
+  - アプリを開くURLスキーム。[録音開始シート](docs/start-sheet.md)
   - 短い別話者区間をフレーズの多数派へ吸収する補正。[話者の割当と固定](docs/speaker-assignment.md)
   - 稼働中のherdrペインへ接続する `attach` / `displayAgent` と、会議に紐づかない準備済みAIセッション。[AI設定の複数プロファイル](docs/ai-profiles.md)
   - AIの返事の未読表示と既読操作。[AIへの定期自動送信](docs/ai-scheduled.md)
@@ -102,7 +102,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | `recording.md` | [録音開始シート](docs/start-sheet.md)、[発話の確定表示](docs/utterance-progress.md)、[話者判別の切替](docs/diarization-toggle.md)、[話者の手動統合](docs/speaker-mapping.md)、[小音量発話の除外](docs/audio-exclusion.md)、[手入力の設計](docs/typed-entry.md)、[書き起こしウィンドウ](docs/transcript-window.md) |
 | `online-meetings.md` | [システム音声の取り込み](docs/system-audio.md) |
 | `ai-participant.md` | [AI参加者の設計](docs/ai-participant.md)、[AI設定の複数プロファイル](docs/ai-profiles.md)、[AIへの定期自動送信](docs/ai-scheduled.md)、[AIを会話の参加者として並べる](docs/ai-timeline.md)、[AIへの受け渡し](docs/ai-handoff.md) |
-| `minutes-and-board.md` | [議事録ペイン](docs/minutes-pane.md)、[議事録の描画と検索](docs/minutes-rendering.md)、[議事録プレビューの設計](docs/minutes-preview.md)、[議論のボード](docs/board.md)、[録音開始シート](docs/start-sheet.md) の `kikigaki://start` |
+| `minutes-and-board.md` | [議事録ペイン](docs/minutes-pane.md)、[議事録の描画と検索](docs/minutes-rendering.md)、[議事録プレビューの設計](docs/minutes-preview.md)、[議論のボード](docs/board.md) |
 | `data.md` | `site/` が正本。根拠は [議事録プレビューの設計](docs/minutes-preview.md) の書き込み許可、[AI参加者の設計](docs/ai-participant.md) の受け渡し、[設定リファレンス](docs/config.md) の保存物 |
 | `configuration.md` | [設定リファレンス](docs/config.md)、[AI設定の複数プロファイル](docs/ai-profiles.md) |
 
@@ -126,7 +126,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | [小音量発話の除外](docs/audio-exclusion.md) | 除外の判定、操作、保存・コピー・AI送信への適用 | 除外の判定や適用先を変える前 |
 | [小音量発話の計測](docs/audio-levels.md) | 音量トラックと診断表示、`.levels.json` | 音量の計測・保存を変える前 |
 | [手入力の設計](docs/typed-entry.md) | 手入力の投稿、画像添付、併合、AI文脈 | 手入力・`TranscriptEntries.merge` を変える前 |
-| [録音開始シート](docs/start-sheet.md) | 会議ごとの指定、`kikigaki://start` | 開始経路・URLスキームを変える前 |
+| [録音開始シート](docs/start-sheet.md) | 会議ごとの指定、次の会議の予約 | 開始経路・予約を変える前 |
 | [書き起こしウィンドウ](docs/transcript-window.md) | 配色、行の構造、改名、フッター、ピン留め、幅 | ウィンドウの見た目・操作を変える前 |
 | [議事録ペイン](docs/minutes-pane.md) | 右ペインの操作、履歴、幅と復元、ファイル監視 | 議事録ペインのUIを変える前 |
 | [議事録の描画と検索](docs/minutes-rendering.md) | 対応する記法、検索、Wikiリンク、描画資産の再生成 | 議事録の描画・`web/minutes` を変える前 |

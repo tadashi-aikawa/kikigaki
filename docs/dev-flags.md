@@ -15,7 +15,6 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - `--config <path>`: 設定ファイルを差し替える (保存先を作業用ディレクトリにするため)
 - `--replay <wav>`: マイクの代わりに音声ファイルを実時間より速く流す
 - `--show-window`: 起動直後に書き起こしウィンドウを表示する (見た目の確認用)
-- DEBUGの `--open-url <url>` は、起動直後に `kikigaki://` のリンクを実物と同じ経路へ流します。LaunchServicesが別の場所の `.app` へURLを配るため、組んだばかりの `.app` を確かめるのはこちらです。replayとは併用しません。
 - `--smoke`: UI を起動せず設定の読み込みだけ確認して終了する (CI 用)
 
 ## replayの速度と終了

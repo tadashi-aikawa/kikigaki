@@ -29,7 +29,6 @@ KIKIGAKI_TRIAL=1 ./scripts/make-app.sh
 
 - 出力は固定の `.build/trial/KIKIGAKI-Trial.app`。識別子 `com.tadashi-aikawa.kikigaki.trial`
     - UserDefaults・マイク許可が本体と別になる。初回にマイク許可を求められる
-    - `kikigaki://` のリンクは受け付けない
 - 試験用 `.app` は本体と並べて起動できる。終了はメニューバーの試験版から行う
 
 ### replay で記録する
