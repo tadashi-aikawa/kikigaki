@@ -68,9 +68,15 @@ struct NextCommandTests {
         try f.store.add(old); try f.store.add(recent)
         #expect(try f.store.expire(now: Date(timeIntervalSince1970: 86_400)).meetings == [recent])
         #expect(try f.store.load().meetings == [recent])
-        try f.store.consume(minutesPath: "/other.md")
+        try f.store.consume(id: UUID())
         #expect(try f.store.load().meetings == [recent])
-        try f.store.consume(minutesPath: "/recent.md")
+        let duplicate = try NextMeeting(minutesPath: recent.minutesPath, createdAt: Date(timeIntervalSince1970: 2))
+        try f.store.add(duplicate)
+        try f.store.consume(id: recent.id)
+        #expect(try f.store.load().meetings == [duplicate])
+        try f.store.consume(id: recent.id)
+        #expect(try f.store.load().meetings == [duplicate])
+        try f.store.consume(id: duplicate.id)
         #expect(try f.store.load().meetings.isEmpty)
     }
     @Test func ミリ秒未満の登録順も保存後に保つ() throws {

@@ -30,13 +30,14 @@ struct NextMeetingsTests {
         #expect(meetings.expire(now: Date(timeIntervalSince1970: 86_400)) == [old])
         #expect(meetings.meetings == [recent, future])
     }
-    @Test func 消費は表示上限の外もパス一致だけで判定する() throws {
+    @Test func 消費は表示上限の外もidで判定し同じパスの別予約を残す() throws {
         let entries = try (1...4).map { try meeting($0, created: Double($0)) }
         let duplicate = try meeting(5, path: "/会議/4.md")
         var meetings = NextMeetings(entries + [duplicate])
-        #expect(meetings.consume(minutesPath: "/会議/4.MD").isEmpty)
-        #expect(Set(meetings.consume(minutesPath: "/会議/4.md").map(\.id)) == Set([entries[3].id, duplicate.id]))
-        #expect(meetings.meetings == Array(entries.prefix(3)))
+        #expect(meetings.consume(id: UUID()).isEmpty)
+        #expect(meetings.consume(id: entries[3].id) == [entries[3]])
+        #expect(meetings.meetings == NextMeetings(Array(entries.prefix(3)) + [duplicate]).meetings)
+        #expect(meetings.consume(id: entries[3].id).isEmpty)
     }
     @Test func 時分は今日で日付付きはそのまま解釈する() throws {
         let now = Date(timeIntervalSince1970: 0)

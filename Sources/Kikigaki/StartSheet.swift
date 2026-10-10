@@ -18,6 +18,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         var exclusionEnabled = false
         /// 議事録の絶対パス。nilは指定なし
         var minutesPath: String?
+        /// 選んだ予約のid。議事録を別のパスへ変えた場合と「指定しない」はnil。
+        var nextMeetingID: UUID?
         /// 自動送信の宛先の枠。nilは「送らない」
         var scheduleSlot: Int?
         /// 宛先があるときの自動送信の指定
@@ -37,6 +39,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     /// 表示中の宛先。nilは「送らない」
     private(set) var selectedSlot: Int?
     let nextMeetings: [NextMeeting]
+    private var selectedNextMeetingID: UUID?
     private(set) var nextButtons: [NSButton] = []
     private(set) var nextTitles: [NSTextField] = []
     private(set) var nextDetails: [NSTextField] = []
@@ -305,9 +308,11 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         if let previous = selectedSlot { drafts[previous] = currentDraft }
         if nextMeetings.indices.contains(index) {
             let meeting = nextMeetings[index]
+            selectedNextMeetingID = meeting.id
             minutesBox.stringValue = meeting.minutesPath
             selectDestination(meeting.ai.flatMap { name in profiles.first { $0.name == name }?.slot })
         } else {
+            selectedNextMeetingID = nil
             minutesBox.stringValue = ""
             selectDestination(profiles.first(where: \.autoStart)?.slot)
         }
@@ -679,6 +684,13 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         if let path = minutesInput {
             guard (try? MinutesPath.validate(path)) != nil else { return nil }
             result.minutesPath = path
+        }
+        // 最終的な議事録パスも選んだ予約と一致するときだけ、その1件を使ったとみなす。
+        // symlinkの解決や実在は判定へ混ぜない。「指定しない」からの手入力も予約を使わない。
+        if let id = selectedNextMeetingID,
+           let meeting = nextMeetings.first(where: { $0.id == id }),
+           meeting.minutesPath == result.minutesPath {
+            result.nextMeetingID = id
         }
         if let slot = selectedSlot {
             let draft = currentDraft

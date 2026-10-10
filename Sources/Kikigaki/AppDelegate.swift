@@ -475,11 +475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch { Self.log("replay 自動送信の指定が不正: \(error)"); exit(1) }
         }
         let started = await session.start(source: source)
-        if started, let path = options?.minutesPath {
-            // 準備に失敗した会議は予約を残す。取消やシートでの選び直しも消費しない。
-            do { try nextMeetingStore?.consume(minutesPath: path) }
-            catch { Self.log("次の会議を消費できません: \(error)") }
-        }
+        consumeNextMeeting(options: options, started: started)
         // 議事録を指定したら、開始と同時に右のペインへ出す。
         if started, options?.minutesPath != nil || replayDebug.minutesPath != nil { window?.showMinutes() }
         // 宛先の指定は録音開始のリセットより後に当てる。start()が先頭へ戻すので、
@@ -508,6 +504,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Self.log("replay を開始できなかったので終了する")
             exit(1)
         }
+    }
+
+    /// 開始結果が確定してから、シートが使った予約1件だけを消費する。
+    func consumeNextMeeting(options: StartSheet.Options?, started: Bool) {
+        guard started, let id = options?.nextMeetingID else { return }
+        do { try nextMeetingStore?.consume(id: id) }
+        catch { Self.log("次の会議を消費できません: \(error)") }
     }
 
     private func openOutputDir() {

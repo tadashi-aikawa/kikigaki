@@ -48,9 +48,9 @@ public struct NextMeetingStore: Sendable {
         for meeting in meetings.expire(now: now) { try removeIfPresent(meeting.id) }
         return meetings
     }
-    public func consume(minutesPath: String) throws {
+    public func consume(id: UUID) throws {
         var meetings = try load()
-        for meeting in meetings.consume(minutesPath: minutesPath) { try removeIfPresent(meeting.id) }
+        for meeting in meetings.consume(id: id) { try removeIfPresent(meeting.id) }
     }
     private func removeIfPresent(_ id: UUID) throws {
         do { try remove(id) } catch AIFileError.missing { /* 他の窓が先に消費した場合も成功。 */ }

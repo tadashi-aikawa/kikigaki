@@ -100,10 +100,10 @@ public struct NextMeetings: Equatable, Sendable {
         meetings.removeAll { now.timeIntervalSince($0.createdAt) >= Self.lifetime }
         return removed
     }
-    /// symlinkや実在は同一性へ混ぜない。手で欄を編集した場合も最終的なパスで消費する。
-    @discardableResult public mutating func consume(minutesPath: String) -> [NextMeeting] {
-        let removed = meetings.filter { $0.minutesPath == minutesPath }
-        meetings.removeAll { $0.minutesPath == minutesPath }
+    /// 選んだ予約だけをidで消費する。同じ議事録を指す別の予約は残す。
+    @discardableResult public mutating func consume(id: UUID) -> [NextMeeting] {
+        let removed = meetings.filter { $0.id == id }
+        meetings.removeAll { $0.id == id }
         return removed
     }
 }
