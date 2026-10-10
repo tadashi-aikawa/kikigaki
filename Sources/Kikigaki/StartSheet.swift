@@ -47,12 +47,10 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     private let stack = NSStackView()
     /// 本文の自然な高さとシートの高さを分け、画面下端で止めたぶんをスクロールする。
     private let bodyScroll = NSScrollView()
-    private weak var parentWindow: NSWindow?
-    private var parentIgnoredMouseEvents = false
-    private var parentInputMonitor: Any?
-    private var parentObservers: [NSObjectProtocol] = []
-    /// 表示時の画面と上端を固定する。候補の切替では位置を取り直さない。
-    private var placement: (visibleFrame: NSRect, top: CGFloat, x: CGFloat)?
+    /// 全宛先とエラー表示を含めて確保する本文高。表示中は窓のサイズを変更しない。
+    private var reservedBodyHeight: CGFloat = 0
+    private var fixedContentHeight: CGFloat?
+    private var detailsSlot: Int?
     static let systemAudioDefaultsKey = "KikigakiSystemAudioMode"
     let systemAudioAutomatic = NSButton(radioButtonWithTitle: "自動(いまは取り込まない)", target: nil, action: nil)
     let systemAudioInclude = NSButton(radioButtonWithTitle: "取り込む", target: nil, action: nil)
@@ -89,15 +87,10 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         self.nextMeetings = NextMeetings(nextMeetings).candidates
         self.outputKind = outputKind
         window = StartSheetWindow(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 400),
-                                  styleMask: [.borderless], backing: .buffered, defer: false)
+                                  styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
-        // 題は本文にあるため題名バーを付けない。従来のシートに近い和紙の面を保つ。
-        window.level = .modalPanel
-        window.hasShadow = true
-        window.isOpaque = false
-        window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: .aqua)
-        window.backgroundColor = .clear
+        window.backgroundColor = Washi.paper
         avatars.onChange = { [weak self] in
             self?.refreshDestinationImages()
             self?.refreshNextImages()
@@ -213,18 +206,17 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         bodyScroll.scrollerStyle = .overlay
         bodyScroll.hasHorizontalScroller = false
         bodyScroll.documentView = stack
-        bodyScroll.wantsLayer = true
-        bodyScroll.layer?.cornerRadius = 10
-        bodyScroll.layer?.masksToBounds = true
-        bodyScroll.layer?.backgroundColor = Washi.paper.cgColor
         window.contentView = bodyScroll
         (window as? StartSheetWindow)?.onDismiss = { [weak self] in self?.cancelPressed() }
         (window as? StartSheetWindow)?.onCommandReturn = { [weak self] in self?.startPressed() }
         editor.onSubmit = { [weak self] in self?.startPressed() }
         editor.onCancel = { [weak self] in self?.cancelPressed() }
         minutesHint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // 「送らない」で開いても、最初の宛先の下書きを無効表示する。
+        selectDestination(profiles.first?.slot)
         selectDestination(profiles.first(where: \.autoStart)?.slot)
         if !self.nextMeetings.isEmpty { selectNextMeeting(at: 0) }
+        reserveBodyHeight()
         fit()
     }
 
@@ -477,11 +469,15 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     private func selectDestination(_ slot: Int?) {
         selectedSlot = slot
         destination.selectItem(withTag: slot ?? 0)
-        // 「送らない」なら下の指定は畳む。始めないものの設定を並べても選べるものは増えない。
-        aiDetails.isHidden = slot == nil
+        // 高さを保ったまま、送らない設定は薄くして操作を止める。
+        aiDetails.alphaValue = slot == nil ? 0.4 : 1
+        for control in [interval, work, final] { control.isEnabled = slot != nil }
+        editor.isSelectable = slot != nil
         guard let slot, let profile = profiles.first(where: { $0.slot == slot }) else {
-            refreshDestinationTitle(); return
+            editor.isEditable = false
+            refreshPromptState(); refreshDestinationTitle(); return
         }
+        detailsSlot = slot
         let draft = draft(for: slot)
         editor.isEditable = profile.board == nil
         cwdLabel.stringValue = Self.shortPath(profile.cwd)
@@ -581,19 +577,36 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     /// パス欄の下にいま出ている1行。
     var minutesHintText: String { minutesHint.stringValue }
 
-    /// 中身に合わせて高さを詰める。AI区画の畳み・プロンプトの展開で変わる。
+    /// 表示前に全宛先と議事録のエラー行を測る。選択中の下書きは測定後に戻す。
+    private func reserveBodyHeight() {
+        let selected = selectedSlot
+        let displayed = detailsSlot
+        if let displayed { drafts[displayed] = currentDraft }
+        let savedDrafts = drafts
+        let hint = minutesHint.stringValue
+        let hidden = minutesHint.isHidden
+        minutesHint.stringValue = "議事録は絶対パスの.mdを指定してください"
+        minutesHint.isHidden = false
+        reservedBodyHeight = 0
+        for slot in [Int?](profiles.map { $0.slot }) + [nil] {
+            selectDestination(slot)
+            stack.layoutSubtreeIfNeeded()
+            reservedBodyHeight = max(reservedBodyHeight, ceil(stack.fittingSize.height))
+        }
+        drafts = savedDrafts
+        if let displayed { selectDestination(displayed) }
+        selectDestination(selected)
+        minutesHint.stringValue = hint
+        minutesHint.isHidden = hidden
+    }
+
+    /// 本文だけを再配置する。表示中のシート高は変えず、超過分をスクロールする。
     private func fit() {
         stack.layoutSubtreeIfNeeded()
-        let bodySize = NSSize(width: Self.width, height: ceil(stack.fittingSize.height))
+        let bodySize = NSSize(width: Self.width, height: max(reservedBodyHeight, ceil(stack.fittingSize.height)))
         stack.setFrameSize(bodySize)
-        if let placement {
-            var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: bodySize))
-            // 小数の高さをAppKitが丸めても上端が1pt動かないよう、高さは整数に揃える。
-            frame.size.height = min(frame.height, max(1, floor(placement.top - placement.visibleFrame.minY - Self.screenMargin)))
-            frame.origin = NSPoint(x: placement.x, y: placement.top - frame.height)
-            window.setFrame(frame, display: true)
-        } else {
-            window.setContentSize(bodySize)
+        if window.sheetParent == nil {
+            window.setContentSize(NSSize(width: Self.width, height: fixedContentHeight ?? bodySize.height))
         }
         bodyScroll.hasVerticalScroller = bodySize.height > bodyScroll.contentSize.height
         bodyScroll.layoutSubtreeIfNeeded()
@@ -604,69 +617,29 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     }
     /// シートの幅。既定のウィンドウ(600pt)より広いが、議事録の絶対パスを縮めずに読めることを優先する。
     static let width: CGFloat = 640
-    static let topInsetRatio: CGFloat = 0.12
     static let screenMargin: CGFloat = 20
 
-    /// 画面のやや上。横は親の中央に揃え、画面の端では内側へ寄せる。
-    static func initialPlacement(parentFrame: NSRect, visibleFrame: NSRect) -> (top: CGFloat, x: CGFloat) {
-        let x = min(max(parentFrame.midX - width / 2, visibleFrame.minX),
-                    max(visibleFrame.minX, visibleFrame.maxX - width))
-        return (visibleFrame.maxY - visibleFrame.height * topInsetRatio, x)
-    }
-
     func present(on parent: NSWindow) {
-        guard parentWindow == nil else { focus(); return }
-        parentWindow = parent
+        guard window.sheetParent == nil else { focus(); return }
+        reserveBodyHeight()
         let visibleFrame = (parent.screen ?? NSScreen.main)?.visibleFrame ?? parent.frame
-        let initial = Self.initialPlacement(parentFrame: parent.frame, visibleFrame: visibleFrame)
-        placement = (visibleFrame, initial.top, initial.x)
+        fixedContentHeight = min(reservedBodyHeight, max(1, floor(visibleFrame.height - Self.screenMargin * 2)))
         fit()
-        // AppKitが初回フレームを画素へ丸めた後の上端を、以後の基準にする。
-        placement = (visibleFrame, window.frame.maxY, window.frame.minX)
-        // 子ウィンドウと入力遮断で親だけをモーダルにする。runModalの入れ子ループを
-        // 作らず、onStartのTaskやモデルの先読みを通常のMainActorで実行できる。
-        // ignoresMouseEventsは題名バーも止め、monitorは親に戻された焦点でのキー操作も止める。
-        parentIgnoredMouseEvents = parent.ignoresMouseEvents
-        parent.ignoresMouseEvents = true
-        parent.addChildWindow(window, ordered: .above)
-        let inputEvents: NSEvent.EventTypeMask = [.keyDown, .keyUp, .flagsChanged,
-            .leftMouseDown, .leftMouseUp, .leftMouseDragged, .rightMouseDown, .rightMouseUp,
-            .rightMouseDragged, .otherMouseDown, .otherMouseUp, .otherMouseDragged,
-            .scrollWheel, .gesture, .magnify, .swipe, .rotate, .beginGesture, .endGesture]
-        parentInputMonitor = NSEvent.addLocalMonitorForEvents(matching: inputEvents) { [weak self, weak parent] event in
-            guard let self, let parent, event.window === parent else { return event }
-            self.focus()
-            return nil
-        }
-        for name in [NSWindow.didBecomeKeyNotification, NSWindow.willCloseNotification] {
-            parentObservers.append(NotificationCenter.default.addObserver(forName: name, object: parent, queue: .main) { [weak self] note in
-                MainActor.assumeIsolated {
-                    if note.name == NSWindow.willCloseNotification { self?.cancelPressed() }
-                    else { self?.focus() }
-                }
-            })
-        }
         // 開いているシートだけ追従する。開始後の会議の音源モードは固定する。
         outputTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshSystemAudioOutput() }
         }
-        focus()
+        parent.beginSheet(window)
+        (window as? AIQuestionWindow)?.monitorOutsideClicks()
         window.makeFirstResponder(nextMeetings.isEmpty ? nil : startButton)
     }
     func close() {
         outputTimer?.invalidate(); outputTimer = nil
-        if let parentInputMonitor { NSEvent.removeMonitor(parentInputMonitor); self.parentInputMonitor = nil }
-        for observer in parentObservers { NotificationCenter.default.removeObserver(observer) }
-        parentObservers.removeAll()
         // 親を閉じる経路でも、ファイル選択パネルを残さない。
         if let panel = window.attachedSheet { window.endSheet(panel, returnCode: .cancel); panel.orderOut(nil) }
-        let parent = parentWindow
-        parent?.removeChildWindow(window)
-        parent?.ignoresMouseEvents = parentIgnoredMouseEvents
-        parentWindow = nil
-        placement = nil
+        if let parent = window.sheetParent { parent.endSheet(window) }
         window.orderOut(nil)
-        parent?.makeKey()
+        fixedContentHeight = nil
     }
     func focus() { (window.attachedSheet ?? window).makeKeyAndOrderFront(nil) }
 
@@ -753,8 +726,6 @@ final class StartSheet: NSObject, NSTextViewDelegate {
 /// ⌘⏎でも開始する。焦点がどこにあっても同じ操作で始められるようにする。
 /// 素の⏎は既定ボタンが受け、プロンプト編集中だけ `AIQuestionWindow` が改行へ回す。
 final class StartSheetWindow: AIQuestionWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
     var onCommandReturn: (() -> Void)?
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, event.keyCode == 36 || event.keyCode == 76,

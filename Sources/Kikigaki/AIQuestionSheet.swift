@@ -10,7 +10,6 @@ class AIQuestionWindow: NSWindow {
     deinit { if let outsideMonitor { NSEvent.removeMonitor(outsideMonitor) } }
 
     /// シートの背後へのクリックは親の停止ボタン等へ流さず、閉じる操作だけに使う。
-    /// 録音を取り止める紐づけシートでは呼ばない。
     func monitorOutsideClicks() {
         stopMonitoringOutsideClicks()
         outsideMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
@@ -19,7 +18,8 @@ class AIQuestionWindow: NSWindow {
         }
     }
     func handleOutsideClick(_ event: NSEvent) -> NSEvent? {
-        guard monitorsOutsideClicks, let parent = sheetParent, parent.attachedSheet === self,
+        guard monitorsOutsideClicks, attachedSheet == nil,
+              let parent = sheetParent, parent.attachedSheet === self,
               event.window === parent, let onDismiss else { return event }
         let screenPoint = parent.convertPoint(toScreen: event.locationInWindow)
         guard !frame.contains(screenPoint) else { return event }
