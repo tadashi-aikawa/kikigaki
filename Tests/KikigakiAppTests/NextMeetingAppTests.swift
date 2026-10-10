@@ -6,14 +6,16 @@ import KikigakiAIIO
 @testable import Kikigaki
 
 @Suite(.serialized, .timeLimit(.minutes(1))) @MainActor struct NextMeetingAppTests {
-    @Test func シートを開く時だけ失効分を消し取消は予約を残す() throws {
+    @Test func シートを開く時だけ失効分を消し取消は予約を残す() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let store = NextMeetingStore(directory: root.appendingPathComponent("next"))
         let expired = try NextMeeting(minutesPath: root.appendingPathComponent("古い.md").path,
                                       createdAt: Date().addingTimeInterval(-86_401))
         let next = try NextMeeting(minutesPath: root.appendingPathComponent("次.md").path)
-        try store.add(expired); try store.add(next)
+        let removable = try NextMeeting(minutesPath: root.appendingPathComponent("消す.md").path,
+                                       createdAt: next.createdAt.addingTimeInterval(1))
+        try store.add(expired); try store.add(next); try store.add(removable)
         let config = ResolvedConfig(config: KikigakiConfig(), home: root)
         let session = MeetingSession(config: config, models: { throw CancellationError() }, log: { _ in },
                                      aiStore: AIRecordStore(directory: root))
@@ -31,20 +33,17 @@ import KikigakiAIIO
         #expect(app.startSheet === sheet)
         #expect(window.window?.attachedSheet === sheet.window)
         #expect(window.window?.sheets.count == 1)
-        #expect(sheet.nextMeetings.map(\.id) == [next.id])
+        #expect(sheet.nextMeetings.map(\.id) == [next.id, removable.id])
         #expect(sheet.options?.minutesPath == next.minutesPath)
+        #expect(try store.load().meetings.map(\.id) == [next.id, removable.id])
+        // 削除は一度開いたシートで検証し、取消直後に余分なモーダルを開かない。
+        sheet.nextRemoveButtons[1].isHidden = false
+        try await sendAction(sheet.nextRemoveButtons[1])
         #expect(try store.load().meetings.map(\.id) == [next.id])
+        #expect(sheet.nextMeetings.map(\.id) == [next.id])
         sheet.cancelPressed()
         #expect(app.startSheet == nil)
         #expect(try store.load().meetings.map(\.id) == [next.id])
-        app.presentStartSheet()
-        #expect(app.startSheet?.minutesBox.stringValue == next.minutesPath)
-        // 実際のpresentStartSheetが店への削除コールバックをつなぐことも確かめる。
-        let remove = try #require(app.startSheet?.nextRemoveButtons.first)
-        try sendAction(remove)
-        #expect(try store.load().meetings.isEmpty)
-        #expect(app.startSheet?.nextMeetings.isEmpty == true)
-        app.startSheet?.cancelPressed()
     }
 
     @Test(arguments: ["選択", "別のパス", "指定しない", "開始失敗", "不正パス", "取消"])
@@ -93,7 +92,7 @@ import KikigakiAIIO
     }
 
     @Test(arguments: [false, true])
-    func シートの削除は予約だけを消し店で失敗しても候補を取り除く(_ alreadyRemoved: Bool) throws {
+    func シートの削除は予約だけを消し店で失敗しても候補を取り除く(_ alreadyRemoved: Bool) async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let store = NextMeetingStore(directory: root.appendingPathComponent("next"))
@@ -111,7 +110,8 @@ import KikigakiAIIO
         defer { sheet.close() }
         sheet.onRemoveNextMeeting = { app.removeNextMeeting(id: $0) }
         if alreadyRemoved { try store.remove(meeting.id) }
-        try sendAction(sheet.nextRemoveButtons[0])
+        sheet.nextRemoveButtons[0].isHidden = false
+        try await sendAction(sheet.nextRemoveButtons[0])
         #expect(try store.load().meetings.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: store.directory.appendingPathComponent(meeting.id.uuidString + ".json").path))
         #expect(try Data(contentsOf: minutes) == contents)
@@ -126,10 +126,13 @@ import KikigakiAIIO
         #expect(reopened.nextMeetings.isEmpty && reopened.nextButtons.isEmpty)
     }
 
-    /// 削除はボタン自身を取り除く。performClickの押下演出中にビューを組み直すと、
-    /// 一括テストのイベント処理を巻き込んで集計前に終了するため、target/actionだけを送る。
-    private func sendAction(_ button: NSButton) throws {
+    /// ×の予約削除だけ、NSButtonCell.performClickのblock_invoke付近で一括テストが集計前に終了する。
+    /// テスト環境の入れ子イベントループとの組合せを疑うが原因は未解明なので、sendActionで検証する。
+    private func sendAction(_ button: NSButton) async throws {
         let action = try #require(button.action)
         #expect(button.sendAction(action, to: button.target))
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
     }
 }

@@ -273,7 +273,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             radio.tag = index
             radio.setAccessibilityLabel(title.stringValue + " " + label.stringValue)
             radio.setContentHuggingPriority(.required, for: .horizontal)
-            let remove = NSButton()
+            let remove = NextMeetingRemoveButton()
             remove.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "この予約を削除")
             remove.imagePosition = .imageOnly; remove.imageScaling = .scaleProportionallyDown
             remove.isBordered = false; remove.contentTintColor = Washi.muted
@@ -337,6 +337,12 @@ final class StartSheet: NSObject, NSTextViewDelegate {
 
     @objc func removeNextMeeting(_ sender: NSButton) {
         guard let index = nextRemoveButtons.firstIndex(where: { $0 === sender }) else { return }
+        let id = nextMeetings[index].id
+        (sender as? NextMeetingRemoveButton)?.afterPress { self.removeNextMeeting(id: id) }
+    }
+
+    private func removeNextMeeting(id: UUID) {
+        guard let index = nextMeetings.firstIndex(where: { $0.id == id }) else { return }
         let meeting = nextMeetings.remove(at: index)
         let wasSelected = selectedNextMeetingID == meeting.id
         // 最後の1件を消しても「指定しない」は残す。選び直した状態を見せ、区画を急に消さない。
@@ -774,6 +780,42 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     func refreshMicrophone() {
         microphoneLabel.stringValue = microphoneName()
         microphoneLabel.toolTip = microphoneLabel.stringValue
+    }
+}
+
+/// 削除で外されるボタンと親行を、AppKitの押下処理全体が戻るまで保持する。
+/// 次のメインキュー処理はperformClick内のイベントループでも実行され得るため、
+/// 実マウスとperformClickの両方でAppKitから戻ってから作り直す保持方式を選ぶ。
+@MainActor private final class NextMeetingRemoveButton: NSButton {
+    private var handlingPress = false
+    private var pendingRemoval: (() -> Void)?
+
+    func afterPress(_ removal: @escaping () -> Void) {
+        if handlingPress { pendingRemoval = removal }
+        else { DispatchQueue.main.async(execute: removal) }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        withExtendedLifetime((self, superview?.superview)) {
+            handlingPress = true
+            super.mouseDown(with: event)
+            finishPress()
+        }
+    }
+
+    override func performClick(_ sender: Any?) {
+        withExtendedLifetime((self, superview?.superview)) {
+            handlingPress = true
+            super.performClick(sender)
+            finishPress()
+        }
+    }
+
+    private func finishPress() {
+        handlingPress = false
+        let removal = pendingRemoval
+        pendingRemoval = nil
+        removal?()
     }
 }
 
