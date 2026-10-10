@@ -183,6 +183,65 @@ import KikigakiAIIO
         controller.scan()
         #expect(session.snapshot.names.attributions[0] == nil)
     }
+    @Test func 二KiB近い複数行の根拠を全文表示し入力中も名前欄が動かない() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(root), request = try await submit(session)
+        let lines = TranscriptRenderer.lines(session.snapshot.utterances, names: session.snapshot.names,
+                                              timeline: session.snapshot.timeline)
+        let firstLine = try #require(lines.first)
+        let stamp = try #require(SpeakerEvidence.timestamps(in: firstLine).first)
+        let suffix = "引用の終端です。"
+        let continuation = "\n[\(stamp)] 話者A: 田中さんに呼ばれて応答し、タダシですと名乗っています。"
+        var evidence = firstLine
+        while (evidence + continuation + suffix).utf8.count <= AISpeakerEvent.evidenceBytes {
+            evidence += continuation
+        }
+        evidence += suffix
+        #expect(evidence.utf8.count > 1900 && evidence.utf8.count <= 2048)
+        #expect(evidence.contains("\n"))
+        _ = try deliver(session, request: request, evidence: evidence)
+        session.aiRecord?.controller.scan()
+        let attribution = try #require(session.snapshot.names.attributions[0])
+        let defaults = MinutesTestDefaults()
+        let controller = TranscriptWindowController(shouldReduceMotion: { true }, minutesDefaults: defaults.value)
+        let window = try #require(controller.window)
+        window.setFrameAutosaveName("")
+        window.setContentSize(NSSize(width: 600, height: 460))
+        controller.apply(session.snapshot); controller.show()
+        defer { window.close() }
+        let anchor = try #require(window.contentView)
+        for nearTop in [false, true] {
+            let popover = controller.makeSpeakerPopover(slot: 0)
+            popover.present(relativeTo: NSRect(x: 200, y: nearTop ? 430 : 10, width: 22, height: 22), of: anchor)
+            defer { popover.close() }
+            let content = popover.contentView, label = popover.evidenceLabel
+            let field = try #require(descendants(content).compactMap { $0 as? NSTextField }.first { $0.isEditable })
+            let scroll = try #require(descendants(content).compactMap { $0 as? NSScrollView }.first)
+            #expect(label.stringValue == attribution.detail)
+            #expect(label.stringValue.hasSuffix(suffix + "」"))
+            #expect(!label.stringValue.contains("\n"))
+            #expect(label.toolTip == nil && label.accessibilityLabel() == attribution.tooltip)
+            #expect(label.maximumNumberOfLines == 0 && label.lineBreakMode == .byWordWrapping)
+            #expect(content.bounds.width == 340 && label.frame.width == 274)
+            #expect(label.frame.height > 18 && content.bounds.height > 104 + scroll.frame.height + 22)
+            #expect(label.frame.maxY < field.frame.minY && label.frame.minY > scroll.frame.maxY)
+            let popoverWindow = try #require(field.window)
+            let originalWindowFrame = popoverWindow.frame
+            let originalContentSize = content.bounds.size
+            let originalField = popoverWindow.convertToScreen(field.convert(field.bounds, to: nil))
+            if !nearTop { try capture("speaker-ai-evidence-long", view: content) }
+            for query in ["田", "候補にない名前"] {
+                field.stringValue = query
+                popover.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: field))
+                try await Task.sleep(for: .milliseconds(30))
+                #expect(content.bounds.size == originalContentSize && popoverWindow.frame == originalWindowFrame)
+                #expect(popoverWindow.convertToScreen(field.convert(field.bounds, to: nil)) == originalField)
+                #expect(label.stringValue == attribution.detail)
+            }
+        }
+    }
+
     @Test func 点と名前欄の下の根拠を本番ビューで撮影する() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }

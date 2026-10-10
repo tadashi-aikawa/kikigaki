@@ -12,7 +12,7 @@ final class SpeakerPopover: NSObject, NSTextFieldDelegate {
     private let slot: Int
     private let candidates: [SpeakerSuggestions.Candidate]
     private let names: SpeakerNames
-    let evidenceLabel = Washi.label(size: 11, color: Washi.muted)
+    let evidenceLabel = NSTextField(wrappingLabelWithString: "")
     private var edited = false
     private var rows: [Row] = []
     private var selected: Int?
@@ -38,7 +38,19 @@ final class SpeakerPopover: NSObject, NSTextFieldDelegate {
         // contentSizeを入力中に変更しない。上向きの表示でも入力欄の画面位置を維持する。
         let listHeight = CGFloat(min(8, max(2, candidates.count)) * 28)
         let attribution = names.attributions[slot]
-        let evidenceHeight: CGFloat = attribution == nil ? 0 : 22
+        evidenceLabel.font = .systemFont(ofSize: 11)
+        evidenceLabel.textColor = Washi.muted
+        // 引用中の改行は従来のdetailと同じく空白にする。340pt幅では原文の短い改行と
+        // 自動折り返しが混在すると読みにくいため、引用を切らず連続した文章として読ませる。
+        evidenceLabel.stringValue = attribution?.detail ?? ""
+        evidenceLabel.setAccessibilityLabel(attribution?.tooltip)
+        evidenceLabel.isHidden = attribution == nil
+        evidenceLabel.maximumNumberOfLines = 0
+        evidenceLabel.lineBreakMode = .byWordWrapping
+        let labelHeight = max(18, ceil(evidenceLabel.cell?.cellSize(forBounds:
+            NSRect(x: 0, y: 0, width: 274, height: CGFloat.greatestFiniteMagnitude)).height ?? 18))
+        // 開く時点の全文から高さを確定する。候補の絞り込み中は再計測・リサイズしない。
+        let evidenceHeight: CGFloat = attribution == nil ? 0 : labelHeight + 4
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 104 + listHeight + evidenceHeight))
         Washi.surface(content, color: Washi.paper)
         let badge = AvatarView(frame: NSRect(x: 18, y: content.bounds.height - 43, width: 22, height: 23))
@@ -52,12 +64,7 @@ final class SpeakerPopover: NSObject, NSTextFieldDelegate {
         field.setAccessibilityLabel("話者\(SpeakerNames.letter(for: slot))の名前")
         field.delegate = self
         content.addSubview(field)
-        evidenceLabel.stringValue = attribution?.detail ?? ""
-        evidenceLabel.toolTip = attribution?.tooltip
-        evidenceLabel.setAccessibilityLabel(attribution?.tooltip)
-        evidenceLabel.isHidden = attribution == nil
-        evidenceLabel.lineBreakMode = .byTruncatingTail
-        evidenceLabel.frame = NSRect(x: 48, y: content.bounds.height - 67, width: 274, height: 18)
+        evidenceLabel.frame = NSRect(x: 48, y: content.bounds.height - 49 - labelHeight, width: 274, height: labelHeight)
         content.addSubview(evidenceLabel)
         scroll.frame = NSRect(x: 14, y: 50, width: 312, height: listHeight)
         scroll.drawsBackground = false
