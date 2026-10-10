@@ -63,6 +63,7 @@ public struct RecordedAudioClock: Sendable {
     public private(set) var timeline: MeetingTimeline
     public private(set) var acceptedSamples = 0
     private var pausedAt: Date?
+    private var pauseIntervals: [DateInterval] = []
     public var isPaused: Bool { pausedAt != nil }
 
     public init(startedAt: Date) { timeline = MeetingTimeline(startedAt: startedAt) }
@@ -74,12 +75,34 @@ public struct RecordedAudioClock: Sendable {
         return true
     }
 
+    /// 後から復元する欠落音声。欠落中の一時停止は除き、停止の境界位置も補正する。
+    /// 返した数だけ無音を共通のPCM入力へ流す。次の実音声より先に呼ぶ。
+    public mutating func acceptGap(sampleCount: Int, start: Date, end: Date) -> Int {
+        guard sampleCount > 0, end > start else { return 0 }
+        let intervals = pauseIntervals + (pausedAt.map { [DateInterval(start: $0, end: max($0, end))] } ?? [])
+        func excluded(through boundary: Date) -> Double {
+            intervals.reduce(0) { total, interval in
+                total + max(0, min(boundary, interval.end).timeIntervalSince(max(start, interval.start)))
+            }
+        }
+        for (index, interval) in pauseIntervals.enumerated() where interval.start > start {
+            let boundary = min(end, interval.start)
+            let beforePause = max(0, boundary.timeIntervalSince(start) - excluded(through: boundary))
+            let pause = timeline.pauses[index]
+            timeline.pauses[index] = .init(audioTime: pause.audioTime + beforePause, duration: pause.duration)
+        }
+        let count = max(0, sampleCount - Int((excluded(through: end) * 16000).rounded()))
+        acceptedSamples += count
+        return count
+    }
+
     public mutating func pause(at date: Date) {
         if pausedAt == nil { pausedAt = date }
     }
 
     public mutating func resume(at date: Date) {
         guard let pausedAt else { return }
+        pauseIntervals.append(DateInterval(start: pausedAt, end: max(pausedAt, date)))
         timeline.pauses.append(.init(audioTime: Double(acceptedSamples) / 16000,
                                      duration: max(0, date.timeIntervalSince(pausedAt))))
         self.pausedAt = nil

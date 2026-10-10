@@ -24,6 +24,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onRecreateAI: (() -> Void)?
     var onRetryAISave: (() -> Void)?
     private var aiRows: [String: any AITimelineRowView] = [:]
+    private var microphoneRows: [UUID: MicrophoneSwitchRow] = [:]
     private var aiProgress: [UUID: AIProgress] = [:]
     private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
     private var speakerSettingsPopover: SpeakerSettingsPopover?
@@ -221,7 +222,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         updateHeader(width: minutesSplit.left.frame.width)
         speakerSettingsPopover?.update(snapshot: value)
         updateRangeLabel()
-        emptyView.isHidden = !value.utterances.isEmpty || value.tentativeText != nil || !(value.ai?.conversation?.questions.isEmpty ?? true)
+        emptyView.isHidden = !value.utterances.isEmpty || !value.microphoneSwitches.isEmpty || value.tentativeText != nil || !(value.ai?.conversation?.questions.isEmpty ?? true)
         emptyLabel.stringValue = value.state == .idle ? "録音を開始すると、会話がここに表示されます。" : "発言を待っています…"
         updateRows(previous: previous)
         refreshSearch(reset: previous.timeline.startedAt != value.timeline.startedAt, reveal: false)
@@ -308,7 +309,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         if !sameMeeting {
             // 別の会議へ移る行に、前の会議の返答到着の点灯を持ち越さない。
             for row in aiRows.values { (row as? AIReplyRow)?.stopArrival() }
-            rows.removeAll(); aiRows.removeAll(); aiProgress.removeAll()
+            rows.removeAll(); aiRows.removeAll(); aiProgress.removeAll(); microphoneRows.removeAll()
             anchor = .init(candidates: [], y: 0, atBottom: true)
         }
         // AIの追加・状態変化も発話と同じ追従規則にする。上へスクロール中はanchor、
@@ -340,8 +341,20 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         var occurrences: [RowKey: Int] = [:]
         var inserted: [TranscriptRow] = []
         var changed: [TranscriptRow] = []
+        let microphoneEvents = snapshot.microphoneSwitches.sorted { $0.audioTime < $1.audioTime }
+        var microphoneIndex = 0
+        func appendMicrophoneEvents(through time: Double) {
+            while microphoneIndex < microphoneEvents.count, microphoneEvents[microphoneIndex].audioTime <= time {
+                let event = microphoneEvents[microphoneIndex]
+                let row = microphoneRows[event.id] ?? MicrophoneSwitchRow(event)
+                microphoneRows[event.id] = row
+                ordered.append(row)
+                microphoneIndex += 1
+            }
+        }
         for item in attached[-1, default: []] { ordered.append(aiRowView(item)) }
         for (index, utterance) in snapshot.utterances.enumerated() {
+            appendMicrophoneEvents(through: utterance.start)
             let key = RowKey(kind: utterance.kind, start: utterance.start)
             let occurrence = occurrences[key, default: 0]
             occurrences[key] = occurrence + 1
@@ -359,6 +372,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             for item in attached[index, default: []] { ordered.append(aiRowView(item)) }
             rangeRows.append(ordered.last!)
         }
+        appendMicrophoneEvents(through: .infinity)
+        let microphoneIDs = Set(microphoneEvents.map(\.id))
+        microphoneRows = microphoneRows.filter { microphoneIDs.contains($0.key) }
         if let tentative = snapshot.tentativeText {
             tentativeRow.updateTentative(tentative)
             tentativeRow.updateExclusion(snapshot.tentativeExcluded)

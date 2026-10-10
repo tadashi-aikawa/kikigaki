@@ -3,6 +3,27 @@ import Foundation
 import IOKit.audio
 import KikigakiCore
 
+struct MicrophoneDevice: Equatable {
+    let id: AudioObjectID
+    let name: String
+    static func current() throws -> Self {
+        let id = try SystemAudioHAL.read(SystemAudioHAL.system, kAudioHardwarePropertyDefaultInputDevice, UInt32(0))
+        guard id != 0 else { throw SystemAudioError(reason: "既定マイクがまだ接続されていません") }
+        return Self(id: id, name: try SystemAudioHAL.string(id, kAudioObjectPropertyName))
+    }
+    static var currentName: String { (try? current().name) ?? "接続されていません" }
+    static func observe(_ changed: @escaping () -> Void) throws -> (() -> Void) {
+        var address = SystemAudioHAL.address(kAudioHardwarePropertyDefaultInputDevice)
+        let queue = DispatchQueue(label: "kikigaki.microphone.device")
+        let listener: AudioObjectPropertyListenerBlock = { _, _ in changed() }
+        try SystemAudioHAL.check(AudioObjectAddPropertyListenerBlock(SystemAudioHAL.system, &address, queue, listener), "既定マイクの監視")
+        return {
+            var address = SystemAudioHAL.address(kAudioHardwarePropertyDefaultInputDevice)
+            AudioObjectRemovePropertyListenerBlock(SystemAudioHAL.system, &address, queue, listener)
+        }
+    }
+}
+
 struct SystemAudioError: LocalizedError {
     let reason: String
     var errorDescription: String? { reason }

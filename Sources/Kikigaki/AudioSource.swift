@@ -12,36 +12,55 @@ protocol AudioSource: AnyObject {
 }
 
 /// マイク入力を 16kHz mono Float32 に変換して流す(プロトの MicCapture の移植)
-final class MicSource: AudioSource {
+final class EngineMicrophoneCapture: MicrophoneCapturing {
     private let engine = AVAudioEngine()
-
-    static func requestPermission() async -> Bool {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized: return true
-        case .notDetermined: return await AVCaptureDevice.requestAccess(for: .audio)
-        default: return false
+    private let notifications: NotificationCenter
+    private var observer: NSObjectProtocol?
+    private var tapped = false
+    var onConfigurationChange: (() -> Void)?
+    var onFailure: ((String) -> Void)?
+    var isRunning: Bool { engine.isRunning }
+    init(notifications: NotificationCenter = .default) { self.notifications = notifications }
+    // マイクを開かず、実際の通知登録から再起動経路までを試験する口。
+    var notificationObject: AnyObject { engine }
+    func observeConfigurationChanges() {
+        observer = notifications.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
+            // Appleの内部queueではengineを破棄しない。MicSourceが専用queueへ渡す。
+            self?.onConfigurationChange?()
         }
     }
-
-    func start(onSamples: @escaping ([Float]) -> Void) throws {
+    func start(onSamples: @escaping ([Float], Double) -> Void) throws {
+        try SystemAudioHAL.requireMicrophone()
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
-        guard let resampler = AudioResampler(from: format) else {
+        guard format.sampleRate > 0, format.channelCount > 0,
+              let resampler = AudioResampler(from: format) else {
             throw NSError(domain: "kikigaki", code: 2,
                           userInfo: [NSLocalizedDescriptionKey: "マイクの形式を 16kHz mono へ変換できない: \(format)"])
         }
         // 変換器はタップの閉包が持つ。録音のたびに作り直すので、前の会議の状態は残らない
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-            guard let samples = try? resampler.resample(buffer), !samples.isEmpty else { return }
-            onSamples(samples)
+        observeConfigurationChanges()
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, time in
+            do {
+                let samples = try resampler.resample(buffer)
+                guard !samples.isEmpty else { return }
+                let end = time.isHostTimeValid
+                    ? AVAudioTime.seconds(forHostTime: time.hostTime) + Double(buffer.frameLength) / format.sampleRate
+                    : ProcessInfo.processInfo.systemUptime
+                onSamples(samples, end)
+            } catch { self?.onFailure?(error.localizedDescription) }
         }
+        tapped = true
         try engine.start()
     }
 
     func stop() {
-        engine.inputNode.removeTap(onBus: 0)
+        if let observer { notifications.removeObserver(observer) }
+        observer = nil
+        if tapped { engine.inputNode.removeTap(onBus: 0); tapped = false }
         engine.stop()
     }
+    deinit { stop() }
 }
 
 /// 音声ファイルをマイクの代わりに流す(開発用の `--replay <file>`)。実時間を待たずに流し、

@@ -56,6 +56,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     let systemAudioInclude = NSButton(radioButtonWithTitle: "取り込む", target: nil, action: nil)
     let systemAudioExclude = NSButton(radioButtonWithTitle: "取り込まない", target: nil, action: nil)
     private let outputKind: () -> AudioOutputKind
+    private let microphoneName: () -> String
+    let microphoneLabel = Washi.label(size: 13)
     private var outputTimer: Timer?
     let diarizeOn = NSButton(radioButtonWithTitle: "区別する(最大8人)", target: nil, action: nil)
     let diarizeOff = NSButton(radioButtonWithTitle: "区別しない", target: nil, action: nil)
@@ -82,10 +84,12 @@ final class StartSheet: NSObject, NSTextViewDelegate {
          minutesPath: String? = nil, minutesHistory: [String] = [],
          nextMeetings: [NextMeeting] = [],
          systemAudioMode: SystemAudioMode = .automatic,
-         outputKind: @escaping () -> AudioOutputKind = { .unknown }) {
+         outputKind: @escaping () -> AudioOutputKind = { .unknown },
+         microphoneName: @escaping () -> String = { MicrophoneDevice.currentName }) {
         self.profiles = profiles
         self.nextMeetings = NextMeetings(nextMeetings).candidates
         self.outputKind = outputKind
+        self.microphoneName = microphoneName
         window = StartSheetWindow(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 400),
                                   styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
@@ -123,6 +127,13 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         let audioChoices = NSStackView(views: audioRadios)
         audioChoices.orientation = .horizontal; audioChoices.spacing = 14
         add(row("システム音声", audioChoices), to: rows)
+        add(separator(), to: rows)
+        microphoneLabel.usesSingleLineMode = true
+        microphoneLabel.lineBreakMode = .byTruncatingTail
+        microphoneLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        microphoneLabel.setAccessibilityLabel("マイク")
+        refreshMicrophone()
+        add(row("マイク", microphoneLabel), to: rows)
         add(separator(), to: rows)
 
         // 話者判別。録音開始で会議へ固定するので、始めてからは変えられない。
@@ -627,7 +638,10 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         fit()
         // 開いているシートだけ追従する。開始後の会議の音源モードは固定する。
         outputTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshSystemAudioOutput() }
+            MainActor.assumeIsolated {
+                self?.refreshSystemAudioOutput()
+                self?.refreshMicrophone()
+            }
         }
         parent.beginSheet(window)
         (window as? AIQuestionWindow)?.monitorOutsideClicks()
@@ -708,6 +722,10 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     func refreshSystemAudioOutput() {
         systemAudioAutomatic.title = SystemAudioMode.automatic.includes(outputKind())
             ? "自動(いまは取り込む)" : "自動(いまは取り込まない)"
+    }
+    func refreshMicrophone() {
+        microphoneLabel.stringValue = microphoneName()
+        microphoneLabel.toolTip = microphoneLabel.stringValue
     }
 }
 

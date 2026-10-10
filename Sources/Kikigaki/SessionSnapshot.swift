@@ -8,6 +8,7 @@ struct SessionSnapshot {
     var aiRecoveryWarning: String?
     var state: RecordingState = .idle
     var utterances: [Utterance] = []
+    var microphoneSwitches: [MicrophoneSwitch] = []
     var audioLevels: [AudioLevelAssessment?] = []
     var audioExclusion = AudioExclusion()
     var excludedRows: Set<Int> = []

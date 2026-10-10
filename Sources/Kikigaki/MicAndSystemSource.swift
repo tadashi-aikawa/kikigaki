@@ -112,6 +112,15 @@ final class MicAndSystemSource: AudioSource {
         do {
             let source = try makeMicrophone()
             microphone = source
+            if let mic = source as? MicSource {
+                let token = generation
+                mic.onWarning = { [weak self] warning in
+                    DispatchQueue.main.async {
+                        guard let self, self.running, self.generation == token else { return }
+                        self.notify(warning ?? "システム音声を取り込めないためマイクのみで続けます: \(reason)")
+                    }
+                }
+            }
             try source.start(onSamples: samples); live = source
             // 再接続できたら「再試行します」を残さず、マイクのみで続ける理由へ戻す。
             notify("システム音声を取り込めないためマイクのみで続けます: \(reason)")

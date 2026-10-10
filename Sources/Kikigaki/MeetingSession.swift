@@ -3,15 +3,33 @@ import Foundation
 import KikigakiCore
 
 /// 音声スレッド側の消費ループから読む一時停止フラグ
-private final class PauseFlag: @unchecked Sendable {
+final class PauseFlag: @unchecked Sendable {
     private let lock = NSLock()
     private var clock = RecordedAudioClock(startedAt: Date())
     var timeline: MeetingTimeline { lock.withLock { clock.timeline } }
     var audioTime: Double { lock.withLock { Double(clock.acceptedSamples) / 16000 } }
 
-    func reset(startedAt: Date) { lock.withLock { clock = RecordedAudioClock(startedAt: startedAt) } }
-    func pause() { lock.withLock { clock.pause(at: Date()) } }
-    func resume() { lock.withLock { clock.resume(at: Date()) } }
+    func reset(startedAt: Date) {
+        lock.withLock { clock = RecordedAudioClock(startedAt: startedAt) }
+    }
+    func pause(at date: Date = Date()) {
+        lock.withLock { clock.pause(at: date) }
+    }
+    func resume(at date: Date = Date()) {
+        lock.withLock { clock.resume(at: date) }
+    }
+
+    func acceptGap(sampleCount: Int, start: Date, end: Date, into continuation: AsyncStream<[Float]>.Continuation) {
+        lock.withLock {
+            // 再接続待ちの途中に一時停止・再開していても、その秒数を二重に数えない。
+            var remaining = clock.acceptGap(sampleCount: sampleCount, start: start, end: end)
+            // まだ一時停止中でも、停止前に欠落した分だけは記録する。
+            while remaining > 0 {
+                let count = min(8000, remaining)
+                continuation.yield(Array(repeating: 0, count: count)); remaining -= count
+            }
+        }
+    }
 
     func accept(_ chunk: [Float], into continuation: AsyncStream<[Float]>.Continuation) {
         lock.withLock {
@@ -350,6 +368,12 @@ final class MeetingSession {
             samplesIn = continuation
             consumer = makeConsumer(stream: stream, transcriber: transcriber, diarizer: diarizer, wav: wav, generation: preparation)
             let pause = self.pause
+            if let microphone = source as? MicSource {
+                configureMicrophone(microphone, generation: preparation)
+                microphone.onGap = { count, start, end in
+                    pause.acceptGap(sampleCount: count, start: start, end: end, into: continuation)
+                }
+            }
             if let mixed = source as? MicAndSystemSource {
                 mixed.onWarning = { [weak self] reason in
                     Task { @MainActor in
@@ -535,6 +559,31 @@ final class MeetingSession {
         }
         refreshLive()
         emit()
+    }
+
+    /// 注記の位置は消費側ではなく収録側の時計を読む。ASRが遅れても位置は動かない。
+    func configureMicrophone(_ microphone: MicSource, generation: UUID? = nil) {
+        let generation = generation ?? preparationID
+        let pause = self.pause
+        microphone.onSwitch = { [weak self] name, date in
+            let event = MicrophoneSwitch(audioTime: pause.audioTime, date: date, name: name)
+            Task { @MainActor in
+                guard let self, self.preparationID == generation,
+                      self.snapshot.state == .recording || self.snapshot.state == .paused else { return }
+                self.snapshot.microphoneSwitches.append(event)
+                self.emit()
+            }
+        }
+        microphone.onWarning = { [weak self] reason in
+            Task { @MainActor in
+                guard let self, self.preparationID == generation,
+                      self.snapshot.state == .preparing || self.snapshot.state == .recording || self.snapshot.state == .paused else { return }
+                // 復帰で消すのはマイクの警告だけ。別の保存・AI警告は消さない。
+                if let reason { self.snapshot.message = reason; self.log(reason) }
+                else if self.snapshot.message?.hasPrefix("マイクを再接続できません。") == true { self.snapshot.message = nil }
+                self.emit()
+            }
+        }
     }
 
     /// 投稿受付からemitまでawaitを挟まない。停止より先に受理した行は最終保存に含める。

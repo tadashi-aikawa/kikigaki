@@ -74,6 +74,38 @@ import Testing
         #expect(markdown.contains("- 長さ: 00:20"))
         #expect(markdown.contains("- [00:01:41] 話者A: 再開後"))
     }
+
+    @Test func 欠落中の複数回の休止を引き境界も収録位置へ戻す() {
+        var clock = RecordedAudioClock(startedAt: start)
+        clock.accept(sampleCount: 16000)
+        clock.pause(at: start.addingTimeInterval(1.5)); clock.resume(at: start.addingTimeInterval(2))
+        clock.pause(at: start.addingTimeInterval(3)); clock.resume(at: start.addingTimeInterval(4))
+        #expect(clock.acceptGap(sampleCount: 64000, start: start.addingTimeInterval(1), end: start.addingTimeInterval(5)) == 40000)
+        #expect(clock.timeline.pauses == [.init(audioTime: 1.5, duration: 0.5), .init(audioTime: 2.5, duration: 1)])
+        #expect(clock.acceptedSamples == 56000)
+        #expect(clock.timeline.date(at: 2.4) == start.addingTimeInterval(2.9))
+        #expect(clock.timeline.date(at: 3.5) == start.addingTimeInterval(5))
+    }
+
+    @Test func 休止が欠落の前から始まった場合は再開後だけを補う() {
+        var clock = RecordedAudioClock(startedAt: start)
+        clock.accept(sampleCount: 16000)
+        clock.pause(at: start.addingTimeInterval(1)); clock.resume(at: start.addingTimeInterval(3))
+        #expect(clock.acceptGap(sampleCount: 32000, start: start.addingTimeInterval(2), end: start.addingTimeInterval(4)) == 16000)
+        #expect(clock.timeline.pauses == [.init(audioTime: 1, duration: 2)])
+        #expect(clock.timeline.date(at: 2) == start.addingTimeInterval(4))
+    }
+
+    @Test func まだ休止中でも停止前の欠落だけを補い再開時の位置を保つ() {
+        var clock = RecordedAudioClock(startedAt: start)
+        clock.accept(sampleCount: 16000)
+        clock.pause(at: start.addingTimeInterval(1.5))
+        #expect(clock.acceptGap(sampleCount: 48000, start: start.addingTimeInterval(1), end: start.addingTimeInterval(4)) == 8000)
+        #expect(clock.isPaused && clock.acceptedSamples == 24000)
+        clock.resume(at: start.addingTimeInterval(4))
+        #expect(clock.timeline.pauses == [.init(audioTime: 1.5, duration: 2.5)])
+        #expect(clock.timeline.date(at: 1.5) == start.addingTimeInterval(4))
+    }
 }
 
 @Suite struct LiveTranscriptTests {
