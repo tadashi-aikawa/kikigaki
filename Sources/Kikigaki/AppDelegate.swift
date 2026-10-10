@@ -380,12 +380,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `minutesPath` はURLスキームなど外からの指定で、開いている最中なら差し替える。
     func presentStartSheet(minutesPath: String? = nil) {
         guard let session, let config, session.snapshot.state.canStart, replayURL == nil else { return }
-        window?.show()
         if let startSheet {
             if let minutesPath { startSheet.setMinutesPath(minutesPath) }
             startSheet.focus()
             return
         }
+        window?.show()
         guard let parent = window?.window else { return }
         let nextMeetings: [NextMeeting]
         do { nextMeetings = try nextMeetingStore?.expire().candidates ?? [] }

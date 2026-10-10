@@ -3,7 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
-// 実シートの焦点と閉じる操作を確かめるため、同時に複数のシートを開かない。
+// 実モーダルの焦点と閉じる操作を確かめるため、同時に複数を開かない。
 @Suite(.serialized, .timeLimit(.minutes(1))) @MainActor struct StartSheetTests {
     @Test func システム音声の自動判定が追従し開始時に固定する() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
@@ -172,7 +172,7 @@ import KikigakiCore
         #expect(started?.minutesPath == "/work/dropped.md")
     }
 
-    @Test func 実ウィンドウへシートとして出し幅を固定する() throws {
+    @Test func 実ウィンドウへ独立モーダルとして出し幅と焦点を保つ() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let suite = "StartSheetTests.\(UUID())"
@@ -185,8 +185,13 @@ import KikigakiCore
         let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true, exclusion: AudioExclusion(),
                                nextMeetings: [next])
         sheet.present(on: parent)
-        #expect(parent.attachedSheet === sheet.window)
+        #expect(parent.attachedSheet == nil && sheet.window.sheetParent == nil)
+        #expect(sheet.window.parent === parent)
+        #expect(parent.ignoresMouseEvents)
         #expect(sheet.window.firstResponder === sheet.startButton)
+        #expect(sheet.startButton.focusRingType == .none)
+        sheet.window.selectNextKeyView(nil)
+        #expect(sheet.window.firstResponder != nil && sheet.window.firstResponder !== sheet.startButton)
         #expect(sheet.window.frame.width == StartSheet.width)
         // 「送らない」で詳細を畳むと高さだけが変わる。幅は動かさない。
         let expanded = sheet.window.frame.height
@@ -195,6 +200,7 @@ import KikigakiCore
         #expect(sheet.window.frame.width == StartSheet.width && sheet.window.frame.height < expanded)
         sheet.close()
         #expect(parent.attachedSheet == nil)
+        #expect(sheet.window.parent == nil && !parent.ignoresMouseEvents)
     }
 
     @Test func 取消は何も始めない() throws {
@@ -381,7 +387,7 @@ import KikigakiCore
         sheet.close()
     }
 
-    @Test func 親より長い実シートも候補と宛先の切替で上端を固定する() async throws {
+    @Test func 独立モーダルは画面のやや上から候補と宛先の切替で下へ伸縮する() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let screen = try #require(NSScreen.main)
@@ -399,11 +405,13 @@ import KikigakiCore
         defer { sheet.close(); parent.orderOut(nil) }
         sheet.present(on: parent)
         try await Task.sleep(for: .milliseconds(300))
-        #expect(parent.attachedSheet === sheet.window)
+        #expect(parent.attachedSheet == nil && sheet.window.sheetParent == nil)
+        #expect(sheet.window.parent === parent)
         #expect(sheet.window.frame.height > parent.frame.height)
         let top = sheet.window.frame.maxY
         let expanded = sheet.window.frame.height
-        #expect(abs(top - parent.convertToScreen(parent.contentLayoutRect).maxY) < 0.5)
+        #expect(abs(top - (screen.visibleFrame.maxY - screen.visibleFrame.height * 0.12)) < 0.5)
+        #expect(abs(sheet.window.frame.midX - parent.frame.midX) < 0.5)
         for _ in 0..<2 {
             sheet.selectNextMeeting(at: 1)
             #expect(abs(sheet.window.frame.maxY - top) < 0.5)
@@ -427,7 +435,7 @@ import KikigakiCore
         try capture("fixed-top-expanded", sheet)
     }
 
-    @Test func 実シートの下端を画面内に収め本文をスクロールできる() async throws {
+    @Test func 独立モーダルは画面下端に余白を残して本文をスクロールできる() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let screen = try #require(NSScreen.main)
@@ -443,29 +451,123 @@ import KikigakiCore
         sheet.present(on: parent)
         try await Task.sleep(for: .milliseconds(300))
         let top = sheet.window.frame.maxY
+        // 大きい画面でも必ず下端制限を検証する。自然な本文高だけを増やす。
+        let scroll = try #require(sheet.window.contentView as? NSScrollView)
+        let document = try #require(scroll.documentView as? NSStackView)
+        let extra = NSView()
+        extra.heightAnchor.constraint(equalToConstant: screen.visibleFrame.height).isActive = true
+        document.insertArrangedSubview(extra, at: document.arrangedSubviews.count - 1)
         sheet.destination.selectItem(withTag: 2); sheet.destinationChanged()
         #expect(abs(sheet.window.frame.maxY - top) < 0.5)
         try await Task.sleep(for: .milliseconds(100))
-        #expect(parent.attachedSheet === sheet.window)
+        #expect(sheet.window.parent === parent && sheet.window.sheetParent == nil)
         #expect(abs(sheet.window.frame.maxY - top) < 0.5)
-        #expect(abs(sheet.window.frame.minY - screen.visibleFrame.minY) < 0.5)
-        let scroll = try #require(sheet.window.contentView as? NSScrollView)
-        let document = try #require(scroll.documentView)
+        #expect(abs(sheet.window.frame.minY - (screen.visibleFrame.minY + 20)) < 0.5)
         #expect(scroll.hasVerticalScroller)
         #expect(document.frame.height > scroll.contentView.bounds.height)
         #expect(abs(scroll.documentVisibleRect.maxY - document.bounds.maxY) < 0.5)
-        #expect(!scroll.documentVisibleRect.intersects(sheet.startButton.convert(sheet.startButton.bounds, to: document)))
         try capture("screen-limited-top", sheet)
+        let actions = sheet.startButton.convert(sheet.startButton.bounds, to: document)
         document.scroll(NSPoint(x: 0, y: 0))
         scroll.reflectScrolledClipView(scroll.contentView)
-        #expect(abs(scroll.documentVisibleRect.minY) < 0.5)
         #expect(scroll.documentVisibleRect.maxY < document.bounds.maxY)
-        #expect(scroll.documentVisibleRect.contains(sheet.startButton.convert(sheet.startButton.bounds, to: document)))
+        #expect(scroll.documentVisibleRect.contains(actions))
         try capture("screen-limited-bottom", sheet)
+        document.removeArrangedSubview(extra); extra.removeFromSuperview()
         sheet.destination.selectItem(withTag: 0); sheet.destinationChanged()
         try await Task.sleep(for: .milliseconds(100))
         #expect(abs(sheet.window.frame.maxY - top) < 0.5)
         #expect(!scroll.hasVerticalScroller)
+    }
+
+    @Test func 親が画面の端でも独立モーダルの横位置を画面内へ寄せる() {
+        let screen = NSRect(x: -1200, y: 100, width: 1000, height: 800)
+        let left = StartSheet.initialPlacement(parentFrame: NSRect(x: -1400, y: 0, width: 200, height: 200), visibleFrame: screen)
+        let right = StartSheet.initialPlacement(parentFrame: NSRect(x: -100, y: 0, width: 200, height: 200), visibleFrame: screen)
+        #expect(left.x == screen.minX)
+        #expect(right.x + StartSheet.width == screen.maxX)
+        #expect(left.top == screen.maxY - screen.height * 0.12)
+    }
+
+    @Test func 独立モーダルで親への入力を止め閉じると復元する() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let parent = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 800, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let responder = StartSheetParentResponder()
+        parent.contentView = responder
+        parent.makeFirstResponder(responder)
+        let sheet = StartSheet(profiles: [], diarizationEnabled: true, exclusion: AudioExclusion())
+        defer { sheet.close(); parent.orderOut(nil) }
+        let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: 0, windowNumber: parent.windowNumber, context: nil,
+            characters: "x", charactersIgnoringModifiers: "x", isARepeat: false, keyCode: 7))
+        sheet.present(on: parent)
+        sheet.present(on: parent)
+        #expect(parent.childWindows?.filter { $0 is StartSheetWindow }.count == 1)
+        NSApp.sendEvent(event)
+        #expect(responder.keyCount == 0)
+        sheet.cancelPressed()
+        NSApp.sendEvent(event)
+        #expect(responder.keyCount == 1)
+        #expect(!parent.ignoresMouseEvents)
+    }
+
+    @Test func 独立モーダルで改行と開始と取消を保ち開始後のTaskが動く() async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let parent = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 800, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let sheet = StartSheet(profiles: try twoProfiles(root), diarizationEnabled: true, exclusion: AudioExclusion())
+        defer { sheet.close(); parent.orderOut(nil) }
+        var starts = 0, cancels = 0, taskRan = false
+        sheet.onStart = { _ in starts += 1; Task { @MainActor in taskRan = true } }
+        sheet.onCancel = { cancels += 1 }
+        func key(_ code: UInt16, _ text: String, _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
+            try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
+                timestamp: 0, windowNumber: sheet.window.windowNumber, context: nil,
+                characters: text, charactersIgnoringModifiers: text, isARepeat: false, keyCode: code))
+        }
+        sheet.present(on: parent)
+        sheet.window.makeFirstResponder(sheet.editor)
+        sheet.editor.string = "議事録"; sheet.editor.setSelectedRange(NSRange(location: 3, length: 0))
+        sheet.window.sendEvent(try key(36, "\r"))
+        #expect(sheet.editor.string == "議事録\n" && starts == 0)
+        sheet.window.sendEvent(try key(36, "\r", .command))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(starts == 1 && taskRan && !sheet.window.isVisible)
+        sheet.present(on: parent)
+        sheet.window.makeFirstResponder(sheet.startButton)
+        sheet.window.sendEvent(try key(36, "\r"))
+        #expect(starts == 2)
+        sheet.present(on: parent)
+        sheet.window.sendEvent(try key(53, "\u{1b}"))
+        #expect(cancels == 1 && starts == 2)
+    }
+
+    @Test func 独立モーダルに付けた選択用のシートを操作して取消できる() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let parent = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 800, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let sheet = StartSheet(profiles: [], diarizationEnabled: true, exclusion: AudioExclusion())
+        defer { sheet.close(); parent.orderOut(nil) }
+        sheet.present(on: parent)
+        // NSOpenPanelのXPCサービスはswift testを途中終了させるため、同じ
+        // シート機構で独立モーダルに付くパネルへの入力と取消を確認する。
+        let panel = AIQuestionWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100),
+                                     styleMask: [.titled], backing: .buffered, defer: false)
+        var cancelled = false
+        panel.onDismiss = { sheet.window.endSheet(panel, returnCode: .cancel); panel.orderOut(nil) }
+        sheet.window.beginSheet(panel) { cancelled = $0 == .cancel }
+        #expect(panel.sheetParent === sheet.window)
+        #expect(parent.ignoresMouseEvents)
+        sheet.focus()
+        #expect(sheet.window.attachedSheet === panel)
+        let escape = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: 0, windowNumber: panel.windowNumber, context: nil,
+            characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+        NSApp.sendEvent(escape)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        #expect(cancelled && sheet.minutesBox.stringValue.isEmpty && sheet.window.isVisible)
     }
 
     /// 検証用の撮影。モックとの突き合わせに使い、通常のテストでは何もしない。
@@ -482,6 +584,12 @@ import KikigakiCore
         try #require(bitmap.representation(using: .png, properties: [:]))
             .write(to: URL(fileURLWithPath: directory).appendingPathComponent(name + ".png"))
     }
+}
+
+private final class StartSheetParentResponder: NSView {
+    var keyCount = 0
+    override var acceptsFirstResponder: Bool { true }
+    override func keyDown(with event: NSEvent) { keyCount += 1 }
 }
 
 @Suite(.timeLimit(.minutes(1))) @MainActor struct StartSheetScheduleTests {

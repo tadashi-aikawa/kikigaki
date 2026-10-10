@@ -26,6 +26,10 @@ import KikigakiAIIO
         let app = AppDelegate(testingSession: session, config: config, window: window, nextMeetingStore: store)
         app.presentStartSheet()
         let sheet = try #require(app.startSheet)
+        // 録音ボタンの二重押しでも同じ独立モーダルへ焦点を戻す。
+        app.presentStartSheet()
+        #expect(app.startSheet === sheet)
+        #expect(window.window?.childWindows?.filter { $0 is StartSheetWindow }.count == 1)
         #expect(sheet.nextMeetings.map(\.id) == [next.id])
         #expect(sheet.options?.minutesPath == next.minutesPath)
         #expect(try store.load().meetings.map(\.id) == [next.id])
