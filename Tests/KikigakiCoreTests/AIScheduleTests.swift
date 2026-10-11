@@ -151,14 +151,21 @@ import KikigakiCore
         #expect(history.received?.id == snapshot.id)
     }
 
-    @Test func 開始値を検証し標準外の設定間隔を保持する() throws {
+    @Test func 開始値のプロンプトと秒単位の間隔を検証する() throws {
         for prompt in ["", " \n", "a\0", String(repeating: "あ", count: 11_000)] {
             #expect(throws: (any Error).self) { try AIScheduleOptions(prompt: prompt) }
         }
         for interval in [0.0, -1, .infinity, .nan] {
             #expect(throws: (any Error).self) { try AIScheduleOptions(prompt: "更新", interval: interval) }
         }
-        #expect(AIScheduleOptions.minuteChoices(including: 7) == [1, 2, 3, 5, 7, 10])
-        #expect(AIScheduleOptions.minuteChoices(including: 3) == [1, 2, 3, 5, 10])
+    }
+
+    @Test func 間隔の候補は120分まで標準外の設定値を追加する() {
+        let standard = [1, 2, 3, 5, 10, 15, 30, 60, 120]
+        for minutes in standard + [0, 121] {
+            #expect(AIScheduleOptions.minuteChoices(including: minutes) == standard)
+        }
+        #expect(AIScheduleOptions.minuteChoices(including: 7) == [1, 2, 3, 5, 7, 10, 15, 30, 60, 120])
+        #expect(AIScheduleOptions.minuteChoices(including: 95) == [1, 2, 3, 5, 10, 15, 30, 60, 95, 120])
     }
 }

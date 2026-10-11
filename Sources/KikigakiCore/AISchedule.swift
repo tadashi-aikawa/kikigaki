@@ -14,7 +14,7 @@ public struct AIScheduleOptions: Equatable, Sendable {
     }
 
     public static func minuteChoices(including configured: Int) -> [Int] {
-        Array(Set([1, 2, 3, 5, 10] + ((1...60).contains(configured) ? [configured] : []))).sorted()
+        Array(Set([1, 2, 3, 5, 10, 15, 30, 60, 120] + ((1...120).contains(configured) ? [configured] : []))).sorted()
     }
 }
 

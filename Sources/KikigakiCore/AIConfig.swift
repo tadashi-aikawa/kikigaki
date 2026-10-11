@@ -117,8 +117,8 @@ public struct AIConfig: Codable, Equatable, Sendable {
         if let autoPrompt, autoPrompt.utf8.count > AILimits.questionBytes || autoPrompt.contains("\0") {
             throw invalid("autoPrompt exceeds limit or contains NUL")
         }
-        if let autoIntervalMinutes, !(1...60).contains(autoIntervalMinutes) {
-            throw invalid("autoIntervalMinutes must be 1...60")
+        if let autoIntervalMinutes, !(1...120).contains(autoIntervalMinutes) {
+            throw invalid("autoIntervalMinutes must be 1...120")
         }
         if let board { try BoardHeading.validate(board) }
         if let boardPrompt {

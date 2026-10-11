@@ -7,12 +7,12 @@ import KikigakiCore
         let home = URL(fileURLWithPath: "/tmp/scheduled")
         let defaults = try #require(ResolvedConfig(config: ConfigLoader.parse(toml: "[[ai]]"), home: home).ai)
         #expect(defaults.autoPrompt == "" && defaults.autoIntervalMinutes == 3)
-        for minutes in [1, 7, 60] {
+        for minutes in [1, 7, 60, 61, 95, 120] {
             let config = try #require(ResolvedConfig(config: ConfigLoader.parse(toml: "[[ai]]\nautoPrompt = '議事録を更新'\nautoIntervalMinutes = \(minutes)"), home: home).ai)
             let restored = try AIJSON.decode(ResolvedAIConfig.self, from: AIJSON.encode(config))
             #expect(restored.autoIntervalMinutes == minutes && restored.autoPrompt == "議事録を更新")
         }
-        for value in ["0", "61", "-1", "1.5", "'3'", "true"] {
+        for value in ["0", "121", "-1", "1.5", "'3'", "true"] {
             #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: "[[ai]]\nautoIntervalMinutes = \(value)") }
         }
         #expect(throws: (any Error).self) { try ConfigLoader.parse(toml: "[[ai]]\nautoPrompt = 3") }
@@ -24,6 +24,13 @@ import KikigakiCore
         #expect(restored.autoPrompt == "" && restored.autoIntervalMinutes == 3)
         old["autoIntervalMinutes"] = NSNull()
         #expect(throws: (any Error).self) { try AIJSON.decode(ResolvedAIConfig.self, from: JSONSerialization.data(withJSONObject: old)) }
+    }
+
+    @Test(arguments: [0, 121])
+    func 間隔の範囲外は120分までのエラーを返す(minutes: Int) {
+        #expect(throws: ConfigError.invalid(description: "ai: autoIntervalMinutes must be 1...120")) {
+            try AIConfig(autoIntervalMinutes: minutes).validate()
+        }
     }
 
     private func request(trigger: AIParticipantContext.Trigger?) throws -> AIRequest {

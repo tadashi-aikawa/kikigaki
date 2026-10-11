@@ -50,7 +50,7 @@ cwd = "~/work/minutes"    # 起動時の作業ディレクトリ。省略時は�
 autoStart = true          # 録音開始シートの自動送信の既定にする。全体で1つまで
 # 手動・自動実行シートと録音開始シートのプロンプト初期値
 autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
-autoIntervalMinutes = 3   # 1〜60分
+autoIntervalMinutes = 3   # 1〜120分
 
 [[ai]]
 name = "相談"
@@ -135,7 +135,7 @@ avatar = "~/Pictures/avatars/tanaka.png"
 | --- | --- | --- |
 | `autoStart` | `false` | `true` で、録音開始シートの自動送信の宛先の既定にする。全宛先で1つまで。`board` の無い宛先では `autoPrompt` が必要 |
 | `autoPrompt` | 空 | 手動・自動実行シートと録音開始シートのプロンプトの初期値。32 KiBまで |
-| `autoIntervalMinutes` | `3` | 自動送信の間隔。1〜60分。シートの選択肢に無い値も、その値で選べるようになる |
+| `autoIntervalMinutes` | `3` | 自動送信の間隔。1〜120分。シートの選択肢に無い値も、その値で選べるようになる |
 
 ### ボード
 

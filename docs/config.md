@@ -42,7 +42,7 @@ autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更�
 # board = "## ボード"          # 自動はこの見出しだけ更新。autoPromptは手動の初期値
 # boardLocation = "~/Documents/minutes/${yyyyMMdd_HHmmss}.md として作成し、変数は現在日時" # パス未指定時の作成指示
 # boardPrompt = "独自のボードのプロンプト全文" # board指定時のみ。省略時は内蔵
-autoIntervalMinutes = 3 # 1〜60分、省略時は3分
+autoIntervalMinutes = 3 # 1〜120分、省略時は3分
 
 [[ai]]
 name = "相談"
@@ -124,7 +124,7 @@ address = "ネオへ"
 | `identifySpeakers` | `false` | 送信に話者名の割当を同梱する。詳細は [AI参加者の設計](ai-participant.md#話者名の割当) |
 | `autoStart` | `false` | 録音開始シートの自動送信の宛先の既定にする。配列全体で1つまで。`board` を指定しない宛先は `autoPrompt` が必要 |
 | `autoPrompt` | 空 | 手動・自動実行シートと録音開始シートのプロンプト初期値 |
-| `autoIntervalMinutes` | `3` | 自動送信の間隔。1〜60分 |
+| `autoIntervalMinutes` | `3` | 自動送信の間隔。1〜120分 |
 | `board` | ボードなし | ボードとして自動更新する見出し。1行のMarkdown見出し。宛先間で同じ見出しを使える |
 | `boardPrompt` | 内蔵 | ボードのプロンプト全文の差し替え。`board` があるときだけ指定できる |
 | `boardLocation` | なし | 議事録のパスが無いときの作成指示。`board` があるときだけ指定できる。変数はAIが解釈し、アプリでは展開しない |

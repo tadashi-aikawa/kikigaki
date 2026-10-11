@@ -55,7 +55,7 @@ address = "ネオへ"                # cwd を省いたので既定のディレ�
 | identifySpeakers | false。trueの宛先の送信に話者名の割当を同梱する。真偽値だけを認める。契約は [AI参加者の設計](ai-participant.md#話者名の割当) を参照。 |
 | autoStart | false。trueは配列全体で1つまで。`board` を指定しない宛先は `autoPrompt` が空なら設定エラー。録音開始シートの宛先の既定になる。 |
 | autoPrompt | 空文字列。手動・自動実行シートと録音開始シートのプロンプトの初期値。32 KiBまで。 |
-| autoIntervalMinutes | 3。1〜60分。 |
+| autoIntervalMinutes | 3。1〜120分。 |
 | board | 省略時はボードなし。単一のMarkdown見出し(`#` から `######`)。配列内の重複を許す。 |
 | boardPrompt | `board` があるときだけ指定できる。省略時は内蔵のボードプロンプト。 |
 | boardLocation | `board` があるときだけ指定できる。議事録のパスが無いときの作成指示。 |

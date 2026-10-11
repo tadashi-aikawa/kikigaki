@@ -113,6 +113,31 @@ import KikigakiCore
         #expect(!footer.robot.isHidden && !footer.arrangedSubviews[1].isHidden)
     }
 
+    @Test func 長い間隔も分秒の表示でフッターの幅に収まる() throws {
+        _ = NSApplication.shared
+        let controller = TranscriptWindowController(shouldReduceMotion: { true })
+        let window = try #require(controller.window)
+        window.setContentSize(NSSize(width: 600, height: 578))
+        let now = Date(timeIntervalSince1970: 1000)
+        var state = SessionSnapshot(ai: AIViewState(), state: .recording)
+        state.aiSchedule.active = true
+        for (seconds, expected) in [(7200.0, "120:00"), (5730.0, "95:30"), (6000.0, "100:00")] {
+            state.aiSchedule.nextFire = now.addingTimeInterval(seconds)
+            controller.apply(state)
+            controller.compactFooter.update(state, reduceMotion: true, now: now)
+            window.contentView?.layoutSubtreeIfNeeded()
+            let robot = controller.compactFooter.robot
+            #expect(robot.displayText == expected)
+            let width = (robot.displayText as NSString).size(withAttributes: [.font: robot.statusFont]).width
+            #expect(width <= robot.bounds.width)
+        }
+        let font = controller.compactFooter.robot.statusFont
+        let widths = ["111:11", "120:00", "888:88"].map {
+            ($0 as NSString).size(withAttributes: [.font: font]).width
+        }
+        #expect(Set(widths).count == 1)
+    }
+
     @Test func フッターのAI操作を左端一つへまとめ解除をその他から外す() {
         _ = NSApplication.shared
         let window = TranscriptWindowController()
@@ -205,10 +230,11 @@ import KikigakiCore
         window.setFrameOrigin(NSPoint(x: 20000, y: 20000)); window.orderFront(nil)
         defer { window.orderOut(nil) }
         let now = Date(timeIntervalSince1970: 1000)
-        for (name, active, preparing, running, phase) in [
-            ("off", false, false, false, 0), ("countdown", true, false, false, 0),
-            ("preparing-0", true, true, false, 0), ("preparing-1", true, true, false, 1),
-            ("running-0", true, false, true, 0), ("running-1", true, false, true, 1)
+        for (name, active, preparing, running, phase, remaining) in [
+            ("off", false, false, false, 0, 150), ("countdown", true, false, false, 0, 150),
+            ("countdown-120", true, false, false, 0, 7200), ("countdown-95", true, false, false, 0, 5730),
+            ("preparing-0", true, true, false, 0, 150), ("preparing-1", true, true, false, 1, 150),
+            ("running-0", true, false, true, 0, 150), ("running-1", true, false, true, 1, 150)
         ] {
             var state = try waitingState()
             if !running {
@@ -220,7 +246,7 @@ import KikigakiCore
                 state.ai?.conversation = conversation
             }
             state.ai?.isPreparing = preparing
-            state.aiSchedule.active = active; state.aiSchedule.nextFire = active ? now.addingTimeInterval(150) : nil
+            state.aiSchedule.active = active; state.aiSchedule.nextFire = active ? now.addingTimeInterval(Double(remaining)) : nil
             state.timeline = .init(startedAt: Date(timeIntervalSince1970: 1_788_759_600))
             state.elapsed = 754
             state.utterances = (0..<40).map { index in
