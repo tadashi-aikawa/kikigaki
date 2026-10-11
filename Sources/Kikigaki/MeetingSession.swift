@@ -1,3 +1,4 @@
+import AppKit
 import FluidAudio
 import Foundation
 import KikigakiCore
@@ -145,6 +146,11 @@ final class MeetingSession {
     private var aiSubmissionTriggers: [Int: AIParticipantContext.Trigger] = [:]
     private var cancelledAutomaticOwners: [Int: UUID] = [:]
     private var aiSchedule: AIScheduleState?
+    private var autoSendPhraseState: AutoSendPhraseState
+    /// 合図の音は返事のnotifySoundと独立。テストでは音を捕捉する。
+    var playAutoSendSound: (Bool) -> Void = { sent in
+        NSSound(named: sent ? "Pop" : "Basso")?.play()
+    }
     private var rangeAutomaticSlot: Int?
 #if DEBUG
     func setMinutesPreparationForTesting() {
@@ -244,6 +250,7 @@ final class MeetingSession {
     /// 会議をまたいで引き継がないAIの状態。録音開始のたびにここを通す。
     /// 宛先の選択も前の会議のものを残さない。
     private func resetMeetingAIState(_ meetingConfig: ResolvedConfig) {
+        autoSendPhraseState = AutoSendPhraseState(phrases: meetingConfig.autoSendPhrases)
         scheduleDrafts = [:]
         manualDrafts = [:]
         meetingAIProfiles = meetingConfig.aiProfiles
@@ -258,6 +265,7 @@ final class MeetingSession {
     init(config: ResolvedConfig, models: @escaping () async throws -> DiarizationModels.Loaded, log: @escaping (String) -> Void,
          aiStore: AIRecordStore? = nil, diarizationDefaults: UserDefaults? = nil) {
         self.config = config
+        autoSendPhraseState = AutoSendPhraseState(phrases: config.autoSendPhrases)
         self.aiStore = aiStore; meetingAIProfiles = config.aiProfiles
         // 手動と自動の宛先はどちらも先頭で独立に初期化する。
         meetingAI = config.aiProfiles.first; scheduleAI = config.aiProfiles.first
@@ -1071,6 +1079,12 @@ final class MeetingSession {
         let generation = preparationID
         return { [weak self] value in self?.publishUndiarized(value, generation: generation) }
     }
+    /// ASRを起動しない検証では、送信のcaptureが読む確定本文も同時に用意する。
+    func publishUndiarizedForTesting(_ value: TranscriptMerge.Snapshot, elapsed: Double) {
+        finalTokens = value.tokens
+        consumedAudioTime = elapsed; snapshot.elapsed = elapsed
+        publishUndiarized(value, generation: preparationID)
+    }
     var pendingUndiarizedDrawForTesting: Task<Void, Never>? { pendingUndiarizedDraw }
     var submissionTaskForTesting: Task<Void, Never>? { aiTasks[meetingAI?.slot ?? 1] ?? aiTasks.values.first }
     var paneCleanupTaskForTesting: Task<Void, Never>? { aiCleanupTask }
@@ -1227,6 +1241,7 @@ final class MeetingSession {
         refreshLive()
         diagnostics.liveTraceLines(snapshot.utterances, names: snapshot.names, elapsed: consumedAudioTime).forEach(log)
         emit()
+        observeAutoSendPhrases()
         if diagnostics.showsLiveTrace && newlyFinalized {
             log(String(format: "[undiarized-final count=%d published=%.6f]", liveSource.finalCount, ProcessInfo.processInfo.systemUptime))
         }
@@ -1274,6 +1289,7 @@ final class MeetingSession {
         snapshot.elapsed = elapsed
         diagnostics.liveTraceLines(snapshot.utterances, names: snapshot.names, elapsed: elapsed).forEach(log)
         emit()
+        observeAutoSendPhrases()
     }
 }
 
@@ -1401,15 +1417,36 @@ extension MeetingSession {
         return aiRecord?.controller.hasChanges(lines: lines, slot: aiScheduleConfiguration?.slot) ?? !lines.isEmpty
     }
 
-    func fireAIScheduleNow(now: Date = Date()) { evaluateAISchedule(now: now, immediately: true) }
+    @discardableResult
+    func fireAIScheduleNow(now: Date = Date()) -> AIScheduleState.Effect {
+        guard snapshot.canFireAutomatic else { return .skipped(.unavailable) }
+        return evaluateAISchedule(now: now, immediately: true)
+    }
 
-    func evaluateAISchedule(now: Date = Date(), immediately: Bool = false) {
+    private func observeAutoSendPhrases(now: Date = Date()) {
+        // 通常行はfinalCountの範囲。手入力と暫定末尾はCoreへ渡さない。
+        for row in snapshot.utterances where row.kind == .voice {
+            guard let event = autoSendPhraseState.observe(row, now: now.timeIntervalSince1970,
+                automaticActive: aiSchedule?.phase == .running, canFireNow: snapshot.canFireAutomatic) else { continue }
+            log(diagnostics.autoSendPhraseLine(event))
+            switch event.decision {
+            case .fire:
+                let effect = fireAIScheduleNow(now: now)
+                if case .send = effect { playAutoSendSound(true) } else { playAutoSendSound(false) }
+            case .unavailable: playAutoSendSound(false)
+            case .cooldown, .watermark: break
+            }
+        }
+    }
+
+    @discardableResult
+    func evaluateAISchedule(now: Date = Date(), immediately: Bool = false) -> AIScheduleState.Effect {
         guard let phase = aiSchedule?.phase, phase != .stopped else {
-            aiScheduleTimer?.invalidate(); aiScheduleTimer = nil; return
+            aiScheduleTimer?.invalidate(); aiScheduleTimer = nil; return .none
         }
         observeAIScheduleResults()
         guard immediately || aiSchedule?.phase == .awaitingFinal ||
-              (aiSchedule?.phase == .running && aiSchedule?.nextFire.map({ now >= $0 }) == true) else { return }
+              (aiSchedule?.phase == .running && aiSchedule?.nextFire.map({ now >= $0 }) == true) else { return .none }
         let lines = TranscriptRenderer.lines(snapshot.includedUtterances, names: snapshot.names, timeline: snapshot.timeline)
         let changed = aiRecord?.controller.hasChanges(lines: lines, slot: aiScheduleConfiguration?.slot) ?? !lines.isEmpty
         let availability = scheduleAvailability
@@ -1436,6 +1473,7 @@ extension MeetingSession {
         default: break
         }
         emit()
+        return effect ?? .none
     }
 
 #if DEBUG

@@ -16,17 +16,19 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     public var measureAudioLevels: Bool?
     /// 話者名の候補に使う、議事録のfrontmatterのキー
     public var participantsKey: String?
+    public var autoSendPhrases: [String]?
     public var speakers: [Speaker]?
     /// 配列の `[[ai]]`
     public var ai: AIProfileList?
 
     public init(outputDir: String? = nil, saveRecording: Bool? = nil,
                 speakers: [Speaker]? = nil, ai: AIProfileList? = nil, measureAudioLevels: Bool? = nil,
-                participantsKey: String? = nil) {
+                participantsKey: String? = nil, autoSendPhrases: [String]? = nil) {
         self.outputDir = outputDir
         self.saveRecording = saveRecording
         self.measureAudioLevels = measureAudioLevels
         self.participantsKey = participantsKey
+        self.autoSendPhrases = autoSendPhrases
         self.speakers = speakers
         self.ai = ai
     }
@@ -38,6 +40,7 @@ public struct ResolvedConfig: Equatable, Sendable {
     public static let defaultOutputDir = "~/Documents/KIKIGAKI"
     /// タダシの議事録が使うキー。`attendees` などの流儀の人は設定で変える
     public static let defaultParticipantsKey = "participants"
+    public static let defaultAutoSendPhrases = ["しおりを挟んで", "栞を挟んで", "しおりをはさんで", "栞をはさんで"]
 
     public var outputDir: URL
     /// 録音WAVは既定では残さない。通常利用では不要でディスクを食うだけで、要るのはデバッグや
@@ -45,6 +48,7 @@ public struct ResolvedConfig: Equatable, Sendable {
     public var saveRecording: Bool
     public var measureAudioLevels: Bool
     public var participantsKey: String
+    public var autoSendPhrases: [String]
     public var speakers: [KikigakiConfig.Speaker]
     /// 設定順のプロファイル。slotは1始まりで、この並びが宛先ポップアップの並びになる
     public var aiProfiles: [ResolvedAIConfig]
@@ -65,6 +69,7 @@ public struct ResolvedConfig: Equatable, Sendable {
         saveRecording = config.saveRecording ?? false
         measureAudioLevels = config.measureAudioLevels ?? false
         participantsKey = config.participantsKey ?? Self.defaultParticipantsKey
+        autoSendPhrases = config.autoSendPhrases ?? Self.defaultAutoSendPhrases
         speakers = (config.speakers ?? []).map { speaker in
             var speaker = speaker
             speaker.name = SpeakerNames.normalized(speaker.name)
@@ -120,6 +125,16 @@ public enum ConfigLoader {
 
     private static func validate(_ config: KikigakiConfig) throws {
         try config.ai?.validate()
+        if let phrases = config.autoSendPhrases {
+            guard phrases.count <= 20 else { throw ConfigError.invalid(description: "autoSendPhrases allows at most 20 phrases") }
+            var normalized = Set<String>()
+            for phrase in phrases {
+                let value = AutoSendPhrase.normalize(phrase)
+                guard phrase.count <= 64, !value.isEmpty, normalized.insert(value).inserted else {
+                    throw ConfigError.invalid(description: "autoSendPhrases must be non-empty and unique after normalization, with at most 64 characters per phrase")
+                }
+            }
+        }
         var speakerNames = Set<String>()
         for speaker in config.speakers ?? [] {
             let name = SpeakerNames.normalized(speaker.name)

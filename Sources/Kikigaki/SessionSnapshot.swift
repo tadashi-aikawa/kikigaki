@@ -68,4 +68,11 @@ struct SessionSnapshot {
     var canSubmitAI: Bool {
         markdownURL != nil && (state == .recording || state == .paused)
     }
+
+    /// メニューと声の合図が共有する即時自動送信の入口。
+    var canFireAutomatic: Bool {
+        aiSchedule.active && aiSchedule.nextFire != nil && aiSchedule.canFireNow
+            && ai?.isPreparing != true
+            && ai?.conversation?.questions.contains { $0.isAwaitingResult } != true
+    }
 }

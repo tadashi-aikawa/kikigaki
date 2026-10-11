@@ -21,6 +21,12 @@ public struct Diagnostics: Sendable {
         return ["[live]\n" + TranscriptRenderer.text(utterances, names: names)]
     }
 
+    /// 本文を残さず、正規化した合図と時刻だけで着火・無視を追える。
+    public func autoSendPhraseLine(_ event: AutoSendPhraseState.Event) -> String {
+        "[auto-send-phrase \(event.decision.rawValue)] phrase=\(event.phrase) "
+            + String(format: "start=%.3f end=%.3f at=%.3f", event.start, event.end, event.at)
+    }
+
     public func liveTraceLines(_ utterances: [Utterance], names: SpeakerNames, elapsed: Double) -> [String] {
         guard showsLiveTrace else { return [] }
         return [String(format: "[live at=%.2f]\n", elapsed) + TranscriptRenderer.text(utterances, names: names)]
