@@ -569,6 +569,10 @@ import KikigakiCore
         let initial = sheet.window.frame
         let scroll = try #require(sheet.window.contentView as? NSScrollView)
         let document = try #require(scroll.documentView)
+        let documentHeight = document.frame.height
+        // CIの仮想画面のように低い画面では、確保した本文高がシート高の上限を超えてスクロールする。
+        // スクロールしないことは画面に収まるときだけ確かめ、本文高が変わらないことはどちらでも確かめる。
+        let fitsScreen = documentHeight <= floor(screen.visibleFrame.height - StartSheet.screenMargin * 2)
         try capture("fixed-height-next-two", sheet)
         for _ in 0..<2 {
             for index in 0...2 {
@@ -581,21 +585,22 @@ import KikigakiCore
         for slot in [0, 1, 2] {
             sheet.destination.selectItem(withTag: slot); sheet.destinationChanged()
             try await Task.sleep(for: .milliseconds(100))
-            #expect(sheet.window.frame == initial)
-            #expect(document.frame.height <= scroll.contentSize.height)
-            #expect(!scroll.hasVerticalScroller)
+            #expect(sheet.window.frame == initial && document.frame.height == documentHeight)
+            if fitsScreen {
+                #expect(document.frame.height <= scroll.contentSize.height)
+                #expect(!scroll.hasVerticalScroller)
+            }
             if slot == 0 { try capture("fixed-height-send-none", sheet) }
         }
         sheet.showMinutesHint("議事録は絶対パスの.mdを指定してください")
         sheet.editor.string = String(repeating: "長いプロンプト\n", count: 100)
         sheet.textDidChange(Notification(name: NSText.didChangeNotification))
         try await Task.sleep(for: .milliseconds(100))
-        #expect(sheet.window.frame == initial)
-        #expect(document.frame.height <= scroll.contentSize.height)
+        #expect(sheet.window.frame == initial && document.frame.height == documentHeight)
+        if fitsScreen { #expect(document.frame.height <= scroll.contentSize.height) }
         sheet.setMinutesPath("/手入力.md")
         #expect(sheet.window.frame == initial)
         // 実シートの候補を最後まで削除しても、初回に確保した高さと上端は維持する。
-        let documentHeight = document.frame.height
         for _ in meetings {
             sheet.nextRemoveButtons[0].isHidden = false
             try await sendAction(sheet.nextRemoveButtons[0])
