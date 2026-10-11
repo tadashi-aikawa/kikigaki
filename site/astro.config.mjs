@@ -33,6 +33,17 @@ export default defineConfig({
           tag: "link",
           attrs: { rel: "apple-touch-icon", href: "/kikigaki/apple-touch-icon.png" },
         },
+        // Starlightは og:image を出さないので、トップと同じ横長の画像を全ページに付ける。
+        // 元は site/ogp/ogp.html。twitter:card は Starlight が summary_large_image で出す
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:image",
+            content: "https://tadashi-aikawa.github.io/kikigaki/ogp.webp",
+          },
+        },
+        { tag: "meta", attrs: { property: "og:image:width", content: "1200" } },
+        { tag: "meta", attrs: { property: "og:image:height", content: "630" } },
       ],
       social: [
         {

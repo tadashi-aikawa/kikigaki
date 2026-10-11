@@ -1,0 +1,132 @@
+<!doctype html>
+<!--
+  リンクプレビュー画像 (public/ogp.webp) の元。トップ・ドキュメント・GitHubのSocial previewで共有する。
+  再生成はリポジトリルートで次を実行する。Chromeのヘッドレスで撮り、非可逆WebPへ変換する。
+
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --hide-scrollbars \
+      --window-size=1200,630 --screenshot=/tmp/kikigaki-ogp.png "file://$PWD/site/ogp/ogp.html"
+    cwebp -q 90 -m 6 -metadata icc /tmp/kikigaki-ogp.png -o site/public/ogp.webp
+
+  GitHubのSocial previewはWebPを受け付けないので、同じPNGをJPEGにして手で上げる。
+-->
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../src/styles/washi.css" />
+    <style>
+      * {
+        margin: 0;
+        box-sizing: border-box;
+      }
+
+      /* 地はヒーロー画像の地の色に合わせ、画像の縁を見せない。和紙のノイズは全体へ重ねる */
+      body {
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+        background: #f4e9d6;
+        font-family: var(--washi-font);
+        color: var(--washi-ink);
+      }
+
+      body::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        background: var(--washi-noise);
+      }
+
+      .card {
+        position: relative;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 32px;
+        padding: 0 64px 0 80px;
+      }
+
+      /* 下端に朱の帯を引き、ロゴの色と結ぶ */
+      .card::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 14px;
+        background: var(--washi-red);
+      }
+
+      .wordmark {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+      }
+
+      .wordmark img {
+        width: 112px;
+        height: 112px;
+      }
+
+      .name {
+        display: flex;
+        flex-direction: column;
+        line-height: 1;
+      }
+
+      .name b {
+        font-size: 76px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+      }
+
+      .name i {
+        margin-top: 10px;
+        padding-left: 0.2em;
+        font-size: 21px;
+        font-style: normal;
+        color: var(--washi-muted);
+        letter-spacing: 0.4em;
+      }
+
+      h1 {
+        margin-top: 48px;
+        white-space: nowrap;
+        font-size: 46px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      p {
+        margin-top: 16px;
+        font-size: 22px;
+        color: var(--washi-muted);
+        letter-spacing: 0.02em;
+      }
+
+      /* 上下の余白を切り、吹き出しと紙の部分だけを見せる */
+      .visual img {
+        display: block;
+        width: 440px;
+        height: 380px;
+        object-fit: cover;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div>
+        <div class="wordmark">
+          <img src="../src/assets/kikigaki.png" alt="" />
+          <span class="name"><b>KIKIGAKI</b><i>聞書</i></span>
+        </div>
+        <h1>声をすべてドキュメントに</h1>
+        <p>会議も、ひとりの声も、話す人ごとにMarkdownへ</p>
+      </div>
+      <div class="visual">
+        <img src="../public/illustrations/hero.webp" alt="" />
+      </div>
+    </div>
+  </body>
+</html>

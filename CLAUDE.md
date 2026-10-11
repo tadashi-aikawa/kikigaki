@@ -49,6 +49,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - 配信先はGitHub Pagesの `https://tadashi-aikawa.github.io/kikigaki/`。ドキュメントは `/kikigaki/docs/` 以下
   - ビルドは `pnpm --dir site install --frozen-lockfile` と `pnpm --dir site build`。mainへのpushで `.github/workflows/pages.yml` が配備する
   - トップの絵・動画・キャプチャは `public/illustrations/` `public/demos/` `public/captures/` に置くと出る。無ければ仮置きを出す。ファイル名は `index.astro` の `Media` の `src`
+  - リンクプレビュー画像は `public/ogp.webp` で、トップとドキュメントの全ページが使う。元は `ogp/ogp.html` で、再生成の手順はその冒頭
   - 画像は非可逆のWebPで置く。PNGは容量を食うので使わない。例外はPNGが前提のfaviconとapple-touch-icon、Astroが変換する `src/assets/` の元画像
   - `docs/` との分担と対応表は「変える前に知っておくこと」
 - `experiments/nemotron/`: 話者判別モデルの比較用の独立CLI。アプリにはエンジンの切替を置かない
