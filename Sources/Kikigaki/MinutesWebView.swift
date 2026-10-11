@@ -132,6 +132,19 @@ actor MinutesImageReader {
 
 /// 議事録専用のWebKit。AIの返事行のTextKit描画とは寿命・幅・検索を共有しない。
 @MainActor final class MinutesWebView: NSView, WKNavigationDelegate {
+    private(set) var textScale: CGFloat = 1
+    func setTextScale(_ scale: CGFloat) {
+        guard scale != textScale else { return }
+        textScale = scale
+        // DOMを書き直さないので、検索のmark・選択・更新強調を維持する。
+        loadedWebView?.pageZoom = scale
+        applyPageTextScale()
+    }
+    private func applyPageTextScale() {
+        guard ready, let loadedWebView else { return }
+        loadedWebView.callAsyncJavaScript("window.minutes.setTextScale(scale)", arguments: ["scale": Double(textScale)],
+                                         in: nil, in: .page) { _ in }
+    }
     private var loadedWebView: WKWebView?
     var hasLoadedWebView: Bool { loadedWebView != nil }
     var webView: WKWebView { loadWebView() }
@@ -165,6 +178,7 @@ actor MinutesImageReader {
         config.setURLSchemeHandler(resources, forURLScheme: "minutes-image")
         config.userContentController.add(relay, name: "minutes")
         let webView = WKWebView(frame: .zero, configuration: config)
+        webView.pageZoom = textScale
         loadedWebView = webView
         webView.navigationDelegate = self
         webView.setAccessibilityLabel("議事録")
@@ -212,7 +226,7 @@ actor MinutesImageReader {
     fileprivate func receive(_ body: Any) {
         guard let value = body as? [String: Any], let kind = value["kind"] as? String else { return }
         switch kind {
-        case "ready": ready = true; sendPending()
+        case "ready": ready = true; applyPageTextScale(); sendPending()
         case "focus":
             if !isHiddenOrHasHiddenAncestor, window?.firstResponder !== webView { window?.makeFirstResponder(webView) }
         case "rendered":

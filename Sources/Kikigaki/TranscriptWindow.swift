@@ -72,9 +72,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     struct RowKey: Hashable { let kind: Utterance.Kind; let start: Double }
     struct RowID: Hashable { let kind: Utterance.Kind; let start: Double; let occurrence: Int }
     var rows: [RowID: TranscriptRow] = [:]
+    static let textScaleDefaultsKey = "KikigakiTranscriptTextPercent"
+    private let textDefaults: UserDefaults
+    private(set) var textScale: TranscriptTextScale
 
-    init(shouldReduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }, minutesDefaults: UserDefaults = .standard) {
+    init(shouldReduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }, minutesDefaults: UserDefaults = .standard, textDefaults: UserDefaults = .standard) {
         self.shouldReduceMotion = shouldReduceMotion
+        self.textDefaults = textDefaults
+        textScale = TranscriptTextScale(savedValue: textDefaults.object(forKey: Self.textScaleDefaultsKey))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 578),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "KIKIGAKI"
@@ -102,6 +107,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         minutesSplit.preview.onSelect = { [weak self] path in try self?.onSelectMinutes?(path) }
         minutesSplit.restore()
+        tentativeRow.setTextScale(CGFloat(textScale.multiplier))
+        minutesSplit.preview.setTextScale(CGFloat(textScale.multiplier))
         updateHeader(width: minutesSplit.left.frame.width)
         avatars.onChange = { [weak self] in
             guard let self else { return }
@@ -360,6 +367,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             occurrences[key] = occurrence + 1
             let id = RowID(kind: utterance.kind, start: utterance.start, occurrence: occurrence)
             let row = rows[id] ?? TranscriptRow()
+            row.setTextScale(CGFloat(textScale.multiplier))
             if rows[id] == nil { inserted.append(row) }
             if row.update(utterance, names: snapshot.names, timeline: snapshot.timeline) { changed.append(row) }
             row.updateConfirmation(unconfirmed: snapshot.unconfirmedRows.contains(index))
@@ -589,6 +597,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             }
         }
         aiRows[item.rowID] = view
+        view.setTextScale(CGFloat(textScale.multiplier))
         return view
     }
 
@@ -675,7 +684,32 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         copyRequested = false
     }
     @objc private func copyPressed() { copyWithNotice { onCopy?() } }
+    @objc func increaseTextSize(_ sender: Any?) { setTextScale(textScale.increased()) }
+    @objc func decreaseTextSize(_ sender: Any?) { setTextScale(textScale.decreased()) }
+    @objc func resetTextSize(_ sender: Any?) { setTextScale(.actual) }
+
+    func setTextScale(_ value: TranscriptTextScale) {
+        guard value != textScale else { return }
+        // フォントの更新より先に、読んでいる行と画面上の位置を記録する。
+        let anchor = transcriptDocument.anchor()
+        textScale = value
+        textDefaults.set(value.percent, forKey: Self.textScaleDefaultsKey)
+        let scale = CGFloat(value.multiplier)
+        for row in rows.values { row.setTextScale(scale) }
+        tentativeRow.setTextScale(scale)
+        for row in aiRows.values { row.setTextScale(scale) }
+        minutesSplit.preview.setTextScale(scale)
+        window?.contentView?.layoutSubtreeIfNeeded()
+        transcriptDocument.reflow(anchor: anchor)
+        scrolled()
+    }
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(increaseTextSize(_:)): return textScale.canIncrease
+        case #selector(decreaseTextSize(_:)): return textScale.canDecrease
+        case #selector(resetTextSize(_:)): return textScale != .actual
+        default: break
+        }
         if menuItem.action == #selector(toggleMinutes) {
             menuItem.title = minutesSplit.isPreviewVisible ? "議事録を隠す" : "議事録を表示"
             menuItem.state = minutesSplit.isPreviewVisible ? .on : .off

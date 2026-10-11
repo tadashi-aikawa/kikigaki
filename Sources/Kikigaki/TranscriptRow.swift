@@ -121,7 +121,9 @@ final class TranscriptRow: NSView, DocumentRow {
     private let typedBody = TypedEntryBody()
     private let imageStrip = TypedImageStrip()
     private var displayedImagePaths: [String] = []
-    private var imagesHeight: CGFloat { displayedImagePaths.isEmpty ? 0 : 90 }
+    private var imagesHeight: CGFloat { displayedImagePaths.isEmpty ? 0 : imageStrip.contentHeight + 6 }
+    private var bodyX: CGFloat { 20 + 34 * textScale }
+    private func bodyWidth(_ width: CGFloat) -> CGFloat { max(44, width - bodyX - 20) }
     private let speakerButton = SpeakerButton()
     var onRename: ((Int, NSView) -> Void)?
     private var utterance: Utterance?
@@ -136,6 +138,28 @@ final class TranscriptRow: NSView, DocumentRow {
         let currentName: NSRange?; let currentText: NSRange?
     }
     private let tentative: Bool
+    private(set) var textScale: CGFloat = 1
+
+    func setTextScale(_ scale: CGFloat) {
+        guard textScale != scale else { return }
+        textScale = scale
+        nameLabel.font = .systemFont(ofSize: 12 * scale, weight: tentative ? .regular : .semibold)
+        // 検索で属性付き文字列になった名前は、fontプロパティだけでは更新されない。
+        nameLabel.attributedStringValue = TranscriptTypography.withFont(nameLabel.attributedStringValue, nameLabel.font!)
+        timeLabel.font = .monospacedDigitSystemFont(ofSize: 12 * scale, weight: .regular)
+        levelLabel.font = .systemFont(ofSize: 11 * scale)
+        let scaledBody = TranscriptTypography.withFont(body.attributedStringValue, .systemFont(ofSize: 15 * scale))
+        body.font = .systemFont(ofSize: 15 * scale)
+        body.attributedStringValue = scaledBody
+        let selection = typedBody.selectedRanges
+        if let storage = typedBody.textStorage {
+            storage.setAttributedString(TranscriptTypography.withFont(storage, .systemFont(ofSize: 15 * scale)))
+        }
+        typedBody.selectedRanges = selection
+        imageStrip.setTextScale(scale)
+        measuredWidth = -1
+        needsLayout = true
+    }
 
     init(tentative: Bool = false) {
         self.tentative = tentative
@@ -280,7 +304,7 @@ final class TranscriptRow: NSView, DocumentRow {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = 4
         let attributed = NSMutableAttributedString(string: text, attributes: [
-            .font: NSFont.systemFont(ofSize: 15), .foregroundColor: Washi.ink,
+            .font: NSFont.systemFont(ofSize: 15 * textScale), .foregroundColor: Washi.ink,
             .paragraphStyle: paragraph
         ])
         if utterance?.kind == .typed, let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
@@ -300,8 +324,8 @@ final class TranscriptRow: NSView, DocumentRow {
         if measuredWidth != width {
             // NSTextFieldの内側余白まで含めて測る。文字列だけのboundingRectでは
             // 折り返し境界の数pt差で最終行が切れるため、描画するセル自身に問い合わせる。
-            let size = body.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: max(44, width - 74), height: .greatestFiniteMagnitude)) ?? .zero
-            measuredHeight = max(20, typedBody.isHidden ? ceil(size.height) : typedBody.height(for: max(44, width - 74))) + 36 + (hasLevelNote ? 20 : 0) + imagesHeight
+            let size = body.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: bodyWidth(width), height: .greatestFiniteMagnitude)) ?? .zero
+            measuredHeight = max(20 * textScale, typedBody.isHidden ? ceil(size.height) : typedBody.height(for: bodyWidth(width))) + 31 * textScale + 5 + (hasLevelNote ? 20 * textScale : 0) + imagesHeight
             measuredWidth = width
         }
         return measuredHeight
@@ -310,19 +334,20 @@ final class TranscriptRow: NSView, DocumentRow {
         super.layout()
         content.frame = bounds
         flash.frame = NSRect(x: 12, y: 2, width: max(0, bounds.width - 24), height: bounds.height - 4)
-        avatar.frame = NSRect(x: 20, y: 8, width: 25, height: 26)
+        // アバター内のイニシャルも同じ倍率で描く。外側の紙の余白は固定する。
+        avatar.frame = NSRect(x: 20, y: 8, width: 25 * textScale, height: 26 * textScale)
         // 太字の字形が計測幅の右端へ届くため、端数の丸めと描画の余白を確保する。
         let nameWidth = min(ceil(nameLabel.intrinsicContentSize.width) + 4,
-                            max(70, bounds.width - 220))
-        nameLabel.frame = NSRect(x: 54, y: 8, width: nameWidth, height: 18)
-        speakerButton.frame = NSRect(x: 18, y: 5, width: nameWidth + 40, height: 29)
-        attributionDot.frame = NSRect(x: 54 + nameWidth + 5, y: 14.5, width: 5, height: 5)
-        timeLabel.frame = NSRect(x: 54 + nameWidth + (attributionDot.isHidden ? 12 : 18), y: 8, width: 62, height: 18)
-        let levelHeight: CGFloat = hasLevelNote ? 20 : 0
-        body.frame = NSRect(x: 54, y: 31, width: max(44, bounds.width - 74), height: max(20, bounds.height - 36 - levelHeight - imagesHeight))
+                            max(70 * textScale, bounds.width - bodyX - 104 - 62 * textScale))
+        nameLabel.frame = NSRect(x: bodyX, y: 8, width: nameWidth, height: 18 * textScale)
+        speakerButton.frame = NSRect(x: 18, y: 5, width: nameWidth + bodyX - 14, height: max(29, 29 * textScale))
+        attributionDot.frame = NSRect(x: bodyX + nameWidth + 5, y: 8 + 9 * textScale - 2.5, width: 5, height: 5)
+        timeLabel.frame = NSRect(x: bodyX + nameWidth + (attributionDot.isHidden ? 12 : 18), y: 8, width: 62 * textScale, height: 18 * textScale)
+        let levelHeight: CGFloat = hasLevelNote ? 20 * textScale : 0
+        body.frame = NSRect(x: bodyX, y: 31 * textScale, width: bodyWidth(bounds.width), height: max(20 * textScale, bounds.height - 31 * textScale - 5 - levelHeight - imagesHeight))
         typedBody.frame = body.frame
-        imageStrip.frame = NSRect(x: 54, y: body.frame.maxY + 4, width: max(44, bounds.width - 74), height: 84)
-        levelLabel.frame = NSRect(x: 54, y: bounds.height - 23, width: max(44, bounds.width - 74), height: 18)
+        imageStrip.frame = NSRect(x: bodyX, y: body.frame.maxY + 4, width: bodyWidth(bounds.width), height: imageStrip.contentHeight)
+        levelLabel.frame = NSRect(x: bodyX, y: bounds.height - 5 - 18 * textScale, width: bodyWidth(bounds.width), height: 18 * textScale)
     }
     func appear(animated: Bool) {
         guard animated else { stopAnimations(); return }

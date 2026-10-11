@@ -5,6 +5,7 @@ import KikigakiCore
 /// NSTextTableを使うためTextKit 1を明示し、計測も表示と同じlayoutManagerで行う。
 final class MarkdownBodyView: NSTextView {
     private var source: String?
+    private(set) var textScale: CGFloat = 1
     private var measuredWidth: CGFloat?
     private var measuredHeight: CGFloat = 0
     /// 描画は幅を知らずに1回だけ行うので、表の列は自然幅のまま置かれている。
@@ -49,7 +50,19 @@ final class MarkdownBodyView: NSTextView {
         // 改名・録音の進行では文字列を差し替えず、選択とスクロール位置を保つ。
         guard source != markdown else { return }
         source = markdown
-        textStorage?.setAttributedString(MarkdownBodyRenderer.render(MarkdownBlocks.parse(markdown)))
+        render(markdown)
+    }
+
+    func setTextScale(_ scale: CGFloat) {
+        guard textScale != scale else { return }
+        textScale = scale
+        let selection = selectedRanges
+        if let source { render(source) }
+        selectedRanges = selection
+    }
+
+    private func render(_ markdown: String) {
+        textStorage?.setAttributedString(MarkdownBodyRenderer.render(MarkdownBlocks.parse(markdown), scale: textScale))
         measuredWidth = nil
         appliedWidth = nil
         collectTables()
@@ -136,7 +149,7 @@ final class MarkdownBodyView: NSTextView {
 enum MarkdownBodyRenderer {
     /// 表の文字。本文15ptより1段小さく、列幅の計測にも同じ値を使う。
     static let tableFontSize: CGFloat = 14
-    static func render(_ blocks: [MarkdownBlock]) -> NSAttributedString {
+    static func render(_ blocks: [MarkdownBlock], scale: CGFloat = 1) -> NSAttributedString {
         let result = NSMutableAttributedString(string: "")
         render(blocks, into: result, enclosing: [])
         // 表の空セル・空コードにも終端段落が必要。通常本文の余分な終端だけを取り除く。
@@ -144,7 +157,25 @@ enum MarkdownBodyRenderer {
             let last = result.attribute(.paragraphStyle, at: result.length - 1, effectiveRange: nil) as? NSParagraphStyle
             if last?.textBlocks.isEmpty != false { result.deleteCharacters(in: NSRange(location: result.length - 1, length: 1)) }
         }
-        return result
+        if scale != 1 {
+            // フォントを変える前に、列の自然幅と字下げを同じ倍率へ直す。
+            var seen = Set<ObjectIdentifier>()
+            result.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: result.length)) { value, range, _ in
+                guard let paragraph = value as? NSParagraphStyle else { return }
+                let style = paragraph.mutableCopy() as! NSMutableParagraphStyle
+                style.firstLineHeadIndent *= scale
+                style.headIndent *= scale
+                style.defaultTabInterval *= scale
+                style.tabStops = style.tabStops.map { NSTextTab(textAlignment: $0.alignment, location: $0.location * scale, options: $0.options) }
+                for block in style.textBlocks where block.contentWidthValueType == .absoluteValueType {
+                    if seen.insert(ObjectIdentifier(block)).inserted {
+                        block.setContentWidth(block.contentWidth * scale, type: .absoluteValueType)
+                    }
+                }
+                result.addAttribute(.paragraphStyle, value: style, range: range)
+            }
+        }
+        return TranscriptTypography.scaled(result, by: scale)
     }
 
     /// admonitionの本文は外側の器を持ったまま再帰で描く。1つのtextStorageのままにして、

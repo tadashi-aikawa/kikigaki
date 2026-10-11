@@ -6,6 +6,7 @@ import KikigakiCore
 @MainActor protocol AITimelineRowView: DocumentRow {
     var item: AITimeline.Item { get }
     func update(_ item: AITimeline.Item, state: AIViewState)
+    func setTextScale(_ scale: CGFloat)
 }
 
 enum AIRowMetrics {
@@ -24,6 +25,11 @@ enum AIRowMetrics {
     static func measure(_ field: NSTextField, width: CGFloat) -> CGFloat {
         ceil(field.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: max(44, width), height: .greatestFiniteMagnitude)).height ?? 0)
     }
+    /// 省略表示した後も、元の文字列の幅で折り返しを判定する。
+    static func labelWidth(_ field: NSTextField, scale: CGFloat) -> CGFloat {
+        guard scale > 1 else { return ceil(field.intrinsicContentSize.width) }
+        return ceil((field.stringValue as NSString).size(withAttributes: [.font: field.font ?? NSFont.systemFont(ofSize: 12 * scale)]).width)
+    }
 }
 
 /// 確認待ち・返事待ちの印。状態表示なので操作を持たせない。無効でも面は足さず、色だけを抜く。
@@ -31,6 +37,12 @@ final class AIStatusPill: HoverButton {
     enum Style: Equatable { case confirmation, waiting }
     private(set) var style: Style = .waiting
     private var configured = false
+    var textScale: CGFloat = 1 {
+        didSet {
+            font = .systemFont(ofSize: 11 * textScale, weight: .bold)
+            invalidateIntrinsicContentSize(); needsDisplay = true
+        }
+    }
     init() {
         super.init(frame: .zero)
         isBordered = false
@@ -48,7 +60,7 @@ final class AIStatusPill: HoverButton {
         invalidateIntrinsicContentSize(); needsDisplay = true
     }
     override var intrinsicContentSize: NSSize {
-        NSSize(width: ceil((title as NSString).size(withAttributes: [.font: font!]).width) + 16, height: 20)
+        NSSize(width: ceil((title as NSString).size(withAttributes: [.font: font!]).width) + 16, height: 20 * textScale)
     }
     override func draw(_ dirtyRect: NSRect) {
         let color = style == .confirmation ? Washi.red : Washi.muted
@@ -69,7 +81,8 @@ final class AIStatusPill: HoverButton {
 final class AITagPill: NSView {
     override var isFlipped: Bool { true }
     var text = "" { didSet { if text != oldValue { needsDisplay = true } } }
-    private var font: NSFont { .systemFont(ofSize: 10) }
+    var textScale: CGFloat = 1 { didSet { needsDisplay = true } }
+    private var font: NSFont { .systemFont(ofSize: 10 * textScale) }
     var measuredWidth: CGFloat { ceil((text as NSString).size(withAttributes: [.font: font]).width) + 12 }
     override func draw(_ dirtyRect: NSRect) {
         let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
@@ -90,13 +103,13 @@ final class AIModelFooter: NSView {
     static let height: CGFloat = 18
     /// 2つの塊の間。中黒より広く、別のものだと一目で読めるだけ空ける。
     static let gap: CGFloat = 12
-    private static let font = NSFont.systemFont(ofSize: 11)
     private static let iconGap: CGFloat = 4
     private static let modelGlyph = glyph("cpu")
     private static let placeGlyph = glyph("folder")
     private var stages: [AIModelLabel.Stage] = []
     /// 今の幅で選んだ段。どれも収まらなければnilで、何も描かない。
     private(set) var stage: AIModelLabel.Stage?
+    var textScale: CGFloat = 1 { didSet { refresh(); needsDisplay = true } }
     var displayText: String { stage?.text ?? "" }
 
     override init(frame frameRect: NSRect) {
@@ -122,14 +135,14 @@ final class AIModelFooter: NSView {
 
     /// 幅へ収まる最も広い段を選ぶ。同じ幅なら同じ段に落ち着くので、描き直しは循環しない。
     private func refresh() {
-        let selected = AIModelLabel.fit(stages, available: Double(bounds.width)) { Double(AIModelFooter.width(of: $0)) }
+        let selected = AIModelLabel.fit(stages, available: Double(bounds.width)) { Double(AIModelFooter.width(of: $0, scale: textScale)) }
         guard selected != stage else { return }
         stage = selected
         needsDisplay = true
     }
 
-    static func width(of stage: AIModelLabel.Stage) -> CGFloat {
-        modelWidth(stage.model) + (stage.directory.map { gap + placeWidth($0) } ?? 0)
+    static func width(of stage: AIModelLabel.Stage, scale: CGFloat = 1) -> CGFloat {
+        cluster(modelGlyph, stage.model, scale: scale) + (stage.directory.map { gap + cluster(placeGlyph, $0, scale: scale) } ?? 0)
     }
     /// 前の塊の幅。アイコン + 4pt + 文字。後ろの塊はアイコンが違うので別に測る。
     static func modelWidth(_ text: String) -> CGFloat { cluster(modelGlyph, text) }
@@ -139,8 +152,8 @@ final class AIModelFooter: NSView {
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
                 .applying(NSImage.SymbolConfiguration(paletteColors: [Washi.muted])))
     }
-    private static func cluster(_ glyph: NSImage?, _ text: String) -> CGFloat {
-        iconWidth(glyph) + iconGap + ceil((text as NSString).size(withAttributes: [.font: font]).width)
+    private static func cluster(_ glyph: NSImage?, _ text: String, scale: CGFloat = 1) -> CGFloat {
+        (iconWidth(glyph) + iconGap) * scale + ceil((text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11 * scale)]).width)
     }
     private static func iconWidth(_ glyph: NSImage?) -> CGFloat { ceil(glyph?.size.width ?? 11) }
 
@@ -152,15 +165,15 @@ final class AIModelFooter: NSView {
         }
     }
     private func draw(_ glyph: NSImage?, _ text: String, x: CGFloat) -> CGFloat {
-        let attributes: [NSAttributedString.Key: Any] = [.font: AIModelFooter.font, .foregroundColor: Washi.muted]
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11 * textScale), .foregroundColor: Washi.muted]
         if let glyph {
-            glyph.draw(in: NSRect(x: x, y: (bounds.height - glyph.size.height) / 2,
-                                  width: glyph.size.width, height: glyph.size.height))
+            glyph.draw(in: NSRect(x: x, y: (bounds.height - glyph.size.height * textScale) / 2,
+                                  width: glyph.size.width * textScale, height: glyph.size.height * textScale))
         }
         let size = (text as NSString).size(withAttributes: attributes)
-        (text as NSString).draw(at: NSPoint(x: x + AIModelFooter.iconWidth(glyph) + AIModelFooter.iconGap,
+        (text as NSString).draw(at: NSPoint(x: x + (AIModelFooter.iconWidth(glyph) + AIModelFooter.iconGap) * textScale,
                                             y: (bounds.height - size.height) / 2), withAttributes: attributes)
-        return x + AIModelFooter.cluster(glyph, text)
+        return x + AIModelFooter.cluster(glyph, text, scale: textScale)
     }
 }
 
@@ -169,6 +182,7 @@ final class AIQuoteButton: HoverButton {
     private(set) var expanded = false
     var text = ""
     var onToggle: (() -> Void)?
+    var textScale: CGFloat = 1 { didSet { refresh() } }
     init() {
         super.init(frame: .zero)
         isBordered = false
@@ -186,7 +200,7 @@ final class AIQuoteButton: HoverButton {
         paragraph.lineBreakMode = expanded ? .byWordWrapping : .byTruncatingTail
         paragraph.lineSpacing = expanded ? 3 : 0
         attributedTitle = NSAttributedString(string: text, attributes: [
-            .font: NSFont.systemFont(ofSize: 12), .foregroundColor: Washi.muted, .paragraphStyle: paragraph
+            .font: NSFont.systemFont(ofSize: 12 * textScale), .foregroundColor: Washi.muted, .paragraphStyle: paragraph
         ])
         cell?.lineBreakMode = expanded ? .byWordWrapping : .byTruncatingTail
         (cell as? NSButtonCell)?.wraps = expanded
@@ -196,9 +210,9 @@ final class AIQuoteButton: HoverButton {
     }
     /// 幅は字下げ後の実幅で渡す。罫は行側が本文の左端へ別に描く。
     func height(for width: CGFloat) -> CGFloat {
-        guard expanded else { return 18 }
+        guard expanded else { return 18 * textScale }
         let bounds = NSRect(x: 0, y: 0, width: max(44, width), height: .greatestFiniteMagnitude)
-        return max(18, ceil(cell?.cellSize(forBounds: bounds).height ?? 18))
+        return max(18 * textScale, ceil(cell?.cellSize(forBounds: bounds).height ?? 18 * textScale))
     }
     @objc private func pressed() {
         expanded.toggle()
@@ -209,6 +223,7 @@ final class AIQuoteButton: HoverButton {
 
 /// 声からの送信と自動送信の細い1行。発話の直下か日時順に置く。
 final class AISendLineRow: NSView, AITimelineRowView {
+    private var bodyX: CGFloat { 20 + 34 * textScale }
     override var isFlipped: Bool { true }
     private(set) var item: AITimeline.Item
     private let label = Washi.label(size: 11, color: Washi.muted)
@@ -216,6 +231,14 @@ final class AISendLineRow: NSView, AITimelineRowView {
     private lazy var cancelAction = AIActionButton("取消", size: 11) { [weak self] in self?.onCancel?() }
     var onCancel: (() -> Void)?
     var displayText: String { label.stringValue }
+    private(set) var textScale: CGFloat = 1
+    func setTextScale(_ scale: CGFloat) {
+        guard textScale != scale else { return }
+        textScale = scale
+        label.font = .systemFont(ofSize: 11 * scale)
+        cancelAction.font = .systemFont(ofSize: 11 * scale)
+        needsLayout = true
+    }
     init(item: AITimeline.Item, state: AIViewState) {
         self.item = item
         super.init(frame: .zero)
@@ -242,13 +265,13 @@ final class AISendLineRow: NSView, AITimelineRowView {
     }
     /// 取消は同じ行の右端へ置く。段を足すと、結果が届いて取消が消えたときに行が縮み、
     /// 末尾を読んでいる利用者の画面が動く。
-    func height(for width: CGFloat) -> CGFloat { 26 }
+    func height(for width: CGFloat) -> CGFloat { 26 * textScale }
     override func layout() {
         super.layout()
         let width = cancelAction.isHidden ? 0 : cancelAction.measuredWidth
-        cancelAction.frame = NSRect(x: bounds.width - 20 - width, y: 1, width: width, height: 24)
+        cancelAction.frame = NSRect(x: bounds.width - 20 - width, y: 1, width: width, height: 24 * textScale)
         let right = cancelAction.isHidden ? bounds.width - 20 : cancelAction.frame.minX - 8
-        label.frame = NSRect(x: AIRowMetrics.bodyX, y: 4, width: max(0, right - AIRowMetrics.bodyX), height: 18)
+        label.frame = NSRect(x: bodyX, y: 4, width: max(0, right - bodyX), height: 18 * textScale)
     }
 }
 
@@ -256,6 +279,14 @@ final class AISendLineRow: NSView, AITimelineRowView {
 /// 「手入力」とは別の名前・記号にする。手入力は会議Markdownへ残る投稿の固定名で、
 /// AIへ送っただけの文が議事録に載っていると誤解させるため。
 final class AITypedSendRow: NSView, AITimelineRowView {
+    private var bodyX: CGFloat { 20 + 34 * textScale }
+    private func bodyWidth(_ width: CGFloat) -> CGFloat { max(44, width - bodyX - 36) }
+    private func wrapsHeader(for width: CGFloat) -> Bool {
+        let needed = AIRowMetrics.labelWidth(nameLabel, scale: textScale) + AIRowMetrics.labelWidth(timeLabel, scale: textScale)
+            + AIRowMetrics.labelWidth(address, scale: textScale) + (cancelAction.isHidden ? 0 : cancelAction.measuredWidth + 8) + 34
+        return textScale > 1 && needed > width - bodyX - 20
+    }
+    private func bodyTop(for width: CGFloat) -> CGFloat { 31 * textScale + (wrapsHeader(for: width) ? 20 * textScale : 0) }
     override var isFlipped: Bool { true }
     private(set) var item: AITimeline.Item
     private let avatar = AvatarView()
@@ -273,6 +304,18 @@ final class AITypedSendRow: NSView, AITimelineRowView {
     var displayName: String { nameLabel.stringValue }
     var addressText: String { address.stringValue }
     var noteText: String { noteLabel.stringValue }
+    private(set) var textScale: CGFloat = 1
+    func setTextScale(_ scale: CGFloat) {
+        guard textScale != scale else { return }
+        textScale = scale
+        nameLabel.font = .systemFont(ofSize: 12 * scale, weight: .semibold)
+        timeLabel.font = .monospacedDigitSystemFont(ofSize: 12 * scale, weight: .regular)
+        for field in [noteLabel, address] { field.font = .systemFont(ofSize: 11 * scale) }
+        cancelAction.font = .systemFont(ofSize: 11 * scale)
+        body.attributedStringValue = TranscriptTypography.withFont(body.attributedStringValue, .systemFont(ofSize: 15 * scale))
+        measured = 0
+        needsLayout = true
+    }
     init(item: AITimeline.Item, state: AIViewState) {
         self.item = item
         super.init(frame: .zero)
@@ -304,7 +347,7 @@ final class AITypedSendRow: NSView, AITimelineRowView {
         if body.stringValue != item.question || previous.notes != item.notes {
             let paragraph = NSMutableParagraphStyle(); paragraph.lineSpacing = 4
             body.attributedStringValue = NSAttributedString(string: item.question, attributes: [
-                .font: NSFont.systemFont(ofSize: 15), .foregroundColor: pending ? Washi.muted : Washi.ink,
+                .font: NSFont.systemFont(ofSize: 15 * textScale), .foregroundColor: pending ? Washi.muted : Washi.ink,
                 .paragraphStyle: paragraph
             ])
             measured = 0
@@ -317,29 +360,45 @@ final class AITypedSendRow: NSView, AITimelineRowView {
     /// 取消は見出しの行へ置く。段を足すと、結果が届いて取消が消えたときに行が縮み、
     /// 末尾を読んでいる利用者の画面が動く。
     func height(for width: CGFloat) -> CGFloat {
-        measured = AIRowMetrics.measure(body, width: AIRowMetrics.bodyWidth(width))
-        return max(20, measured) + 36
+        measured = AIRowMetrics.measure(body, width: bodyWidth(width))
+        return max(20 * textScale, measured) + bodyTop(for: width) + 5
     }
     override func layout() {
         super.layout()
-        avatar.frame = AIRowMetrics.avatar
-        let nameWidth = ceil(nameLabel.intrinsicContentSize.width) + 4
-        nameLabel.frame = NSRect(x: AIRowMetrics.bodyX, y: 8, width: nameWidth, height: 18)
-        timeLabel.frame = NSRect(x: AIRowMetrics.bodyX + nameWidth + 12, y: 8,
-                                width: ceil(timeLabel.intrinsicContentSize.width) + 4, height: 18)
-        let addressWidth = ceil(address.intrinsicContentSize.width) + 2
-        address.frame = NSRect(x: bounds.width - 20 - addressWidth, y: 9, width: addressWidth, height: 16)
+        avatar.frame = NSRect(x: 20, y: 8, width: 25 * textScale, height: 26 * textScale)
+        let nameWidth = AIRowMetrics.labelWidth(nameLabel, scale: textScale) + 4
+        nameLabel.frame = NSRect(x: bodyX, y: 8, width: nameWidth, height: 18 * textScale)
+        timeLabel.frame = NSRect(x: bodyX + nameWidth + 12, y: 8,
+                                width: AIRowMetrics.labelWidth(timeLabel, scale: textScale) + 4, height: 18 * textScale)
+        let addressWidth = AIRowMetrics.labelWidth(address, scale: textScale) + 2
+        address.frame = NSRect(x: bounds.width - 20 - addressWidth, y: 9, width: addressWidth, height: 16 * textScale)
         let width = cancelAction.isHidden ? 0 : cancelAction.measuredWidth
-        cancelAction.frame = NSRect(x: address.frame.minX - 8 - width, y: 5, width: width, height: 24)
+        cancelAction.frame = NSRect(x: address.frame.minX - 8 - width, y: 5, width: width, height: 24 * textScale)
         let noteX = timeLabel.frame.maxX + 8
         let noteRight = cancelAction.isHidden ? address.frame.minX : cancelAction.frame.minX
-        noteLabel.frame = NSRect(x: noteX, y: 9, width: max(0, noteRight - noteX - 8), height: 16)
-        body.frame = NSRect(x: AIRowMetrics.bodyX, y: 31, width: AIRowMetrics.bodyWidth(bounds.width), height: max(20, bounds.height - 36))
+        noteLabel.frame = NSRect(x: noteX, y: 9, width: max(0, noteRight - noteX - 8), height: 16 * textScale)
+        if wrapsHeader(for: bounds.width) {
+            nameLabel.frame.size.width = max(0, min(nameWidth, noteRight - bodyX - 8))
+            timeLabel.frame.origin = NSPoint(x: bodyX, y: 8 + 20 * textScale)
+            noteLabel.frame = NSRect(x: timeLabel.frame.maxX + 8, y: 9 + 20 * textScale,
+                                    width: max(0, bounds.width - 28 - timeLabel.frame.maxX), height: 16 * textScale)
+        }
+        let top = bodyTop(for: bounds.width)
+        body.frame = NSRect(x: bodyX, y: top, width: bodyWidth(bounds.width), height: max(20 * textScale, bounds.height - top - 5))
     }
 }
 
 /// AIの行。返事待ち・返事・確認質問・失敗を同じ行IDで扱い、到着で生まれ直さない。
 final class AIReplyRow: NSView, AITimelineRowView {
+    private var bodyX: CGFloat { 20 + 34 * textScale }
+    private func bodyWidth(_ width: CGFloat) -> CGFloat { max(44, width - bodyX - 36) }
+    private func wrapsHeader(for width: CGFloat) -> Bool {
+        let needed = AIRowMetrics.labelWidth(nameLabel, scale: textScale) + (chip.isHidden ? 0 : chip.measuredWidth + 8)
+            + (timeLabel.isHidden ? 0 : AIRowMetrics.labelWidth(timeLabel, scale: textScale) + 12)
+            + (pill.isHidden ? 0 : pill.intrinsicContentSize.width + 8) + 4
+        return textScale > 1 && needed > width - bodyX - 20
+    }
+    private func bodyTop(for width: CGFloat) -> CGFloat { 31 * textScale + (wrapsHeader(for: width) ? 20 * textScale : 0) }
     override var isFlipped: Bool { true }
     private(set) var item: AITimeline.Item
     private var state: AIViewState
@@ -393,6 +452,24 @@ final class AIReplyRow: NSView, AITimelineRowView {
         avatar.image = store.image(for: state.avatarSource(for: item.requestID))
     }
     var statusPill: AIStatusPill { pill }
+    private(set) var textScale: CGFloat = 1
+    func setTextScale(_ scale: CGFloat) {
+        guard textScale != scale else { return }
+        textScale = scale
+        nameLabel.font = .systemFont(ofSize: 12 * scale, weight: .semibold)
+        timeLabel.font = .monospacedDigitSystemFont(ofSize: 12 * scale, weight: .regular)
+        durationLabel.font = .monospacedDigitSystemFont(ofSize: 11 * scale, weight: .regular)
+        confirmationMark.font = .systemFont(ofSize: 15 * scale)
+        failureLabel.font = .systemFont(ofSize: 12 * scale, weight: .semibold)
+        notes.attributedStringValue = TranscriptTypography.withFont(notes.attributedStringValue, .systemFont(ofSize: 12 * scale))
+        for action in [replyAction, cancelAction, retryAction] { action.font = .systemFont(ofSize: 12 * scale) }
+        chip.textScale = scale; pill.textScale = scale
+        footer.textScale = scale; quote.textScale = scale
+        markdownBody.setTextScale(scale)
+        progressView.setTextScale(scale)
+        measuredBody = 0
+        needsLayout = true
+    }
 
     /// 進行表示はこの入口だけから更新する。返答到着の見せ方を行が決めるため。
     /// 返事待ちから結果へ変わった瞬間だけ全段を点灯し、1.5秒後に本文へ入れ替える。
@@ -501,7 +578,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
         let text = item.notes.joined(separator: " · ")
         if notes.stringValue != text {
             notes.attributedStringValue = NSAttributedString(string: text, attributes: [
-                .font: NSFont.systemFont(ofSize: 12), .foregroundColor: Washi.muted
+                .font: NSFont.systemFont(ofSize: 12 * textScale), .foregroundColor: Washi.muted
             ])
         }
         updateVisibility()
@@ -550,20 +627,20 @@ final class AIReplyRow: NSView, AITimelineRowView {
 
     func height(for width: CGFloat) -> CGFloat {
         if isFailure {
-            guard isReturnedFailure else { return 34 }
-            measuredBody = measureMarkdown(AIRowMetrics.bodyWidth(width))
-            return 34 + measuredBody + 8
+            guard isReturnedFailure else { return 34 * textScale }
+            measuredBody = measureMarkdown(bodyWidth(width))
+            return 34 * textScale + measuredBody + 8
         }
-        let bodyWidth = AIRowMetrics.bodyWidth(width)
+        let bodyWidth = bodyWidth(width)
         measuredQuote = item.question.isEmpty ? 0 : quote.height(for: bodyWidth - 12) + 8
-        measuredBody = isWaiting ? 42 : measureMarkdown(bodyWidth)
+        measuredBody = isWaiting ? 42 * textScale : measureMarkdown(bodyWidth)
         measuredNotes = notes.isHidden ? 0 : AIRowMetrics.measure(notes, width: bodyWidth) + 6
         // 表記を出す行は1段ぶん高くなる。段の有無は幅ではなくプロファイルで決まるので、
         // 幅を狭めても行の高さは動かない。
-        measuredFooter = footer.isHidden ? 0 : AIModelFooter.height
+        measuredFooter = footer.isHidden ? 0 : AIModelFooter.height * textScale
         // 取消は進行文と同じ行の右端へ寄せる。バーの8ptと段名の14ptを確保する。
-        let actions = replyAction.isHidden ? 0.0 : 30
-        return 31 + measuredQuote + max(20, measuredBody) + measuredFooter + measuredNotes + actions + 9
+        let actions = replyAction.isHidden ? 0.0 : 30 * textScale
+        return bodyTop(for: width) + measuredQuote + max(20 * textScale, measuredBody) + measuredFooter + measuredNotes + actions + 9
     }
 
     override func layout() {
@@ -571,56 +648,66 @@ final class AIReplyRow: NSView, AITimelineRowView {
         if isFailure {
             // 読み取り専用では「再送」を出さないので、その幅を空けたままにしない。
             let retryWidth = retryAction.isHidden ? 0 : retryAction.measuredWidth
-            retryAction.frame = NSRect(x: bounds.width - 20 - retryWidth, y: 5, width: retryWidth, height: 24)
+            retryAction.frame = NSRect(x: bounds.width - 20 - retryWidth, y: 5, width: retryWidth, height: 24 * textScale)
             let right = retryAction.isHidden ? bounds.width - 20 : retryAction.frame.minX - 8
-            let timeWidth = ceil(timeLabel.intrinsicContentSize.width) + 4
-            timeLabel.frame = NSRect(x: right - timeWidth, y: 6, width: timeWidth, height: 18)
+            let timeWidth = AIRowMetrics.labelWidth(timeLabel, scale: textScale) + 4
+            timeLabel.frame = NSRect(x: right - timeWidth, y: 6, width: timeWidth, height: 18 * textScale)
             let pillWidth = pill.isHidden ? 0 : ceil(pill.intrinsicContentSize.width)
-            pill.frame = NSRect(x: timeLabel.frame.minX - 8 - pillWidth, y: 5, width: pillWidth, height: 20)
+            pill.frame = NSRect(x: timeLabel.frame.minX - 8 - pillWidth, y: 5, width: pillWidth, height: 20 * textScale)
             let end = pill.isHidden ? timeLabel.frame.minX : pill.frame.minX
-            failureLabel.frame = NSRect(x: AIRowMetrics.bodyX, y: 7, width: max(0, end - AIRowMetrics.bodyX - 8), height: 18)
+            failureLabel.frame = NSRect(x: bodyX, y: 7, width: max(0, end - bodyX - 8), height: 18 * textScale)
             if isReturnedFailure {
-                markdownBody.frame = NSRect(x: AIRowMetrics.bodyX, y: 34, width: AIRowMetrics.bodyWidth(bounds.width),
+                markdownBody.frame = NSRect(x: bodyX, y: 34 * textScale, width: bodyWidth(bounds.width),
                                             height: max(20, measuredBody))
             }
             return
         }
-        avatar.frame = AIRowMetrics.avatar
-        let nameWidth = ceil(nameLabel.intrinsicContentSize.width) + 4
-        nameLabel.frame = NSRect(x: AIRowMetrics.bodyX, y: 8, width: nameWidth, height: 18)
+        avatar.frame = NSRect(x: 20, y: 8, width: 25 * textScale, height: 26 * textScale)
+        let nameWidth = AIRowMetrics.labelWidth(nameLabel, scale: textScale) + 4
+        nameLabel.frame = NSRect(x: bodyX, y: 8, width: nameWidth, height: 18 * textScale)
         let chipWidth = chip.isHidden ? 0 : chip.measuredWidth
-        chip.frame = NSRect(x: nameLabel.frame.maxX + 8, y: 9, width: chipWidth, height: 16)
+        chip.frame = NSRect(x: nameLabel.frame.maxX + 8, y: 9, width: chipWidth, height: 16 * textScale)
         // 名前 → チップ → 時刻 → 所要。モデル表記は本文の下へ移したので名前行を押さない。
         timeLabel.frame = NSRect(x: nameLabel.frame.maxX + (chip.isHidden ? 12 : chipWidth + 16), y: 8,
-                                width: ceil(timeLabel.intrinsicContentSize.width) + 4, height: 18)
+                                width: AIRowMetrics.labelWidth(timeLabel, scale: textScale) + 4, height: 18 * textScale)
         let pillWidth = ceil(pill.intrinsicContentSize.width)
-        pill.frame = NSRect(x: bounds.width - 20 - pillWidth, y: 8, width: pillWidth, height: 20)
+        pill.frame = NSRect(x: bounds.width - 20 - pillWidth, y: 8, width: pillWidth, height: 20 * textScale)
         let durationRight = pill.isHidden ? bounds.width - 20 : pill.frame.minX - 8
         durationLabel.frame = NSRect(x: timeLabel.frame.maxX + 6, y: 9,
             width: max(0, min(ceil(durationLabel.intrinsicContentSize.width) + 4,
-                             durationRight - timeLabel.frame.maxX - 6)), height: 16)
-        let bodyWidth = AIRowMetrics.bodyWidth(bounds.width)
+                             durationRight - timeLabel.frame.maxX - 6)), height: 16 * textScale)
+        if wrapsHeader(for: bounds.width) {
+            let right = pill.isHidden ? bounds.width - 20 : pill.frame.minX - 8
+            nameLabel.frame.size.width = max(0, min(nameWidth, right - bodyX - (chip.isHidden ? 0 : chipWidth + 8)))
+            chip.frame.origin.x = nameLabel.frame.maxX + 8
+            timeLabel.frame.origin = NSPoint(x: bodyX, y: 8 + 20 * textScale)
+            durationLabel.frame = NSRect(x: timeLabel.frame.maxX + 6, y: 9 + 20 * textScale,
+                width: max(0, min(ceil(durationLabel.intrinsicContentSize.width) + 4,
+                                 bounds.width - 26 - timeLabel.frame.maxX)), height: 16 * textScale)
+        }
+        let bodyWidth = bodyWidth(bounds.width)
         // 引用は本文より12pt字下げし、空いた左へ罫を置く。従属関係を字下げと罫の両方で示す。
-        quote.frame = NSRect(x: AIRowMetrics.bodyX + 12, y: 31, width: bodyWidth - 12, height: max(0, measuredQuote - 8))
-        quoteRule.frame = NSRect(x: AIRowMetrics.bodyX, y: 32, width: 2, height: max(0, measuredQuote - 10))
-        let bodyY = 31 + measuredQuote
-        markdownBody.frame = NSRect(x: AIRowMetrics.bodyX, y: bodyY, width: bodyWidth, height: max(20, measuredBody))
+        let top = bodyTop(for: bounds.width)
+        quote.frame = NSRect(x: bodyX + 12, y: top, width: bodyWidth - 12, height: max(0, measuredQuote - 8))
+        quoteRule.frame = NSRect(x: bodyX, y: top + 1, width: 2, height: max(0, measuredQuote - 10))
+        let bodyY = top + measuredQuote
+        markdownBody.frame = NSRect(x: bodyX, y: bodyY, width: bodyWidth, height: max(20, measuredBody))
         let progressRight = cancelAction.isHidden ? bounds.width - 20 : bounds.width - 20 - cancelAction.measuredWidth - 8
-        progressView.frame = NSRect(x: AIRowMetrics.bodyX, y: bodyY,
-                                   width: max(0, progressRight - AIRowMetrics.bodyX), height: 44)
-        confirmationMark.frame = NSRect(x: AIRowMetrics.bodyX - 14, y: bodyY + 2, width: 12, height: 20)
+        progressView.frame = NSRect(x: bodyX, y: bodyY,
+                                   width: max(0, progressRight - bodyX), height: 44 * textScale)
+        confirmationMark.frame = NSRect(x: bodyX - 14 * textScale, y: bodyY + 2, width: 12 * textScale, height: 20 * textScale)
         // 返事待ちでは進行文とバーの下。回答・確認質問では本文の下。どちらも本文の左端へ揃える。
         let contentBottom = isWaiting ? progressView.frame.maxY : markdownBody.frame.maxY
-        footer.frame = NSRect(x: AIRowMetrics.bodyX, y: contentBottom, width: bodyWidth, height: AIModelFooter.height)
-        notes.frame = NSRect(x: AIRowMetrics.bodyX, y: contentBottom + measuredFooter + 6,
+        footer.frame = NSRect(x: bodyX, y: contentBottom, width: bodyWidth, height: AIModelFooter.height * textScale)
+        notes.frame = NSRect(x: bodyX, y: contentBottom + measuredFooter + 6,
                              width: bodyWidth, height: max(0, measuredNotes - 6))
         if !cancelAction.isHidden {
             let width = cancelAction.measuredWidth
-            cancelAction.frame = NSRect(x: bounds.width - 20 - width, y: bodyY - 2, width: width, height: 24)
+            cancelAction.frame = NSRect(x: bounds.width - 20 - width, y: bodyY - 2, width: width, height: 24 * textScale)
         }
         if !replyAction.isHidden {
-            replyAction.frame = NSRect(x: AIRowMetrics.bodyX, y: contentBottom + measuredFooter + measuredNotes + 4,
-                                       width: replyAction.measuredWidth, height: 24)
+            replyAction.frame = NSRect(x: bodyX, y: contentBottom + measuredFooter + measuredNotes + 4,
+                                       width: replyAction.measuredWidth, height: 24 * textScale)
         }
     }
 

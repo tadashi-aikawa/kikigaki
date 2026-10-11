@@ -62,6 +62,10 @@ final class MinutesClearButton: HoverButton {
 
 /// パス編集と本文閲読を分離する。通知が来てもfield editorのドラフトは変更しない。
 @MainActor final class MinutesPreviewView: NSView, NSSearchFieldDelegate {
+    /// 参加者が読むWeb描画だけを拡大する。パス・タブなどの操作部は固定サイズ。
+    func setTextScale(_ scale: CGFloat) {
+        minutesDocument.setTextScale(scale); boardDocument.setTextScale(scale)
+    }
     let pathField: NSTextField = MinutesPathField(string: "")
     let headerBar = NSView()
     let minutesDocument = MinutesWebView(frame: .zero)

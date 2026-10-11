@@ -8,6 +8,7 @@ import { layoutTables } from './tables.js';
 import { boardLinks, attachBoardLinks } from './board.js';
 const md = createRenderer(), root = document.getElementById('minutes');
 const toc = document.getElementById('toc'), tocNav = toc.querySelector('nav');
+let textScale = 1;
 let headings = [], tocLinks = [], activeTOCLink = null, tocFrame = 0;
 let folded = new Set();
 function prepareSections(reset) {
@@ -141,6 +142,7 @@ function rebuildTOC(reset) {
   const allHeadings = root.querySelectorAll('h1,h2,h3,h4,h5,h6');
   headings = Array.from(allHeadings).slice(0, 300);
   toc.hidden = headings.length === 0;
+  root.classList.toggle('text-expanded', textScale > 1 && !toc.hidden);
   if (reset || toc.hidden) toc.open = false;
   activeTOCLink = null;
   const base = headings.reduce((level, heading) => Math.min(level, Number(heading.tagName.slice(1))), 6);
@@ -188,6 +190,27 @@ const fitsTimelineNode = text => {
   timelineMeasure.font = '16px -apple-system, sans-serif';
   return timelineMeasure.measureText(text).width <= 144;
 };
+async function renderDiagram(id, definition) {
+  // WebKitのpageZoomはSVG文字のem位置だけを倍率で割る。計測は等倍にし、
+  // 出力の文字位置をSVGの数値へ固定してから、本文の倍率で表示する。
+  const scale = textScale, measure = document.createElement('div');
+  measure.style.cssText = `position:fixed;visibility:hidden;zoom:${1 / scale};width:${document.body.clientWidth}px`;
+  document.body.append(measure);
+  try {
+    const result = await mermaid.render(id, definition, scale === 1 ? undefined : measure);
+    // 非同期描画の途中で倍率が変わったら、新しい倍率を打ち消して計測し直す。
+    if (scale !== textScale) { measure.remove(); return renderDiagram(id, definition); }
+    measure.innerHTML = result.svg;
+    for (const text of measure.querySelectorAll('text,tspan')) {
+      for (const attribute of ['x', 'y', 'dx', 'dy']) {
+        if (!/(?:em|ex)(?:\s|,|$)/.test(text.getAttribute(attribute) || '')) continue;
+        const lengths = text[attribute].baseVal;
+        text.setAttribute(attribute, Array.from({ length:lengths.numberOfItems }, (_, i) => lengths.getItem(i).value).join(' '));
+      }
+    }
+    return { ...result, svg:measure.innerHTML };
+  } finally { measure.remove(); }
+}
 let generation = 0, query = '', hit = -1, ranges = [], source = '', context = '', vault = '';
 const updates = new UpdateHighlighter();
 let updateListeners = new AbortController();
@@ -290,6 +313,12 @@ function paint(reveal) {
   }
 }
 window.minutes = {
+  setTextScale(scale) {
+    const saved = anchor();
+    textScale = scale;
+    root.classList.toggle('text-expanded', textScale > 1 && !toc.hidden);
+    restoreAnchor(saved);
+  },
   async render(text, newContext, reset, ticket, newVault, boardLinksEnabled = false) {
     cancelNavigation();
     const current = ++generation;
@@ -341,7 +370,7 @@ window.minutes = {
       try {
         const board = boardLinksEnabled ? boardLinks(pre.textContent) : { definition: pre.textContent, links: new Map() };
         const definition = isTimeline(board.definition) ? wrapTimeline(board.definition, fitsTimelineNode) : board.definition;
-        const { svg } = await mermaid.render('diagram-' + current + '-' + crypto.randomUUID(), definition);
+        const { svg } = await renderDiagram('diagram-' + current + '-' + crypto.randomUUID(), definition);
         if (current !== generation) return;
         holder.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, FORBID_TAGS: ['foreignObject', 'script', 'a'] });
         attachBoardLinks(holder, board.links, target => {

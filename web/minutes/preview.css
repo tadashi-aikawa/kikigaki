@@ -3,6 +3,8 @@
 html { background:var(--paper); color:var(--ink); overflow-wrap:anywhere; }
 body { margin:0; padding:24px; font:15px/1.8 -apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif; }
 main { min-width:0; width:100%; }
+/* 拡大中の目次ボタンが先頭の見出しを覆わないよう、上に操作の枠を残す。 */
+main.text-expanded { padding-top:44px; }
 p { margin:10px 0; }
 /* parliamentの段階差と上を厚くする余白を、和紙の配色で表す。本文幅に上限を置かない。 */
 h1,h2,h3,h4,h5,h6 { line-height:1.5; margin:26px 0 10px; font-weight:650; }

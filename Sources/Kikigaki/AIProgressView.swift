@@ -15,6 +15,13 @@ final class AIProgressView: NSView {
     var timerRunning: Bool { timer != nil }
     var displayText: String { label.stringValue }
     var observerCount: Int { observers.count }
+    private(set) var textScale: CGFloat = 1
+    func setTextScale(_ scale: CGFloat) {
+        guard textScale != scale else { return }
+        textScale = scale
+        label.font = .systemFont(ofSize: 13 * scale)
+        needsLayout = true; needsDisplay = true
+    }
     init(visibility: (() -> Bool)? = nil) {
         self.visibility = visibility
         super.init(frame: .zero)
@@ -70,7 +77,7 @@ final class AIProgressView: NSView {
     }
     override func layout() {
         super.layout()
-        label.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 20)
+        label.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 20 * textScale)
         updateVisibility()
     }
     override func viewDidMoveToWindow() {
@@ -101,7 +108,7 @@ final class AIProgressView: NSView {
     override func viewDidUnhide() { super.viewDidUnhide(); updateVisibility() }
     override func draw(_ dirtyRect: NSRect) {
         guard let progress else { return }
-        let width = min(234, bounds.width - 2)
+        let width = min(234 * textScale, bounds.width - 2)
         let count = CGFloat(AIProgress.Stage.allCases.count)
         let segment = max(0, (width - (count - 1) * 6) / count)
         for stage in AIProgress.Stage.allCases {
@@ -111,7 +118,7 @@ final class AIProgressView: NSView {
             let color = progress.isArrival ? Washi.red
                 : current ? Washi.red.withAlphaComponent(progress.isUnknown ? 0.5 : 1)
                 : observed ? Washi.muted : Washi.aiProgressPending
-            let rect = NSRect(x: 2 + CGFloat(stage.rawValue) * (segment + 6), y: 26, width: segment, height: 3)
+            let rect = NSRect(x: 2 + CGFloat(stage.rawValue) * (segment + 6), y: 26 * textScale, width: segment, height: 3)
             let path = NSBezierPath(roundedRect: rect, xRadius: 1.5, yRadius: 1.5)
             if observed { color.setFill(); path.fill() }
             else { color.setStroke(); path.lineWidth = 1.5; path.stroke() }
@@ -119,13 +126,13 @@ final class AIProgressView: NSView {
                 : current && !progress.isUnknown ? Washi.red
                 : observed ? Washi.ink : Washi.muted
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 9), .foregroundColor: textColor]
+                .font: NSFont.systemFont(ofSize: 9 * textScale), .foregroundColor: textColor]
             let title = stage.title as NSString
             let size = title.size(withAttributes: attributes)
-            title.draw(at: NSPoint(x: rect.midX - size.width / 2, y: 31), withAttributes: attributes)
+            title.draw(at: NSPoint(x: rect.midX - size.width / 2, y: 31 * textScale), withAttributes: attributes)
             if current && !progress.isUnknown && !progress.isPaused {
-                ("▾" as NSString).draw(at: NSPoint(x: rect.midX - 3, y: 17), withAttributes: [
-                    .font: NSFont.systemFont(ofSize: 9), .foregroundColor: color])
+                ("▾" as NSString).draw(at: NSPoint(x: rect.midX - 3 * textScale, y: 17 * textScale), withAttributes: [
+                    .font: NSFont.systemFont(ofSize: 9 * textScale), .foregroundColor: color])
             }
         }
     }

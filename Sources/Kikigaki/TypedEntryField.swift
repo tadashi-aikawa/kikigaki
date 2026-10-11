@@ -20,8 +20,22 @@ final class TypedEntryEditor: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if string.isEmpty {
-            (placeholder as NSString).draw(at: NSPoint(x: 13, y: 6), withAttributes: [
-                .font: NSFont.systemFont(ofSize: 14), .foregroundColor: Washi.muted])
+            let text = placeholder as NSString
+            var attributes: [NSAttributedString.Key: Any] = [
+                .font: font ?? NSFont.systemFont(ofSize: 14), .foregroundColor: Washi.muted]
+            let origin = NSPoint(x: 13, y: 6)
+            let size = text.size(withAttributes: attributes)
+            let width = max(0, bounds.width - origin.x - 13)
+            if size.width <= width {
+                // 収まる場合は既存の描画を保つ。
+                text.draw(at: origin, withAttributes: attributes)
+            } else {
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.lineBreakMode = .byTruncatingTail
+                attributes[.paragraphStyle] = paragraph
+                text.draw(in: NSRect(origin: origin, size: NSSize(width: width, height: ceil(size.height))),
+                          withAttributes: attributes)
+            }
         }
     }
     override func keyDown(with event: NSEvent) {
@@ -157,7 +171,7 @@ final class TypedEntryField: NSScrollView, NSTextViewDelegate {
         if editor.frame.width != contentSize.width {
             editor.setFrameSize(NSSize(width: contentSize.width, height: max(editor.frame.height, contentSize.height)))
         }
-        draftLabel.frame = NSRect(x: max(0, bounds.width - 48), y: 9, width: 42, height: 16)
+        draftLabel.frame = NSRect(x: max(0, bounds.width - 42 - 6), y: 9, width: 42, height: 16)
         outline.frame = bounds
     }
     func update(enabled: Bool, resetDraft: Bool) {
@@ -174,7 +188,7 @@ final class TypedEntryField: NSScrollView, NSTextViewDelegate {
         if !enabled, window?.firstResponder === editor { window?.makeFirstResponder(nil) }
         editor.placeholder = enabled ? "会話に書き込む… · ⌘Enterで投稿" : "録音中に書き込めます"
         draftLabel.isHidden = enabled || (editor.string.isEmpty && images.isEmpty)
-        contentInsets.right = draftLabel.isHidden ? 2 : 50
+        contentInsets.right = draftLabel.isHidden ? 2 : 42 + 8
         editor.needsDisplay = true
         if editableChanged { refreshAttachments() }
         updateBorder()

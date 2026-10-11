@@ -38,6 +38,26 @@ enum ApplicationMenu {
         let view = NSMenuItem()
         view.submenu = NSMenu(title: "表示")
         view.submenu?.addItem(NSMenuItem(title: "議事録を表示", action: #selector(TranscriptWindowController.toggleMinutes), keyEquivalent: ""))
+        view.submenu?.addItem(.separator())
+        for (title, action, key) in [
+            ("文字を大きく", #selector(TranscriptWindowController.increaseTextSize(_:)), "+"),
+            ("文字を小さく", #selector(TranscriptWindowController.decreaseTextSize(_:)), "-"),
+            ("実際のサイズ", #selector(TranscriptWindowController.resetTextSize(_:)), "0")
+        ] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = .command
+            item.allowsAutomaticKeyEquivalentLocalization = false
+            view.submenu?.addItem(item)
+        }
+        // USの=とJISの;はShiftなしでも拡大する。表示する項目は⌘+の1つだけ。
+        for key in ["=", ";"] {
+            let alias = NSMenuItem(title: "文字を大きく", action: #selector(TranscriptWindowController.increaseTextSize(_:)), keyEquivalent: key)
+            alias.keyEquivalentModifierMask = .command
+            alias.allowsAutomaticKeyEquivalentLocalization = false
+            alias.isHidden = true
+            alias.allowsKeyEquivalentWhenHidden = true
+            view.submenu?.addItem(alias)
+        }
         menu.addItem(view)
         return menu
     }

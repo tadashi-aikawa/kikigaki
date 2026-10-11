@@ -96,11 +96,18 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
 
 ## テスト
 
+- `KIKIGAKI_UI_CAPTURE=<出力先> swift test --filter TranscriptTextScaleAppTests`: 書き起こしとAIの行、議事録・ボードを420pt・600ptの全8倍率で検証し、PNGへ撮影する。
+    - 通常実行: 100%と200%で、対象の拡大・対象外の固定サイズ・検索強調・閲読位置・保存幅を確認する。全段階の撮影と周辺画面の巡回は行わない。
+    - 出力: AIの行を含む画像は出力先直下、書き起こし本体と議事録・ボードの画像は `review/` に置く。
+    - 比較用の入力: `KIKIGAKI_UI_FIXTURE=<使い捨てディレクトリ>` を添えると、同じパスの議事録で別ビルドと比較できる。ディレクトリは事前に用意する。
+- `KIKIGAKI_MERMAID_CAPTURE=<出力先> swift test --filter MermaidScaleTests`: flowchart・mindmap・timeline・sequenceを100%・125%・150%・200%で検証する。
+    - 保存: 使い捨て議事録、倍率変更後と再描画後のPNG、SVGの計測値。
+    - 理由: 100%の画素一致を比較するため、撮影は非可逆圧縮しない。
 - `KIKIGAKI_TEST_SPEECH=1 swift test --filter DiarizationTests`: 通常はスキップする実Apple Speechの結合テストも実行できます。マイクを使わず無音を入力し、話者モデルの呼出ゼロ・会議ごとの切替を確認します。
 - 環境変数 `KIKIGAKI_TEST_DIARIZATION=1 swift test --filter SpeakerDiarizerTests`: 実モデルで短い入力とchunk境界の末尾処理を確かめる。初回はモデルを取得する
 - 開始シートの見た目は `KIKIGAKI_START_SHEET_CAPTURE=<出力先> swift test --filter StartSheetTests` でPNGへ撮り、モックと突き合わせます。
 - 撮影用の環境変数: 次の変数は、値に出力先を渡したときだけ、該当のテストがPNGを書き出す。指定しなければ何も書かない
-    - `KIKIGAKI_UI_CAPTURE`: `HoverButtonTests` ・ `NarrowWindowTests`
+    - `KIKIGAKI_UI_CAPTURE`: `HoverButtonTests` ・ `NarrowWindowTests` ・ `TranscriptTextScaleAppTests`
     - `KIKIGAKI_TYPED_CAPTURE`: `TypedImageTests` ・ `TypedEntryTests`
     - `KIKIGAKI_MINUTES_CAPTURE`: `MinutesUpdateTests` ・ `MinutesPreviewTests` ・ `MinutesWebTests`。`KIKIGAKI_MINUTES_SAMPLE` を添えると `MinutesWebTests` が指定の議事録を撮る
     - `KIKIGAKI_EXCLUSION_CAPTURE`: `AudioExclusionAppTests`

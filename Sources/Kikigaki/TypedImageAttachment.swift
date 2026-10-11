@@ -130,6 +130,16 @@ final class TypedImageStrip: NSScrollView {
     private let cards = NSView()
     private var actions: [() -> Void] = []
     var onRemove: ((Int) -> Void)?
+    private var previews: [NSImage?] = []
+    private var paths: [String] = []
+    private var removable = false
+    private(set) var textScale: CGFloat = 1
+    var contentHeight: CGFloat { 66 + 18 * textScale }
+    func setTextScale(_ scale: CGFloat) {
+        guard textScale != scale else { return }
+        textScale = scale
+        update(previews: previews, paths: paths, removable: removable)
+    }
     override init(frame: NSRect) {
         super.init(frame: frame)
         drawsBackground = false
@@ -142,12 +152,14 @@ final class TypedImageStrip: NSScrollView {
     required init?(coder: NSCoder) { fatalError() }
 
     func update(previews: [NSImage?], paths: [String] = [], removable: Bool = false) {
+        self.previews = previews; self.paths = paths; self.removable = removable
         cards.subviews.forEach { $0.removeFromSuperview() }
         actions = []
         isHidden = previews.isEmpty
-        cards.frame = NSRect(x: 0, y: 0, width: CGFloat(previews.count) * 100, height: 82)
+        let cardWidth = 100 * max(1, textScale)
+        cards.frame = NSRect(x: 0, y: 0, width: CGFloat(previews.count) * cardWidth, height: contentHeight - 2)
         for (index, preview) in previews.enumerated() {
-            let button = NSButton(frame: NSRect(x: CGFloat(index) * 100, y: 18, width: 90, height: 62))
+            let button = NSButton(frame: NSRect(x: CGFloat(index) * cardWidth, y: 18 * textScale, width: 90, height: 62))
             button.image = preview ?? NSImage(systemSymbolName: "photo", accessibilityDescription: "画像を読み込めません")
             button.imageScaling = .scaleProportionallyUpOrDown
             button.imagePosition = .imageOnly
@@ -162,14 +174,17 @@ final class TypedImageStrip: NSScrollView {
             cards.addSubview(button)
             actions.append({ if paths.indices.contains(index) { NSWorkspace.shared.open(URL(fileURLWithPath: paths[index])) } })
             let label = NSTextField(labelWithString: "画像\(index + 1)")
-            label.font = .systemFont(ofSize: 11)
+            label.font = .systemFont(ofSize: 11 * textScale)
             label.textColor = Washi.muted
-            label.frame = NSRect(x: CGFloat(index) * 100 + 4, y: 0, width: 65, height: 16)
+            label.frame = NSRect(x: CGFloat(index) * cardWidth + 4, y: 0, width: 65 * textScale, height: 16 * textScale)
             cards.addSubview(label)
             if removable {
                 let remove = NSButton(title: "×", target: self, action: #selector(removeImage(_:)))
                 remove.tag = index
-                remove.frame = NSRect(x: CGFloat(index) * 100 + 65, y: 0, width: 25, height: 18)
+                remove.frame = NSRect(x: CGFloat(index) * cardWidth + 65 * textScale, y: 0, width: 25 * textScale, height: 18 * textScale)
+                if textScale != 1, let font = remove.font {
+                    remove.font = NSFont(descriptor: font.fontDescriptor, size: font.pointSize * textScale)
+                }
                 remove.isBordered = false
                 remove.setAccessibilityLabel("画像\(index + 1)を取り外す")
                 cards.addSubview(remove)
