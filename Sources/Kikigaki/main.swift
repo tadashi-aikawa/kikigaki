@@ -40,6 +40,10 @@ MainActor.assumeIsolated {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     #if DEBUG
+    if let output = ProcessInfo.processInfo.environment["KIKIGAKI_PROMPT_HINT_HOVER_OUTPUT"] {
+        let delegate = PromptHintHoverCheck(output: output)
+        app.delegate = delegate; app.run(); return
+    }
     if let output = ProcessInfo.processInfo.environment["KIKIGAKI_BOARD_APPKIT_PERF"] {
         app.setActivationPolicy(.regular)
         let delegate = BoardAppKitPerformance(output: output)

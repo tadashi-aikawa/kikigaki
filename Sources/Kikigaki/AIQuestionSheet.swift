@@ -29,6 +29,12 @@ final class AIAlwaysPromptHint: NSView {
 /// シート共通の窓。Escで閉じ、Enterはプロンプト編集中だけ改行へ回す。
 /// 開始シート(`StartSheetWindow`)がここへ⌘⏎の開始を足すため、継承できるようにしてある。
 class AIQuestionWindow: NSWindow {
+    override init(contentRect: NSRect, styleMask: NSWindow.StyleMask, backing: NSWindow.BackingStoreType, defer flag: Bool) {
+        super.init(contentRect: contentRect, styleMask: styleMask, backing: backing, defer: flag)
+        // accessoryアプリは、シートが見えていても別のアプリが前面のことがある。
+        // 標準ツールチップは既定でその間出ない。開始・手動・自動のシートだけ許可する。
+        allowsToolTipsWhenApplicationIsInactive = true
+    }
     var onDismiss: (() -> Void)?
     private var outsideMonitor: Any?
     var monitorsOutsideClicks: Bool { outsideMonitor != nil }

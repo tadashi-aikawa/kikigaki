@@ -127,6 +127,13 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
     - 解像度: 1ptあたり1pxと2pxで撮る。2xの画像名には `-2x` を付ける。
     - 幅: 親窓を420pt・600ptにする。開始シート自体は仕様どおり640pt固定。
     - 内容: 自動の返事待ち、要返答・警告あり、手動の返事待ち、両方未指定、停止後の2段フッター。準備中と両方の返事待ちも撮る。開始シートは予約と手動宛先ありを撮る。
+- `KIKIGAKI_PROMPT_HINT_HOVER=1 swift test --filter PromptHintHoverTests`: 本物の書き起こし窓へシートを付け、実カーソルを移動して毎回付く指示の標準ツールチップを確かめる。
+    - 対象: 開始シートの自動送信と手動送信、手動実行シート、自動実行シート。非アクティブ・非キーの窓で修正前の非表示、修正後の長文表示と画面内配置を検査する。
+    - 実行: 修正前後の条件をDEBUG版の別プロセスで確認する。
+        - データ: 内部の `KIKIGAKI_PROMPT_HINT_HOVER_OUTPUT` には `/tmp` 配下の使い捨てデータ置き場を渡す。
+        - 比較: 内部の `KIKIGAKI_PROMPT_HINT_HOVER_BASELINE=1` では、非アクティブ時の許可を付けない窓を表示する。
+    - 操作: マウスを一時的に動かし、終了時に元へ戻す。他のUIテストと同時には実行しない。
+    - 撮影: `KIKIGAKI_PROMPT_HINT_CAPTURE=/tmp/kikigaki-prompt-hint` を添えるとツールチップを撮る。PNGは描画キャッシュの中間物とし、確認用に非可逆WebPへ変換する。
 - 撮影用の環境変数: 次の変数は、値に出力先を渡したときだけ、該当のテストがPNGを書き出す。指定しなければ何も書かない
     - `KIKIGAKI_UI_CAPTURE`: `HoverButtonTests` ・ `NarrowWindowTests` ・ `TranscriptTextScaleAppTests`
     - `KIKIGAKI_TYPED_CAPTURE`: `TypedImageTests` ・ `TypedEntryTests`

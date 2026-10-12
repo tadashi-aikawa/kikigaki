@@ -27,6 +27,7 @@ import KikigakiCore
         #expect(hint.label.stringValue == "＋ 毎回付く指示あり")
         #expect(hint.label.font?.pointSize == 11)
         if !prompt.isEmpty {
+            #expect(hint.window?.allowsToolTipsWhenApplicationIsInactive == true)
             hint.window?.contentView?.layoutSubtreeIfNeeded()
             #expect(hint.superview != nil && hint.frame.height > 0 && hint.frame.width > 0)
         }
