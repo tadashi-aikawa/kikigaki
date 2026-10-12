@@ -19,7 +19,7 @@ measureAudioLevels = false
 # 話者名の候補の「参加者」を読む、議事録のfrontmatterのキー。既定: participants
 participantsKey = "participants"
 # 声の合図で今すぐ自動送信する。省略時もこの既定で有効、[]で無効
-autoSendPhrases = ["しおりを挟んで", "栞を挟んで", "しおりをはさんで", "栞をはさんで"]
+autoSendPhrases = ["アバンティ", "アヴァンティ"]
 
 # 話者候補とアバター。省略可
 [[speakers]]
@@ -62,7 +62,7 @@ address = "ネオへ"
 | `saveRecording` | `false` | 録音WAVを Markdown と並べて残す |
 | `measureAudioLevels` | `false` | 発話ごとの音量と小音量候補の診断表示と保存。除外の設定とは独立。次の会議から効く。詳細は [小音量発話の計測](audio-levels.md) |
 | `participantsKey` | `participants` | 話者名の候補の「参加者」を読む、議事録のfrontmatterのキー。空白・`:`・`#`・引用符・`[]{},` を含む値、空文字、`-` 始まりは設定エラー。読み方は [書き起こしウィンドウ](transcript-window.md) の「候補の出どころ」 |
-| `autoSendPhrases` | `["しおりを挟んで", "栞を挟んで", "しおりをはさんで", "栞をはさんで"]` | 声で「今すぐ送る」を実行する合図。空配列は無効。最大20要素、各64文字まで。文字列以外、正規化後の空要素・重複は設定エラー。次の会議から効く。詳細は [声の合図](ai-scheduled.md#声の合図) |
+| `autoSendPhrases` | `["アバンティ", "アヴァンティ"]` | 声で「今すぐ送る」を実行する合図。空配列は無効。最大20要素、各64文字まで。文字列以外、正規化後の空要素・重複は設定エラー。次の会議から効く。詳細は [声の合図](ai-scheduled.md#声の合図) |
 
 `outputDir` は Codex の書き込み許可にも追加する。議事録を書けるようにするためで、許可の範囲と受け入れたリスクは [議事録プレビューの設計](minutes-preview.md) の「Skillの規則と書き込み許可」を参照する。
 

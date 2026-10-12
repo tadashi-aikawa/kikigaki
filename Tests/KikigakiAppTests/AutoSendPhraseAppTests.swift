@@ -17,7 +17,7 @@ import KikigakiAIIO
         try session.startAISchedule(options: .init(prompt: "議事録を更新", interval: 3600, sendFinal: false),
                                     helper: URL(fileURLWithPath: "/bin/echo"))
     }
-    private func publish(_ session: MeetingSession, diarization: Bool, text: String = "しおりを挟んで",
+    private func publish(_ session: MeetingSession, diarization: Bool, text: String = "アバンティ",
                          start: Double = 0, end: Double = 1, final: Int = 1, accurate: Int = 0) {
         let tokens = [TimedToken(text: text, phraseId: accurate == 0 ? -1 : 1, start: start, end: end)]
         if diarization {
@@ -42,10 +42,10 @@ import KikigakiAIIO
         let request = try #require(session.aiRecord?.controller.conversation.questions.first?.request)
         #expect(request.trigger == .scheduled && request.envelope.participant.question == "議事録を更新")
         let transcript = try String(contentsOfFile: request.envelope.transcriptPath, encoding: .utf8)
-        #expect(transcript.contains("しおりを挟んで"))
+        #expect(transcript.contains("アバンティ"))
         #expect(await fake.commands.filter { $0.prefix(2) == ["agent", "prompt"] }.count == 1)
         #expect(sounds == [true])
-        publish(session, diarization: diarization, text: "栞をはさんで。", accurate: 1)
+        publish(session, diarization: diarization, text: "アヴァンティ。", accurate: 1)
         #expect(session.aiRecord?.controller.conversation.questions.count == 1 && sounds == [true])
     }
     @Test(arguments: [false, true])
@@ -108,7 +108,7 @@ import KikigakiAIIO
         let fake = FakeHerdr(), session = session(root, fake: fake)
         defer { session.stopAISchedule() }
         var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
-        session.setScheduleTranscriptForTesting("しおりを挟んで")
+        session.setScheduleTranscriptForTesting("アバンティ")
         try start(session)
         await session.submissionTaskForTesting?.value
         let controller = try #require(session.aiRecord?.controller)
@@ -118,7 +118,7 @@ import KikigakiAIIO
             "ai", "inbox", request.id.uuidString + ".result.json"], replacing: false)
         controller.scan()
         #expect(session.snapshot.canFireAutomatic)
-        session.publishForTesting(tokens: [.init(text: "しおりを挟んで", phraseId: -1, start: 0, end: 0)],
+        session.publishForTesting(tokens: [.init(text: "アバンティ", phraseId: -1, start: 0, end: 0)],
                                   speakers: [nil], elapsed: 1, finalCount: 1, accurateFinalCount: 0)
         #expect(sounds == [false])
         #expect(controller.conversation.questions.count == 1)

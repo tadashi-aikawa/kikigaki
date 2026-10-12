@@ -40,7 +40,8 @@ public struct ResolvedConfig: Equatable, Sendable {
     public static let defaultOutputDir = "~/Documents/KIKIGAKI"
     /// タダシの議事録が使うキー。`attendees` などの流儀の人は設定で変える
     public static let defaultParticipantsKey = "participants"
-    public static let defaultAutoSendPhrases = ["しおりを挟んで", "栞を挟んで", "しおりをはさんで", "栞をはさんで"]
+    /// 日本語の会話に紛れない短い外国語。正規化はヴァとバを揃えないので両方の表記を持つ
+    public static let defaultAutoSendPhrases = ["アバンティ", "アヴァンティ"]
 
     public var outputDir: URL
     /// 録音WAVは既定では残さない。通常利用では不要でディスクを食うだけで、要るのはデバッグや
