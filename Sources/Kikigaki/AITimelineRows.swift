@@ -34,7 +34,7 @@ enum AIRowMetrics {
 
 /// 確認待ち・返事待ちの印。状態表示なので操作を持たせない。無効でも面は足さず、色だけを抜く。
 final class AIStatusPill: HoverButton {
-    enum Style: Equatable { case confirmation, waiting }
+    enum Style: Equatable { case confirmation, waiting, voiceAnswered, answered }
     private(set) var style: Style = .waiting
     private var configured = false
     var textScale: CGFloat = 1 {
@@ -55,7 +55,12 @@ final class AIStatusPill: HoverButton {
         guard self.style != style || !configured else { return }
         configured = true
         self.style = style
-        title = style == .confirmation ? "要返答" : "返事待ち"
+        switch style {
+        case .confirmation: title = "要返答"
+        case .waiting: title = "返事待ち"
+        case .voiceAnswered: title = "声で返答済み"
+        case .answered: title = "返答済み"
+        }
         setAccessibilityLabel(title)
         invalidateIntrinsicContentSize(); needsDisplay = true
     }
@@ -64,7 +69,7 @@ final class AIStatusPill: HoverButton {
     }
     override func draw(_ dirtyRect: NSRect) {
         let color = style == .confirmation ? Washi.red : Washi.muted
-        let filled = style != .waiting
+        let filled = style == .confirmation
         let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10)
         if filled { color.setFill(); pill.fill() }
         else { color.setStroke(); pill.lineWidth = 1; pill.stroke() }
@@ -392,6 +397,9 @@ final class AITypedSendRow: NSView, AITimelineRowView {
 final class AIReplyRow: NSView, AITimelineRowView {
     private var bodyX: CGFloat { 20 + 34 * textScale }
     private func bodyWidth(_ width: CGFloat) -> CGFloat { max(44, width - bodyX - 36) }
+    private func wrapsActions(for width: CGFloat) -> Bool {
+        replyAction.measuredWidth + 12 * textScale + resolveAction.measuredWidth > bodyWidth(width)
+    }
     private func wrapsHeader(for width: CGFloat) -> Bool {
         let needed = AIRowMetrics.labelWidth(nameLabel, scale: textScale) + (chip.isHidden ? 0 : chip.measuredWidth + 8)
             + (timeLabel.isHidden ? 0 : AIRowMetrics.labelWidth(timeLabel, scale: textScale) + 12)
@@ -403,6 +411,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
     private(set) var item: AITimeline.Item
     private var state: AIViewState
     var onReply: (() -> Void)?
+    var onResolve: (() -> Void)?
     var onCancel: (() -> Void)?
     var onRetry: (() -> Void)?
     var onResize: (() -> Void)?
@@ -431,9 +440,12 @@ final class AIReplyRow: NSView, AITimelineRowView {
     private(set) var isShowingArrival = false
     private let confirmationMark = Washi.label("?", size: 15, color: Washi.muted)
     private let notes = NSTextField(wrappingLabelWithString: "")
+    let answerLabel = Washi.label(size: 12, color: Washi.muted)
+    private var measuredAnswer: CGFloat = 0
     /// 本文15・名前12の間に段を増やさないよう12ptに揃える。
     private let failureLabel = Washi.label(size: 12, weight: .semibold)
     private lazy var replyAction = AIActionButton("返答する", size: 12) { [weak self] in self?.onReply?() }
+    lazy var resolveAction = AIActionButton("返答済みにする", size: 12) { [weak self] in self?.onResolve?() }
     private lazy var cancelAction = AIActionButton("取消", size: 12) { [weak self] in self?.onCancel?() }
     private lazy var retryAction = AIActionButton("再送", size: 12) { [weak self] in self?.onRetry?() }
     private var measuredQuote: CGFloat = 0
@@ -462,7 +474,8 @@ final class AIReplyRow: NSView, AITimelineRowView {
         confirmationMark.font = .systemFont(ofSize: 15 * scale)
         failureLabel.font = .systemFont(ofSize: 12 * scale, weight: .semibold)
         notes.attributedStringValue = TranscriptTypography.withFont(notes.attributedStringValue, .systemFont(ofSize: 12 * scale))
-        for action in [replyAction, cancelAction, retryAction] { action.font = .systemFont(ofSize: 12 * scale) }
+        answerLabel.font = .systemFont(ofSize: 12 * scale)
+        for action in [replyAction, resolveAction, cancelAction, retryAction] { action.font = .systemFont(ofSize: 12 * scale) }
         chip.textScale = scale; pill.textScale = scale
         footer.textScale = scale; quote.textScale = scale
         markdownBody.setTextScale(scale)
@@ -516,6 +529,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
         return nil
     }
     var pillStyle: AIStatusPill.Style? {
+        if let resolution = item.resolution { return resolution.source == .voice ? .voiceAnswered : .answered }
         if isWaiting { return nil }
         if item.kind == .reply(.needsInput) { return item.needsAnswer ? .confirmation : nil }
         return nil
@@ -534,7 +548,9 @@ final class AIReplyRow: NSView, AITimelineRowView {
         quote.onToggle = { [weak self] in self?.onResize?() }
         for view in [avatar, nameLabel, chip, timeLabel, durationLabel, pill, quoteRule, quote, markdownBody,
                      progressView, footer, confirmationMark, notes, failureLabel, replyAction, cancelAction,
-                     retryAction] { addSubview(view) }
+                     retryAction, resolveAction, answerLabel] { addSubview(view) }
+        answerLabel.lineBreakMode = .byTruncatingTail
+        answerLabel.isSelectable = true
         update(item, state: state)
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -565,6 +581,8 @@ final class AIReplyRow: NSView, AITimelineRowView {
         confirmationMark.textColor = item.needsAnswer ? Washi.muted : Washi.rule
         if let style = pillStyle { pill.update(style) }
         markdownBody.update(item.body)
+        answerLabel.stringValue = item.resolution?.event?.evidence.answerLine ?? ""
+        answerLabel.toolTip = item.resolution?.event?.evidence.quote
         quote.update(item.question)
         if case let .failure(reason, returned) = item.kind {
             // 帯は1行なので、取消後・旧接続などの注記も同じ行へ連ねる。
@@ -609,6 +627,8 @@ final class AIReplyRow: NSView, AITimelineRowView {
         notes.isHidden = failure || notes.stringValue.isEmpty
         // 点灯の1.5秒は操作を出さない。取り消せない依頼の取消も、本文のない返答導線も置かない。
         replyAction.isHidden = failure || !item.needsAnswer || state.readOnly || !state.canAsk || isShowingArrival
+        resolveAction.isHidden = replyAction.isHidden
+        answerLabel.isHidden = failure || answerLabel.stringValue.isEmpty
         cancelAction.isHidden = failure || !isWaiting || state.readOnly || isShowingArrival
         // 幅で落とした塊に関係なく、読み上げには全部入りの表記を渡す。
         let spoken = model.map { "、" + $0.text } ?? ""
@@ -638,9 +658,10 @@ final class AIReplyRow: NSView, AITimelineRowView {
         // 表記を出す行は1段ぶん高くなる。段の有無は幅ではなくプロファイルで決まるので、
         // 幅を狭めても行の高さは動かない。
         measuredFooter = footer.isHidden ? 0 : AIModelFooter.height * textScale
+        measuredAnswer = answerLabel.isHidden ? 0 : 22 * textScale
         // 取消は進行文と同じ行の右端へ寄せる。バーの8ptと段名の14ptを確保する。
-        let actions = replyAction.isHidden ? 0.0 : 30 * textScale
-        return bodyTop(for: width) + measuredQuote + max(20 * textScale, measuredBody) + measuredFooter + measuredNotes + actions + 9
+        let actions = replyAction.isHidden ? 0.0 : (wrapsActions(for: width) ? 60 : 30) * textScale
+        return bodyTop(for: width) + measuredQuote + max(20 * textScale, measuredBody) + measuredAnswer + measuredFooter + measuredNotes + actions + 9
     }
 
     override func layout() {
@@ -697,7 +718,9 @@ final class AIReplyRow: NSView, AITimelineRowView {
                                    width: max(0, progressRight - bodyX), height: 44 * textScale)
         confirmationMark.frame = NSRect(x: bodyX - 14 * textScale, y: bodyY + 2, width: 12 * textScale, height: 20 * textScale)
         // 返事待ちでは進行文とバーの下。回答・確認質問では本文の下。どちらも本文の左端へ揃える。
-        let contentBottom = isWaiting ? progressView.frame.maxY : markdownBody.frame.maxY
+        let bodyBottom = isWaiting ? progressView.frame.maxY : markdownBody.frame.maxY
+        answerLabel.frame = NSRect(x: bodyX, y: bodyBottom + 4 * textScale, width: bodyWidth, height: 18 * textScale)
+        let contentBottom = bodyBottom + measuredAnswer
         footer.frame = NSRect(x: bodyX, y: contentBottom, width: bodyWidth, height: AIModelFooter.height * textScale)
         notes.frame = NSRect(x: bodyX, y: contentBottom + measuredFooter + 6,
                              width: bodyWidth, height: max(0, measuredNotes - 6))
@@ -708,6 +731,9 @@ final class AIReplyRow: NSView, AITimelineRowView {
         if !replyAction.isHidden {
             replyAction.frame = NSRect(x: bodyX, y: contentBottom + measuredFooter + measuredNotes + 4,
                                        width: replyAction.measuredWidth, height: 24 * textScale)
+            resolveAction.frame = NSRect(x: wrapsActions(for: bounds.width) ? bodyX : replyAction.frame.maxX + 12 * textScale,
+                                         y: wrapsActions(for: bounds.width) ? replyAction.frame.maxY + 4 * textScale : replyAction.frame.minY,
+                                         width: resolveAction.measuredWidth, height: 24 * textScale)
         }
     }
 

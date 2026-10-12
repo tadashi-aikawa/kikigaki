@@ -9,7 +9,7 @@ struct ReturnCommand: Sendable {
     let options: [String: String]
     let payload: String?
     init(_ arguments: [String]) throws {
-        guard let action = arguments.first, ["accept", "reply", "notify", "minutes", "progress", "speaker"].contains(action) else { throw AIError.invalid("command") }
+        guard let action = arguments.first, ["accept", "reply", "notify", "minutes", "progress", "speaker", "resolve"].contains(action) else { throw AIError.invalid("command") }
         self.action = action
         var options: [String: String] = [:], payload: String?, index = 1
         while index < arguments.count {
@@ -19,7 +19,7 @@ struct ReturnCommand: Sendable {
                 guard action == "progress", options[name] == nil else { throw AIError.invalid("arguments") }
                 options[name] = "true"; index += 1
             } else if name.hasPrefix("--") {
-                guard ["--session", "--request", "--token", "--kind", "--reason", "--provider", "--path", "--total", "--slot", "--name"].contains(name),
+                guard ["--session", "--request", "--token", "--kind", "--reason", "--provider", "--path", "--total", "--slot", "--name", "--question", "--speaker", "--time"].contains(name),
                       options[name] == nil, index + 1 < arguments.count else { throw AIError.invalid("arguments") }
                 options[name] = arguments[index + 1]; index += 2
             } else {
@@ -30,6 +30,7 @@ struct ReturnCommand: Sendable {
         var required: Set<String> = action == "notify" ? ["--session", "--token", "--provider"] : ["--session", "--token", "--request"]
         if action == "minutes" { required.insert("--path") }
         if action == "speaker" { required.formUnion(["--slot", "--name"]) }
+        if action == "resolve" { required.formUnion(["--question", "--speaker", "--time"]) }
         let allowed = action == "reply" ? required.union(["--kind", "--reason"])
             : action == "progress" ? required.union(["--editing", "--replying", "--total"]) : required
         // 段はどちらか1つ必須。総数は編集にしか添えられない。
@@ -90,6 +91,37 @@ struct ReturnCommand: Sendable {
               request.envelope.participant.sessionGeneration == generation,
               request.envelope.participant.sessionPath == path,
               options["--token"] == request.envelope.participant.requestToken else { throw AIError.mismatch }
+        if action == "resolve" {
+            guard let questionID = UUID(uuidString: options["--question"]!),
+                  request.envelope.participant.unansweredQuestions.contains(where: { $0.requestID == questionID }) else { throw AIError.mismatch }
+            let target = base + ["inbox", "\(questionID.uuidString).resolve.json"]
+            _ = try files.directory(base + ["inbox"])
+            // 同じ確認への再実行は、返答済みになった後も最初のイベントを返す。
+            func previousID() throws -> String {
+                let bytes = try files.read(target, limit: AILimits.eventBytes)
+                let raw = try AIJSON.decode(AIResolutionEvent.self, from: bytes)
+                let sender = try AIJSON.decode(AIRequest.self, from: files.read(base + ["requests", raw.requestID.uuidString + ".json"], limit: AILimits.eventBytes))
+                try sender.envelope.validatePaths(outputDirectory: root)
+                let previous = try AIInbox.decodeResolution(bytes, filename: target.last!, for: sender)
+                guard previous.meetingID == meeting, previous.questionRequestID == questionID else { throw AIError.mismatch }
+                try files.syncDirectory(Array(target.dropLast()))
+                return previous.eventID
+            }
+            do { return try previousID() } catch AIFileError.missing { }
+            let bytes = try input()
+            guard bytes.count <= 4096 else { throw AIError.tooLarge }
+            guard let quote = String(data: bytes, encoding: .utf8) else { throw AIError.invalid("UTF-8") }
+            let evidence = try AIAnswerEvidence(speaker: options["--speaker"]!, time: options["--time"]!,
+                                               quote: quote.trimmingCharacters(in: .whitespacesAndNewlines))
+            let event = try AIResolutionEvent(request: request, questionRequestID: questionID, evidence: evidence, recordedAt: now)
+            var state = try AIJSON.decode(AIConversation.self, from: files.read(base + ["state.json"]))
+            guard state.meetingID == meeting else { throw AIError.mismatch }
+            _ = try state.receive(event)
+            try saveIdentity(session: session, environment: environment, files: files, sessions: sessions, generation: generation)
+            do { try files.write(AIJSON.encode(event), to: target, replacing: false) }
+            catch AIError.conflict { return try previousID() }
+            return event.eventID
+        }
         if action == "speaker" {
             let bytes = try input()
             guard bytes.count <= AISpeakerEvent.evidenceBytes else { throw AIError.tooLarge }

@@ -12,6 +12,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onOpenMarkdown: (() -> Void)?
     var onSpeakerMappingChange: ((Int, Int?) -> Void)?
     var onAskAI: ((UUID?) -> Void)?
+    var onResolveAI: ((UUID) -> Void)?
     var onScheduleAI: (() -> Void)?
     var onStopScheduleAI: (() -> Void)?
     var onFireScheduleAI: (() -> Void)?
@@ -580,6 +581,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             reply.updateProgress(aiProgress[id], reduceMotion: shouldReduceMotion())
             reply.updateAvatar(store: avatars)
             reply.onReply = { [weak self] in self?.onAskAI?(id) }
+            reply.onResolve = { [weak self] in self?.onResolveAI?(id) }
             reply.onCancel = { [weak self] in self?.onCancelAI?(id) }
             reply.onRetry = { [weak self] in self?.onResendAI?(id) }
             reply.onResize = { [weak self, weak reply] in

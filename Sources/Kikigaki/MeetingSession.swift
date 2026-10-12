@@ -864,6 +864,13 @@ final class MeetingSession {
         } catch { aiWarning = "取消を保存できません" }
         emit()
     }
+
+    func resolveAI(_ id: UUID) {
+        guard snapshot.canSubmitAI, let controller = aiRecord?.controller else { return }
+        do { try controller.resolveManually(id); aiWarning = nil }
+        catch { aiWarning = "確認を返答済みにできません" }
+        emit()
+    }
     func recreateAI() {
         do { try aiRecord?.controller.newGeneration(slot: meetingAI?.slot); aiWarning = nil }
         catch { aiWarning = "接続を作り直せません" }
@@ -1431,11 +1438,7 @@ extension MeetingSession {
                     && !controller.isPaneClosed(slot: owner) && $0.isAwaitingResult
             }) { return .awaitingResult }
             if !controller.canSend(slot: slot) { return controller.connectionStatus(slot: slot) == .working ? .busy : .disconnected }
-            // 失敗・取消で終わった返答は返答済みと数えない。まだ返答できる確認は自動送信を止める。
-            let questions = controller.conversation.questions
-            if current.contains(where: { $0.state == .needsInput && !AIQuestion.isAnswered($0, in: questions) }) {
-                return .confirmation
-            }
+            // 未回答の確認はenvelopeへ添え、声で答えたかをAIが判断する機会を残す。
         }
         return .ready
     }

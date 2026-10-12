@@ -237,6 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onPauseResume = { session.togglePause() }
         window.onCopy = { session.copyContext(writeClipboard: Self.writeClipboard) }
         window.onAskAI = { [weak self] in self?.showAISheet(parent: $0) }
+        window.onResolveAI = { [weak self] in self?.session?.resolveAI($0) }
         window.onResendAI = { [weak self] in self?.showAISheet(parent: nil, resend: $0) }
         window.onScheduleAI = { [weak self] in self?.showScheduleSheet() }
         window.onStopScheduleAI = { [weak session] in session?.stopAISchedule() }

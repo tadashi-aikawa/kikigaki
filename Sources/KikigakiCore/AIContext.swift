@@ -105,6 +105,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     /// 文面の改訂後も過去requestを読めるよう、内蔵節の切り取りで元の問いを復元しない。
     /// 声の問いと送信印の位置・表示は、送信時に固定した元の問いで決める。
     public let originalQuestion: String?
+    public let unansweredQuestions: [AIUnansweredQuestion]
     public var userQuestion: String { originalQuestion ?? question }
 
     public init(streamID: UUID, requestID: UUID, sessionGeneration: Int, participantName: String,
@@ -113,7 +114,8 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
                 inReplyToRequestID: UUID? = nil, inReplyToEventID: String? = nil, workAllowed: Bool = true,
                 trigger: Trigger? = nil, profile: String? = nil, profileSlot: Int? = nil,
                 minutesPath: String? = nil, boardHeading: String? = nil,
-                speakerIdentification: SpeakerIdentification? = nil) {
+                speakerIdentification: SpeakerIdentification? = nil, unansweredQuestions: [AIUnansweredQuestion] = []) {
+        self.unansweredQuestions = unansweredQuestions
         self.speakerIdentification = speakerIdentification
         originalQuestion = speakerIdentification == nil ? nil : question
         self.boardHeading = boardHeading
@@ -131,6 +133,8 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
     }
 
     public func validate() throws {
+        for question in unansweredQuestions { try question.validate() }
+        guard Set(unansweredQuestions.map(\.requestID)).count == unansweredQuestions.count else { throw AIError.mismatch }
         try speakerIdentification?.validate()
         if let minutesPath { try MinutesPath.validate(minutesPath) }
         if let boardHeading { try BoardHeading.validate(boardHeading) }
@@ -174,6 +178,7 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
         case boardHeading = "board_heading"
         case speakerIdentification = "speaker_identification"
         case originalQuestion = "original_question"
+        case unansweredQuestions = "unanswered_questions"
         case profileSlot = "profile_slot"
         case schemaVersion = "schema_version", mode, streamID = "stream_id", requestID = "request_id"
         case sessionGeneration = "session_generation", participantName = "participant_name"
@@ -185,6 +190,8 @@ public struct AIParticipantContext: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        unansweredQuestions = try values.contains(.unansweredQuestions)
+            ? values.decode([AIUnansweredQuestion].self, forKey: .unansweredQuestions) : []
         trigger = try values.contains(.trigger) ? values.decode(Trigger.self, forKey: .trigger) : nil
         minutesPath = try values.contains(.minutesPath) ? values.decode(String.self, forKey: .minutesPath) : nil
         boardHeading = try values.contains(.boardHeading) ? values.decode(String.self, forKey: .boardHeading) : nil

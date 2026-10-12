@@ -31,6 +31,14 @@ public struct AIInbox: Sendable {
         return event
     }
 
+    public static func decodeResolution(_ data: Data, filename: String, for request: AIRequest) throws -> AIResolutionEvent {
+        guard data.count <= AILimits.eventBytes else { throw AIError.tooLarge }
+        let event = try AIJSON.decode(AIResolutionEvent.self, from: data)
+        try event.validate(for: request)
+        guard filename == event.filename else { throw AIError.mismatch }
+        return event
+    }
+
     /// 段ごとに別ファイル。名前の段とJSONの段が食い違えば検証で弾く。
     public func readProgress(_ phase: AIProgressEvent.Phase, for request: AIRequest) throws -> AIProgressEvent {
         let filename = AIProgressEvent.filename(requestID: request.id, phase: phase)

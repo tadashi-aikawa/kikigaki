@@ -7,7 +7,7 @@ import KikigakiCore
     @Test func 即時実行は変更なしでも操作から一間隔待ち送信不可なら期限を保つ() throws {
         var state = try started()
         let immediate = now.addingTimeInterval(42)
-        for availability in [AIScheduleAvailability.awaitingResult, .busy, .confirmation, .disconnected] {
+        for availability in [AIScheduleAvailability.awaitingResult, .busy, .disconnected] {
             #expect(state.fireNow(now: immediate, availability: availability, hasChanges: true) == .skipped(.unavailable))
             #expect(state.nextFire == now.addingTimeInterval(180))
         }
@@ -54,7 +54,7 @@ import KikigakiCore
         #expect(state.nextFire == now.addingTimeInterval(900))
     }
 
-    @Test(arguments: [AIScheduleAvailability.awaitingResult, .busy, .confirmation, .disconnected])
+    @Test(arguments: [AIScheduleAvailability.awaitingResult, .busy, .disconnected])
     func 通常回は送れなければ溜めず次回へ進む(availability: AIScheduleAvailability) throws {
         var state = try started()
         #expect(state.tick(now: now.addingTimeInterval(180), availability: availability, hasChanges: true) == .skipped(.unavailable))
@@ -63,7 +63,7 @@ import KikigakiCore
         #expect(state.tick(now: now.addingTimeInterval(360), availability: .ready, hasChanges: false) == .skipped(.noChange))
     }
 
-    @Test(arguments: [AIScheduleAvailability.ready, .confirmation])
+    @Test(arguments: [AIScheduleAvailability.ready])
     func 最終回は返事待ちを期限なく保留し到着後一回だけ送る(afterReply: AIScheduleAvailability) throws {
         var state = try started()
         state.recordingStopped()

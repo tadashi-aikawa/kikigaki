@@ -97,10 +97,13 @@ public enum AIMarkdown {
                 if participant.sessionGeneration < generations[participant.profileSlot] ?? 1 {
                     lines.append("- 補足: 旧接続からの返事")
                 }
-                if AIQuestion.isAnswered(question, in: conversation.questions) { lines.append("- 確認: 返答済み") }
-                if result.kind == .needsInput { lines.append("- 状態: 確認待ち") }
+                if AIQuestion.isAnswered(question, in: conversation.questions) {
+                    lines.append("- 確認: " + (question.resolution?.label ?? "返答済み"))
+                }
+                if result.kind == .needsInput, question.resolution == nil { lines.append("- 状態: 確認待ち") }
                 if result.kind == .failed { lines.append("- 状態: 失敗") }
                 lines += ["", "#### 返事", "", result.body ?? ""]
+                if let evidence = question.resolution?.event?.evidence { lines += ["", evidence.answerLine] }
             } else {
                 lines.append("- 状態: " + label(question.state))
                 if let failure = question.failure { lines += ["", "#### 返事", "", failure] }

@@ -31,6 +31,82 @@ import KikigakiAIIO
     }
     private func settle(_ session: MeetingSession) async { await session.submissionTaskForTesting?.value }
 
+    @Test(arguments: ["自動", "手動", "声", "返答する"])
+    func 全送信入口の共通準備は未回答一覧を固定する(entry: String) async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = try session(root, fake: FakeHerdr())
+        session.submitAI(question: "確認して", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"))
+        await settle(session)
+        try reply(session, root: root, kind: .needsInput)
+        let controller = try #require(session.aiRecord?.controller)
+        let target = controller.conversation.questions[0]
+        let config = try #require(session.aiConfiguration)
+        let request = try controller.prepare(lines: ["[13:19:40] タダシ: うん、その案で進めよう"],
+            question: entry == "声" ? "" : "続けて", voiceQuestion: "その案で進めよう", capturedAt: Date(), cutoff: 1,
+            tail: nil, config: config, helper: URL(fileURLWithPath: "/bin/echo"), parent: entry == "返答する" ? target.request.id : nil,
+            trigger: entry == "自動" ? .scheduled : nil)
+        let list = request.envelope.participant.unansweredQuestions
+        #expect(list.count == 1 && list[0].requestID == target.request.id)
+        #expect(list[0].body == target.result?.body && list[0].askedAt == target.result?.recordedAt && list[0].number == 1)
+        #expect(controller.conversation.unansweredQuestions.count == 1)
+        try controller.cancel(request.id)
+        await session.stop()
+    }
+
+    @Test(arguments: [false, true])
+    func 確認があっても自動と手動で一覧を送り根拠か操作でだけ解消する(manual: Bool) async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = try session(root, fake: FakeHerdr()), now = Date()
+        try session.startAISchedule(options: .init(prompt: "更新", sendFinal: false), helper: URL(fileURLWithPath: "/bin/echo"), now: now)
+        await settle(session)
+        try reply(session, root: root, kind: .needsInput)
+        let controller = try #require(session.aiRecord?.controller)
+        let parent = controller.conversation.questions[0].request
+        #expect(controller.conversation.unansweredQuestions.count == 1)
+        session.submitAI(question: "確認に関わらない作業を続けて", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"))
+        await settle(session)
+        #expect(controller.conversation.questions.last?.request.envelope.participant.unansweredQuestions.first?.requestID == parent.id)
+        try reply(session, root: root)
+        #expect(controller.conversation.unansweredQuestions.count == 1)
+        session.setScheduleTranscriptForTesting("うん、その案で進めよう")
+        #expect(session.fireAIScheduleNow(now: now.addingTimeInterval(180)) == .send(final: false))
+        await settle(session)
+        let sender = try #require(controller.conversation.questions.last?.request)
+        #expect(sender.trigger == .scheduled && sender.envelope.participant.unansweredQuestions.count == 1)
+        try reply(session, root: root)
+        #expect(controller.conversation.unansweredQuestions.count == 1)
+        let footer = AICompactFooter(visibility: { false })
+        footer.update(session.snapshot, reduceMotion: true)
+        #expect(footer.confirmation.count == 1)
+        if manual {
+            session.resolveAI(parent.id)
+        } else {
+            let event = try AIResolutionEvent(request: sender, questionRequestID: parent.id,
+                evidence: AIAnswerEvidence(speaker: "タダシ", time: "13:19:40", quote: "うん、その案で進めよう"), recordedAt: Date())
+            try AIFileStore(root: root).write(AIJSON.encode(event), to: [".kikigaki-context", session.aiMeetingID.uuidString, "ai", "inbox", event.filename])
+            controller.scan(); controller.scan()
+        }
+        #expect(controller.conversation.unansweredQuestions.isEmpty)
+        footer.update(session.snapshot, reduceMotion: true)
+        #expect(footer.confirmation.count == 0 && footer.confirmation.isHidden)
+        let item = try #require(AITimeline.items(conversation: controller.conversation, utterances: [], timeline: session.snapshot.timeline)
+            .first { $0.requestID == parent.id && !$0.isSend })
+        #expect(!item.needsAnswer && item.resolution?.source == (manual ? .manual : .voice))
+        await session.stop()
+        let markdown = try String(contentsOf: root.appendingPathComponent("meeting.md"), encoding: .utf8)
+        #expect(markdown.contains(manual ? "確認: 返答済み" : "確認: 声で返答済み"))
+        #expect(markdown.contains("答え: タダシ 13:19:40「うん、その案で進めよう」") == !manual)
+        let files = AIFileStore(root: root), base = [".kikigaki-context", session.aiMeetingID.uuidString, "ai"]
+        let restored = try AIJSON.decode(AIConversation.self, from: files.read(base + ["state.json"]))
+        let archive = try AIJSON.decode(MeetingArchive.self, from: files.read(base + ["archive.json"]))
+        #expect(archive.original.ai == restored)
+        let recovered = try testAIController(meetingID: session.aiMeetingID, outputDirectory: root,
+            herdr: AIHerdr(run: { _, _ in throw AIHerdrError.notReady }), recovered: restored)
+        recovered.scan()
+        #expect(recovered.conversation.unansweredQuestions.isEmpty)
+        #expect(recovered.conversation.questions[0].resolution?.source == (manual ? .manual : .voice))
+    }
+
     @Test func 古い依頼の取消通知中に始めた同じ枠の準備中を消さない() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let session = try session(root, fake: FakeHerdr())
@@ -303,6 +379,7 @@ import KikigakiAIIO
         #expect(session.aiRecord?.controller.conversation.questions.count == 2)
         let last = try #require(session.aiRecord?.controller.conversation.questions.last)
         #expect(last.state == .submitted && last.request.trigger == .scheduled)
+        #expect(last.request.envelope.participant.unansweredQuestions.count == (kind == .needsInput ? 1 : 0))
         #expect(last.request.envelope.readLineCount == 0)
         session.evaluateAISchedule(); await settle(session)
         #expect(session.aiRecord?.controller.conversation.questions.count == 2)

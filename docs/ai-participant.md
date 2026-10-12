@@ -31,7 +31,7 @@ KIKIGAKIから起動するCodexには `-c check_for_update_on_startup=false` を
 | prepared | 問いとsnapshot、返送契約を保存済み。まだ端末へ送っていない。 |
 | submitted | herdrのpromptが成功。AIの受領は未確認。 |
 | accepted | 同梱CLIのacceptを保存済み。回答待ち。 |
-| needs_input | 同梱CLIで確認質問を保存済み。当該の行の「返答する」から返答できる。 |
+| needs_input | 同梱CLIで確認質問を保存済み。声、行の「返答する」、「返答済みにする」で返答できる。 |
 | answered | 同梱CLIで回答を保存済み。 |
 | failed | 入力前の拒否、起動失敗、モデルが返した失敗など、根拠のある失敗。原因と再開操作を表示する。 |
 | delivery_unknown | 送信を試みたが応答喪失などで成否不明。自動再送しない。 |
@@ -40,6 +40,8 @@ KIKIGAKIから起動するCodexには `-c check_for_update_on_startup=false` を
 preparedからsubmitted、acceptedへ進み、回答・確認質問・失敗のいずれかに至るのが通常の流れ。送信要求前に「送信を試行する」を永続化し、その後のクラッシュはdelivery_unknownとして扱う。acceptより先のreplyも保存してansweredにできる。後着acceptやherdrの休止で状態を巻き戻さない。
 
 needs_inputへの返答は新しいrequestに `in_reply_to_request_id` と `in_reply_to_event_id` を付ける。確認待ちの元質問は「返答済み」と補足し、新request側で回答を待つ。確認を続けず別の問いを送る場合も明示操作にし、元質問をansweredへ変えない。同じrequestへの回答訂正はMVPでは上書きせず、新質問として依頼する。
+
+声への返答は独立した `resolve` イベントで記録する。元質問のresultとneeds_input状態は保持し、未回答の判定から外す。「返答済みにする」はAIへ送らず手動の解消をstateへ保存する。押せる条件は「返答する」と同じ。表示とMarkdownは [AIの行](ai-timeline.md) に従う。
 
 herdrのworking、blocked、接続不能は接続状態の補助情報。workingをaccepted、doneをansweredと解釈しない。返送漏れも独立した警告であり、確定回答が届けば解消する。取消後や旧世代の回答は元質問に「取消後の回答」「旧接続からの回答」と残し、新しい質問を完了にしない。
 
@@ -97,6 +99,7 @@ herdrのworking、blocked、接続不能は接続状態の補助情報。working
     "work_allowed": true,
     "captured_at": "2026-09-06T14:05:00+09:00",
     "audio_cutoff_seconds": 300,
+    "unanswered_questions": [],
     "tentative_tail": {
       "text": "迅雷、さっきの案を直して",
       "start_seconds": 296,
@@ -109,10 +112,13 @@ herdrのworking、blocked、接続不能は接続状態の補助情報。working
 
 UUIDとパス・時刻は書式の説明用。実データでは生成した値を使う。`question_source` は問い欄が空ならvoice、それ以外はtyped。`tentative_tail` と確認質問への二つの参照IDは必要な場合だけ付ける。`participant_name` は `address` 末尾の「へ」を除いた表示名とし、明示指定された一宛先を扱う。複数宛名への展開はしない。
 
-次の任意キーは該当するときだけ付く。欠損は未指定として読む。
+次の追加キーを使う。欠損は未指定として読む。
+
+- 付与: `unanswered_questions` は常に付ける。ほかは該当するときだけ付ける。
 
 - `profile` と `profile_slot`: 複数のAIを設定した会議だけ。片方だけの指定は拒否する。`session_path` の枝名になり、単一プロファイルの会議は `ai/sessions/<generation>.json` の平置きのまま。詳細は [AI設定の複数プロファイル](ai-profiles.md) を参照する。
 - `trigger`: 定期自動送信のとき `scheduled`。手動は付けない。
+- `unanswered_questions`: 会議全体の未回答の確認の配列。自動・手動・声の合図・「返答する」の全送信で固定する。各要素は `request_id`、`event_id`、依頼番号 `number`、問いの本文 `body`、尋ねた実時刻 `asked_at`。空なら `[]`、旧保存物の欠損も空として読む。別の宛先の確認も含む。
 - `minutes_path`: 議事録の書き先。人の指定を優先して固定し、ボードの会議では人の指定が無いときに通知パスを引き継ぐ。
 - `board_heading`: ボードの自動送信が更新する見出し。
 - `speaker_identification`: 話者名の割当の固定情報。`unresolved` は未確定枠の記号、`candidates` は候補名の配列。契約は「[話者名の割当](#話者名の割当)」を参照。
@@ -147,6 +153,7 @@ ai/
   inbox/<request_id>.progress.replying.json
   inbox/<request_id>.minutes.json
   inbox/<request_id>.speaker.<A〜H>.json
+  inbox/<確認request_id>.resolve.json
   inbox/notify-<event_id>.json
   state.json                    送信試行、取り込み順、表示状態
   archive.json                  最後に永続化した人間の保存用データ
@@ -157,6 +164,26 @@ manifestとrequestはアプリが送信前に保存する。sessionの接続情�
 acceptとresultはrequest内で各一つ。resultのkindはanswered、needs_input、failedのいずれか。ファイル名を固定することでCLI再実行も同じ論理イベントとして扱う。progressはrequest内で段ごとに一つで、AIがその段へ入ったことだけを伝える自己申告であり、受領・完了・回答の代わりにはならない。`phase` は `editing` と `replying` の2つで、event IDは `<request_id>/progress/<phase>`、ファイル名は `<request_id>.progress.<phase>.json`。`total` は1〜999の任意で `editing` にだけ添えられる。段ごとに最初の1件だけが有効で、2回目以降は保存も失敗もせず同じevent IDを返す。結果より後に保存された申告はアプリが無視する。`schema_version` は据え置き、request・envelope・reply・state.jsonの形式は変えない。notifyはプロバイダのイベント識別子を使い、なければ正規化したペイロードのdigestでIDを作る。モデルにevent ID・会議ID・保存時刻を捏造させず、同梱CLIがrequestの固定情報から生成する。
 
 minutesもrequest内で一つ。AIが作成・更新した議事録の絶対パスを独立イベントとして保存する。event IDは `<request_id>/minutes`、ファイル名は `<request_id>.minutes.json`。会議ごとの対象は `ai/minutes.json` に保存し、古い後着通知は人の指定や対象解除を巻き戻さない。詳細は [議事録プレビューの設計](minutes-preview.md) を参照する。
+
+### 会話で答えた確認の解消
+
+```text
+<cli_path> resolve --session <session_path> --request <今のrequest_id> --token <今のrequest_token> --question <確認のrequest_id> --speaker <話者> --time <HH:mm:ss> < quote.txt
+```
+
+stdinは会話からの短い引用。前後の空白と改行を除き、空・複数行・4 KiB超は拒否する。話者は空でない1行で256バイト以内、時刻は00:00:00〜23:59:59。
+
+イベントは `schema_version: 1` と通常の返送と同じ `meeting_id`、今の `request_id`、`session_generation`、`snapshot_id`、CLIの実時刻 `recorded_at` を持つ。対象は `question_request_id` と `question_event_id`、根拠は `evidence: {speaker, time, quote}`。event IDは `<確認request_id>/resolve`、ファイルは `<確認request_id>.resolve.json`。
+
+- 今の返送と同じトークン・session・固定request・fd検証を通す。
+- 対象は今のrequestの `unanswered_questions` に載った確認に限る。
+    - 検証: CLIとアプリは現在の会議stateでも未回答か確かめる。別会議、回答や失敗の行、手動または文章で返答済みの確認への新規イベントは拒否する。
+- 同じ確認への2回目は保存せず、最初のevent IDを成功として返す。
+    - 適用: 後のrequestからの再実行も同じ。現在のrequestの検証と対象一覧の照合は省略しない。
+- 答えを会話の中に見つけたときだけ返す。推測で消さない。
+    - 続き: 答えがあればその答えに沿って作業する。答えが無ければ確認を残し、確認に関わらない作業だけを進める。
+- 自動送信や通常のansweredだけでは確認を消さない。
+- 旧stateの解消情報の欠損は未解消として読む。復元時も同じ検証を通す。
 
 ```json
 {

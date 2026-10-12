@@ -11,6 +11,7 @@ import KikigakiAIIO
             print("kikigaki-cli speaker --session <session_path> --request <request_id> --token <request_token> --slot <A-H> --name <候補名> < evidence.txt")
             print("kikigaki-cli progress --session <session_path> --request <request_id> --token <request_token> --editing [--total <1-999>]")
             print("kikigaki-cli skill install|uninstall")
+            print("kikigaki-cli resolve --session <session_path> --request <request_id> --token <request_token> --question <確認のrequest_id> --speaker <話者> --time <HH:mm:ss> < quote.txt")
             print(NextCommand.usage)
             return
         }

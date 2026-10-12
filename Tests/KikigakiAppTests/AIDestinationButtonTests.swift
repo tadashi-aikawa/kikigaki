@@ -125,6 +125,25 @@ import KikigakiCore
         #expect(!footer.destinations.isHidden && !footer.arrangedSubviews[1].isHidden)
     }
 
+    @Test func スキップ理由別のカウントダウンと最後の1回の表示を保つ() throws {
+        let footer = AICompactFooter(visibility: { true })
+        let now = Date(timeIntervalSince1970: 1000)
+        var schedule = AIScheduleState(meetingID: UUID())
+        try schedule.start(options: .init(prompt: "更新"), now: now, runID: UUID())
+        var state = SessionSnapshot(ai: AIViewState(), state: .recording)
+        for availability in [AIScheduleAvailability.ready, .busy, .disconnected] {
+            state.aiSchedule = AIScheduleViewState(schedule: schedule, availability: availability, hasChanges: false)
+            footer.update(state, reduceMotion: true, now: now)
+            #expect(footer.automaticDestination.displayText == (availability == .disconnected ? "—" : "3:00"))
+            #expect(footer.automaticDestination.toolTip?.contains(state.aiSchedule.skipReason!) == true)
+            #expect(footer.timerRunning == (availability != .disconnected))
+        }
+        schedule.recordingStopped()
+        state.aiSchedule = AIScheduleViewState(schedule: schedule)
+        footer.update(state, reduceMotion: false, now: now)
+        #expect(footer.automaticDestination.displayText == "—" && !footer.timerRunning)
+    }
+
     @Test func 準備中と実行中を送った側だけに表示し両方も塗る() throws {
         let footer = AICompactFooter(visibility: { true })
         let now = Date(timeIntervalSince1970: 1000)

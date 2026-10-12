@@ -27,7 +27,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - AI設定、独立stream履歴、envelope、質問と受信イベント、AIの返事のMarkdownもここに置く。契約は [AI参加者の設計](docs/ai-participant.md)
 - `Sources/KikigakiAIIO/`: アプリと返送CLIが共有するfd検証、原子的な保存、sessionとフック観測の型
 - `Sources/KikigakiCLI/`: 同梱CLI `kikigaki-cli`。配置は `.app/Contents/Helpers/kikigaki-cli`
-  - コマンド: `accept`・`reply`・`progress`・`notify`・`minutes`・`speaker`・`skill`・`next`。書式は `ReturnCommand.swift`、`SkillCommand.swift`、`NextCommand.swift`
+  - コマンド: `accept`・`reply`・`progress`・`notify`・`minutes`・`speaker`・`resolve`・`skill`・`next`。書式は `ReturnCommand.swift`、`SkillCommand.swift`、`NextCommand.swift`
   - `reply` の本文はstdinから読み、固定requestの受信箱へ排他公開する。`minutes` は議事録の絶対パスを独立イベントとして同じ検証で保存する。会議Markdownへは直接書かない
   - `skill install|uninstall` は利用者が端末で打つ配布Skillの導入口。モデルの返送では使わない
 - `Sources/Kikigaki/`: 実行ターゲット (AppKit + Speech + FluidAudio)。Swift 5 言語モード (非 Sendable な型を音声スレッドと MainActor で受け渡すため)

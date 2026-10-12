@@ -124,6 +124,7 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
     - `KIKIGAKI_LEVEL_CAPTURE`: `AudioLevelAppTests`
     - `KIKIGAKI_PATH_CAPTURE`: `MinutesWindowRevisionTests`
     - `KIKIGAKI_STATE_CAPTURE`: `DestinationFooterTests`。2段の宛先ボタンの状態を撮る
+    - `KIKIGAKI_VOICE_RESOLVE_CAPTURE`: `AIResolutionRowTests`。`/tmp` 配下だけへ、要返答・声で返答済み・返答済みの行を100%と200%で撮る。PNGは描画キャッシュの中間物とし、確認用に非可逆WebPへ変換する
     - `KIKIGAKI_DIARIZATION_CAPTURE`: `DiarizationTests`
     - `KIKIGAKI_MICROPHONE_CAPTURE`: `MicrophoneSwitchUITests`。開始シートのマイク行と、切替の区切り行を撮る。実機のマイクは開かない
     - `KIKIGAKI_SPEAKER_CAPTURE`: `SpeakerPopoverTests` と `SpeakerIdentificationAppTests`。話者名の候補と、AIが付けた名前の点・話者一覧・根拠の行を撮る

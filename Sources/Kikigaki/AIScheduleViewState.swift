@@ -34,7 +34,6 @@ struct AIScheduleViewState {
         switch availability {
         case .awaitingResult: skipReason = "返事待ちでスキップ中"
         case .busy: skipReason = "処理中のためスキップ中"
-        case .confirmation: skipReason = "要返答のためスキップ中"
         case .disconnected: skipReason = "接続できないためスキップ中"
         case .ready: if !hasChanges { skipReason = "差分なしでスキップ中" }
         }

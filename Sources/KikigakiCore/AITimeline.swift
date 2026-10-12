@@ -48,6 +48,7 @@ public enum AITimeline {
         public let needsAnswer: Bool
         /// 送信の行に取消を出すか。送達不明は返事の行を作らないので、ここでしか取り消せない。
         public let canCancel: Bool
+        public var resolution: AIQuestionResolution? = nil
 
         public var isSend: Bool {
             switch kind {
@@ -126,7 +127,7 @@ public enum AITimeline {
                                notes: notes, timeRange: request.timeRange,
                                needsAnswer: question.state == .needsInput
                                  && !AIQuestion.isAnswered(question, in: conversation.questions),
-                               canCancel: false),
+                               canCancel: false, resolution: question.resolution),
                           rank: rank(anchor), sortDate: arrival, side: 1,
                           // 返事同士は記録順。記録の無い送信前失敗は同着の先頭へ置く。
                           order: question.resultOrder ?? -1))

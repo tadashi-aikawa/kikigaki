@@ -130,6 +130,7 @@ public struct AIQuestion: Codable, Equatable, Sendable {
     public private(set) var resultReceivedAt: Date?
     public private(set) var resultOrder: Int?
     public private(set) var answeredByRequestID: UUID?
+    public private(set) var resolution: AIQuestionResolution?
     public var contextReceived: Bool { acceptance != nil || result?.contextReceived == true }
     public var isAwaitingResult: Bool { sendAttemptedAt != nil && result == nil && state != .cancelled && state != .failed }
 
@@ -188,13 +189,18 @@ public struct AIQuestion: Codable, Equatable, Sendable {
     /// 失敗・取消に終わった返答は、同じ確認へ送り直せるよう参照を付け替える。
     /// 付け替えないと、失敗した返答の再送が「返答済み」として拒否される。
     mutating func linkFollowup(_ id: UUID, replacing: Bool = false) throws {
-        guard state == .needsInput, answeredByRequestID == nil || replacing else { throw AIError.invalidTransition }
+        guard state == .needsInput, resolution == nil, answeredByRequestID == nil || replacing else { throw AIError.invalidTransition }
         answeredByRequestID = id
+    }
+    mutating func resolve(_ value: AIQuestionResolution) throws {
+        guard state == .needsInput, resolution == nil else { throw AIError.invalidTransition }
+        resolution = value
     }
     /// 確認質問が返答済みかどうか。**失敗・取消で終わった返答は返答済みとして数えない。**
     /// 送り直せる状態なのに「返答済み」と見えると、返答の導線も件数も消えてしまう。
-    /// 表示・件数・自動送信の抑止はすべてこの判定を通す。
+    /// 表示・件数・送信に添える未回答一覧はすべてこの判定を通す。
     public static func isAnswered(_ parent: AIQuestion, in questions: [AIQuestion]) -> Bool {
+        if parent.resolution != nil { return true }
         guard let id = parent.answeredByRequestID else { return false }
         guard let child = questions.first(where: { $0.request.id == id }) else { return true }
         return child.state != .failed && child.state != .cancelled
@@ -203,6 +209,16 @@ public struct AIQuestion: Codable, Equatable, Sendable {
     /// state.json回収用。破損した保存状態を受信済み・送信可能として扱わない。
     public func validate() throws {
         try request.validate()
+        if let resolution {
+            guard state == .needsInput, result?.kind == .needsInput,
+                  resolution.recordedAt.timeIntervalSince1970.isFinite,
+                  (resolution.source == .voice) == (resolution.event != nil) else { throw AIError.invalid("resolution") }
+            if let event = resolution.event {
+                try event.evidence.validate()
+                guard event.questionRequestID == request.id, event.questionEventID == result?.eventID,
+                      event.meetingID == request.envelope.meetingID, event.recordedAt == resolution.recordedAt else { throw AIError.mismatch }
+            }
+        }
         if let acceptance { try acceptance.validate(for: request) }
         if let result { try result.validate(for: request) }
         guard acceptance == nil || acceptance?.kind == .accept,
@@ -284,6 +300,13 @@ public struct AIConversation: Codable, Equatable, Sendable {
             }
         }
         var speakerIDs = Set<String>()
+        for question in questions {
+            if let event = question.resolution?.event {
+                guard let sender = questions.first(where: { $0.request.id == event.requestID }),
+                      sender.sendAttemptedAt != nil else { throw AIError.mismatch }
+                try event.validate(for: sender.request)
+            }
+        }
         for event in speakerAssignments {
             guard let request = questions.first(where: { $0.request.id == event.requestID })?.request,
                   processedSpeakerIDs.contains(event.eventID), speakerIDs.insert(event.eventID).inserted else { throw AIError.mismatch }

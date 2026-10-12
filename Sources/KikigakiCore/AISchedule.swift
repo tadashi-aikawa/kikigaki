@@ -20,7 +20,7 @@ public struct AIScheduleOptions: Equatable, Sendable {
 
 /// 接続不可と返事待ちを区別する。working中・手動編集中・準備中はbusy。
 public enum AIScheduleAvailability: Equatable, Sendable {
-    case ready, awaitingResult, busy, confirmation, disconnected
+    case ready, awaitingResult, busy, disconnected
 }
 
 public struct AIScheduleState: Sendable {
@@ -97,14 +97,14 @@ public struct AIScheduleState: Sendable {
     }
 
     /// 返事と接続状態の更新時に再評価する。期限なし。sendを返す前に権利を消費する。
-    /// 最終回はneeds_input到着後も締めを送る。通常tickだけがconfirmationでスキップする。
+    /// 通常回と同じく、未回答の確認によって締めを止めない。
     public mutating func finalDecision(availability: AIScheduleAvailability, hasChanges: Bool) -> Effect {
         guard phase == .awaitingFinal else { return .none }
         switch availability {
         case .awaitingResult, .busy: return .none
         case .disconnected:
             stop(); return .skipped(.disconnected)
-        case .ready, .confirmation:
+        case .ready:
             stop()
             return hasChanges ? .send(final: true) : .skipped(.noChange)
         }

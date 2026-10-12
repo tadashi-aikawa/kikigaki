@@ -12,7 +12,7 @@
 - `session_path` は会話ファイルと同じ `.kikigaki-context/<meeting_id>/ai/sessions/` の下にある。`profile_slot` が無ければ `<session_generation>.json`、あれば `<profile_slot>/<session_generation>.json`。`cli_path` はKIKIGAKI.appの `Contents/Helpers/kikigaki-cli` を指す
 - `profile` と `profile_slot` は任意で、両方あるか両方無いかのどちらか。あれば送信元が複数の宛先を使い分けている。`profile` は表示名なので、返送の宛先や読む範囲を変える根拠にはしない
 - `minutes_path` は任意の文字列。人が指定した議事録の書き先、またはボードの会議でAIが通知した書き先で、省略だけを未指定として扱う。明示nullは不正。絶対パスの `.md` ファイルで、UTF-8で1024バイト以下。空要素、`.`、`..`、末尾の `/`、制御文字、経路要素 `.kikigaki-context` を認めない。管理領域の要素はASCIIの大文字小文字を区別せず、制御文字にはZWJなどの書式文字も含む。Swiftの文字列等価性はNFCとNFDを同一視する
-- `work_allowed` は真偽値。無ければ true として扱う。false のときは依頼された作業(ファイル変更・コマンド実行・外部送信)に入らず、回答と提案までにする。**連携そのものに要る操作は値に関わらず行う**: 指定範囲の会話ファイルの読み取り、同梱CLIによる accept・reply・minutes・speaker。通知の許可は議事録本文の作成・更新を許可する意味ではない
+- `work_allowed` は真偽値。無ければ true として扱う。false のときは依頼された作業(ファイル変更・コマンド実行・外部送信)に入らず、回答と提案までにする。**連携そのものに要る操作は値に関わらず行う**: 指定範囲の会話ファイルの読み取り、同梱CLIによる accept・reply・minutes・speaker・resolve。通知の許可は議事録本文の作成・更新を許可する意味ではない
 - `tentative_tail` があればstatusはtentative、時刻は0以上で開始≤終了≤audio_cutoff_seconds
 - `in_reply_to_request_id` があれば、`in_reply_to_event_id` はそのUUIDに `/result` を付けた値
 
@@ -45,6 +45,26 @@ tentative_tailは確定していない付帯情報であり、snapshotへ追加�
 確認への続きは新requestへ返す。in_reply_to_request_idとin_reply_to_event_idが指す元確認を参照し、古いrequestのresultを上書きしない。
 
 ## 同梱CLIへ返す
+
+### 未回答の確認に会話の答えを見つけたとき
+
+全送信の `participant.unanswered_questions` に会議全体の未回答一覧が付く。各要素は `request_id`、`event_id`、依頼番号 `number`、問い `body`、尋ねた時刻 `asked_at`。旧envelopeで欠損していれば空として扱う。
+
+- 会話に答えがあるときだけ `resolve` を返す。推測で返答済みにしない。
+    - 根拠: 話者と `HH:mm:ss`、会話からの短い引用を付ける。引用はstdinで4 KiB以内の1行として渡す。
+- 答えがあれば、その答えに沿って続きの作業をする。
+    - 作業許可: `work_allowed` に従う。falseでも解消の返送は行ってよい。
+- 答えが無ければ、確認を残したまま確認に関わらない作業だけを進める。
+    - 禁止: 答えを推測して確認に関わる作業へ進むこと。
+- 全ての送信で判断する。自動送信だけ、通常のansweredだけでは確認は消えない。
+- 対象は一覧のrequest IDから選ぶ。今のrequestのsession・tokenで返す。
+    - 再実行: 同じ確認の最初のイベントだけが保存され、2回目は同じevent IDを返す。
+
+```text
+<cli_path> resolve --session <session_path> --request <request_id> --token <request_token> --question <確認のrequest_id> --speaker <話者> --time <HH:mm:ss> < quote.txt
+```
+
+acceptの後、続きの作業を始める前に返す。resolveは通常のreplyの代わりにはならない。
 
 次の全共通引数は先頭envelopeの値を使う。event ID、会議ID、保存時刻はCLIが作る。回答本文はstdinに渡す。
 

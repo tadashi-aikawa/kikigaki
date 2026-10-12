@@ -213,7 +213,8 @@ final class AIConversationController {
             audioCutoffSeconds: cutoff, tentativeTail: tail, inReplyToRequestID: parent,
             inReplyToEventID: parent.map { "\($0.uuidString)/result" }, workAllowed: workAllowed ?? config.allowWork,
             trigger: trigger, profile: slot == nil ? nil : config.name, profileSlot: slot,
-            minutesPath: minutesPath, boardHeading: boardHeading, speakerIdentification: speakerIdentification)
+            minutesPath: minutesPath, boardHeading: boardHeading, speakerIdentification: speakerIdentification,
+            unansweredQuestions: conversation.unansweredQuestions)
         let request = try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant),
             number: conversation.questions.count + 1, voiceQuestion: voiceQuestion, snapshot: snapshot, voiceUtteranceStart: voiceUtteranceStart)
         var next = conversation
@@ -487,6 +488,7 @@ final class AIConversationController {
             } catch { scanWarning = "返事の取り込み状態を保存できません" }
         }
         let oldReports = progressReports
+        scanResolutions()
         scanEditing()
         let returns = Dictionary(uniqueKeysWithValues: conversation.questions.map { ($0.request.id, isReturnUnconfirmed($0)) })
         let returnChanged = returns != lastScanReturnStatus
@@ -494,6 +496,33 @@ final class AIConversationController {
         if changed || returnChanged || oldReports != progressReports || oldWarning != warning || oldInvalid != invalidInboxFiles
             || oldBackground != channels.mapValues({ $0.hookBackgroundRunning }) {
             onChange?()
+        }
+    }
+
+    func resolveManually(_ id: UUID) throws {
+        var next = conversation
+        try next.resolveManually(id, at: Date())
+        try commit(next)
+        onChange?()
+    }
+
+    private func scanResolutions() {
+        var next = conversation
+        var changed = false
+        for target in conversation.questions where target.result?.kind == .needsInput {
+            let name = "\(target.request.id.uuidString).resolve.json"
+            do {
+                let bytes = try files.read(base + ["inbox", name], limit: AILimits.eventBytes)
+                let raw = try AIJSON.decode(AIResolutionEvent.self, from: bytes)
+                guard let sender = conversation.questions.first(where: { $0.request.id == raw.requestID }) else { throw AIError.mismatch }
+                let event = try AIInbox.decodeResolution(bytes, filename: name, for: sender.request)
+                if try next.receive(event) { changed = true }
+            } catch AIFileError.missing { continue }
+            catch { invalidInboxFiles.append(name); scanWarning = "確認の返答済みイベントを検証できません" }
+        }
+        if changed {
+            do { try commit(next); onChange?() }
+            catch { scanWarning = "確認の返答済み状態を保存できません" }
         }
     }
 

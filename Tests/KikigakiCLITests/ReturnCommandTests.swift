@@ -49,6 +49,47 @@ import KikigakiAIIO
             #expect(try AIInbox(outputDirectory: f.root).read(filename: f.request.id.uuidString + ".accept.json", for: f.request).kind == .accept)
         }
     }
+
+    @Test func 確認の解消を保存し二回目は最初の結果を返す() throws {
+        let f = try Fixture()
+        var state = AIConversation(meetingID: f.session.meetingID)
+        try state.append(f.request)
+        try state.update(f.request.id) { try $0.beginSending(at: Date()) }
+        try state.receive(AIReceiveEvent(request: f.request, kind: .needsInput, recordedAt: Date(), body: "案Aでよいですか", reason: "clarification"), at: Date())
+        var history = try AIStreamHistory(meetingID: f.session.meetingID)
+        let snapshot = try history.prepare(lines: ["[13:19:40] タダシ: 案Aで進めよう"], outputDirectory: f.root)
+        let participant = AIParticipantContext(streamID: history.streamID, requestID: UUID(), sessionGeneration: 1,
+            participantName: "迅雷", cliPath: "/tmp/helper", sessionPath: f.path, requestToken: "sender-token",
+            question: "続き", capturedAt: Date(), audioCutoffSeconds: 1, unansweredQuestions: state.unansweredQuestions)
+        let sender = try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant), number: 2)
+        try state.append(sender); try state.update(sender.id) { try $0.beginSending(at: Date()) }
+        try f.files.write(AIJSON.encode(sender), to: f.base + ["requests", sender.id.uuidString + ".json"])
+        try f.files.write(AIJSON.encode(state), to: f.base + ["state.json"])
+        let args = ["resolve", "--session", f.path, "--request", sender.id.uuidString, "--token", "sender-token",
+                    "--question", f.request.id.uuidString, "--speaker", "タダシ", "--time", "13:19:40"]
+        let command = try ReturnCommand(args)
+        let id = try command.execute(input: { Data("案Aで進めよう\n".utf8) }, environment: [:])
+        let filename = f.request.id.uuidString + ".resolve.json"
+        let bytes = try f.files.read(f.base + ["inbox", filename])
+        let event = try AIInbox.decodeResolution(bytes, filename: filename, for: sender)
+        #expect(event.evidence.quote == "案Aで進めよう")
+        let pending = state
+        try state.receive(event)
+        try f.files.write(AIJSON.encode(state), to: f.base + ["state.json"])
+        #expect(try command.execute(input: { Issue.record("再実行はstdinを読まない"); return Data() }, environment: [:]) == id)
+        #expect(try f.files.read(f.base + ["inbox", filename]) == bytes)
+        // トークンと別会議の確認IDは、再実行の前にも検証する。
+        var wrong = args; wrong[6] = "wrong"
+        #expect(throws: AIError.mismatch) { try ReturnCommand(wrong).execute(input: { Data() }, environment: [:]) }
+        wrong = args; wrong[8] = UUID().uuidString
+        #expect(throws: AIError.mismatch) { try ReturnCommand(wrong).execute(input: { Data() }, environment: [:]) }
+        // 手動で解消した確認にイベントを新規保存しない。
+        try f.files.remove(f.base + ["inbox", filename])
+        var manual = pending
+        try manual.resolveManually(f.request.id, at: Date())
+        try f.files.write(AIJSON.encode(manual), to: f.base + ["state.json"])
+        #expect(throws: AIError.invalidTransition) { try command.execute(input: { Data("案Aで進めよう".utf8) }, environment: [:]) }
+    }
     /// プロファイルごとの枝を切った会議でも返送できること。
     /// 平置きだけを想定していた頃はここで unsafe_file になり、実herdrの返送が全滅した。
     @Test func プロファイルの枝を切った保存パスでも返送できる() throws {
