@@ -6,6 +6,12 @@ import KikigakiCore
 @Suite(.serialized) @MainActor struct MinutesToggleTests {
     /// 画面は1800×1000に固定する。実行機の画面を使うと、CIの狭い画面ではウィンドウを伸ばせず期待が崩れる。
     static let screen = NSRect(x: 0, y: 0, width: 1800, height: 1000)
+    private func place(_ window: NSWindow, width: CGFloat) {
+        // 他スイートのウィンドウでNSScreen.mainが変わると、初期位置が別の画面になる。
+        // 画面移動の通知はfitWindowで保存幅へ戻すため、位置を先に揃えてから幅を変える。
+        window.setFrameOrigin(NSPoint(x: 0, y: 100))
+        window.setFrame(NSRect(x: 0, y: 100, width: width, height: 700), display: false)
+    }
     private func controller(width: CGFloat) throws -> (TranscriptWindowController, UserDefaults, String) {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let suite = "minutes-toggle-" + UUID().uuidString
@@ -14,7 +20,7 @@ import KikigakiCore
         controller.minutesSplit.visibleScreen = { _ in Self.screen }
         let window = try #require(controller.window)
         window.setFrameAutosaveName("")
-        window.setFrame(NSRect(x: 0, y: 100, width: width, height: 700), display: false)
+        place(window, width: width)
         controller.windowDidResize(Notification(name: NSWindow.didResizeNotification, object: window))
         return (controller, defaults, suite)
     }
@@ -134,7 +140,14 @@ import KikigakiCore
             let window = try #require(controller.window), split = controller.minutesSplit!
             split.visibleScreen = { _ in Self.screen }
             window.setFrameAutosaveName("")
-            window.setFrame(NSRect(x: 0, y: 100, width: 800, height: 700), display: false)
+            // 実行順やモニター数によらず、テストの初期配置で画面移動を必ず通す。
+            // 画面外に置く間だけdelegateを外し、fitWindowに画面内へ戻されないようにする。
+            window.delegate = nil
+            window.setFrameOrigin(NSPoint(x: 20000, y: 20000))
+            window.delegate = controller
+            place(window, width: 800)
+            try #require(window.frame.width == 800 && split.left.frame.width == 800)
+            #expect(split.preference.leftWidth == 428)
             split.animates = { animated }
             split.setVisible(true)
             if animated {
