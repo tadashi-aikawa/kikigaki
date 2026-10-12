@@ -201,6 +201,11 @@ async function renderDiagram(id, definition) {
     // 非同期描画の途中で倍率が変わったら、新しい倍率を打ち消して計測し直す。
     if (scale !== textScale) { measure.remove(); return renderDiagram(id, definition); }
     measure.innerHTML = result.svg;
+    // width:100%とmax-widthによる縮小を外し、文字の大きさをペイン幅に依存させない。
+    // 自然寸法のSVGをpageZoomで拡大し、はみ出した分は.diagramがスクロールする。
+    const svg = measure.querySelector('svg');
+    svg.style.width = `${svg.viewBox.baseVal.width}px`;
+    svg.style.maxWidth = 'none';
     for (const text of measure.querySelectorAll('text,tspan')) {
       for (const attribute of ['x', 'y', 'dx', 'dy']) {
         if (!/(?:em|ex)(?:\s|,|$)/.test(text.getAttribute(attribute) || '')) continue;

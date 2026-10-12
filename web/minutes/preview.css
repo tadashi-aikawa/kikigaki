@@ -50,7 +50,7 @@ pre code { padding:0; background:none; } img { max-width:100%; height:auto; } .i
 .code-copy:hover,.code-copy:focus-visible { background:var(--paper); }
 .code-copy:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .code-copy.copied { color:var(--accent); }
-.diagram { margin:14px 0; overflow-x:auto; } .diagram svg { display:block; max-width:100%; height:auto; margin:auto; }
+.diagram { margin:14px 0; overflow-x:auto; } .diagram svg { display:block; max-width:none; height:auto; margin:auto; }
 .katex-display { overflow-x:auto; overflow-y:hidden; padding:4px 0; } eq { display:inline; } eqn { display:block; }
 .footnotes { border-top:1px solid var(--rule); margin-top:24px; font-size:12px; color:var(--muted); }
 .footnotes p { margin:4px 0; } .footnote-ref { font-size:10px; }
