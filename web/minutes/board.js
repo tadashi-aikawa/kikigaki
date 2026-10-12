@@ -14,11 +14,15 @@ export function boardLinks(source) {
   return { definition, links };
 }
 
+export function boardNodeID(node, svg) {
+  const prefix = svg.id + '-';
+  const localID = node.id.startsWith(prefix) ? node.id.slice(prefix.length) : node.id;
+  return /^flowchart-(T[1-9][0-9]*)-[0-9]+$/.exec(localID)?.[1] || null;
+}
 export function attachBoardLinks(holder, links, navigate) {
-  const prefix = holder.querySelector('svg')?.id + '-';
+  const svg = holder.querySelector('svg');
   for (const node of holder.querySelectorAll('g.node')) {
-    const localID = node.id.startsWith(prefix) ? node.id.slice(prefix.length) : node.id;
-    const id = /^flowchart-(T[1-9][0-9]*)-[0-9]+$/.exec(localID)?.[1];
+    const id = boardNodeID(node, svg);
     if (!id || !links.has(id)) continue;
     node.setAttribute('role', 'link'); node.setAttribute('tabindex', '0');
     node.setAttribute('aria-label', '見出しへ: ' + links.get(id));

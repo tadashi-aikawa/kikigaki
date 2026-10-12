@@ -73,14 +73,20 @@ final class MinutesClearButton: HoverButton {
     var document: MinutesWebView { selectedBoard ? boardDocument : minutesDocument }
     let tabs = NSSegmentedControl(labels: ["議事録", "ボード"], trackingMode: .selectOne, target: nil, action: nil)
     private let tabBar = NSStackView()
-    private(set) var selectedBoard = false
+    private(set) var selectedBoard = false {
+        didSet {
+            let label = selectedBoard ? "ボードを検索" : "議事録を検索"
+            searchField.placeholderString = label
+            searchField.setAccessibilityLabel(label)
+        }
+    }
     private var boardHeading: String?
     let updateStatus = MinutesUpdateStatus(frame: .zero)
     private var pendingModifiedAt: Date?
     private var rendering = false
     let searchField = NSSearchField()
     private let searchBar = NSStackView()
-    private let searchCount = Washi.label("", size: 11)
+    let searchCount = Washi.label("", size: 11)
     private let neovimButton = HoverButton(title: "", target: nil, action: nil)
     private let obsidianButton = HoverButton(title: "", target: nil, action: nil)
     private var editorTask: Task<Void, Never>?
@@ -210,6 +216,7 @@ final class MinutesClearButton: HoverButton {
         tabBar.addArrangedSubview(tabs); tabBar.addArrangedSubview(NSView()); tabBar.isHidden = true
         boardDocument.isHidden = true
         boardDocument.boardLinksEnabled = true
+        boardDocument.boardCanvasEnabled = true
         boardDocument.onBoardAnchor = { [weak self] heading in
             guard let self, self.selectedBoard else { return }
             self.selectBoard(false)

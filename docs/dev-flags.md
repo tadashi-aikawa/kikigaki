@@ -102,13 +102,19 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
     - 出力: AIの行を含む画像は出力先直下、書き起こし本体と議事録・ボードの画像は `review/` に置く。
     - 比較用の入力: `KIKIGAKI_UI_FIXTURE=<使い捨てディレクトリ>` を添えると、同じパスの議事録で別ビルドと比較できる。ディレクトリは事前に用意する。
 - `KIKIGAKI_MERMAID_CAPTURE=<出力先> swift test --filter MermaidScaleTests`: flowchart・mindmap・timeline・sequenceを100%・125%・150%・200%で検証する。
-- `KIKIGAKI_DIAGRAM_CAPTURE=<出力先> swift test --filter DiagramInteractionTests`: ボードの横長・縦長Mermaid図を文字100%・200%で撮る。
+- `KIKIGAKI_DIAGRAM_CAPTURE=<出力先> swift test --filter DiagramInteractionTests`: 議事録と旧ボード本文のMermaid図を文字100%・200%で撮る。
     - 撮影: 選択前、図200%、図50%、ドラッグ後。通常のテストでは撮らない。
     - 続きの表示: 右へ伸びる図、下へ伸びる図、両方へ伸びる図、小さい図の選択前・「全体」後・ドラッグ後を文字100%・200%で撮る。`/tmp` 配下へだけ保存する。
     - 更新の撮影: 縦に伸びるボードの更新前、更新後、選択中、Esc後も撮る。未選択・選択中・選択解除後の更新を含む。
     - 目次との配置: 議事録・ボードの両タブで、図をペイン上端に置き、目次の開閉を100%・200%で撮る。狭いペインも含む。
     - 保存: 使い捨て議事録、倍率変更後と再描画後のPNG、SVGの計測値。
     - 理由: 100%の画素一致を比較するため、撮影は非可逆圧縮しない。
+- `KIKIGAKI_BOARD_CANVAS_CAPTURE=/tmp/kikigaki-board-canvas swift test --filter BoardCanvasTests`: 30ノードのボードの初期表示・フォーカス・ズーム中の更新前後・ミニマップを文字100%・200%で撮る。旧ボードの複数図と本文も撮る。
+- `KIKIGAKI_BOARD_SEARCH_CAPTURE=/tmp/kikigaki-board-search swift test --filter BoardSearchTests`: 30ノードの検索前・1件目・2件目を文字100%・200%で撮る。保存先は `/tmp` 配下だけ。
+- `KIKIGAKI_BOARD_FOCUS_CAPTURE=/tmp/kikigaki-board-focus swift test --filter BoardFocusTests`: 通常・now・done・holdの四隅ブラケットを等倍と全体表示で撮る。保存先は `/tmp` 配下だけ。
+- `KIKIGAKI_BOARD_PERF_CAPTURE=/tmp/kikigaki-board-performance/before.json swift web/minutes/measure-canvas.swift`: 30・60ノードの入力中のフレーム間隔と処理時間を使い捨てJSONへ記録する。保存先は `/tmp` 配下だけ。
+    - 計測資産の切替: `KIKIGAKI_BOARD_PERF_ASSETS=<絶対パス>`。`measure-variants.mjs`で生成した `/tmp` 配下の資産だけ指定できる。
+    - 保存: `/tmp` 配下だけへ使い捨てMarkdownと画素比較用のPNGを書き出す。通常のテストでは撮影しない。
 - `KIKIGAKI_TEST_SPEECH=1 swift test --filter DiarizationTests`: 通常はスキップする実Apple Speechの結合テストも実行できます。マイクを使わず無音を入力し、話者モデルの呼出ゼロ・会議ごとの切替を確認します。
 - 環境変数 `KIKIGAKI_TEST_DIARIZATION=1 swift test --filter SpeakerDiarizerTests`: 実モデルで短い入力とchunk境界の末尾処理を確かめる。初回はモデルを取得する
 - 開始シートの見た目は `KIKIGAKI_START_SHEET_CAPTURE=<出力先> swift test --filter StartSheetTests` でPNGへ撮り、モックと突き合わせます。

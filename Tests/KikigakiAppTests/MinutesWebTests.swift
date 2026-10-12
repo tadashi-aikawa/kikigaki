@@ -104,20 +104,24 @@ import Testing
         <pre><code>HTML code</code></pre>
         """
         preview.update(path: "/tmp/kikigaki-code-copy-fixture.md", source: .human, active: false, boardHeading: "## ボード")
+        var boardRendered = false
+        let previousRendered = preview.boardDocument.onRendered
+        preview.boardDocument.onRendered = { text in previousRendered?(text); boardRendered = true }
         preview.receive(.body("# コピーの確認\n\n" + codes + excluded + "\n\n## ボード\n\n" + codes + excluded,
                               [], modifiedAt: Date()))
-        try await wait { preview.minutesDocument.renderedText.contains("HTML code") && preview.boardDocument.renderedText.contains("HTML code") }
+        try await wait { preview.minutesDocument.renderedText.contains("HTML code") && boardRendered }
         let expected = ["let message = \"<&> 日本語\";  \n", "言語なし", "indented", ""]
         for board in [false, true] {
             preview.selectBoard(board)
             let document = preview.document, web = document.webView
-            let originalText = document.renderedText
+            if board { _ = try await web.evaluateJavaScript("document.querySelector('.board-legacy').open=true; void 0") }
+            let originalText = try #require(try await web.evaluateJavaScript("document.querySelector('main').innerText.trim()") as? String)
             #expect(!originalText.contains("コピー") || !board) // 議事録の見出し以外にラベルを足さない
             #expect(!originalText.contains("✓"))
             #expect(try await web.evaluateJavaScript("document.querySelectorAll('.code-copy').length") as? Int == 4)
             #expect(try await web.evaluateJavaScript("[...document.querySelectorAll('.code-copy')].every(b => b.title === 'コピー' && b.getAttribute('aria-label') === 'コピー' && b.textContent === '')") as? Bool == true)
             #expect(try await web.evaluateJavaScript("window.minutes.search('コピー', 0, false).count") as? Int == (board ? 0 : 1))
-            #expect(try await web.evaluateJavaScript("window.minutes.search('日本語', 0, false).count") as? Int == 1)
+            #expect(try await web.evaluateJavaScript("window.minutes.search('日本語', 0, false).count") as? Int == (board ? 0 : 1))
             _ = try await web.evaluateJavaScript("window.minutes.select(3, 8); window.copySelection = getSelection().toString(); window.copyY = scrollY;")
             for (index, text) in expected.enumerated() {
                 _ = try await web.evaluateJavaScript("document.querySelectorAll('.code-copy')[\(index)].click()")
@@ -163,7 +167,7 @@ import Testing
             document.render((board ? "" : "# コピーの確認\n\n") + changedCodes + excluded, reset: false)
             try await wait { document.renderedText.contains("更新した日本語") }
             #expect(try await web.evaluateJavaScript("CSS.highlights.get('updated').size") as? Int == 1)
-            #expect(try await web.evaluateJavaScript("window.minutes.search('更新した日本語', 0, false).count") as? Int == 1)
+            #expect(try await web.evaluateJavaScript("window.minutes.search('更新した日本語', 0, false).count") as? Int == (board ? 0 : 1))
             _ = try await web.evaluateJavaScript("document.querySelector('.code-copy').click()")
             try await wait { pasteboard.string(forType: .string) == "let message = \"<&> 更新した日本語\";  \n" }
             // 古い本文から遅れて来たコピーは、現在のpasteboardを書き換えない。

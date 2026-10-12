@@ -252,7 +252,7 @@ import KikigakiAIIO
         preview.update(path: nil, source: nil, active: true, boardHeading: "## ボード")
         preview.receive(.body(markdown, [], modifiedAt: Date()))
         for _ in 0..<400 {
-            if preview.boardDocument.renderedText.contains("T3 開始日") && preview.minutesDocument.renderedText.contains("手動の記録") { break }
+            if preview.boardDocument.renderedText.contains("T1 料金") && preview.minutesDocument.renderedText.contains("手動の記録") { break }
             try await Task.sleep(for: .milliseconds(20))
         }
         preview.selectBoard(true)
@@ -260,16 +260,17 @@ import KikigakiAIIO
         let web = preview.boardDocument.webView
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.diagram').length") as? Int == 2)
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('main a[href^=\"#\"]').length") as? Int == 1)
-        for selector in ["main a[href^=\"#\"]", ".diagram g.node[role=link]"] {
+        for selector in ["main a[href^=\"#\"]", ".board-canvas g.node[role=button]"] {
             _ = try await web.evaluateJavaScript("scrollTo(0, 0); true")
             _ = try await web.callAsyncJavaScript("""
-            if (selector.startsWith('.diagram')) document.querySelector('.diagram').click();
+            document.querySelector('.board-legacy').open=true;
+            if (selector.startsWith('.board-canvas')) document.querySelector(selector).dispatchEvent(new MouseEvent('click', {bubbles:true}));
             document.querySelector(selector).dispatchEvent(new MouseEvent('click', {bubbles:true}));
             return true;
             """, arguments: ["selector": selector], contentWorld: .page)
             try await Task.sleep(for: .milliseconds(100))
             #expect(preview.selectedBoard)
-            #expect(try await web.evaluateJavaScript("scrollY > 0") as? Bool == true)
+            #expect(try await web.evaluateJavaScript("document.querySelector('.board-legacy').open") as? Bool == true)
             #expect(try await web.evaluateJavaScript("""
             (() => { const h = document.querySelector('h3'), r = h.getBoundingClientRect();
               return r.top >= 0 && r.bottom < innerHeight && h.getAnimations().length > 0; })()
@@ -308,12 +309,12 @@ import KikigakiAIIO
         preview.selectBoard(true)
         let web = preview.boardDocument.webView
         let nodes = try await web.evaluateJavaScript("JSON.stringify([...document.querySelectorAll('.diagram g.node')].map(n=>[n.id,n.getAttribute('role')]))") as? String ?? "なし"
-        #expect(try await web.evaluateJavaScript("document.querySelectorAll('.diagram g.node[role=link]').length") as? Int == 1, "ノード: \(nodes)、本文: \(preview.boardDocument.renderedText)")
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('.board-canvas g.node[role=button]').length") as? Int == 3, "ノード: \(nodes)、本文: \(preview.boardDocument.renderedText)")
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.diagram a,.diagram script').length") as? Int == 0)
-        _ = try await web.evaluateJavaScript("document.querySelector('.diagram g.node[role=link]').dispatchEvent(new MouseEvent('click', {bubbles:true}))")
+        _ = try await web.evaluateJavaScript("document.querySelector('.board-canvas [data-node-id=T1]').dispatchEvent(new MouseEvent('click', {bubbles:true}))")
         #expect(preview.selectedBoard)
-        #expect(try await web.evaluateJavaScript("document.querySelector('.diagram').classList.contains('diagram-selected')") as? Bool == true)
-        _ = try await web.evaluateJavaScript("document.querySelector('.diagram g.node[role=link]').dispatchEvent(new MouseEvent('click', {bubbles:true}))")
+        #expect(try await web.evaluateJavaScript("document.querySelector('.board-canvas [data-node-id=T1] .board-focus-ring')!==null") as? Bool == true)
+        _ = try await web.evaluateJavaScript("document.querySelector('.board-canvas [data-node-id=T1]').dispatchEvent(new MouseEvent('click', {bubbles:true}))")
         for _ in 0..<100 {
             if !preview.selectedBoard { break }
             try await Task.sleep(for: .milliseconds(20))

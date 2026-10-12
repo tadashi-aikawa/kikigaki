@@ -74,6 +74,23 @@ pre code { padding:0; background:none; } img { max-width:100%; height:auto; } .i
 .diagram-selected.diagram-dragging { cursor:grabbing; }
 .diagram-controls { display:none; position:fixed; z-index:1; align-items:center; flex-wrap:wrap; gap:3px; padding:3px; border:1px solid var(--rule); border-radius:6px; background:var(--paper); color:var(--accent); font:12px/1.5 -apple-system,sans-serif; cursor:default; }
 .diagram-selected .diagram-controls { display:flex; }
+.canvas-active .diagram-controls { display:flex; }
+body.board-canvas-mode { padding:0; overflow:hidden; }
+.board-canvas { position:fixed; inset:0; margin:0; overflow:hidden; cursor:grab; user-select:none; }
+.board-canvas:focus { outline:none; }
+.board-canvas .diagram-stage { width:max-content; }
+.board-canvas .diagram-stage > svg { margin:0; overflow:visible; }
+.board-canvas.diagram-dragging { cursor:grabbing; }
+.board-canvas svg,.board-canvas svg * { cursor:inherit; }
+.board-focus-ring { fill:none; stroke:#2b2420; stroke-width:3px; stroke-linecap:square; vector-effect:non-scaling-stroke; pointer-events:none; }
+.board-minimap { position:absolute; right:12px; bottom:12px; padding:3px; background:var(--paper); border:1px solid var(--rule); border-radius:5px; box-shadow:0 2px 6px #221f1c20; cursor:crosshair; touch-action:none; }
+.board-minimap[hidden] { display:none; }
+.board-minimap > svg { display:block; margin:0; }
+.board-map-frame { fill:#5b3e7a18; stroke:var(--accent); stroke-width:2px; vector-effect:non-scaling-stroke; pointer-events:none; }
+.board-legacy { position:fixed; left:12px; bottom:12px; z-index:2; max-width:calc(100vw - 24px); max-height:45vh; border:1px solid var(--rule); border-radius:6px; background:var(--paper); font-size:13px; }
+.board-legacy summary { padding:6px 10px; color:var(--accent); cursor:pointer; }
+.board-legacy summary::before { content:attr(data-label); }
+.board-legacy-body { max-height:calc(45vh - 36px); overflow:auto; padding:0 16px 12px; }
 .diagram-controls [data-label]::before { content:attr(data-label); }
 .diagram-controls output { min-width:42px; text-align:center; }
 .diagram-controls button { min-width:25px; padding:3px 5px; border:0; border-radius:3px; background:transparent; color:inherit; font:inherit; cursor:pointer; }

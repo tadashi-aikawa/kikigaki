@@ -304,6 +304,8 @@ import Testing
     @Test func 図の倍率操作は両タブと文字倍率と目次の開閉によらず重ならない() async throws {
         let preferences = MinutesTestDefaults()
         let preview = MinutesPreviewView(frame:NSRect(x:0,y:0,width:1350,height:1000),defaults:preferences.value)
+        // 旧ボード本文の図は議事録と同じ選択操作を使う。全面キャンバスは別suiteで検証する。
+        preview.boardDocument.boardCanvasEnabled = false
         let window = NSWindow(contentRect:preview.frame,styleMask:[.titled],backing:.buffered,defer:false)
         window.contentView = preview; window.orderFront(nil); preview.layoutSubtreeIfNeeded()
         defer { preview.stop(); window.orderOut(nil) }
@@ -416,6 +418,7 @@ import Testing
     @Test func Mermaid図を選択してズームと移動を行い再描画で保持する() async throws {
         let preferences = MinutesTestDefaults()
         let preview = MinutesPreviewView(frame: NSRect(x:0, y:0, width:900, height:850), defaults:preferences.value)
+        preview.boardDocument.boardCanvasEnabled = false
         let window = NSWindow(contentRect:preview.frame, styleMask:[.titled], backing:.buffered, defer:false)
         window.contentView = preview; window.orderFront(nil); preview.layoutSubtreeIfNeeded()
         defer { preview.stop(); window.orderOut(nil) }

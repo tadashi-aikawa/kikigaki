@@ -164,6 +164,7 @@ actor MinutesImageReader {
     var onError: ((String) -> Void)?
     var onBoardAnchor: ((String) -> Void)?
     var boardLinksEnabled = false
+    var boardCanvasEnabled = false
     /// 本文のリンクとwikilinkの開き先。既定はシステム。テストが実クリックの行き先を確かめるために差し替える。
     var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
     /// コピーの書き込み先。テストでは専用pasteboardへ隔離する。
@@ -216,9 +217,9 @@ actor MinutesImageReader {
         guard ready, let (source, reset, current) = pending else { return }
         pending = nil
         resources.beginImages()
-        webView.callAsyncJavaScript("return await window.minutes.render(source, context, reset, ticket, vault, boardLinksEnabled);",
+        webView.callAsyncJavaScript("return await window.minutes.render(source, context, reset, ticket, vault, boardLinksEnabled, boardCanvasEnabled);",
             arguments: ["source": source, "context": resources.context, "reset": reset, "ticket": current,
-                        "vault": vault ?? NSNull(), "boardLinksEnabled": boardLinksEnabled],
+                        "vault": vault ?? NSNull(), "boardLinksEnabled": boardLinksEnabled, "boardCanvasEnabled": boardCanvasEnabled],
             in: nil, in: .page) { [weak self] result in
                 guard let self, self.ticket == current else { return }
                 if case .failure = result { self.onError?("議事録を描画できません。再読込してください") }

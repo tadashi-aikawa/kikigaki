@@ -163,6 +163,13 @@ import Testing
         let start = try #require(doc.range(of: "````text\n"))
         let end = try #require(doc.range(of: "\n````", range: start.upperBound..<doc.endIndex))
         #expect(String(doc[start.upperBound..<end.lowerBound]) == BoardPrompt.builtIn)
+        #expect(BoardPrompt.builtIn.contains("ボードはMermaid図1枚だけにします。"))
+        for obsolete in ["12個", "20個", "詳細図", "立場", "直近の動き"] {
+            #expect(!BoardPrompt.builtIn.contains(obsolete))
+        }
+        for required in ["一度付けたIDを変更・再利用せず", "classDef done", "classDef hold", "classDef rejected", "classDef now", "classDef hot", "classDef cold", "click Tn"] {
+            #expect(BoardPrompt.builtIn.contains(required))
+        }
         let locationStart = try #require(doc.range(of: "```text\n", range: end.upperBound..<doc.endIndex))
         let locationEnd = try #require(doc.range(of: "\n```", range: locationStart.upperBound..<doc.endIndex))
         #expect(String(doc[locationStart.upperBound..<locationEnd.lowerBound]) == BoardPrompt.locationInstruction)

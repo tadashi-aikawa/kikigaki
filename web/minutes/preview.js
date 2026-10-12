@@ -9,6 +9,7 @@ import { boardLinks, attachBoardLinks } from './board.js';
 import { DiagramInteractions } from './diagrams.js';
 const md = createRenderer(), root = document.getElementById('minutes');
 const diagrams = new DiagramInteractions();
+const canvas = new DiagramInteractions();
 const toc = document.getElementById('toc'), tocNav = toc.querySelector('nav');
 let textScale = 1;
 let headings = [], tocLinks = [], activeTOCLink = null, tocFrame = 0;
@@ -58,6 +59,7 @@ function fitTables() { fittedWidth = root.clientWidth; layoutTables(root); }
 new ResizeObserver(() => { if (root.clientWidth !== fittedWidth) fitTables(); }).observe(root);
 function revealElement(element) {
   for (let parent = element; parent && parent !== root; parent = parent.parentElement) {
+    if (parent.classList.contains('board-legacy')) parent.open = true;
     if (parent.classList.contains('section-body') && parent.hidden) {
       parent.hidden = false;
       const heading = parent.previousElementSibling;
@@ -93,6 +95,7 @@ function jumpTo(element) {
 // どちらかを変えると着地した見出しを現在位置が指さなくなるので、必ず両方を見直す。
 const TOC_LANDING_MARGIN = 75;
 function navigateTOC(target) {
+  if (target?.closest('.board-legacy')) { window.minutes.jump(target.id); return; }
   cancelNavigation();
   revealElement(target);
   const start = scrollY;
@@ -316,8 +319,9 @@ function refreshSearch(reveal = false) {
     // 元のUTF-16位置を保ったまま大文字小文字を無視する。入力の正規表現記号はすべて引用する。
     // 毎ヒットでDOM全体を歩かず、文字位置の索引を二分探索する。
     let text = '', previousBlock;
-    const index = nodes().map(node => {
-      const block = node.parentElement.closest('p,li,td,th,h1,h2,h3,h4,h5,h6,pre,.callout-title');
+    const board = root.querySelector('.board-canvas');
+    const index = nodes().filter(node => !board || node.parentElement.closest('.board-canvas .diagram-stage [data-node-id] text')).map(node => {
+      const block = node.parentElement.closest('[data-node-id],p,li,td,th,h1,h2,h3,h4,h5,h6,pre,.callout-title');
       if (previousBlock && block !== previousBlock) text += '\n';
       previousBlock = block;
       const start = text.length; text += node.textContent;
@@ -342,7 +346,11 @@ function paint(reveal) {
   cancelNavigation();
   CSS.highlights.set('matches', new Highlight(...ranges));
   CSS.highlights.set('current', new Highlight(...(hit >= 0 ? [ranges[hit]] : [])));
+  const boardNode = range => range?.startContainer.parentElement.closest('.board-canvas [data-node-id]');
+  canvas.paintSearch(ranges.map(boardNode).filter(Boolean), boardNode(ranges[hit]));
   if (reveal && hit >= 0) {
+    const node = boardNode(ranges[hit]);
+    if (node) { canvas.revealSearch(node); return; }
     revealElement(ranges[hit].startContainer.parentElement);
     revealElement(ranges[hit].endContainer.parentElement);
     const rect = ranges[hit].getBoundingClientRect();
@@ -356,19 +364,28 @@ window.minutes = {
     root.classList.toggle('text-expanded', textScale > 1 && !toc.hidden);
     restoreAnchor(saved);
     diagrams.positionControls();
+    canvas.positionControls();
   },
-  async render(text, newContext, reset, ticket, newVault, boardLinksEnabled = false) {
+  async render(text, newContext, reset, ticket, newVault, boardLinksEnabled = false, boardCanvasEnabled = false) {
     cancelNavigation();
     const current = ++generation;
     if (reset) updates.reset();
     if (reset) diagrams.reset(); else diagrams.detach();
+    if (reset) canvas.reset(); else canvas.detach();
     clearUpdates();
     updateListeners.abort(); updateListeners = new AbortController();
     const saved = reset ? null : anchor(), selection = reset ? null : selectionOffsets();
+    const legacyState = reset ? null : {
+      open:root.querySelector('.board-legacy')?.open,
+      scroll:root.querySelector('.board-legacy-body')?.scrollTop || 0,
+    };
     source = text; context = newContext; vault = newVault || '';
     closeImage();
     const codeBlocks = [];
     root.innerHTML = safeHTML(md.render(withoutFrontmatter(text), { context, vault, cleanHTML, codeBlocks }));
+    // 図がない旧ボードは従来の文書としてそのまま読める。
+    const primarySource = boardCanvasEnabled ? root.querySelector('.mermaid-source') : null;
+    document.body.classList.toggle('board-canvas-mode', !!primarySource);
     decorateCodeBlocks(codeBlocks, ticket);
     prepareSections(reset);
     decorateCallouts();
@@ -415,21 +432,40 @@ window.minutes = {
         const { svg } = await renderDiagram('diagram-' + current + '-' + crypto.randomUUID(), definition);
         if (current !== generation) return;
         holder.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, FORBID_TAGS: ['foreignObject', 'script', 'a'] });
-        attachBoardLinks(holder, board.links, target => {
+        const navigate = target => {
           // 詳細図は同じボード内。そこに無い見出しだけ議事録タブへ渡す。
           if (!window.minutes.jump(target)) report({ kind: 'boardAnchor', target });
-        });
+        };
+        if (pre !== primarySource) attachBoardLinks(holder, board.links, navigate);
         pre.replaceWith(holder);
         // 文言の更新ではキーを変えない。見出しのIDと、その節内の図の順番で対応付ける。
         const section = holder.closest('.heading-section');
         const sectionID = section?.querySelector(':scope > :is(h1,h2,h3,h4,h5,h6)')?.id || '';
         const index = diagramCounts.get(sectionID) || 0; diagramCounts.set(sectionID, index + 1);
         const key = JSON.stringify([sectionID, index]); diagramKeys.add(key);
-        const cleanup = diagrams.attach(holder, key);
+        const primary = pre === primarySource;
+        const cleanup = primary ? canvas.attach(holder, 'board', { canvas:true, navigate:id => {
+          if (board.links.has(id)) navigate(board.links.get(id));
+        } }) : diagrams.attach(holder, key);
+        if (primary) {
+          // 残りは消さず、キャンバスの手前で開ける文書へ移す。旧複数図も読み続けられる。
+          holder.remove();
+          const legacy = document.createElement('details'); legacy.className = 'board-legacy';
+          legacy.open = !!legacyState?.open;
+          const summary = document.createElement('summary'); summary.dataset.label = '以前の本文';
+          summary.setAttribute('aria-label', '以前のボードの本文を表示');
+          const body = document.createElement('div'); body.className = 'board-legacy-body';
+          body.append(...root.childNodes); legacy.append(summary, body);
+          root.append(holder);
+          if (body.textContent.trim() || body.querySelector('.diagram,img')) root.append(legacy);
+        }
         updateListeners.signal.addEventListener('abort', cleanup, { once:true });
       } catch { pre.title = '図を描画できないため、記法を表示しています'; }
     }
     if (current !== generation) return;
+    document.body.classList.toggle('board-canvas-mode', !!root.querySelector('.board-canvas'));
+    const legacyBody = root.querySelector('.board-legacy-body');
+    if (legacyBody && legacyState) legacyBody.scrollTop = legacyState.scroll;
     for (const key of diagrams.states.keys()) if (!diagramKeys.has(key)) diagrams.states.delete(key);
     if (restore) { restoreAnchor(saved); restoreSelection(selection); }
     updateTOCPosition();
@@ -440,6 +476,7 @@ window.minutes = {
     highlightUpdates(plan.entries, plan.persist, heading => tocLinks[headings.indexOf(heading)]);
     // 全ての図と閲読位置を復元してから、操作列を最終の配置へ合わせる。
     diagrams.positionControls();
+    canvas.positionControls();
     report({ kind: 'rendered', ticket, text: root.innerText });
     return true;
   },
@@ -448,10 +485,14 @@ window.minutes = {
   jump(name) {
     const target = document.getElementById(name) || document.getElementById('heading-' + name) ||
       [...root.querySelectorAll('[data-heading]')].find(el => el.dataset.heading === name);
-    jumpTo(target);
+    if (target?.closest('.board-legacy')) {
+      target.closest('.board-legacy').open = true;
+      revealElement(target); target.scrollIntoView({ block:'start' });
+      highlightLanding(target,1000);
+    } else jumpTo(target);
     return !!target;
   },
-  clear() { cancelNavigation(); diagrams.reset(); generation++; updates.reset(); clearUpdates(); updateListeners.abort(); closeImage(); folded.clear(); source = ''; root.replaceChildren(); rebuildTOC(true); query = ''; refreshSearch(); scrollTo(0, 0); },
+  clear() { cancelNavigation(); diagrams.reset(); canvas.reset(); document.body.classList.remove('board-canvas-mode'); generation++; updates.reset(); clearUpdates(); updateListeners.abort(); closeImage(); folded.clear(); source = ''; root.replaceChildren(); rebuildTOC(true); query = ''; refreshSearch(); scrollTo(0, 0); },
   invalidate() { cancelNavigation(); generation++; clearUpdates(); updateListeners.abort(); },
   search(value, direction = 0, reveal = true) {
     if (query !== value) { query = value; hit = 0; return refreshSearch(reveal); }
