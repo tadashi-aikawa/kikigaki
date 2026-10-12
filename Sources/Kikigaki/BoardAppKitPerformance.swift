@@ -44,7 +44,13 @@ import KikigakiCore
             controller.show()
             controller.showMinutes()
             controller.window!.setContentSize(NSSize(width: 1500, height: 900))
-            controller.window!.center()
+            if let name = environment["KIKIGAKI_BOARD_PERF_SCREEN"] {
+                guard let screen = NSScreen.screens.first(where: { $0.localizedName == name }) else { throw CocoaError(.featureUnsupported) }
+                let size = NSSize(width: min(1500, screen.visibleFrame.width), height: min(900, screen.visibleFrame.height))
+                controller.window!.setContentSize(size)
+                controller.window!.setFrameOrigin(NSPoint(x: screen.visibleFrame.midX - controller.window!.frame.width / 2,
+                                                         y: screen.visibleFrame.midY - controller.window!.frame.height / 2))
+            } else { controller.window!.center() }
             NSApp.activate(ignoringOtherApps: true)
             Task {
                 do { try await run(); NSApp.terminate(nil) }
@@ -57,7 +63,7 @@ import KikigakiCore
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../web/minutes")
         let script = try String(contentsOf: root.appendingPathComponent("measure-appkit.js"), encoding: .utf8)
         try configureFrameRate(controller.minutesSplit.preview.boardDocument.webView.configuration.preferences)
-        if environment["KIKIGAKI_BOARD_PERF_HIGH_FPS"] == "1", near60FPS != false {
+        if environment["KIKIGAKI_BOARD_PERF_HIGH_FPS"] != nil, near60FPS == nil {
             throw CocoaError(.featureUnsupported)
         }
         let counts = environment["KIKIGAKI_BOARD_PERF_QUICK"] == "1" ? [30] : [30, 60]
@@ -66,14 +72,19 @@ import KikigakiCore
         let maps = mapFilter.map { [$0] } ?? (environment["KIKIGAKI_BOARD_PERF_QUICK"] == "1" ? ["coarse"] : ["coarse", "detailed", "none"])
         let repeats = Int(environment["KIKIGAKI_BOARD_PERF_REPEATS"] ?? "3") ?? 3
         let duration = Double(environment["KIKIGAKI_BOARD_PERF_SECONDS"] ?? "3") ?? 3
+        let idleOnly = environment["KIKIGAKI_BOARD_PERF_IDLE"] == "1"
+        let inputs = idleOnly ? ["idle"] : ["scroll", "drag"]
+        let layerFlag = environment["KIKIGAKI_BOARD_PERF_LAYER"]
+        guard layerFlag == nil || ["0", "1"].contains(layerFlag!) else { throw CocoaError(.coderInvalidValue) }
+        let layers = layerFlag.map { [$0 == "1"] } ?? [false, true]
         guard (1...10).contains(repeats), duration.isFinite, (1...30).contains(duration) else { throw CocoaError(.coderInvalidValue) }
         for repeatIndex in 0..<repeats {
             for count in counts {
-                for flowing in [false, true] {
+                for flowing in idleOnly ? [false] : [false, true] {
                     // 反復ごとに順序を反転し、ウォームアップと温度による偏りを減らす。
                     for map in repeatIndex % 2 == 0 ? maps : maps.reversed() {
-                        for layer in repeatIndex % 2 == 0 ? [false, true] : [true, false] {
-                            for input in ["scroll", "drag"] {
+                        for layer in repeatIndex % 2 == 0 ? layers : layers.reversed() {
+                            for input in inputs {
                                 try await measure(count: count, flowing: flowing, map: map, layer: layer,
                                                   input: input, repeatIndex: repeatIndex, duration: duration, script: script)
                                 try save()
@@ -89,21 +100,44 @@ import KikigakiCore
                          repeatIndex: Int, duration: Double, script: String) async throws {
         let nodes = (1...count).map { "T\($0)[\"T\($0) 論点の確認と運用の判断\"]" }
         let edges = (1...count).filter { $0 % 6 != 0 }.map { "T\($0) --> T\($0+1)" }
-        let source = "# 使い捨て会議\n## ボード\n```mermaid\nflowchart TB\n" + (nodes + edges).joined(separator: "\n") + "\n```"
+        let definitions = BoardPrompt.builtIn.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { $0.hasPrefix("classDef ") }
+        let classes = (1...count).compactMap { index -> String? in
+            let names = ["done", "hold", "now", "rejected", ""]
+            let name = names[(index - 1) % names.count]
+            return name.isEmpty ? nil : "class T\(index) \(name)"
+        }
+        let diagram = "```mermaid\nflowchart TB\n" + (definitions + nodes + edges + classes).joined(separator: "\n") + "\n```"
+        let source = "# 使い捨て会議\n## ボード\n" + diagram
         let file = output.appendingPathComponent("fixture.md")
-        try source.write(to: file, atomically: true, encoding: .utf8)
+        if (try? String(contentsOf: file, encoding: .utf8)) != source {
+            try source.write(to: file, atomically: true, encoding: .utf8)
+        }
         if store.state.participantMinutesPath == nil { try store.select(file.path) }
         let preview = controller.minutesSplit.preview
         var rendered = false
-        preview.boardDocument.onRendered = { _ in rendered = true }
+        var renderError: String?
+        let originalRendered = preview.boardDocument.onRendered
+        let originalError = preview.boardDocument.onError
+        defer {
+            preview.boardDocument.onRendered = originalRendered
+            preview.boardDocument.onError = originalError
+        }
+        preview.boardDocument.onRendered = { text in originalRendered?(text); rendered = true }
+        preview.boardDocument.onError = { message in renderError = message; originalError?(message) }
         preview.receive(.body(source, [], modifiedAt: Date()))
+        // ファイル監視の初回読み取りと直接描画を重ねない。計測する入力区間の外で待つ。
+        try await Task.sleep(for: .milliseconds(350))
+        rendered = false
         // 同一本文は再描画されないので、計測の各条件では明示して描き直す。
-        preview.boardDocument.render("```mermaid\nflowchart TB\n" + (nodes + edges).joined(separator: "\n") + "\n```", reset: true)
+        preview.boardDocument.render(diagram, reset: true)
         preview.selectBoard(true)
         for _ in 0..<500 {
-            if rendered { break }; try await Task.sleep(for: .milliseconds(20))
+            if rendered || renderError != nil { break }; try await Task.sleep(for: .milliseconds(20))
         }
-        guard rendered else { throw CocoaError(.coderReadCorrupt) }
+        guard rendered, renderError == nil else {
+            throw NSError(domain: "BoardAppKitPerformance.render", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: renderError ?? "\(count)ノードの描画完了通知が10秒以内に届きませんでした"])
+        }
         let web = preview.boardDocument.webView
         controller.window!.makeKeyAndOrderFront(nil)
         controller.window!.makeFirstResponder(web)
@@ -124,6 +158,7 @@ import KikigakiCore
         sent = []; queueDelays = []; sendCosts = []; updateCosts = []; updates = 0
         active = true
         _ = try await web.evaluateJavaScript("boardPerf.begin()")
+        let cpuStart = cpuTimes(web)
         let local = web.convert(NSPoint(x: point["x"]!, y: web.bounds.height - point["y"]!), to: nil)
         if input == "drag" { try send(type: .leftMouseDown, local: local) }
         var step = 0
@@ -141,7 +176,8 @@ import KikigakiCore
                 } catch { self.fail(String(describing: error)) }
             }
         }
-        inputTimer = clock; clock.resume()
+        if input != "idle" { inputTimer = clock; clock.resume() }
+        else { clock.setEventHandler {}; clock.cancel(); clock.resume() }
         let ping = DispatchSource.makeTimerSource(queue: queue)
         ping.schedule(deadline: .now(), repeating: .milliseconds(5), leeway: .microseconds(100))
         ping.setEventHandler { [weak self] in
@@ -151,7 +187,8 @@ import KikigakiCore
                 self.queueDelays.append((ProcessInfo.processInfo.systemUptime - start) * 1000)
             }
         }
-        heartbeat = ping; ping.resume()
+        if input != "idle" { heartbeat = ping; ping.resume() }
+        else { ping.setEventHandler {}; ping.cancel(); ping.resume() }
         if flowing {
             let timer = Timer(timeInterval: 0.125, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated {
@@ -168,12 +205,22 @@ import KikigakiCore
             RunLoop.main.add(timer, forMode: .common); transcriptTimer = timer
         }
         try await Task.sleep(for: .seconds(duration))
+        let cpu = cpuDelta(cpuStart, cpuTimes(web))
         inputTimer?.cancel(); heartbeat?.cancel(); transcriptTimer?.invalidate()
         inputTimer = nil; heartbeat = nil; transcriptTimer = nil
         if input == "drag" { try send(type: .leftMouseUp, local: local) }
         active = false
         try await Task.sleep(for: .milliseconds(200))
         guard let page = try await web.evaluateJavaScript("boardPerf.finish()") as? [String: Any] else { throw CocoaError(.coderReadCorrupt) }
+        var idleCPU: [String: Double]?
+        if input == "idle" {
+            // rAF計測ループ自体が静止時の負荷を増やすため、停止して別区間を測る。
+            _ = try await web.evaluateJavaScript("boardPerf.stop()")
+            try await Task.sleep(for: .milliseconds(500))
+            let start = cpuTimes(web)
+            try await Task.sleep(for: .seconds(duration))
+            idleCPU = cpuDelta(start, cpuTimes(web))
+        }
         let screen = controller.window!.screen!
         let intervals = page["intervals"] as? [Double] ?? []
         let events = page["events"] as? [[String: Any]] ?? []
@@ -208,10 +255,16 @@ import KikigakiCore
             "backingScaleFactor": controller.window!.backingScaleFactor, "pageZoom": web.pageZoom,
             "webWidth": web.bounds.width, "webHeight": web.bounds.height, "page": page, "sent": sent]
         result["near60FPSPreference"] = near60FPS ?? NSNull() as Any
+        result["cpuSeconds"] = cpu
+        result["idleCPUSeconds"] = idleCPU
+        var timebase = mach_timebase_info_data_t()
+        mach_timebase_info(&timebase)
+        result["cpuTimebase"] = ["numer": timebase.numer, "denom": timebase.denom]
+        result["screens"] = NSScreen.screens.map { ["name": $0.localizedName, "maximumFramesPerSecond": $0.maximumFramesPerSecond] as [String: Any] }
         result["windowKey"] = controller.window!.isKeyWindow
         result["windowVisible"] = controller.window!.occlusionState.contains(.visible)
         result["trustedEvents"] = events.filter { $0["trusted"] as? Bool == true }.count
-        let valid = !latencies.isEmpty && !transformLatencies.isEmpty
+        let valid = (input == "idle" ? events.isEmpty && !intervals.isEmpty : !latencies.isEmpty && !transformLatencies.isEmpty)
             && page["canvasCurrent"] as? Bool == true && page["canvasConnected"] as? Bool == true
             && controller.window!.isKeyWindow && events.allSatisfy { $0["trusted"] as? Bool == true }
         result["validInputPath"] = valid
@@ -225,28 +278,43 @@ import KikigakiCore
         Utterance(speaker: index % 3, start: Double(index), end: Double(index + 1),
                   text: "使い捨ての発言\(index)。ボードの議論と運用の判断について確認しています。")
     }
-    /// 60Hz制限を診断する比較実験だけに使うprivate API。製品の設定や通常のWebViewには適用しない。
-    /// 正本: WebKit/UIProcess/API/Cocoa/WKPreferencesPrivate.h と _WKFeature.h。
+    /// 既定は製品の設定。0だけ旧60Hz優先に戻し、1は製品と同じ高更新頻度で比較する。
     private func configureFrameRate(_ preferences: WKPreferences) throws {
-        let selector = NSSelectorFromString("_features")
-        guard let method = class_getClassMethod(WKPreferences.self, selector) else { return }
-        typealias Features = @convention(c) (AnyClass, Selector) -> AnyObject
-        let get = unsafeBitCast(method_getImplementation(method), to: Features.self)
-        guard let features = get(WKPreferences.self, selector) as? [NSObject],
-              let feature = features.first(where: { $0.value(forKey: "key") as? String == "PreferPageRenderingUpdatesNear60FPSEnabled" }) else { return }
-        let getter = NSSelectorFromString("_isEnabledForFeature:")
-        guard preferences.responds(to: getter) else { return }
-        typealias Enabled = @convention(c) (AnyObject, Selector, AnyObject) -> Bool
-        let enabled = unsafeBitCast(preferences.method(for: getter), to: Enabled.self)
-        if environment["KIKIGAKI_BOARD_PERF_HIGH_FPS"] == "1" {
-            let setter = NSSelectorFromString("_setEnabled:forFeature:")
-            guard preferences.responds(to: setter) else { throw CocoaError(.featureUnsupported) }
-            typealias SetEnabled = @convention(c) (AnyObject, Selector, Bool, AnyObject) -> Void
-            let set = unsafeBitCast(preferences.method(for: setter), to: SetEnabled.self)
-            set(preferences, setter, false, feature)
+        if let flag = environment["KIKIGAKI_BOARD_PERF_HIGH_FPS"] {
+            guard ["0", "1"].contains(flag) else { throw CocoaError(.coderInvalidValue) }
+            near60FPS = MinutesRenderingPreferences.setNear60FPS(flag == "0", on: preferences)
+        } else { near60FPS = MinutesRenderingPreferences.near60FPS(on: preferences) }
+        print("WebKit near60FPS=\(String(describing: near60FPS))")
+    }
+
+    private func cpuTimes(_ web: WKWebView) -> [String: Double] {
+        func seconds(_ pid: pid_t) -> Double? {
+            var info = proc_taskinfo()
+            guard proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &info, Int32(MemoryLayout.size(ofValue: info))) == MemoryLayout.size(ofValue: info) else { return nil }
+            var timebase = mach_timebase_info_data_t()
+            guard mach_timebase_info(&timebase) == KERN_SUCCESS, timebase.denom > 0 else { return nil }
+            // pti_total_*はmach tick。Apple Siliconでは1tickが1nsとは限らない。
+            return Double(info.pti_total_user + info.pti_total_system) * Double(timebase.numer) / Double(timebase.denom) / 1_000_000_000
         }
-        near60FPS = enabled(preferences, getter, feature)
-        print("WebKit near60FPS=\(near60FPS!)")
+        var times: [String: Double] = [:]
+        times["app"] = seconds(getpid())
+        // DEBUG診断だけ。WebContentはXPCプロセスなのでgetrusage(RUSAGE_CHILDREN)では測れない。
+        let selector = NSSelectorFromString("_webProcessIdentifier")
+        if let method = class_getInstanceMethod(type(of: web), selector), method_getNumberOfArguments(method) == 2 {
+            let returnType = method_copyReturnType(method)
+            defer { free(returnType) }
+            if String(cString: returnType) == "i" {
+                typealias PID = @convention(c) (AnyObject, Selector) -> pid_t
+                let get = unsafeBitCast(method_getImplementation(method), to: PID.self)
+                times["webContent"] = seconds(get(web, selector))
+            }
+        }
+        return times
+    }
+    private func cpuDelta(_ before: [String: Double], _ after: [String: Double]) -> [String: Double] {
+        var delta: [String: Double] = [:]
+        for (name, end) in after { if let start = before[name] { delta[name] = end - start } }
+        return delta
     }
     private func send(type: CGEventType, local: NSPoint, delta: Int32 = 0) throws {
         let window = controller.window!

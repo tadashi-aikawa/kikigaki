@@ -86,6 +86,19 @@ AIへ依頼を送った時点と、その依頼の `progress --editing` を観�
 - アイコンは文字を持たないSVGで描く
     - 目的: `root.innerText` の本文・検索・更新強調・選択位置へ混ざらないようにする
 
+## 画面の更新頻度
+
+議事録タブ・ボードタブのWKWebViewは、WebKitの60Hz優先を外し、表示する画面の更新頻度に従う。
+
+- 対象: 議事録ペインで生成する各WebViewの `WKPreferences` だけ。生成前に適用する。
+    - 保存: Safariや利用者の設定へは書かない。他のWebViewへも適用しない。
+- 設定: 非公開feature `PreferPageRenderingUpdatesNear60FPSEnabled` を `false` にする[^board-perf-feature]。
+    - 理由: 120Hzの画面でもWebKitが約60Hzへ抑えるため、入力中の図を画面の頻度で更新できない。公開APIにこの制限を外す設定がない。
+- 互換性: feature一覧・キーgetter・読み書きselectorの存在と型を確認する。KVCによる未定義キーの読み取りは行わない。
+    - 欠損・名前変更・型変更: 設定を変更せず、WebKitの既定動作へ戻る。macOSの更新で約60Hzへ戻りうる。
+- 60Hzの画面: 図も約60Hzで更新する。120Hzのタイマーや常時rAFループを製品へ追加しない。
+- 静止中: 入力や更新がなければ、図のrAFは予約しない。ミニマップも更新しない。
+
 ## 実装と配布
 
 `MinutesFileMonitor`が検証したUTF-8本文を、`MinutesWebView`から引数付きJavaScript呼び出しで渡す。本文をスクリプトへ文字列連結しない。旧TextKit用のブロック解析はプレビューの読込経路では行わない。
@@ -302,9 +315,15 @@ debug版.appは `--preview-minutes <絶対パス>` で議事録の検証画面�
     - `KIKIGAKI_BOARD_PERF_REPEATS`: 反復数。既定3、1〜10。
     - `KIKIGAKI_BOARD_PERF_QUICK=1`: 30ノード・粗いミニマップだけの配送確認。
     - `KIKIGAKI_BOARD_PERF_MAP`: `coarse`・`detailed`・`none` の1条件だけを選ぶ。未指定なら3条件すべて。
-- 60Hz制限の診断: `KIKIGAKI_BOARD_PERF_HIGH_FPS=1` を添えると、DEBUG計測器だけがWebKitのprivate feature `PreferPageRenderingUpdatesNear60FPSEnabled` を無効にして比較する[^board-perf-feature]。
-    - 用途: 画面の最大更新頻度とrAFの差が、WebKitの設定によるものかを切り分ける。
-    - 境界: private APIは製品の手当てには使わない。値は計測プロセス内だけに適用し、通常のWebViewやSafariの設定へ保存しない。
+    - `KIKIGAKI_BOARD_PERF_LAYER`: `0` は製品の合成レイヤー設定、`1` は `will-change: transform`。未指定なら両方。
+    - `KIKIGAKI_BOARD_PERF_SCREEN`: 計測窓を置く `NSScreen.localizedName`。未接続の名前は失敗にする。窓はその画面の可視領域内へ置く。
+    - `KIKIGAKI_BOARD_PERF_IDLE=1`: 入力と会話更新を止め、rAF間隔を測った後に診断用rAFも止めて別区間のCPU時間を測る。
+- 60Hz制限の比較: `KIKIGAKI_BOARD_PERF_HIGH_FPS=0` は計測器のボードだけ旧60Hz優先へ戻す。`1` は製品と同じ制限解除。未指定も製品の設定を使う。
+    - 用途: 同じ画面で設定あり・なしを比べる。設定がないOSで明示指定した場合は、比較不成立として失敗する。
+    - 境界: 比較値は計測プロセス内だけに適用する。Safariや利用者の設定へ保存しない。
+- CPU時間: `proc_pidinfo(PROC_PIDTASKINFO)` のuser・system時間の差を `mach_timebase_info` でmach tickから秒へ換算して保存する。
+    - 対象: アプリと、ボードのWebContentプロセス。GPUプロセス・WindowServer・音声処理は含めない。
+    - 静止: `idleCPUSeconds` は診断用rAF停止後の独立区間。`cpuSeconds` はrAFを観測している区間。
 
 [^board-perf-feature]: WebKit公式ヘッダーの [WKPreferencesPrivate.h](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/API/Cocoa/WKPreferencesPrivate.h) と [_WKFeature.h](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/API/Cocoa/_WKFeature.h)。
 

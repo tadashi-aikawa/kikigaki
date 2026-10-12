@@ -82,6 +82,8 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 - 利用者のグローバル設定は書き換えない: CodexとClaudeの設定は、セッション限定の引数と専用の `--settings` JSONで渡す。[AI参加者の設計](docs/ai-participant.md)
 - manifestが欠損した会議登録は保持するが、対処できない警告は出さない。`AIRecordStore` の復元がこの扱い
 - 受け入れたリスク
+  - 議事録ペインで非公開のWebKit設定を使い、60Hz優先を外す。[議事録の描画と検索](docs/minutes-rendering.md#画面の更新頻度)
+    - 条件: macOSの更新で設定がなくなると約60Hzへ戻りうる。
   - `outputDir` をCodexの書き込み許可へ加えるため、全会議のMarkdown・state・archive・minutes・返送tokenを含むrequestsをモデルから書き換えられる。会議Markdownを直接編集しない制約はSkillの規則で、サンドボックスでは保証されない。[議事録プレビューの設計](docs/minutes-preview.md) の「Skillの規則と書き込み許可」
   - 速報を並走させると高精度側の認識結果も変わり、語尾や助詞が落ちやすくなる。認識品質の検証は等倍で行う。[文字起こしの速報表示](docs/fast-transcription.md)
   - 話者補正が残す限界。吸収の廃止で元の形に戻る事例を含む。[話者の割当と固定](docs/speaker-assignment.md) の「受け入れた限界」

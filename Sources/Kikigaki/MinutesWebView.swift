@@ -176,6 +176,7 @@ actor MinutesImageReader {
     private func loadWebView() -> WKWebView {
         if let loadedWebView { return loadedWebView }
         let config = WKWebViewConfiguration()
+        MinutesRenderingPreferences.setNear60FPS(false, on: config.preferences)
         config.websiteDataStore = .nonPersistent()
         config.setURLSchemeHandler(resources, forURLScheme: "minutes-app")
         config.setURLSchemeHandler(resources, forURLScheme: "minutes-image")
