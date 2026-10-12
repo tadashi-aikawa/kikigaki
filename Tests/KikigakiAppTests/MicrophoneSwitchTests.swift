@@ -182,10 +182,15 @@ private final class SwitchFixture {
 }
 
 @Suite(.serialized, .timeLimit(.minutes(1))) @MainActor struct MicrophoneSwitchUITests {
-    @Test func マイク行は値だけで追従し長い名前でもシートの高さを変えない() throws {
+    @Test func マイク行は値だけで追従し長い名前でもシートの高さを変えない() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         var name = "MacBook Proのマイク"
-        let sheet = StartSheet(profiles: [], diarizationEnabled: true, exclusion: AudioExclusion(), microphoneName: { name })
+        let (reads, continuation) = AsyncStream<String>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        defer { continuation.finish() }
+        let sheet = StartSheet(profiles: [], diarizationEnabled: true, exclusion: AudioExclusion(), microphoneName: {
+            continuation.yield(name)
+            return name
+        })
         let parent = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 800, height: 700), styleMask: [.titled], backing: .buffered, defer: false)
         defer { sheet.close(); parent.orderOut(nil) }
         sheet.present(on: parent)
@@ -197,12 +202,16 @@ private final class SwitchFixture {
         let index = try #require(rows.arrangedSubviews.firstIndex(of: microphoneRow))
         let previous = try #require(rows.arrangedSubviews[index - 2] as? NSStackView)
         #expect((previous.arrangedSubviews.first as? NSTextField)?.stringValue == "システム音声")
-        name = "スピーカーフォン"
-        waitForMicrophone(sheet, name: name)
+        // 待機中も別のMainActorタスクが進むことを確かめる。
+        // 同期RunLoopの再入ではメインキューを明け渡せず、この変更も実行できない。
+        let change = Task { @MainActor in name = "スピーカーフォン" }
+        defer { change.cancel() }
+        try await waitForMicrophone(reads, name: "スピーカーフォン")
+        await change.value
         #expect(sheet.microphoneLabel.stringValue == name && sheet.window.frame == frame)
         try capture(sheet.window.contentView!, name: "start-sheet-microphone")
         name = String(repeating: "とても長いUSBマイクの装置名", count: 20)
-        waitForMicrophone(sheet, name: name)
+        try await waitForMicrophone(reads, name: name)
         #expect(sheet.microphoneLabel.stringValue == name && sheet.window.frame == frame)
         #expect(sheet.microphoneLabel.toolTip == name && sheet.microphoneLabel.usesSingleLineMode)
     }
@@ -266,12 +275,14 @@ private final class SwitchFixture {
         try #require(bitmap.representation(using: .png, properties: [:]))
             .write(to: URL(fileURLWithPath: path).appendingPathComponent(name + ".png"))
     }
-    private func waitForMicrophone(_ sheet: StartSheet, name: String) {
-        // 並列テストのMainActor復帰順とTimerの発火順は一致しない。
-        // タイマーを手動で呼ばず、実際のRunLoopで表示への反映を待つ。
-        let deadline = Date().addingTimeInterval(2)
-        while sheet.microphoneLabel.stringValue != name, Date() < deadline {
-            RunLoop.main.run(mode: .default, before: deadline)
+    private func waitForMicrophone(_ reads: AsyncStream<String>, name: String) async throws {
+        // 実タイマーが装置名を読んだ通知を待ち、MainActorと外側のRunLoopを明け渡す。
+        // 同期RunLoopの1回は並列テストやAppKitのシートアニメーションで2秒を超え得る。
+        // タイマーを手動発火せず、停止の検知はSuiteの既存の60秒制限に任せる。
+        for await value in reads {
+            if value == name { return }
         }
+        try Task.checkCancellation()
+        Issue.record("マイクの装置名を読む前に通知が終了しました")
     }
 }
