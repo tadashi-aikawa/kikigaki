@@ -42,6 +42,14 @@ th { background:var(--shade); font-weight:650; } tr:nth-child(even) td { backgro
 code { font:12.5px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--shade); border-radius:3px; padding:2px 4px; }
 pre { overflow-x:auto; padding:12px 14px; background:var(--shade); border:1px solid var(--rule); border-radius:6px; white-space:pre; overflow-wrap:normal; }
 pre code { padding:0; background:none; } img { max-width:100%; height:auto; } .image-error { color:var(--muted); font-size:12px; }
+.code-block { position:relative; min-height:40px; margin:1em 0; padding-right:42px; background:var(--shade); border:1px solid var(--rule); border-radius:6px; }
+.code-block pre { margin:0; border:0; background:none; }
+.code-copy { position:absolute; top:6px; right:6px; display:grid; place-items:center; width:28px; height:28px; padding:4px; border:0; border-radius:4px; background:transparent; color:var(--muted); opacity:.35; cursor:pointer; user-select:none; }
+.code-copy svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+.code-block:hover .code-copy,.code-copy:focus-visible,.code-copy.copied { opacity:1; }
+.code-copy:hover,.code-copy:focus-visible { background:var(--paper); }
+.code-copy:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.code-copy.copied { color:var(--accent); }
 .diagram { margin:14px 0; overflow-x:auto; } .diagram svg { display:block; max-width:100%; height:auto; margin:auto; }
 .katex-display { overflow-x:auto; overflow-y:hidden; padding:4px 0; } eq { display:inline; } eqn { display:block; }
 .footnotes { border-top:1px solid var(--rule); margin-top:24px; font-size:12px; color:var(--muted); }

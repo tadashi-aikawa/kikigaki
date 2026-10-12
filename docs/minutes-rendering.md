@@ -58,6 +58,21 @@ AIへ依頼を送った時点と、その依頼の `progress --editing` を観�
 
 コードブロックと行内コードの記法は変換しない。表のwikilinkのパイプはObsidianと同じくエスケープする。表示例は [minutes-preview-example.md](minutes-preview-example.md)。
 
+## コードブロックのコピー
+
+- 議事録・ボードの普通のコードブロックは、右上にコピーアイコンを重ねる
+    - 対象: 言語名付き・言語名なしのコードフェンスと字下げのコードブロック
+    - 対象外: Mermaid・SVG・math・latexとして描くブロックと行内コード
+- アイコンは普段は薄く、コードブロックへのマウスの重なりやキーボードの焦点で濃くなる
+    - 表示: 本文の倍率に従い、操作後は1.5秒だけチェックへ変わる
+    - 余白: 右端に専用の領域を取り、横スクロールでも本文がアイコンの下へ潜らない
+    - ツールチップ・読み上げ: 「コピー」
+- コピーする文字列は、Markdown描画器が保持した元のコード本文
+    - 処理: 末尾の改行1つだけを落とす。空白・空行・記号を保持する
+    - 書き込み: 世代番号付きの `copyCode` メッセージをSwiftへ渡し、`NSPasteboard` へ文字列だけを書く
+- アイコンは文字を持たないSVGで描く
+    - 目的: `root.innerText` の本文・検索・更新強調・選択位置へ混ざらないようにする
+
 ## 実装と配布
 
 `MinutesFileMonitor`が検証したUTF-8本文を、`MinutesWebView`から引数付きJavaScript呼び出しで渡す。本文をスクリプトへ文字列連結しない。旧TextKit用のブロック解析はプレビューの読込経路では行わない。
@@ -108,5 +123,7 @@ script・イベント属性・iframe・form・外部CSS・固定配置・CSSのU
 debug版.appは `--preview-minutes <絶対パス>` で議事録の検証画面だけを起動できる。マイク・モデル・AIを起動しない。会議状態と幅設定は一時領域へ分け、終了時に片づける。
 
 表示例の [minutes-preview-example.md](minutes-preview-example.md) は `--preview-minutes docs/minutes-preview-example.md` で開くと、上の対応記法をまとめて目視できる。
+
+`KIKIGAKI_CODE_COPY_CAPTURE=/tmp/kikigaki-code-copy` を付けて `swift test --filter コードコピー` を実行すると、専用設定の議事録ペインで両タブを100%・200%のPNGへ撮影する。通常のテストでは撮影しない。
 
 右ペインの開閉・パス欄・履歴・幅の復元は [議事録ペイン](minutes-pane.md)、AIとの受け渡しの契約は [議事録プレビューの設計](minutes-preview.md) を参照する。

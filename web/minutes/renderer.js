@@ -146,6 +146,13 @@ export function createRenderer() {
     return self.renderToken(tokens, i, options);
   };
   const fence = md.renderer.rules.fence;
+  const codeBlock = md.renderer.rules.code_block;
+  function copyableCode(html, token, env) {
+    const index = (env.codeBlocks ??= []).push(token.content.replace(/\n$/, '')) - 1;
+    return '<div class="code-block" data-code-index="' + index + '">' + html + '</div>\n';
+  }
+  md.renderer.rules.code_block = (tokens, i, options, env, self) =>
+    copyableCode(codeBlock(tokens, i, options, env, self), tokens[i], env);
   md.renderer.rules.fence = (tokens, i, options, env, self) => {
     const token = tokens[i], language = token.info.trim().toLowerCase();
     if (language === 'mermaid' || language === 'svg')
@@ -154,7 +161,7 @@ export function createRenderer() {
       try { return katex.renderToString(token.content, { displayMode: true, trust: false, maxExpand: 1000, maxSize: 20 }); }
       catch { return '<pre>' + escape(token.content) + '</pre>'; }
     }
-    return fence(tokens, i, options, env, self);
+    return copyableCode(fence(tokens, i, options, env, self), token, env);
   };
   // 閉じたSVGブロックは生のDOMにせず画像として描く。
   md.block.ruler.before('html_block', 'svg_block', (state, start, end, silent) => {

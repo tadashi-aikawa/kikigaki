@@ -166,6 +166,8 @@ actor MinutesImageReader {
     var boardLinksEnabled = false
     /// 本文のリンクとwikilinkの開き先。既定はシステム。テストが実クリックの行き先を確かめるために差し替える。
     var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
+    /// コピーの書き込み先。テストでは専用pasteboardへ隔離する。
+    var codePasteboard: NSPasteboard = .general
     override init(frame: NSRect) {
         super.init(frame: frame)
         relay.owner = self
@@ -232,6 +234,10 @@ actor MinutesImageReader {
         case "rendered":
             guard value["ticket"] as? Int == ticket, let text = value["text"] as? String else { return }
             renderedText = text.trimmingCharacters(in: .newlines); onRendered?(renderedText)
+        case "copyCode":
+            guard value["ticket"] as? Int == ticket, let text = value["text"] as? String else { return }
+            codePasteboard.clearContents()
+            codePasteboard.setString(text, forType: .string)
         case "link":
             guard let href = value["href"] as? String, let url = URL(string: href),
                   ["https", "http", "mailto"].contains(url.scheme?.lowercased() ?? "") else { return }

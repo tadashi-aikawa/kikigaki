@@ -57,6 +57,121 @@ import Testing
         }
         Issue.record("WebKitの表示が完了しません")
     }
+    @Test func コードコピーは両タブで原文だけを渡し本文と選択を変えない() async throws {
+        let preferences = MinutesTestDefaults()
+        let preview = MinutesPreviewView(frame: NSRect(x: 0, y: 0, width: 800, height: 800), defaults: preferences.value)
+        let window = NSWindow(contentRect: preview.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = preview; window.orderFront(nil); preview.layoutSubtreeIfNeeded()
+        defer { preview.stop(); window.orderOut(nil) }
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        preview.minutesDocument.codePasteboard = pasteboard; preview.boardDocument.codePasteboard = pasteboard
+        let codes = """
+        ```swift
+        let message = "<&> 日本語";\u{0020}\u{0020}
+
+        ```
+
+        ```
+        言語なし
+        ```
+
+            indented
+
+        ```
+        ```
+        """
+        let excluded = """
+
+        ```mermaid
+        graph TD; A-->B
+        ```
+
+        ```svg
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20"/></svg>
+        ```
+
+        ```math
+        x^2
+        ```
+
+        ```latex
+        \\invalidcommand
+        ```
+
+        `inline`
+
+        <pre><code>HTML code</code></pre>
+        """
+        preview.update(path: "/tmp/kikigaki-code-copy-fixture.md", source: .human, active: false, boardHeading: "## ボード")
+        preview.receive(.body("# コピーの確認\n\n" + codes + excluded + "\n\n## ボード\n\n" + codes + excluded,
+                              [], modifiedAt: Date()))
+        try await wait { preview.minutesDocument.renderedText.contains("HTML code") && preview.boardDocument.renderedText.contains("HTML code") }
+        let expected = ["let message = \"<&> 日本語\";  \n", "言語なし", "indented", ""]
+        for board in [false, true] {
+            preview.selectBoard(board)
+            let document = preview.document, web = document.webView
+            let originalText = document.renderedText
+            #expect(!originalText.contains("コピー") || !board) // 議事録の見出し以外にラベルを足さない
+            #expect(!originalText.contains("✓"))
+            #expect(try await web.evaluateJavaScript("document.querySelectorAll('.code-copy').length") as? Int == 4)
+            #expect(try await web.evaluateJavaScript("[...document.querySelectorAll('.code-copy')].every(b => b.title === 'コピー' && b.getAttribute('aria-label') === 'コピー' && b.textContent === '')") as? Bool == true)
+            #expect(try await web.evaluateJavaScript("window.minutes.search('コピー', 0, false).count") as? Int == (board ? 0 : 1))
+            #expect(try await web.evaluateJavaScript("window.minutes.search('日本語', 0, false).count") as? Int == 1)
+            _ = try await web.evaluateJavaScript("window.minutes.select(3, 8); window.copySelection = getSelection().toString(); window.copyY = scrollY;")
+            for (index, text) in expected.enumerated() {
+                _ = try await web.evaluateJavaScript("document.querySelectorAll('.code-copy')[\(index)].click()")
+                try await wait { pasteboard.string(forType: .string) == text }
+                // AppKitが自動で付ける旧形式の文字列型も、plain textとして扱う。
+                #expect(pasteboard.types?.allSatisfy { $0 == .string || $0.rawValue == "NSStringPboardType" } == true)
+            }
+            #expect(try await web.evaluateJavaScript("getSelection().toString() === copySelection && scrollY === copyY") as? Bool == true)
+            let copiedText = try #require(try await web.evaluateJavaScript("document.querySelector('main').innerText") as? String)
+            #expect(copiedText.trimmingCharacters(in: .newlines) == originalText)
+            #expect(try await web.evaluateJavaScript("window.minutes.search('✓', 0, false).count") as? Int == 0)
+            try await Task.sleep(for: .milliseconds(1600))
+            #expect(try await web.evaluateJavaScript("document.querySelector('.code-copy.copied') === null") as? Bool == true)
+            var rendered = false
+            let onRendered = document.onRendered
+            document.onRendered = { text in onRendered?(text); rendered = true }
+            document.markUpdateBaseline()
+            document.render((board ? "" : "# コピーの確認\n\n") + codes + excluded, reset: false)
+            try await wait { rendered }
+            document.onRendered = onRendered
+            #expect(try await web.evaluateJavaScript("!CSS.highlights.has('updated')") as? Bool == true)
+            // 200%と撮影は明示したときだけ実行する。通常テストで撮影待ちを増やさない。
+            if let output = ProcessInfo.processInfo.environment["KIKIGAKI_CODE_COPY_CAPTURE"] {
+                let directory = URL(fileURLWithPath: output)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                _ = try await web.evaluateJavaScript("getSelection().removeAllRanges(); window.minutes.search('', 0, false)")
+                for scale in [1, 2] {
+                    preview.setTextScale(CGFloat(scale))
+                    _ = try await web.evaluateJavaScript("scrollTo(0, 0)")
+                    try await Task.sleep(for: .milliseconds(250))
+                    #expect(web.pageZoom == CGFloat(scale))
+                    #expect(try await web.evaluateJavaScript("[...document.querySelectorAll('.code-block')].every(b => b.querySelector('pre').getBoundingClientRect().right <= b.querySelector('button').getBoundingClientRect().left)") as? Bool == true)
+                    #expect(try await web.evaluateJavaScript("[...document.querySelectorAll('.code-block')].every(b => b.querySelector('button').getBoundingClientRect().bottom < b.getBoundingClientRect().bottom)") as? Bool == true)
+                    let image = try await web.takeSnapshot(configuration: WKSnapshotConfiguration())
+                    let data = try #require(image.tiffRepresentation)
+                    let bitmap = try #require(NSBitmapImageRep(data: data))
+                    try #require(bitmap.representation(using: .png, properties: [:])).write(to:
+                        directory.appendingPathComponent("\(board ? "board" : "minutes")-\(scale * 100).png"))
+                }
+                preview.setTextScale(1)
+            }
+            let changedCodes = codes.replacingOccurrences(of: "日本語", with: "更新した日本語")
+            document.render((board ? "" : "# コピーの確認\n\n") + changedCodes + excluded, reset: false)
+            try await wait { document.renderedText.contains("更新した日本語") }
+            #expect(try await web.evaluateJavaScript("CSS.highlights.get('updated').size") as? Int == 1)
+            #expect(try await web.evaluateJavaScript("window.minutes.search('更新した日本語', 0, false).count") as? Int == 1)
+            _ = try await web.evaluateJavaScript("document.querySelector('.code-copy').click()")
+            try await wait { pasteboard.string(forType: .string) == "let message = \"<&> 更新した日本語\";  \n" }
+            // 古い本文から遅れて来たコピーは、現在のpasteboardを書き換えない。
+            _ = try await web.evaluateJavaScript("window.webkit.messageHandlers.minutes.postMessage({kind:'copyCode',ticket:-1,text:'stale'}); void 0")
+            try await Task.sleep(for: .milliseconds(30))
+            #expect(pasteboard.string(forType: .string) == "let message = \"<&> 更新した日本語\";  \n")
+        }
+    }
     @Test func 目次の移動と中断と着地後の位置追従を扱う() async throws {
         let document = MinutesWebView(frame: NSRect(x: 0, y: 0, width: 700, height: 500))
         let window = NSWindow(contentRect: document.frame, styleMask: [.titled], backing: .buffered, defer: false)

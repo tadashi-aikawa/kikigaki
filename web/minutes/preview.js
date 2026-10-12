@@ -218,9 +218,35 @@ const report = value => window.webkit?.messageHandlers.minutes.postMessage(value
 const safeHTML = value => DOMPurify.sanitize(value, { ADD_TAGS: ['eq', 'eqn'], ADD_URI_SAFE_ATTR: ['data-wiki'],
   ADD_ATTR: ['data-heading', 'data-kind'], ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|minutes-image):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i });
 
+function decorateCodeBlocks(codeBlocks, ticket) {
+  root.querySelectorAll('.code-block[data-code-index]').forEach(block => {
+    // 生HTMLはclassとdata属性を落とすため、描画器が生成した普通のコードだけがここへ来る。
+    const text = codeBlocks[Number(block.dataset.codeIndex)];
+    block.removeAttribute('data-code-index');
+    if (typeof text !== 'string') return;
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'code-copy'; button.title = 'コピー';
+    button.setAttribute('aria-label', 'コピー');
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('viewBox', '0 0 20 20'); icon.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(icon.namespaceURI, 'path');
+    const copyPath = 'M7 6V3h10v11h-3 M3 6h11v11H3Z';
+    path.setAttribute('d', copyPath); icon.append(path); button.append(icon); block.append(button);
+    let expiry;
+    // ボタンのクリックで、読んでいる本文の選択やスクロール位置を変えない。
+    button.addEventListener('mousedown', event => event.preventDefault());
+    button.addEventListener('click', () => {
+      report({ kind: 'copyCode', ticket, text });
+      clearTimeout(expiry); button.classList.add('copied'); path.setAttribute('d', 'M4 10l4 4 8-9');
+      expiry = setTimeout(() => { button.classList.remove('copied'); path.setAttribute('d', copyPath); }, 1500);
+    });
+    updateListeners.signal.addEventListener('abort', () => clearTimeout(expiry), { once:true });
+  });
+}
+
 function nodes() {
   const all = [], walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: node => node.parentElement.closest('script,style,.katex-mathml,annotation,.heading-toggle') ||
+    acceptNode: node => node.parentElement.closest('script,style,.katex-mathml,annotation,.heading-toggle,.code-copy') ||
       (node.parentElement === root && !node.textContent.trim()) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
   });
   while (walker.nextNode()) all.push(walker.currentNode);
@@ -328,7 +354,9 @@ window.minutes = {
     const saved = reset ? null : anchor(), selection = reset ? null : selectionOffsets();
     source = text; context = newContext; vault = newVault || '';
     closeImage();
-    root.innerHTML = safeHTML(md.render(withoutFrontmatter(text), { context, vault, cleanHTML }));
+    const codeBlocks = [];
+    root.innerHTML = safeHTML(md.render(withoutFrontmatter(text), { context, vault, cleanHTML, codeBlocks }));
+    decorateCodeBlocks(codeBlocks, ticket);
     prepareSections(reset);
     decorateCallouts();
     fitTables();

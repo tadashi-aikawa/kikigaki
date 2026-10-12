@@ -19,6 +19,15 @@ test('板のclickはT番号から内部見出しへの単独行だけを抽出�
   assert.equal(boardLinks('sequenceDiagram\nclick T1 "#heading"').links.size, 0);
 });
 const render = text => createRenderer().render(withoutFrontmatter(text), { context: 'test' });
+test('普通のコード本文だけを保持し、末尾の改行1つだけ落とす', () => {
+  const env = { context:'test', codeBlocks:[] };
+  const html = createRenderer().render('```js\nconst x = "<&>";  \n\n```\n\n```\n日本語\n```\n\n    indented\n\n```\n```\n\n```mermaid\ngraph TD; A-->B\n```\n\n```svg\n<svg></svg>\n```\n\n```math\nx^2\n```\n\n```latex\n\\invalidcommand\n```\n\n`inline`', env);
+  assert.deepEqual(env.codeBlocks, ['const x = "<&>";  \n', '日本語', 'indented', '']);
+  assert.equal((html.match(/class="code-block"/g) || []).length, 4);
+  assert.match(html, /const x = &quot;&lt;&amp;&gt;&quot;;/);
+  assert.match(html, /<pre class="mermaid-source">/);
+  assert.match(html, /<pre class="svg-source">/);
+});
 test('変更行は追加と書換えだけで移動と削除は光らせない', () => {
   const entries = values => values.map(key => ({ key }));
   assert.deepEqual(changedEntries(entries(['a','b','same','same']), entries(['new','b','a','same','same','same'])).map(e => e.key), ['new','same']);

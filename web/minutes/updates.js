@@ -34,7 +34,7 @@ export function updateEntries(root) {
   const groups = new Map(), walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
     const node = walker.currentNode, parent = node.parentElement;
-    if (!node.textContent.trim() || parent.closest('.heading-toggle,.katex-mathml,annotation,script,style')) continue;
+    if (!node.textContent.trim() || parent.closest('.heading-toggle,.code-copy,.katex-mathml,annotation,script,style')) continue;
     const block = parent.closest('h1,h2,h3,h4,h5,h6,p,li,td,th,pre,.callout-title,.diagram,div,summary') || parent;
     let entry = groups.get(block);
     if (!entry) { entry = { key:block.tagName + ':' + (block.getAttribute('style') || ''), nodes:[], element:block }; groups.set(block, entry); }
