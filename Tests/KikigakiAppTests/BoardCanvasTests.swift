@@ -244,6 +244,55 @@ import KikigakiCore
                   return s.fill==='rgb(206, 233, 221)' && s.stroke==='rgb(68, 119, 102)' && s.strokeWidth==='4px' && s.strokeDasharray===original.strokeDasharray && s.strokeDashoffset===original.strokeDashoffset;})()
                 """) as? Bool == true)
             }
+            let palette = coloredBoard(count: 5, palette: true)
+            try await render(palette, in: document, reset: true)
+            try await capture("cards-palette-\(scale*100)", source: palette, web: web)
+            #expect(try await web.evaluateJavaScript("getComputedStyle(node('T4').querySelector('.label-container')).fill==='rgb(249, 230, 227)'") as? Bool == true)
+        }
+    }
+    @Test func 古い却下色をボードとミニマップへ上書きし他の節には当てない() async throws {
+        let document = MinutesWebView(frame:NSRect(x:0,y:0,width:900,height:850))
+        document.boardCanvasEnabled = true
+        let window = NSWindow(contentRect:document.frame,styleMask:[.titled],backing:.buffered,defer:false)
+        window.contentView = document; window.orderFront(nil)
+        defer { document.invalidate(); window.orderOut(nil) }
+        let web = document.webView
+        let source = coloredBoard(count:30).replacingOccurrences(of:
+            "classDef rejected fill:#f9e6e3,color:#9a9a9a,stroke:#c98b84,stroke-width:1px,stroke-dasharray:2 2",
+            with:"classDef rejected fill:#f2f2f2,color:#666666,stroke:#b5b5b5,stroke-width:5px,stroke-dasharray:9 7")
+        for scale in [1,2] {
+            document.setTextScale(CGFloat(scale)); document.boardCanvasEnabled = true
+            try await render(source,in:document,reset:true)
+            _ = try await web.evaluateJavaScript("press('戻す');void 0")
+            #expect(try await web.evaluateJavaScript("""
+            (()=>{const s=getComputedStyle(node('T4').querySelector('.label-container')),
+              m=getComputedStyle(canvas.querySelectorAll('.board-minimap svg svg rect')[3]),t=getComputedStyle(node('T4').querySelector('text'));
+              return s.fill==='rgb(249, 230, 227)' && s.stroke==='rgb(201, 139, 132)' && s.strokeWidth==='1px' &&
+                m.fill===s.fill && m.stroke===s.stroke && m.strokeWidth===s.strokeWidth && m.strokeDasharray===s.strokeDasharray &&
+                s.strokeDasharray==='\(scale == 1 ? "2px, 2px" : "1px, 1px")' && t.fill==='rgb(154, 154, 154)';})()
+            """) as? Bool == true)
+            try await capture("legacy-rejected-\(scale*100)-canvas",source:source,web:web)
+            document.boardCanvasEnabled = false
+            let palette = source.replacingOccurrences(of:"flowchart TB",with:"flowchart LR")
+            let minutes = "## 普通の図\n"+palette+"\n## ボード(21:04 更新)\n"+palette+"\n## 別の図\n"+palette
+            var rendered = false
+            document.onRendered = { _ in rendered = true }; document.render(minutes,reset:true)
+            try await wait { rendered }
+            #expect(try await web.evaluateJavaScript("""
+            (()=>{const diagrams=[...document.querySelectorAll('.diagram-stage')],colors=diagrams.map(d=>getComputedStyle(d.querySelector('g.rejected .label-container')).fill);
+              return colors.join('|')==='rgb(242, 242, 242)|rgb(249, 230, 227)|rgb(242, 242, 242)';})()
+            """) as? Bool == true)
+            // 議事録タブは自然幅で横スクロールする。ボード節の却下が写る位置を撮る。
+            _ = try await web.evaluateJavaScript("document.querySelectorAll('.diagram')[1].scrollIntoView();void 0")
+            try await capture("legacy-rejected-\(scale*100)-minutes",source:minutes,web:web)
+            document.boardHeading = "### 論点"
+            rendered = false
+            document.render("### 論点(21:04 更新)\n"+palette+"\n### 他の話\n"+palette,reset:true)
+            try await wait { rendered }
+            #expect(try await web.evaluateJavaScript("""
+            [...document.querySelectorAll('.diagram-stage')].map(d=>getComputedStyle(d.querySelector('g.rejected .label-container')).fill).join('|')==='rgb(249, 230, 227)|rgb(242, 242, 242)'
+            """) as? Bool == true)
+            document.boardHeading = "## ボード"
         }
     }
     @Test func 横長と縦長のミニマップを広いキャンバスで表示する() async throws {

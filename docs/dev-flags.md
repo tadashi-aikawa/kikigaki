@@ -112,7 +112,7 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
     - 目次との配置: 議事録・ボードの両タブで、図をペイン上端に置き、目次の開閉を100%・200%で撮る。狭いペインも含む。
     - 保存: 使い捨て議事録、倍率変更後と再描画後のPNG、SVGの計測値。
     - 理由: 100%の画素一致を比較するため、撮影は非可逆圧縮しない。
-- `KIKIGAKI_BOARD_CANVAS_CAPTURE=/tmp/kikigaki-board-canvas swift test --filter BoardCanvasTests`: 30・60ノードの状態色付きボードとミニマップを文字100%・200%で撮る。30ノードの初期表示・フォーカス・ズーム中の更新前後、旧ボードの複数図と本文も撮る。
+- `KIKIGAKI_BOARD_CANVAS_CAPTURE=/tmp/kikigaki-board-canvas swift test --filter BoardCanvasTests`: 30・60ノードの状態色付きボードとミニマップを文字100%・200%で撮る。30ノードの初期表示・フォーカス・ズーム中の更新前後、5状態のカード本体、旧ボードの複数図と本文も撮る。
 - `KIKIGAKI_BOARD_SEARCH_CAPTURE=/tmp/kikigaki-board-search swift test --filter BoardSearchTests`: 30ノードの検索前・1件目・2件目を文字100%・200%で撮る。保存先は `/tmp` 配下だけ。
 - `KIKIGAKI_BOARD_FOCUS_CAPTURE=/tmp/kikigaki-board-focus swift test --filter BoardFocusTests`: 通常・now・done・holdの四隅ブラケットを等倍と全体表示で撮る。保存先は `/tmp` 配下だけ。
 - `KIKIGAKI_BOARD_PERF_CAPTURE=/tmp/kikigaki-board-performance/before.json swift web/minutes/measure-canvas.swift`: 30・60ノードの入力中のフレーム間隔と処理時間を使い捨てJSONへ記録する。保存先は `/tmp` 配下だけ。

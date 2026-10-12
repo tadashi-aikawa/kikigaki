@@ -264,7 +264,7 @@ debug版.appは `--preview-minutes <絶対パス>` で議事録の検証画面�
 `KIKIGAKI_BOARD_CANVAS_CAPTURE=/tmp/kikigaki-board-canvas` を付けて `swift test --filter BoardCanvasTests` を実行すると、30・60ノードのキャンバスを文字100%・200%で撮影する。
 
 - 撮影: 初期表示、ノードへのフォーカス、ズーム中の更新前後、ミニマップ、旧ボードの本文。
-    - 状態色: done・hold・now・rejected・通常が混ざった30・60ノードの全体とミニマップを撮る。
+    - 状態色: done・hold・now・rejected・通常が混ざった30・60ノードの全体とミニマップ、5状態を並べたカード本体も撮る。
 - 保存: `/tmp` 配下だけ。画素比較用のPNGと使い捨てMarkdown。通常のテストでは撮影しない。
 
 `KIKIGAKI_DIAGRAM_UPDATE_CAPTURE=/tmp/kikigaki-diagram-update/after.json swift web/minutes/measure-update.swift` で、ボードと議事録の更新前・途中・後を計測する。

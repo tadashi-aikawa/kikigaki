@@ -5,7 +5,7 @@ import { cleanHTML } from './html.js';
 import { UpdateHighlighter, updateEntries, clearUpdates, highlightUpdates } from './updates.js';
 import { isTimeline, wrapTimeline } from './timeline.js';
 import { layoutTables } from './tables.js';
-import { boardLinks, attachBoardLinks } from './board.js';
+import { boardLinks, attachBoardLinks, styleRejectedBoardNodes } from './board.js';
 import { DiagramInteractions } from './diagrams.js';
 const md = createRenderer(), root = document.getElementById('minutes');
 const diagrams = new DiagramInteractions();
@@ -367,13 +367,13 @@ window.minutes = {
     diagrams.positionControls();
     canvas.positionControls();
   },
-  async render(text, newContext, reset, ticket, newVault, boardLinksEnabled = false, boardCanvasEnabled = false) {
+  async render(text, newContext, reset, ticket, newVault, boardLinksEnabled = false, boardCanvasEnabled = false, boardHeading = '## ボード') {
     const current = ++generation;
     // 次の本文はDOMへ接続せずに組み、全ての図ができるまで今の表示と操作を残す。
     // 画面位置の記憶も差し替え直前に行い、描画待ちの間の操作を引き継ぐ。
     const draft = document.createElement('div'), codeBlocks = [], prepared = [];
     draft.innerHTML = safeHTML(md.render(withoutFrontmatter(text), {
-      context:newContext, vault:newVault || '', cleanHTML, codeBlocks,
+      context:newContext, vault:newVault || '', cleanHTML, codeBlocks, boardHeading,
     }));
     const primarySource = boardCanvasEnabled ? draft.querySelector('.mermaid-source') : null;
     for (const pre of [...draft.querySelectorAll('.mermaid-source')]) {
@@ -385,6 +385,7 @@ window.minutes = {
         if (current !== generation) return;
         const holder = document.createElement('div'); holder.className = 'diagram';
         holder.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg:true, svgFilters:true }, FORBID_TAGS: ['foreignObject', 'script', 'a'] });
+        if (boardCanvasEnabled || boardLinksEnabled || pre.hasAttribute('data-board-diagram')) styleRejectedBoardNodes(holder);
         pre.replaceWith(holder);
         prepared.push({ holder, board, primary:pre === primarySource });
       } catch { pre.title = '図を描画できないため、記法を表示しています'; }

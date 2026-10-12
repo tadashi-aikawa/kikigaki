@@ -122,7 +122,7 @@ public enum BoardPrompt {
       classDef cold color:#9a9a9a,stroke:#d5d5d5
       classDef done fill:#e3f4e1,stroke:#2e8b57
       classDef hold fill:#fff1d6,stroke:#e67e22,stroke-width:2px,stroke-dasharray:5 3
-      classDef rejected fill:#f2f2f2,color:#9a9a9a,stroke:#b5b5b5,stroke-width:1px,stroke-dasharray:2 2
+      classDef rejected fill:#f9e6e3,color:#9a9a9a,stroke:#c98b84,stroke-width:1px,stroke-dasharray:2 2
       T1["T1 来期の料金体系"]
       T2["✅ T2 価格改定は10月から"]
       T3["T3 値上げ幅"]

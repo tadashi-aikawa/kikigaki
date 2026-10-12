@@ -5,8 +5,23 @@ import { createRenderer, withoutFrontmatter, imageURL } from './renderer.js';
 import { changedEntries, UpdateHighlighter, foldUpdateMarks } from './updates.js';
 import { isTimeline, wrapTimeline } from './timeline.js';
 import { fitColumns } from './tables.js';
-import { boardLinks } from './board.js';
+import { boardLinks, isBoardHeading } from './board.js';
 import { zoomDiagram, diagramOverflow, fitDiagram } from './diagrams.js';
+test('却下色の対象はボードのATX節とその配下だけ', () => {
+  const diagram = '\n```mermaid\nflowchart TB\nT1[却下]:::rejected\n```\n';
+  const source = '## 普通の図' + diagram + '## ボード(23:59 更新)' + diagram + '### 詳細' + diagram +
+    '## ボード2' + diagram + '## ボード(24:00 更新)' + diagram;
+  const html = createRenderer().render(source);
+  assert.equal((html.match(/data-board-diagram="true"/g) || []).length, 2);
+  const quoted = createRenderer().render('> ## ボード\n\n## 別の図' + diagram);
+  assert.ok(!quoted.includes('data-board-diagram'));
+  assert.ok(!createRenderer().render('ボード\n------\n' + diagram).includes('data-board-diagram'));
+  assert.ok(createRenderer().render('## ボード\n本文の見出し\n------\n' + diagram).includes('data-board-diagram'));
+  assert.ok(createRenderer().render('### 論点(09:00 更新)' + diagram, { boardHeading:'### 論点' }).includes('data-board-diagram'));
+  assert.ok(isBoardHeading('ボート\u3099', 2));
+  assert.ok(!isBoardHeading('ボード', 3));
+  assert.ok(!isBoardHeading('ボード(12:60 更新)', 2));
+});
 test('図の続きははみ出した辺だけで、丸め誤差は表示しない', () => {
   const viewport = { width:300, height:200 };
   assert.deepEqual(diagramOverflow({ x:0, y:0, width:300, height:200 }, viewport),

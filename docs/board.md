@@ -49,6 +49,9 @@ autoIntervalMinutes = 1
 - ボードの見出し直後にMermaid図1枚だけを置く。自動分割やノード数の目安は設けない。
 - 現在地のnowは、ボード全体でちょうど1つにする。
 - 状態はdone・hold・rejected、更新の様子はnow・hot・coldで示す。
+    - 却下: 淡い赤の地 `#f9e6e3`、くすんだ赤の1px点線枠 `#c98b84`、灰の文字 `#9a9a9a`。
+    - 既存の図: classDefの色にかかわらず、描画側で同じ淡い赤と点線枠・灰の文字へ上書きする。元のMarkdownは変更しない。
+    - 範囲: ボードタブの図と、議事録タブでボードの節に含まれる図。議事録では設定した見出しの階層・名前と、有効な更新時刻の接尾辞で判定する。設定がない場合は `## ボード` を使う。他の節の `rejected` クラスには当てない。
 
 ## 内蔵プロンプト全文
 
@@ -70,7 +73,7 @@ flowchart TB
   classDef cold color:#9a9a9a,stroke:#d5d5d5
   classDef done fill:#e3f4e1,stroke:#2e8b57
   classDef hold fill:#fff1d6,stroke:#e67e22,stroke-width:2px,stroke-dasharray:5 3
-  classDef rejected fill:#f2f2f2,color:#9a9a9a,stroke:#b5b5b5,stroke-width:1px,stroke-dasharray:2 2
+  classDef rejected fill:#f9e6e3,color:#9a9a9a,stroke:#c98b84,stroke-width:1px,stroke-dasharray:2 2
   T1["T1 来期の料金体系"]
   T2["✅ T2 価格改定は10月から"]
   T3["T3 値上げ幅"]

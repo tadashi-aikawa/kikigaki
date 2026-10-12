@@ -3,6 +3,7 @@ import footnote from 'markdown-it-footnote';
 import tasks from 'markdown-it-task-lists';
 import texmath from 'markdown-it-texmath';
 import katex from 'katex';
+import { isBoardHeading } from './board.js';
 
 export function withoutFrontmatter(source) {
   const text = source.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
@@ -156,7 +157,7 @@ export function createRenderer() {
   md.renderer.rules.fence = (tokens, i, options, env, self) => {
     const token = tokens[i], language = token.info.trim().toLowerCase();
     if (language === 'mermaid' || language === 'svg')
-      return '<pre class="' + language + '-source">' + escape(token.content) + '</pre>';
+      return '<pre class="' + language + '-source"' + (token.attrGet('data-board-diagram') ? ' data-board-diagram="true"' : '') + '>' + escape(token.content) + '</pre>';
     if (language === 'math' || language === 'latex') {
       try { return katex.renderToString(token.content, { displayMode: true, trust: false, maxExpand: 1000, maxSize: 20 }); }
       catch { return '<pre>' + escape(token.content) + '</pre>'; }
@@ -179,10 +180,16 @@ export function createRenderer() {
   md.renderer.rules.table_close = () => '</table></div>\n';
   md.core.ruler.after('inline', 'document_structure', state => {
     const ids = new Map();
+    let boardLevel = null;
     for (let i = 0; i < state.tokens.length; i++) {
       const token = state.tokens[i];
       if (token.type === 'heading_open') {
         const inline = state.tokens[i + 1];
+        const level = Number(token.tag.slice(1));
+        if (token.level === 0 && /^#+$/.test(token.markup)) {
+          if (boardLevel !== null && level <= boardLevel) boardLevel = null;
+          if (isBoardHeading(inline.content, level, state.env.boardHeading)) boardLevel = level;
+        }
         const explicit = /\s+\{#([^{}\s]+)\}\s*$/.exec(inline.content);
         if (explicit) {
           inline.content = inline.content.slice(0, explicit.index);
@@ -194,6 +201,8 @@ export function createRenderer() {
         token.attrSet('id', 'heading-' + base + (count ? '-' + count : ''));
         token.attrSet('data-heading', explicit?.[1] || label);
       }
+      if (token.type === 'fence' && token.info.trim().toLowerCase() === 'mermaid' && boardLevel !== null)
+        token.attrSet('data-board-diagram', 'true');
       if (token.type === 'blockquote_open') {
         const inline = state.tokens[i + 2];
         const match = inline?.type === 'inline' && /^\[!([A-Za-z]+)\][+-]?(?:[ \t]+([^\n]*))?(?:\n|$)/.exec(inline.content);

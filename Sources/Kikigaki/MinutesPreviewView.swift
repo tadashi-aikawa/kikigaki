@@ -398,6 +398,7 @@ final class MinutesClearButton: HoverButton {
     func update(path: String?, source: MinutesState.Source?, active: Bool, warning: String? = nil, boardHeading: String? = nil) {
         let headingChanged = self.boardHeading != boardHeading
         self.boardHeading = boardHeading
+        minutesDocument.boardHeading = boardHeading ?? "## ボード"
         let changed = self.path != path
         let start = active && (!self.active || changed || self.source != source)
         self.path = path; self.source = source; self.active = active
