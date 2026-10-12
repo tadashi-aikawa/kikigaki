@@ -1,6 +1,7 @@
 import AppKit
 import WebKit
 import Testing
+import KikigakiCore
 @testable import Kikigaki
 
 @Suite(.serialized) @MainActor struct BoardCanvasTests {
@@ -16,6 +17,19 @@ import Testing
         var edges = (1...30).filter { $0 % 6 != 0 && $0 != omit && $0 + 1 != omit }.map { "T\($0) --> T\($0+1)" }
         if updated { edges += ["T31[\"新しい論点\"] --> T1", "T31 --> T7", "T31 --> T13"] }
         return "```mermaid\nflowchart TB\n" + (nodes + edges).joined(separator:"\n") + "\n```"
+    }
+    private func coloredBoard(count: Int, palette: Bool = false, custom: Bool = false) -> String {
+        let names = ["done", "hold", "now", "rejected", ""]
+        let labels = ["✅ 決定・実行済み", "🟠 保留", "今の話題", "❌ 却下", "通常の論点"]
+        var styles = BoardPrompt.builtIn.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { $0.hasPrefix("classDef ") }
+        if custom { styles = styles.map { $0.hasPrefix("classDef done ") ? "classDef done fill:#cee9dd,stroke:#447766,stroke-width:4px,stroke-dasharray:7 4,stroke-dashoffset:5" : $0 } }
+        let nodes = (1...count).map { "T\($0)[\"T\($0) \(labels[($0 - 1) % 5])\"]" }
+        let edges = palette ? [] : (1...count).filter { $0 % 6 != 0 }.map { "T\($0) --> T\($0+1)" }
+        let classes = (1...count).compactMap { index -> String? in
+            let name = names[(index - 1) % 5]
+            return name.isEmpty ? nil : "class T\(index) \(name)"
+        }
+        return "```mermaid\nflowchart TB\n" + (styles + nodes + edges + classes).joined(separator: "\n") + "\n```"
     }
     private func render(_ source: String, in document: MinutesWebView, reset: Bool) async throws {
         var rendered = false
@@ -180,5 +194,93 @@ import Testing
         document.render("### 立場\n図のない古い記録",reset:true)
         try await wait { rendered }
         #expect(try await web.evaluateJavaScript("!document.querySelector('.board-canvas') && !document.body.classList.contains('board-canvas-mode') && document.body.innerText.includes('図のない古い記録')") as? Bool == true)
+    }
+    @Test func ミニマップはカードの色と点線を写し操作中は色を読み直さない() async throws {
+        let document = MinutesWebView(frame: NSRect(x: 0, y: 0, width: 900, height: 850))
+        document.boardCanvasEnabled = true
+        let window = NSWindow(contentRect: document.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = document; window.orderFront(nil)
+        defer { document.invalidate(); window.orderOut(nil) }
+        let web = document.webView
+        for scale in [1, 2] {
+            document.setTextScale(CGFloat(scale))
+            for count in [30, 60] {
+                let source = coloredBoard(count: count)
+                try await render(source, in: document, reset: true)
+                try await capture("colors-\(count)-\(scale*100)-whole", source: source, web: web)
+                _ = try await web.evaluateJavaScript("press('戻す'); void 0")
+                #expect(try await web.evaluateJavaScript("""
+                (()=>{
+                  const nodes=[...canvas.querySelectorAll('.diagram-stage g.node')], map=canvas.querySelector('.board-minimap'),
+                    boxes=[...map.querySelectorAll('svg svg rect')], outer=map.querySelector('svg');
+                  const properties=['fill','fill-opacity','stroke','stroke-opacity','stroke-width','stroke-dasharray','stroke-dashoffset'];
+                  const equal=nodes.every((node,i)=>{
+                    const shape=node.querySelector('.label-container') || node.querySelector('rect,polygon,circle,ellipse,path');
+                    return properties.every(key=>getComputedStyle(shape).getPropertyValue(key)===getComputedStyle(boxes[i]).getPropertyValue(key));
+                  });
+                  const w=parseFloat(outer.style.width),h=parseFloat(outer.style.height),vb=outer.viewBox.baseVal,
+                    ratio=Math.min(canvas.getBoundingClientRect().width*.50/vb.width,canvas.getBoundingClientRect().height*.40/vb.height);
+                  return nodes.length===\(count) && boxes.length===\(count) && equal && !map.hidden &&
+                    !map.querySelector('use,text,tspan') && Math.abs(w-vb.width*ratio)<.01 && Math.abs(h-vb.height*ratio)<.01;
+                })()
+                """) as? Bool == true)
+                try await capture("colors-\(count)-\(scale*100)-minimap", source: source, web: web)
+                _ = try await web.evaluateJavaScript("""
+                window.cardStyleReads=0;window.savedGetComputedStyle=window.getComputedStyle;
+                window.getComputedStyle=function(element,...rest){
+                  if(element.closest('.diagram-stage g.node'))cardStyleReads++;
+                  return savedGetComputedStyle.call(window,element,...rest);
+                };
+                for(let i=0;i<20;i++)wheel(false,2,1);
+                flushDiagramFrames();void 0;
+                """)
+                try await Task.sleep(for: .milliseconds(150))
+                let reads = try await web.evaluateJavaScript("window.getComputedStyle=savedGetComputedStyle;cardStyleReads") as? Int
+                #expect(reads == 0)
+                // 独自classDefへの変更も再描画時に拾う。色表の固定値で写していないことを確かめる。
+                try await render(coloredBoard(count: count, custom: true), in: document, reset: false)
+                #expect(try await web.evaluateJavaScript("""
+                (()=>{const r=canvas.querySelector('.board-minimap svg svg rect'),s=getComputedStyle(r),original=getComputedStyle(node('T1').querySelector('.label-container'));
+                  return s.fill==='rgb(206, 233, 221)' && s.stroke==='rgb(68, 119, 102)' && s.strokeWidth==='4px' && s.strokeDasharray===original.strokeDasharray && s.strokeDashoffset===original.strokeDashoffset;})()
+                """) as? Bool == true)
+            }
+        }
+    }
+    @Test func 横長と縦長のミニマップを広いキャンバスで表示する() async throws {
+        let document = MinutesWebView(frame: NSRect(x:0,y:0,width:1200,height:850))
+        document.boardCanvasEnabled = true
+        let window = NSWindow(contentRect:document.frame,styleMask:[.titled],backing:.buffered,defer:false)
+        window.contentView = document; window.orderFront(nil)
+        defer { document.invalidate(); window.orderOut(nil) }
+        let web = document.webView
+        for scale in [1,2] {
+            document.setTextScale(CGFloat(scale))
+            for direction in ["LR","TB"] {
+                let source = coloredBoard(count:60).replacingOccurrences(of:"flowchart TB",with:"flowchart \(direction)")
+                // 6ノードずつの枝だけでなく、60ノードが一本につながる極端な縦横比も撮る。
+                let chain = (1..<60).filter { $0 % 6 == 0 }.map { "T\($0) --> T\($0+1)" }.joined(separator:"\n")
+                let connected = source.replacingOccurrences(of:"\n```",with:"\n"+chain+"\n```")
+                try await render(connected,in:document,reset:true)
+                try await capture("long-\(direction)-60-\(scale*100)",source:connected,web:web)
+                #expect(try await web.evaluateJavaScript("""
+                (()=>{const map=canvas.querySelector('.board-minimap'),s=map.querySelector('svg'),r=canvas.getBoundingClientRect();
+                  return !map.hidden && (Math.abs(parseFloat(s.style.width)-r.width*.5)<1 || Math.abs(parseFloat(s.style.height)-r.height*.4)<1);})()
+                """) as? Bool == true)
+            }
+            // カードを右下へ動かし、フォーカスしたときにミニマップが避けることを確かめる。
+            let source = coloredBoard(count:30)
+            try await render(source,in:document,reset:true)
+            _ = try await web.evaluateJavaScript("""
+            (()=>{press('戻す');
+              const r=canvas.getBoundingClientRect(),p=point('T4');
+              wheel(false,p.x-r.width*.85,p.y-r.height*.85);flushDiagramFrames();
+              node('T4').dispatchEvent(new MouseEvent('click',{bubbles:true}));})();void 0;
+            """)
+            #expect(try await web.evaluateJavaScript("""
+            (()=>{const n=node('T4').getBoundingClientRect(),m=canvas.querySelector('.board-minimap').getBoundingClientRect();
+              return n.right<=m.left || n.left>=m.right || n.bottom<=m.top || n.top>=m.bottom;})()
+            """) as? Bool == true)
+            try await capture("minimap-avoids-focus-\(scale*100)",source:source,web:web)
+        }
     }
 }

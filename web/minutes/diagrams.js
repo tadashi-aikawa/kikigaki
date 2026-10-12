@@ -87,7 +87,7 @@ export class DiagramInteractions {
     for (const state of this.states.values()) state.selected = false;
     this.selected = null;
   }
-  attach(holder, key, { canvas = false, navigate = () => {} } = {}) {
+  attach(holder, key, { canvas = false, navigate = () => {}, pageZoom = 1 } = {}) {
     const state = this.states.get(key) || { scale:1, x:0, y:0, window:canvas, selected:canvas, mode:'fit', focusID:null };
     state.canvas = canvas;
     this.states.set(key, state);
@@ -120,12 +120,20 @@ export class DiagramInteractions {
     }
     if (!canvas) holder.append(edges);
     let canvasFrame, canvasBounds;
+    const canvasNodeBounds = new Map();
     let painted = { scale:1, x:0, y:0 };
     const measureCanvas = () => {
       canvasFrame = holder.getBoundingClientRect();
       const box = svg.getBoundingClientRect();
       canvasBounds = { x:(box.left-canvasFrame.left-painted.x)/painted.scale,
         y:(box.top-canvasFrame.top-painted.y)/painted.scale, width:box.width/painted.scale, height:box.height/painted.scale };
+      // フォーカスとミニマップの重なりも、初回・リサイズ時の矩形から求める。
+      // ドラッグ中にノードのレイアウトを読み直さない。
+      for (const [id, node] of nodes) {
+        const rect = node.getBoundingClientRect();
+        canvasNodeBounds.set(id, { x:(rect.left-canvasFrame.left-painted.x)/painted.scale,
+          y:(rect.top-canvasFrame.top-painted.y)/painted.scale, width:rect.width/painted.scale, height:rect.height/painted.scale });
+      }
     };
     if (canvas) measureCanvas();
     const viewport = () => {
@@ -184,6 +192,7 @@ export class DiagramInteractions {
         node.querySelector('.board-focus-ring')?.remove(); node.setAttribute('aria-pressed','false');
       }
       if (holder.contains(document.activeElement)) document.activeElement.blur();
+      if (canvas) delayMinimap();
     };
     const resizeFocus = () => {
       if (!focusMark || focusScale === state.scale) return;
@@ -207,6 +216,7 @@ export class DiagramInteractions {
         node.append(ring); focusMark = ring;
       }
       resizeFocus();
+      if (canvas) updateMinimap();
     };
     const paintSearch = (matches, current) => {
       for (const node of nodes.values()) node.querySelector('.board-search-ring')?.remove();
@@ -234,11 +244,11 @@ export class DiagramInteractions {
       }
       paintFocus();
     };
-    // 本体のSVGをuseで再描画せず、箱と線だけを1回作る。文字・マーク・状態色は複製しない。
+    // 本体のSVGをuseで再描画せず、状態色を写した箱と線を1回作る。文字・マークは複製しない。
     const minimap = document.createElement('div'); minimap.className = 'board-minimap'; minimap.hidden = true;
     minimap.setAttribute('role', 'group'); minimap.setAttribute('aria-label', 'ボード全体と表示範囲');
     const mapSVG = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    const drawing = canvas ? createMinimap(svg) : document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    const drawing = canvas ? createMinimap(svg, pageZoom) : document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     const mapFrame = document.createElementNS('http://www.w3.org/2000/svg', 'rect'); mapFrame.setAttribute('class', 'board-map-frame');
     mapSVG.append(drawing, mapFrame); minimap.append(mapSVG);
     if (canvas) holder.append(minimap);
@@ -246,11 +256,28 @@ export class DiagramInteractions {
       const size = viewport(), box = bounds(), natural = naturalBounds();
       minimap.hidden = !Object.values(diagramOverflow(box, size)).some(Boolean);
       if (minimap.hidden || natural.width <= 0 || natural.height <= 0) return;
-      const ratio = Math.min(180 / natural.width, 120 / natural.height,
-        size.width * 0.25 / natural.width, size.height * 0.25 / natural.height);
+      // 固定px上限だと広いペイン・横長の図で箱が潰れる。図の比率は保ったまま、
+      // キャンバスの広さに従って全体の見取り図を大きくする。
+      const ratio = Math.min(size.width * 0.50 / natural.width, size.height * 0.40 / natural.height);
       mapSVG.setAttribute('viewBox', `0 0 ${natural.width} ${natural.height}`);
       mapSVG.style.width = natural.width * ratio + 'px'; mapSVG.style.height = natural.height * ratio + 'px';
       drawing.setAttribute('width', natural.width); drawing.setAttribute('height', natural.height);
+      const focus = canvasNodeBounds.get(state.focusID);
+      const width = natural.width * ratio + 8, height = natural.height * ratio + 8;
+      const overlap = (x, y) => {
+        if (!focus) return 0;
+        const left = focus.x*state.scale+state.x-8, top = focus.y*state.scale+state.y-8;
+        return Math.max(0, Math.min(x+width, left+focus.width*state.scale+16)-Math.max(x,left)) *
+          Math.max(0, Math.min(y+height, top+focus.height*state.scale+16)-Math.max(y,top));
+      };
+      // 通常は右下。フォーカスを覆う間だけ他の隅へ逃がす。
+      // 上側は操作列、下左は「以前の本文」のボタン分を空ける。
+      const corners = [{ x:size.width-width-12, y:size.height-height-12 },
+        { x:12, y:size.height-height-(holder.querySelector('.board-legacy') ? 48 : 12) },
+        { x:12, y:48 }, { x:size.width-width-12, y:48 }];
+      const corner = corners.reduce((best, next) => overlap(next.x,next.y) < overlap(best.x,best.y) ? next : best);
+      minimap.style.left = Math.max(0, corner.x) + 'px'; minimap.style.top = Math.max(0, corner.y) + 'px';
+      minimap.style.right = minimap.style.bottom = 'auto';
       const left = Math.max(0, -box.x / state.scale), top = Math.max(0, -box.y / state.scale);
       const right = Math.min(natural.width, (size.width-box.x) / state.scale);
       const bottom = Math.min(natural.height, (size.height-box.y) / state.scale);

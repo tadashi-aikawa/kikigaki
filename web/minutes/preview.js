@@ -454,7 +454,7 @@ window.minutes = {
       const sectionID = section?.querySelector(':scope > :is(h1,h2,h3,h4,h5,h6)')?.id || '';
       const index = diagramCounts.get(sectionID) || 0; diagramCounts.set(sectionID, index + 1);
       const key = JSON.stringify([sectionID, index]); diagramKeys.add(key);
-      const cleanup = primary ? canvas.attach(holder, 'board', { canvas:true, navigate:id => {
+      const cleanup = primary ? canvas.attach(holder, 'board', { canvas:true, pageZoom:textScale, navigate:id => {
         if (board.links.has(id)) navigate(board.links.get(id));
       } }) : diagrams.attach(holder, key);
       if (primary) {
