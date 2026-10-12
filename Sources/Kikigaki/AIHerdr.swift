@@ -134,8 +134,9 @@ struct AIHerdr: Sendable {
         let ready = status == .idle && agent.interactive_ready != false && (target.provider == .codex || !(session ?? "").isEmpty)
         return AIHerdrObservation(status: status, ready: ready, sessionID: session, terminalID: agent.terminal_id)
     }
-    func prompt(_ target: AIHerdrConnection, text: String, beforeSend: @Sendable () async throws -> Void = {}) async throws {
-        guard try await observe(target).ready else { throw AIHerdrError.notReady }
+    func prompt(_ target: AIHerdrConnection, text: String, allowsWorking: Bool = false, beforeSend: @Sendable () async throws -> Void = {}) async throws {
+        let observation = try await observe(target)
+        guard observation.ready || (allowsWorking && observation.status == .working) else { throw AIHerdrError.notReady }
         try Task.checkCancellation()
         try await beforeSend()
         try Task.checkCancellation()

@@ -283,7 +283,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // 返答シートは固定した枠の状態を見る。選択中の宛先が返事待ちでも無効にしない。
                     let slot = sheet.owningSlot
                     sheet.update(progress: snapshot.ai?.progress(slot: slot),
-                                 canSubmit: snapshot.ai?.canSubmit(slot: slot) == true, warning: snapshot.ai?.warning)
+                                 canSubmit: snapshot.ai?.canSubmit(slot: slot) == true && (sheet.permitsAppendix || snapshot.ai?.appendingSlots.contains(slot) != true), warning: snapshot.ai?.warning,
+                                 appending: sheet.permitsAppendix && snapshot.ai?.appendingSlots.contains(slot) == true,
+                                 workAllowed: snapshot.ai?.appendingWorkAllowed(slot: slot))
                 }
             }
             if let sheet = self.scheduleSheet,
@@ -632,6 +634,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             canSubmit: snapshot.ai?.canSubmit(slot: slot) == true, confirmation: question?.result?.body,
             workAllowed: session.aiWorkAllowed, fixedSlot: fixed ? slot : nil, alwaysPrompt: config.alwaysPrompt)
         sheet.updateDestinations(session.aiDestinationItems, selected: slot, participant: config.participantName)
+        sheet.update(progress: snapshot.ai?.progress(slot: slot), canSubmit: snapshot.ai?.canSubmit(slot: slot) == true,
+                     appending: !fixed && snapshot.ai?.appendingSlots.contains(slot) == true,
+                     workAllowed: snapshot.ai?.appendingWorkAllowed(slot: slot))
         // 紐づけがsessionの選択を先に変えても、表示していた宛先へ編集内容を保存する。
         var displayedSlot = slot
         // 宛先の選び直しで動かすもの。
@@ -650,7 +655,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // 選択前のemitは旧owningSlotで可否を描く。一時停止中も次の発話を待たず更新する。
             sheet.update(progress: session.snapshot.ai?.progress(slot: profile.slot),
                           canSubmit: session.snapshot.ai?.canSubmit(slot: profile.slot) == true,
-                          warning: session.snapshot.ai?.warning)
+                          warning: session.snapshot.ai?.warning,
+                          appending: session.snapshot.ai?.appendingSlots.contains(profile.slot) == true,
+                          workAllowed: session.snapshot.ai?.appendingWorkAllowed(slot: profile.slot))
         }
         if !fixed { sheet.onDestination = applyDestination }
         sheet.onDraft = {

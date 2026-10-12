@@ -19,7 +19,7 @@ struct ReturnCommand: Sendable {
                 guard action == "progress", options[name] == nil else { throw AIError.invalid("arguments") }
                 options[name] = "true"; index += 1
             } else if name.hasPrefix("--") {
-                guard ["--session", "--request", "--token", "--kind", "--reason", "--provider", "--path", "--total", "--slot", "--name", "--question", "--speaker", "--time"].contains(name),
+                guard ["--session", "--request", "--token", "--kind", "--reason", "--provider", "--path", "--total", "--slot", "--name", "--question", "--speaker", "--time", "--appendices"].contains(name),
                       options[name] == nil, index + 1 < arguments.count else { throw AIError.invalid("arguments") }
                 options[name] = arguments[index + 1]; index += 2
             } else {
@@ -31,7 +31,7 @@ struct ReturnCommand: Sendable {
         if action == "minutes" { required.insert("--path") }
         if action == "speaker" { required.formUnion(["--slot", "--name"]) }
         if action == "resolve" { required.formUnion(["--question", "--speaker", "--time"]) }
-        let allowed = action == "reply" ? required.union(["--kind", "--reason"])
+        let allowed = action == "reply" ? required.union(["--kind", "--reason", "--appendices"])
             : action == "progress" ? required.union(["--editing", "--replying", "--total"]) : required
         // 段はどちらか1つ必須。総数は編集にしか添えられない。
         let editing = options["--editing"] != nil, replying = options["--replying"] != nil
@@ -193,7 +193,22 @@ struct ReturnCommand: Sendable {
             guard let text = String(data: bytes, encoding: .utf8) else { throw AIError.invalid("UTF-8") }
             body = text
         }
-        let event = try AIReceiveEvent(request: request, kind: kind, recordedAt: now, body: body, reason: options["--reason"])
+        var appendices: [Int]?
+        if let raw = options["--appendices"] {
+            let parts = raw.split(separator: ",", omittingEmptySubsequences: false)
+            let numbers = try parts.map { part -> Int in
+                guard let number = Int(part), number > 0, part == String(number) else { throw AIError.invalid("appendices") }
+                return number
+            }
+            guard numbers == Array(Set(numbers)).sorted(), !numbers.isEmpty else { throw AIError.invalid("appendices") }
+            for number in numbers {
+                let appendix = try AIJSON.decode(AIAppendix.self, from: files.read(base + ["requests", "\(id.uuidString).appendix.\(number).json"], limit: AILimits.eventBytes))
+                try appendix.validate(for: request)
+                guard appendix.number == number, appendix.sentAt <= now else { throw AIError.mismatch }
+            }
+            appendices = numbers
+        }
+        let event = try AIReceiveEvent(request: request, kind: kind, recordedAt: now, body: body, reason: options["--reason"], appliedAppendices: appendices)
         let encoded = try AIJSON.encode(event)
         guard encoded.count <= AILimits.eventBytes else { throw AIError.tooLarge }
         try saveIdentity(session: session, environment: environment, files: files, sessions: sessions, generation: generation)

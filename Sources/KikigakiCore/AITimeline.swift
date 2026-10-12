@@ -107,6 +107,16 @@ public enum AITimeline {
             let arrival = question.resultReceivedAt ?? sendDate
             let anchor: Anchor = waiting ? .tail : .at(arrival)
             var notes: [String] = []
+            if waiting { notes.append("追記 \(question.appendices.count)件") }
+            else {
+                for appendix in question.appendices {
+                    if question.hasApplied(appendix) { notes.append("追記 \(appendix.number): 反映済み") }
+                    else if let id = appendix.forwardedRequestID,
+                            let number = conversation.questions.first(where: { $0.request.id == id })?.request.number {
+                        notes.append("追記 \(appendix.number): #\(number)へ送り直し")
+                    } else { notes.append("追記 \(appendix.number): 送り直し待ち") }
+                }
+            }
             if question.cancelledAt != nil { notes.append("取消後の返事") }
             if !waiting, let generation = generation(request), participant.sessionGeneration < generation {
                 notes.append("旧接続からの返事")

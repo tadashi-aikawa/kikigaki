@@ -133,7 +133,8 @@ import Testing
             let copiedText = try #require(try await web.evaluateJavaScript("document.querySelector('main').innerText") as? String)
             #expect(copiedText.trimmingCharacters(in: .newlines) == originalText)
             #expect(try await web.evaluateJavaScript("window.minutes.search('✓', 0, false).count") as? Int == 0)
-            try await Task.sleep(for: .milliseconds(1600))
+            // WebKitのタイマーは非表示・高負荷時に遅れるため、表示状態の変化を待つ。
+            try await wait { try await web.evaluateJavaScript("document.querySelector('.code-copy.copied') === null") as? Bool == true }
             #expect(try await web.evaluateJavaScript("document.querySelector('.code-copy.copied') === null") as? Bool == true)
             var rendered = false
             let onRendered = document.onRendered

@@ -4,6 +4,8 @@
 
 [AIProgress](../Sources/KikigakiCore/AIProgress.swift) で状態を導き、[AIProgressView](../Sources/Kikigaki/AIProgressView.swift) が返事行へ描く。
 
+作業中の依頼への追記では、観測済みの4段も送信試行日時も戻さない。「追記 N件」は進行バーと別の注記に出す。追記の契約は [作業中の依頼への追記](ai-participant.md#作業中の依頼への追記) を参照する。
+
 ## 観測源と段の対応
 
 `AIQuestion` の保存済み状態・acceptance・result、宛先slotの `AIConnectionStatus`、既存の `AIReturnStatus.isUnconfirmed` の結果、受信箱の編集・返答の観測を使う。接続の観測には宛先の現在の世代も渡す。選択中の別宛先の状態を流用しない。

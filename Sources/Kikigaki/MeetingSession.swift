@@ -569,7 +569,7 @@ final class MeetingSession {
             if let phase = aiSchedule?.phase, phase != .stopped { return true }
         }
         guard let controller = aiStore?.records[meetingID]?.controller else { return false }
-        return controller.conversation.questions.contains { $0.isAwaitingResult }
+        return controller.hasPendingAppendices || controller.conversation.questions.contains { $0.isAwaitingResult }
     }
 
     func togglePause() {
@@ -744,7 +744,7 @@ final class MeetingSession {
                 connections[profile.slot] = controller?.connectionStatus(slot: profile.slot) ?? .unknown
                 generations[profile.slot] = controller?.generation(slot: profile.slot) ?? 1
                 canSubmits[profile.slot] = snapshot.canSubmitAI && aiTasks[profile.slot] == nil
-                    && (controller?.canSend(slot: profile.slot) ?? true)
+                    && ((controller?.canSend(slot: profile.slot) ?? true) || controller?.canAppend(slot: profile.slot) == true)
                 progresses[profile.slot] = aiProgresses[profile.slot]
                 participants[profile.slot] = profile.participantName
                 if controller?.canOpenPane(slot: profile.slot) == true { openablePanes.insert(profile.slot) }
@@ -781,6 +781,7 @@ final class MeetingSession {
             state.connections = connections
             state.generations = generations
             state.canSubmits = canSubmits
+            state.appendingSlots = Set(meetingAIProfiles.filter { controller?.awaitingRequest(slot: $0.slot) != nil }.map(\.slot))
             state.progresses = progresses
             state.participants = participants
             state.openablePanes = openablePanes
@@ -913,6 +914,8 @@ final class MeetingSession {
               let config = selected, aiTasks[config.slot] == nil,
               let url = snapshot.markdownURL, let aiStore else { return }
         let slot = config.slot
+        let appendixRequest = trigger == nil && parent == nil
+            ? aiRecord?.controller.awaitingRequest(slot: slot)?.request.id : nil
         let meetingID = handoff.meetingID, capturedAt = Date(), cutoff = snapshot.state == .idle ? snapshot.elapsed : pause.audioTime
         // 書き先は送信操作の入口で固定する。ボードの会議は人の指定が無ければAI通知を引き継ぐ。
         let minutesPath: String?
@@ -964,7 +967,8 @@ final class MeetingSession {
                 try record.controller.setSpeakerNames(snapshot.names)
                 if let slot = rangeAutomaticSlot { aiStore.setAutomaticSlot(slot, for: record) }
                 try record.controller.register(meetingAIProfiles)
-                guard record.controller.canSend(slot: config.slot) else { throw AIHerdrError.notReady }
+                // 受付後に返事が到着しても、固定した元の依頼へ追記を記録して送り直す。
+                guard appendixRequest != nil || record.controller.canSend(slot: config.slot) else { throw AIHerdrError.notReady }
                 if snapshot.state == .idle, var archive, record.archive == nil {
                     let saved = aiStore.save(&archive, for: meetingID); self.archive = archive
                     guard saved.succeeded else { throw AIError.unsafeFile }
@@ -998,6 +1002,13 @@ final class MeetingSession {
                     return
                 }
                 if trigger == .scheduled, !record.controller.hasChanges(lines: capture.lines, slot: config.slot) { return }
+                if let appendixRequest {
+                    aiPhases[slot] = .preparingAndSending
+                    try await record.controller.append(to: appendixRequest, lines: capture.lines, question: question,
+                        capturedAt: capturedAt, cutoff: cutoff, tail: capture.tail, config: config)
+                    sent = true; aiDraft = ""
+                    return
+                }
                 // prepareの通知から録音停止が始まっても、確定待ちの取消へ戻さない。
                 aiPhases[slot] = .preparingAndSending
                 let fixed = try record.controller.prepare(lines: capture.lines, question: question, voiceQuestion: capture.voice,
@@ -1484,7 +1495,8 @@ extension MeetingSession {
     private var canSendVoiceManual: Bool {
         guard snapshot.canSubmitAI, aiStore != nil, automaticHelper != nil, let profile = meetingManualAI,
               aiTasks[profile.slot] == nil else { return false }
-        return aiRecord?.controller.canSend(slot: profile.slot) ?? true
+        return (aiRecord?.controller.canSend(slot: profile.slot) ?? true)
+            || aiRecord?.controller.canAppend(slot: profile.slot) == true
     }
 
     @discardableResult

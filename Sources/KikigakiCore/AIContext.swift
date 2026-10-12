@@ -323,6 +323,13 @@ public struct AIContextSnapshot: Codable, Equatable, Sendable {
     public let fileURL: URL
     public let readStartLine: Int
     public let lines: [String]
+    public init(id: UUID, meetingID: UUID, streamID: UUID, sessionGeneration: Int, sequence: Int,
+                previousSnapshotID: UUID?, kind: Kind, fileURL: URL, readStartLine: Int, lines: [String]) {
+        self.id = id; self.meetingID = meetingID; self.streamID = streamID
+        self.sessionGeneration = sessionGeneration; self.sequence = sequence
+        self.previousSnapshotID = previousSnapshotID; self.kind = kind; self.fileURL = fileURL
+        self.readStartLine = readStartLine; self.lines = lines
+    }
     public var readLineCount: Int {
         guard readStartLine >= 1, readStartLine <= lines.count + 1 else { return 0 }
         return lines.count - (readStartLine - 1)

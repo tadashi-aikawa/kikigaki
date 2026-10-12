@@ -167,9 +167,132 @@ final class AIConversationController {
     func isPaneClosed(slot: Int) -> Bool { closedSlots.contains(slot) }
     func canSend(slot: Int) -> Bool {
         guard allowsSending, !discarded, !closedSlots.contains(slot), let channel = channels[slot] else { return false }
+        if preparingAppendixRetry != slot, conversation.questions.contains(where: {
+            self.slot(of: $0.request) == slot && !$0.unreflectedAppendices.isEmpty
+        }) { return false }
         return !channel.isSending && !channel.connecting
             && (channel.connection == nil ? !channel.launchingAttempted : channel.connectionStatus == .idle)
             && !questions(inSlot: slot, generation: channel.generation).contains { $0.isAwaitingResult || $0.state == .prepared }
+    }
+
+    func awaitingRequest(slot: Int) -> AIQuestion? {
+        guard let channel = channels[slot] else { return nil }
+        return questions(inSlot: slot, generation: channel.generation).first { $0.isAwaitingResult }
+    }
+
+    func canAppend(slot: Int) -> Bool {
+        guard allowsSending, !discarded, !closedSlots.contains(slot), let channel = channels[slot],
+              !channel.isSending, !channel.connecting, channel.inputAttempted, channel.connection != nil,
+              awaitingRequest(slot: slot) != nil else { return false }
+        return channel.connectionStatus == .working || channel.connectionStatus == .idle
+    }
+
+    /// 依頼を増やさず、元の依頼で最後に送ったsnapshotを基準に追記する。
+    func append(to id: UUID, lines: [String], question: String, capturedAt: Date, cutoff: Double,
+                tail: AITentativeTail?, config: ResolvedAIConfig) async throws {
+        let channel = try channel(config.slot)
+        guard allowsSending, !discarded, !closedSlots.contains(config.slot), !channel.isSending, !channel.connecting,
+              channel.inputAttempted, channel.configuration == config,
+              let original = conversation.questions.first(where: { $0.request.id == id }),
+              original.sendAttemptedAt != nil, slot(of: original.request) == config.slot,
+              original.request.envelope.participant.sessionGeneration == channel.generation else { throw AIHerdrError.notReady }
+        channel.isSending = true
+        defer { channel.isSending = false; resendAppendices(); onChange?() }
+        try await refreshConnection(slot: config.slot)
+        guard channel.connectionStatus == .working || channel.connectionStatus == .idle,
+              let target = channel.connection else { throw AIHerdrError.notReady }
+        let fixed = try appendixSnapshot(lines: lines, for: original, channel: channel)
+        // 返送イベントと同じミリ秒精度で比較し、保存前後の丸めで反映判定を変えない。
+        let sentAt = try AIJSON.decode(Date.self, from: AIJSON.encode(Date()))
+        let appendix = AIAppendix(number: original.appendices.count + 1, requestID: id, snapshot: fixed,
+            question: question, capturedAt: capturedAt, audioCutoffSeconds: cutoff, tentativeTail: tail, sentAt: sentAt)
+        try appendix.validate(for: original.request)
+        try files.write(fixed.contents, to: [".kikigaki-context", meetingID.uuidString, fixed.id.uuidString + ".md"], replacing: false)
+        let bytes = try AIJSON.encode(appendix)
+        guard bytes.count <= AILimits.eventBytes else { throw AIError.tooLarge }
+        try files.write(bytes, to: base + ["requests", "\(id.uuidString).appendix.\(appendix.number).json"], replacing: false)
+        try change(id) { try $0.addAppendix(appendix) }
+        if conversation.questions.first(where: { $0.request.id == id })?.result != nil { return }
+        do { try await herdr.prompt(target, text: appendix.prompt(for: original.request), allowsWorking: true) }
+        catch { channel.warning = "追記の送達を確認できません。返事の後に送り直します"; throw error }
+    }
+
+    private func appendixSnapshot(lines: [String], for original: AIQuestion, channel: Channel) throws -> AIContextSnapshot {
+        let previous: [String]
+        if let last = original.appendices.last { previous = last.snapshot.lines }
+        else {
+            let bytes = try files.read([".kikigaki-context", meetingID.uuidString, original.request.envelope.snapshotID.uuidString + ".md"])
+            previous = String(decoding: bytes, as: UTF8.self).split(separator: "\n").map(String.init)
+        }
+        var common = 0
+        while common < min(previous.count, lines.count), previous[common] == lines[common] { common += 1 }
+        let snapshotID = UUID()
+        return AIContextSnapshot(id: snapshotID, meetingID: meetingID, streamID: channel.history.streamID,
+            sessionGeneration: channel.generation, sequence: original.appendices.count + 1,
+            previousSnapshotID: original.appendices.last?.snapshot.id ?? original.request.envelope.snapshotID,
+            kind: .update, fileURL: outputDirectory.appendingPathComponent(".kikigaki-context").appendingPathComponent(meetingID.uuidString).appendingPathComponent(snapshotID.uuidString + ".md"),
+            readStartLine: common + 1, lines: lines)
+    }
+
+    private var appendixRetries: Set<Int> = []
+    private var preparingAppendixRetry: Int?
+    var hasPendingAppendices: Bool {
+        !appendixRetries.isEmpty || conversation.questions.contains { !$0.unreflectedAppendices.isEmpty }
+    }
+    /// resultとpromptのawaitが前後しても、送信終了後に保存済みの未反映一覧を確認する。
+    private func resendAppendices() {
+        guard allowsSending, !discarded else { return }
+        for question in conversation.questions where !question.unreflectedAppendices.isEmpty {
+            let slot = slot(of: question.request)
+            guard let channel = channels[slot], !closedSlots.contains(slot), !channel.isSending,
+                  !channel.connecting, !appendixRetries.contains(slot), let config = channel.configuration else { continue }
+            appendixRetries.insert(slot)
+            Task { [weak self] in
+                guard let self else { return }
+                defer { appendixRetries.remove(slot); onChange?() }
+                do {
+                    if channel.connection != nil { try await waitUntilReady(channel, timeout: 30) }
+                    preparingAppendixRetry = slot
+                    defer { preparingAppendixRetry = nil }
+                    guard !discarded, !closedSlots.contains(slot), canSend(slot: slot),
+                          let latest = conversation.questions.first(where: { $0.request.id == question.request.id }) else { return }
+                    var pending: [AIAppendix] = [], text = ""
+                    for appendix in latest.unreflectedAppendices {
+                        let body = appendix.question.isEmpty ? "会話末尾の指示を反映してください" : appendix.question
+                        let added = "追記 \(appendix.number):\n" + body
+                        let combined = text.isEmpty ? added : text + "\n\n" + added
+                        if combined.utf8.count > AILimits.questionBytes {
+                            // 単独の文面が上限ちょうどなら、番号の前置きを省いて本文を保つ。
+                            if pending.isEmpty { pending = [appendix]; text = body }
+                            break
+                        }
+                        pending.append(appendix); text = combined
+                    }
+                    guard let last = pending.last else { return }
+                    let p = latest.request.envelope.participant
+                    let request = try prepare(lines: last.snapshot.lines, question: text, voiceQuestion: "",
+                        capturedAt: last.capturedAt, cutoff: last.audioCutoffSeconds, tail: last.tentativeTail,
+                        config: config, helper: URL(fileURLWithPath: p.cliPath), full: true, workAllowed: p.workAllowed,
+                        trigger: p.trigger, minutesPath: p.minutesPath, boardHeading: p.boardHeading)
+                    // 送信開始の保存と一緒に引継先を記録し、再走査で二重送信しない。
+                    do {
+                        // 明示的に接続を作り直した後も、保存済みの追記を新しい世代へ引き継ぐ。
+                        if channel.connection == nil {
+                            let settings = try AILaunchConfiguration(config: config, helper: URL(fileURLWithPath: p.cliPath), controller: self)
+                            try await connect(config: config, label: "KIKIGAKI \(config.participantName)",
+                                executable: settings.executable, arguments: settings.arguments)
+                        }
+                        try await send(request, config: config, forwarding: (latest.request.id, pending.map(\.number)))
+                    }
+                    catch {
+                        if conversation.questions.first(where: { $0.request.id == request.id })?.state == .prepared {
+                            try fail(request.id, reason: "追記の送り直しを開始できません")
+                        }
+                        throw error
+                    }
+                } catch { channel.warning = "未反映の追記を送り直せません。ペインを確認してください" }
+            }
+        }
     }
 
     func watch() throws {
@@ -179,7 +302,9 @@ final class AIConversationController {
     }
 
     func preview(lines: [String], full: Bool, slot: Int? = nil) throws -> AIContextSnapshot {
-        var copy = try channel(slot ?? defaultSlot).history
+        let target = slot ?? defaultSlot, channel = try channel(target)
+        if let original = awaitingRequest(slot: target) { return try appendixSnapshot(lines: lines, for: original, channel: channel) }
+        var copy = channel.history
         return try copy.prepare(lines: lines, outputDirectory: outputDirectory, full: full)
     }
 
@@ -304,7 +429,7 @@ final class AIConversationController {
         }
     }
 
-    func send(_ supplied: AIRequest, config: ResolvedAIConfig,
+    func send(_ supplied: AIRequest, config: ResolvedAIConfig, forwarding: (UUID, [Int])? = nil,
               willBeginSending: (() throws -> Void)? = nil, didBeginSending: ((Date) -> Void)? = nil) async throws {
         let channel = try channel(config.slot)
         guard allowsSending, !channel.isSending, !channel.connecting, channel.inputAttempted, channel.configuration == config,
@@ -324,6 +449,9 @@ final class AIConversationController {
                 let sentAt = Date()
                 var next = conversation
                 try next.update(stored.request.id) { try $0.beginSending(at: sentAt) }
+                if let (id, numbers) = forwarding {
+                    try next.update(id) { try $0.forwardAppendices(numbers, to: stored.request.id) }
+                }
                 try commit(next)
                 didBeginSending?(sentAt)
                 onChange?()
@@ -377,6 +505,7 @@ final class AIConversationController {
         channel.launchingAttempted = false; channel.inputAttempted = false
         channel.connectionStatus = .unknown; channel.idleSince = nil; channel.warning = nil
         channel.hookBackgroundRunning = false
+        resendAppendices()
         onChange?()
     }
 
@@ -497,6 +626,7 @@ final class AIConversationController {
             || oldBackground != channels.mapValues({ $0.hookBackgroundRunning }) {
             onChange?()
         }
+        resendAppendices()
     }
 
     func resolveManually(_ id: UUID) throws {
@@ -628,7 +758,7 @@ final class AIConversationController {
         polling.insert(slot)
         Task { [weak self] in
             guard let self else { return }
-            defer { polling.remove(slot); onChange?() }
+            defer { polling.remove(slot); resendAppendices(); onChange?() }
             do { try await refreshConnection(slot: slot) } catch { /* 状態分類はrefreshConnectionで行う */ }
         }
     }

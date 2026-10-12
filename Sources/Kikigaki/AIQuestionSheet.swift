@@ -121,7 +121,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     private let title = Washi.label("", size: 17, weight: .semibold)
     private let editor = AIQuestionEditor()
     let alwaysPromptHint = AIAlwaysPromptHint()
-    private let sendButton = NSButton(title: "送信", target: nil, action: nil)
+    let sendButton = NSButton(title: "送信", target: nil, action: nil)
     private let hint = NSTextField(wrappingLabelWithString: "")
     private let range = Washi.label(size: 11, color: Washi.muted)
     private let full = NSButton(checkboxWithTitle: "会話を最初から送り直す", target: nil, action: nil)
@@ -190,6 +190,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     private(set) var activeSlot: Int?
     /// 固定した枠があればそれ、送信を始めていなければ現在の選択、始めていればそのときの枠
     var owningSlot: Int { fixedSlot ?? activeSlot ?? destination.selected }
+    var permitsAppendix: Bool { fixedSlot == nil }
 
     /// 宛先の一覧と選択を差し替える。固定した枠と送信を始めた後は差し替えない。
     func updateDestinations(_ items: [AIDestinationPicker.Item], selected: Int, participant: String) {
@@ -212,12 +213,16 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         editor.needsDisplay = true
     }
     func close() { if let parent = window.sheetParent { parent.endSheet(window) }; window.orderOut(nil) }
-    func update(progress: String?, canSubmit: Bool, warning: String? = nil) {
+    func update(progress: String?, canSubmit: Bool, warning: String? = nil, appending: Bool = false, workAllowed: Bool? = nil) {
+        sendButton.title = appending ? "追記して送る" : "送信"
+        full.isEnabled = !appending; work.isEnabled = !appending
+        if appending { full.state = .off }
+        if let workAllowed { work.state = workAllowed ? .on : .off }
         if progress == nil { updateRange() }
-        hint.stringValue = progress ?? warning ?? (canSubmit ? "空欄なら声の末尾を送ります" : "返事待ちです。下書きは保持されます")
+        hint.stringValue = progress ?? warning ?? (appending ? "前回送った所から後の会話と文面を追記します。作業許可は元の依頼を引き継ぎます" : canSubmit ? "空欄なら声の末尾を送ります" : "送信できません。下書きは保持されます")
         sendButton.isEnabled = canSubmit && !sent
         editor.isEditable = !sent || progress == nil
-        work.isEnabled = !sent || progress == nil
+        work.isEnabled = !appending && (!sent || progress == nil)
         if progress == nil {
             sent = false; sendButton.isEnabled = canSubmit
             // 送信が終わって次の下書きへ戻ったら、宛先をまた選べるようにする。

@@ -100,7 +100,7 @@ import KikigakiAIIO
         #expect(session.fireAIScheduleNow() == .skipped(.unavailable))
     }
     @Test(arguments: [false, true])
-    func 準備中と返事待ちは追加送信せず低い音を鳴らす(awaiting: Bool) async throws {
+    func 準備中は低い音で返事待ちは自動の依頼へ追記する(awaiting: Bool) async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let session = session(root, fake: FakeHerdr())
         defer { session.stopAISchedule() }
@@ -112,7 +112,10 @@ import KikigakiAIIO
         publish(session, diarization: true)
         await session.submissionTaskForTesting?.value
         #expect(session.aiRecord?.controller.conversation.questions.count == 1)
-        #expect(sounds == [false])
+        #expect(sounds == [awaiting])
+        let saved = session.aiRecord?.controller.conversation.questions.first
+        #expect(saved?.appendices.count == (awaiting ? 1 : 0))
+        if awaiting { #expect(saved?.request.trigger == .scheduled) }
     }
     @Test func 差分なしでも手動送信し今すぐ自動送信の判定を使わない() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
@@ -136,6 +139,47 @@ import KikigakiAIIO
         #expect(controller.conversation.questions.count == 2)
         #expect(controller.conversation.questions.last?.request.trigger == nil)
         #expect(await fake.commands.filter { $0.prefix(2) == ["agent", "prompt"] }.count == 2)
+    }
+
+    @Test func 返事待ちでも接続不可なら合図は低い音だけ返す() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), session = session(root, fake: fake)
+        defer { session.stopAISchedule() }
+        var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        session.setScheduleTranscriptForTesting("会議を始めます")
+        session.submitAI(question: "作業して", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"))
+        await session.submissionTaskForTesting?.value
+        await fake.setStatuses(["missing"])
+        try? await session.aiRecord?.controller.refreshConnection()
+        publish(session, diarization: true)
+        #expect(sounds == [false])
+        #expect(session.aiRecord?.controller.conversation.questions[0].appendices.isEmpty == true)
+    }
+
+    @Test func 合図の受付直後に返事が来ても追記を捨てず新しい依頼へ送る() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(root, fake: FakeHerdr())
+        defer { session.stopAISchedule(); session.aiRecord?.controller.stopWatching() }
+        var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        session.setScheduleTranscriptForTesting("会議を始めます")
+        session.submitAI(question: "作業して", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"))
+        await session.submissionTaskForTesting?.value
+        let controller = try #require(session.aiRecord?.controller)
+        let request = try #require(controller.conversation.questions.first?.request)
+        publish(session, diarization: true)
+        // 追記のTaskへMainActorを譲る前に、元の依頼の返事が届く。
+        let event = try AIReceiveEvent(request: request, kind: .answered, recordedAt: Date(), body: "完了")
+        try AIFileStore(root: root).write(AIJSON.encode(event), to: [".kikigaki-context", session.aiMeetingID.uuidString,
+            "ai", "inbox", event.filename], replacing: false)
+        controller.scan()
+        await session.submissionTaskForTesting?.value
+        for _ in 0..<200 {
+            if !controller.hasPendingAppendices { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(sounds == [true])
+        #expect(controller.conversation.questions.count == 2 && controller.conversation.questions[0].appendices.count == 1)
+        #expect(controller.conversation.questions[0].appendices[0].forwardedRequestID == controller.conversation.questions[1].request.id)
     }
 
     @Test func 自動非稼働でも設定の手動プロンプトで送信する() async throws {

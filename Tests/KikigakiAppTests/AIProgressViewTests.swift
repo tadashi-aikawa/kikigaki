@@ -41,7 +41,7 @@ import KikigakiCore
         controller.apply(state)
         #expect(rows(controller).map { $0.progressView.progress?.status } == [.editing, .awaitingReply, .blocked])
         #expect(rows(controller)[0].progressView.displayText.hasPrefix("編集中(全2か所) · "))
-        #expect(rows(controller).allSatisfy { $0.noteText.isEmpty && $0.height(for: 600) == 82 })
+        #expect(rows(controller).allSatisfy { $0.noteText == "追記 0件" && $0.height(for: 600) > 82 })
         state.ai?.connections[1] = .disconnected
         state.ai?.generations[3] = 2
         controller.apply(state)

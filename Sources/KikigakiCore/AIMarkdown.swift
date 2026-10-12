@@ -108,6 +108,21 @@ public enum AIMarkdown {
                 lines.append("- 状態: " + label(question.state))
                 if let failure = question.failure { lines += ["", "#### 返事", "", failure] }
             }
+            for appendix in question.appendices {
+                let state: String
+                if question.hasApplied(appendix) { state = "反映済み" }
+                else if let id = appendix.forwardedRequestID,
+                        let number = conversation.questions.first(where: { $0.request.id == id })?.request.number { state = "#\(number)へ送り直し" }
+                else { state = question.result == nil ? "返事待ち" : "送り直し待ち" }
+                var context = Array(appendix.snapshot.lines.dropFirst(appendix.snapshot.readStartLine - 1))
+                if let tail = appendix.tentativeTail { context.append("暫定末尾: " + tail.text) }
+                let text = ([appendix.question] + context).joined(separator: "\n")
+                // 会話にフェンスが含まれていても内容を変えず保存する。
+                let longest = text.split(whereSeparator: { $0 != "`" }).map(\.count).max() ?? 0
+                let fence = String(repeating: "`", count: max(3, longest + 1))
+                lines += ["", "#### 追記 \(appendix.number)", "", "- 送信: " + date(appendix.sentAt, timeZone: timeZone), "- 状態: " + state,
+                          "", fence + "text", text, fence]
+            }
         }
         return lines.joined(separator: "\n")
     }

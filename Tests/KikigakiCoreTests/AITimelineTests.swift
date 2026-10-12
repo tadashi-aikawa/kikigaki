@@ -462,7 +462,7 @@ import KikigakiCore
         try send(&conversation, value, at: 30)
         let waiting = try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline,
                                                     generation: { _ in 2 }).first { !$0.isSend })
-        #expect(waiting.notes.isEmpty)
+        #expect(waiting.notes == ["追記 0件"])
         let send = try #require(AITimeline.items(conversation: conversation, utterances: [], timeline: timeline).first)
         #expect(send.timeRange?.start == "00:00:10" && send.timeRange?.end == "00:00:20")
     }

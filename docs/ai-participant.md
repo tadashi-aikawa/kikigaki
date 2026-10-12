@@ -56,7 +56,7 @@ herdrのworking、blocked、接続不能は接続状態の補助情報。working
     - 文字倍率: シートの操作部には掛けない。
 - ⌘Enterで送信する。EnterとShift+Enterは改行する。日本語入力の未確定文字があるときは変換確定だけを行い、送信しない。Escはシートを閉じる。二重押下で二件作らない。
 - 手動・自動のシートは「閉じる」・Esc・親ウィンドウ側のクリックで閉じる。送信準備・AIの実行・自動実行は継続し、外側クリックを親のボタン操作へ流さない。
-- 送信先が起動中・送信中・回答処理中でもシートを開いて下書きできるが、追加送信は無効。MVPは順番待ちを自動送信しない。回答返送済みでもherdrがworkingなら送らない。
+- 送信先が起動中・送信中でもシートを開いて下書きできるが、送信は無効。返事待ちの依頼へは「追記して送る」で追加できる。回答返送済みでもherdrがworkingなら、新しい手動の依頼は送らない。
 - needs_inputへの返答は確認の行の「返答する」から開き、対応する確認内容を表示する。送信できる状態になっても利用者の送信操作を待つ。
 - 送信操作時点の音声経過位置を上限として固定する。押した後に始まった発話を、起動待ちの間に黙って加えない。
 - 送信操作時点で文字の暫定末尾があれば、最長3秒だけその範囲の確定を待つ。待ち中は残り時間と取消を表示する。3秒は初期のUX値である。
@@ -139,7 +139,32 @@ snapshotは従来どおり確定済みの会話全文だけを固定保存する
 
 自動側はsnapshot作成と配信を分離し、acceptまたは文脈受領済みのreplyで受領基準を進める。保存だけ、submittedだけ、フックだけでは進めない。未受領で失敗したsnapshotのsequenceは再利用せず、次の送信ではより大きい番号のfullを作る。手動コピーの連番には触れない。
 
-会話に変更がなくても新しい問いは送れる。同一streamの直前snapshotをそのまま再利用し、新request IDだけを発行する。前回が未受領ならfullで回復する。AIが前回snapshotを失った場合は `needs_input` の `context_missing` 理由で返し、シートのチェックボックス「会話を最初から送り直す」から新requestとして送る。モデルによる範囲外の自動読み込みやアプリの自動再送はしない。
+会話に変更がなくても新しい問いは送れる。同一streamの直前snapshotをそのまま再利用し、新request IDだけを発行する。前回が未受領ならfullで回復する。AIが前回snapshotを失った場合は `needs_input` の `context_missing` 理由で返し、シートのチェックボックス「会話を最初から送り直す」から新requestとして送る。全文不足に対する範囲外の自動読み込みやアプリの自動再送はしない。未反映の追記の引継ぎは次の節を参照する。
+
+## 作業中の依頼への追記
+
+声の合図と通常の手動実行シートは、同じ宛先に返事待ちの依頼があれば、その依頼へ追記する。
+
+- 依頼と返事待ちの行は1つのまま。追記番号は依頼ごとに1から振る。
+    - 内容: その依頼で最後に送ったsnapshotとの共通先頭を除いた会話と、入力した文面、暫定末尾。過去の訂正は変更箇所以降を含む。
+    - 種類と作業許可: 元の依頼を維持する。シートの全文送り直しと作業許可の操作は追記中は無効。
+- 元のrequestとenvelopeは書き換えない。追記はstateの質問レコードと `ai/requests/<request_id>.appendix.<番号>.json` に保存する。
+    - 保存値: requestID・number・snapshot・question・capturedAt・audioCutoffSeconds・tentativeTail・sentAtを持つ。snapshotのfileURLは会話全文の固定ファイル、readStartLineは読む開始行。
+    - 送信: `KIKIGAKI_APPENDIX` のJSONはnumber・context・question・captured_at・audio_cutoff_seconds・tentative_tailを持つ。contextは通常のenvelopeと同じ範囲参照で、request ID・世代・返送先・作業許可・種類を元の依頼から引き継ぐ。保存用のsnapshot.linesをペインへ載せない。問い・暫定末尾・収録位置は追記の値へ更新する。
+    - 準備中・接続不可・blockedでは送らない。workingと入力可能なidleへ送れる。
+- AIは追記を現在の作業へ反映し、元の依頼の `reply` に `--appendices 1,2` を添える。
+    - 形式: 正の整数を昇順でカンマ区切り。重複・空要素・先頭ゼロ・未知番号・未来の送信時刻を拒否する。acceptには指定できない。
+    - イベント: 既存の `<request_id>/result` と `<request_id>.result.json` に任意の `applied_appendices: [1,2]` を追加する。欠損は反映なし。
+- 返事に番号が無い追記は、新しい依頼へまとめて自動で送り直す。
+    - 文面の上限: 合計が32 KiBを超える場合は依頼を分け、先の返事が届いてから残りを送る。本文を切り詰めない。
+    - 引継ぎ: 宛先・種類・作業許可・議事録とボードの契約は元の依頼を維持し、全文snapshotと未反映の文面を送る。
+    - 競合: 返事が送信待ち中やペイン入力より先に届いた場合も同じ扱い。返送済みの元requestへAIが再返送せず、KIKIGAKIの新requestを待つ。
+    - 永続化: 新requestの送信試行と追記のforwardedRequestIDを同じstate更新で保存する。接続の観測でidleになるまで待ち、失敗時は未反映の追記を残す。
+    - 接続の作り直し: 未反映の追記が残っていれば、新しい世代のペインを起動して送り直す。
+    - 停止後: 録音中に受け付けた追記の送り直しは後片付けの対象に含める。再起動回収ではAIセッションを復元せず、新しい送信もしない。
+- 会議Markdownの `### AI #n` に追記ごとの本文・会話差分・暫定末尾と、反映済みまたは引継先の番号を残す。
+
+表示は [AIの行](ai-timeline.md)、進行段は [AI依頼の進行表示](ai-progress.md) を参照する。
 
 ## 受信箱と永続化
 
@@ -228,7 +253,7 @@ archiveは録音停止時と停止後の改名・統合時だけに更新し、�
 | コマンド | 入力と効果 |
 | --- | --- |
 | `accept --session <path> --request <UUID> --token <token>` | 指定文脈を読み終えた受領を保存する。本文なし。 |
-| `reply --session <path> --request <UUID> --token <token> --kind answered` | stdinのMarkdownを最終回答として保存する。 |
+| `reply --session <path> --request <UUID> --token <token> --kind answered [--appendices 1,2]` | stdinのMarkdownを最終回答として保存する。反映した追記番号を添えられる。 |
 | `reply ... --kind needs_input --reason clarification` | stdinを確認質問として保存する。全文要求はreasonをcontext_missingとする。 |
 | `reply ... --kind failed --reason <code>` | stdinの失敗理由を保存する。本文への機密のエラーダンプ混入を避ける。 |
 | `progress --session <path> --request <UUID> --token <token> --editing [--total N]` | 編集へ入ったことだけを1回保存する。本文なし。stdinを読まない。 |
@@ -309,7 +334,7 @@ Codexのnotifyの項目とClaudeのStop本文は公式資料に記載がある�
 
 KIKIGAKIのProcess起動は実行ファイルと引数の配列を使い、`sh -c` やログインシェルを経由しない。**KIKIGAKIが起動する外部プロセスへ渡す環境から、名前が `HERDR_` で始まる項目を全て除く。** workspaceに持ち込む環境も同じにする。herdrが作成先paneのために正しく付与する新しい環境まで除く意味ではない。親paneの名義やsessionを継がせない。
 
-herdr 0.8.2でSwift ProcessからHERDR環境を除去し、信頼済みcwdのagent startはCodex 0.153.4で3.65秒、Claude Code 2.1.263で3.83秒でinteractive_ready trueを返した。promptも両方成功した。ただしworkingでもpromptは成功し、独立turnの待ち行列にはならなかったため、アプリは処理中の追加送信を禁止する。
+herdr 0.8.2でSwift ProcessからHERDR環境を除去し、信頼済みcwdのagent startはCodex 0.153.4で3.65秒、Claude Code 2.1.263で3.83秒でinteractive_ready trueを返した。promptも両方成功した。workingへのpromptは独立turnの待ち行列にならないため、処理中は新しい依頼を作らず、既存の依頼への追記として送る。
 
 pane run で起こした直後は herdr がまだagentを検知しておらず、`agent get` は agent_not_found を返す(実測: 初回の質問だけ送信に失敗した)。起動直後の準備待ちに限り、未検知は切断ではなく待ちとして扱い、期限まで観測を続ける。起動後の通常の監視では未検知は切断のまま。また herdr 0.8.2 の `agent get` は pane run で起こしたagentに `interactive_ready` を返さないため、この項目が無い場合は idle をもって入力可能とみなす。
 

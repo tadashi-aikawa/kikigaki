@@ -65,6 +65,23 @@ import KikigakiAIIO
         session.aiRecord?.controller.scan()
     }
 
+    @Test func 返事待ちの別宛先へシートで追記しても合図の宛先は切り替わらない() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let f = fixture(root, fake: FakeHerdr()); defer { f.close() }
+        let config = f.session.meetingAIProfiles[1]
+        f.session.submitAI(question: "スライドを更新", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"), profile: config)
+        await f.session.submissionTaskForTesting(slot: 2)?.value
+        f.app.showAISheet(parent: nil)
+        let sheet = try #require(f.app.aiSheet)
+        sheet.onDestination?(2)
+        #expect(sheet.sendButton.title == "追記して送る")
+        sheet.onSubmit?("見出しも追加", false)
+        await f.session.submissionTaskForTesting(slot: 2)?.value
+        #expect(f.session.meetingManualAI?.slot == 1)
+        #expect(f.session.aiRecord?.controller.conversation.questions.count == 1)
+        #expect(f.session.aiRecord?.controller.conversation.questions[0].appendices.first?.question == "見出しも追加")
+    }
+
     @Test(arguments: [Int?.none, Int?(1)])
     func 手動送信後に宛先とフッターと初期選択が切り替わり合言葉で同じ文面を送る(initialSlot: Int?) async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }

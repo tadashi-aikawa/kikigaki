@@ -68,19 +68,27 @@ public struct AIReceiveEvent: Codable, Equatable, Sendable {
     public let contextReceived: Bool
     public let body: String?
     public let reason: String?
+    public let appliedAppendices: [Int]?
     public var filename: String { "\(requestID.uuidString).\(kind == .accept ? "accept" : "result").json" }
 
-    public init(request: AIRequest, kind: Kind, recordedAt: Date, body: String? = nil, reason: String? = nil) throws {
+    public init(request: AIRequest, kind: Kind, recordedAt: Date, body: String? = nil, reason: String? = nil,
+                appliedAppendices: [Int]? = nil) throws {
         schemaVersion = 1; eventID = "\(request.id.uuidString)/\(kind == .accept ? "accept" : "result")"
         meetingID = request.envelope.meetingID; requestID = request.id
         sessionGeneration = request.envelope.participant.sessionGeneration; snapshotID = request.envelope.snapshotID
         self.kind = kind; self.recordedAt = recordedAt; self.body = body; self.reason = reason
+        self.appliedAppendices = appliedAppendices
         contextReceived = reason != "context_missing" && reason != "read_failed"
         try validate(for: request)
     }
 
     public func validate(for request: AIRequest) throws {
         try request.validate()
+        if let appliedAppendices {
+            guard kind != .accept, !appliedAppendices.isEmpty,
+                  appliedAppendices.allSatisfy({ $0 > 0 }),
+                  appliedAppendices == Array(Set(appliedAppendices)).sorted() else { throw AIError.invalid("appendices") }
+        }
         guard schemaVersion == 1, meetingID == request.envelope.meetingID, requestID == request.id,
               sessionGeneration == request.envelope.participant.sessionGeneration, snapshotID == request.envelope.snapshotID,
               eventID == "\(requestID.uuidString)/\(kind == .accept ? "accept" : "result")",
@@ -109,13 +117,14 @@ public struct AIReceiveEvent: Codable, Equatable, Sendable {
         schemaVersion == other.schemaVersion && eventID == other.eventID && meetingID == other.meetingID
             && requestID == other.requestID && sessionGeneration == other.sessionGeneration
             && snapshotID == other.snapshotID && kind == other.kind && contextReceived == other.contextReceived
-            && body == other.body && reason == other.reason
+            && body == other.body && reason == other.reason && appliedAppendices == other.appliedAppendices
     }
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version", eventID = "event_id", meetingID = "meeting_id", requestID = "request_id"
         case sessionGeneration = "session_generation", snapshotID = "snapshot_id", kind, recordedAt = "recorded_at"
         case contextReceived = "context_received", body, reason
+        case appliedAppendices = "applied_appendices"
     }
 }
 
@@ -131,6 +140,7 @@ public struct AIQuestion: Codable, Equatable, Sendable {
     public private(set) var resultOrder: Int?
     public private(set) var answeredByRequestID: UUID?
     public private(set) var resolution: AIQuestionResolution?
+    var savedAppendices: [AIAppendix]?
     public var contextReceived: Bool { acceptance != nil || result?.contextReceived == true }
     public var isAwaitingResult: Bool { sendAttemptedAt != nil && result == nil && state != .cancelled && state != .failed }
 
@@ -209,6 +219,13 @@ public struct AIQuestion: Codable, Equatable, Sendable {
     /// state.json回収用。破損した保存状態を受信済み・送信可能として扱わない。
     public func validate() throws {
         try request.validate()
+        for (index, appendix) in appendices.enumerated() {
+            try appendix.validate(for: request)
+            guard appendix.number == index + 1, sendAttemptedAt != nil else { throw AIError.mismatch }
+        }
+        if let result {
+            guard (result.appliedAppendices ?? []).allSatisfy({ number in appendices.contains { $0.number == number } }) else { throw AIError.mismatch }
+        }
         if let resolution {
             guard state == .needsInput, result?.kind == .needsInput,
                   resolution.recordedAt.timeIntervalSince1970.isFinite,
@@ -301,6 +318,16 @@ public struct AIConversation: Codable, Equatable, Sendable {
         }
         var speakerIDs = Set<String>()
         for question in questions {
+            for appendix in question.appendices {
+                if let id = appendix.forwardedRequestID {
+                    guard question.result != nil, !question.hasApplied(appendix),
+                          let target = questions.first(where: { $0.request.id == id }),
+                          target.request.number > question.request.number, target.sendAttemptedAt != nil,
+                          target.request.envelope.participant.profileSlot == question.request.envelope.participant.profileSlot,
+                          target.request.trigger == question.request.trigger,
+                          target.request.envelope.participant.workAllowed == question.request.envelope.participant.workAllowed else { throw AIError.mismatch }
+                }
+            }
             if let event = question.resolution?.event {
                 guard let sender = questions.first(where: { $0.request.id == event.requestID }),
                       sender.sendAttemptedAt != nil else { throw AIError.mismatch }

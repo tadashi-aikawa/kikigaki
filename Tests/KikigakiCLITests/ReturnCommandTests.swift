@@ -50,6 +50,36 @@ import KikigakiAIIO
         }
     }
 
+    @Test func 返送に反映した追記番号を添え未知番号や不正な列を拒否する() throws {
+        let f = try Fixture(), now = Date(timeIntervalSince1970: 100)
+        var history = try AIStreamHistory(meetingID: f.session.meetingID,
+            streamID: f.request.envelope.participant.streamID)
+        for number in 1...2 {
+            let snapshot = try history.prepare(lines: ["[12:00:01] A: 追加の会話"], outputDirectory: f.root)
+            let appendix = AIAppendix(number: number, requestID: f.request.id, snapshot: snapshot,
+                question: "追加", capturedAt: now, audioCutoffSeconds: 2, tentativeTail: nil, sentAt: now)
+            try f.files.write(AIJSON.encode(appendix), to: f.base + ["requests", "\(f.request.id.uuidString).appendix.\(number).json"])
+        }
+        let args = f.args("reply", ["--kind", "answered", "--appendices", "1,2"])
+        _ = try ReturnCommand(args).execute(input: { Data("反映しました".utf8) }, environment: [:], now: now)
+        let event = try AIInbox(outputDirectory: f.root).read(filename: f.request.id.uuidString + ".result.json", for: f.request)
+        #expect(event.appliedAppendices == [1, 2])
+        #expect(String(decoding: try AIJSON.encode(event), as: UTF8.self).contains("applied_appendices"))
+        #expect(try ReturnCommand(args).execute(input: { Data("反映しました".utf8) }, environment: [:], now: now.addingTimeInterval(1)) == event.eventID)
+        for raw in ["", "0", "-1", "01", "1,1", "2,1", "1,", ",1", "1, 2", "x", "3", "999999999999999999999"] {
+            #expect(throws: (any Error).self) {
+                try ReturnCommand(f.args("reply", ["--kind", "answered", "--appendices", raw])).execute(input: { Data("反映しました".utf8) }, environment: [:], now: now)
+            }
+        }
+        #expect(throws: (any Error).self) { try ReturnCommand(f.args("accept", ["--appendices", "1"])) }
+        #expect(throws: AIError.mismatch) {
+            try ReturnCommand(args).execute(input: { Data("反映しました".utf8) }, environment: [:], now: now.addingTimeInterval(-1))
+        }
+        #expect(throws: AIError.conflict) {
+            try ReturnCommand(f.args("reply", ["--kind", "answered", "--appendices", "1"])).execute(input: { Data("反映しました".utf8) }, environment: [:], now: now)
+        }
+    }
+
     @Test func 確認の解消を保存し二回目は最初の結果を返す() throws {
         let f = try Fixture()
         var state = AIConversation(meetingID: f.session.meetingID)

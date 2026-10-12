@@ -132,6 +132,10 @@ struct AIViewState {
         return modelLabels[slot(of: request)]
     }
     func canSubmit(slot: Int) -> Bool { canSubmits[slot] ?? canSubmit }
+    var appendingSlots: Set<Int> = []
+    func appendingWorkAllowed(slot: Int) -> Bool? {
+        conversation?.questions.first { self.slot(of: $0.request) == slot && $0.isAwaitingResult }?.request.envelope.participant.workAllowed
+    }
     func progress(slot: Int) -> String? { progresses[slot] ?? (slot == selectedSlot ? progress : nil) }
     func participant(slot: Int) -> String { participants[slot] ?? participant }
     func canOpenPane(slot: Int) -> Bool { participants[slot] == nil ? canOpenPane : openablePanes.contains(slot) }
