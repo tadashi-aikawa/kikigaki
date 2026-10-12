@@ -40,6 +40,11 @@ MainActor.assumeIsolated {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     #if DEBUG
+    if let output = ProcessInfo.processInfo.environment["KIKIGAKI_BOARD_APPKIT_PERF"] {
+        app.setActivationPolicy(.regular)
+        let delegate = BoardAppKitPerformance(output: output)
+        app.delegate = delegate; app.run(); return
+    }
     if let index = CommandLine.arguments.firstIndex(of: "--utterance-confirmation"), index + 1 < CommandLine.arguments.count {
         let delegate = UtteranceConfirmationHarness(output: CommandLine.arguments[index + 1])
         app.delegate = delegate; app.run(); return

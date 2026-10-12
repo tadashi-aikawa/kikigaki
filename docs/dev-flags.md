@@ -118,6 +118,8 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
 - `KIKIGAKI_BOARD_PERF_CAPTURE=/tmp/kikigaki-board-performance/before.json swift web/minutes/measure-canvas.swift`: 30・60ノードの入力中のフレーム間隔と処理時間を使い捨てJSONへ記録する。保存先は `/tmp` 配下だけ。
     - 計測資産の切替: `KIKIGAKI_BOARD_PERF_ASSETS=<絶対パス>`。`measure-variants.mjs`で生成した `/tmp` 配下の資産だけ指定できる。
     - 保存: `/tmp` 配下だけへ使い捨てMarkdownと画素比較用のPNGを書き出す。通常のテストでは撮影しない。
+- `KIKIGAKI_BOARD_APPKIT_PERF=/tmp/kikigaki-board-appkit .build/debug/Kikigaki`: DEBUGの本物の書き起こしウィンドウで、AppKitの入力配送を通してキャンバスを比較計測する。
+    - 詳細: [議事録の描画と検索](minutes-rendering.md#appkitの入力配送を通したキャンバス計測)。秒数・反復・配送確認・60Hz制限の診断用フラグも同節を参照する。
 - `KIKIGAKI_TEST_SPEECH=1 swift test --filter DiarizationTests`: 通常はスキップする実Apple Speechの結合テストも実行できます。マイクを使わず無音を入力し、話者モデルの呼出ゼロ・会議ごとの切替を確認します。
 - 環境変数 `KIKIGAKI_TEST_DIARIZATION=1 swift test --filter SpeakerDiarizerTests`: 実モデルで短い入力とchunk境界の末尾処理を確かめる。初回はモデルを取得する
 - 開始シートの見た目は `KIKIGAKI_START_SHEET_CAPTURE=<出力先> swift test --filter StartSheetTests` でPNGへ撮り、モックと突き合わせます。

@@ -261,4 +261,34 @@ debug版.appは `--preview-minutes <絶対パス>` で議事録の検証画面�
     - 比較: `KIKIGAKI_BOARD_PERF_ASSETS` に `assets/before` と `assets/coarse` の絶対パスを指定して、それぞれ計測する。未指定なら作業ツリーの生成済み資産を使う。
     - 粗い絵だけの段階: ミニマップの更新頻度と本体の入力処理はHEADのまま。最終版との比較で、100ms間引き・フレーム集約・矩形キャッシュの効果を分ける。
 
+### AppKitの入力配送を通したキャンバス計測
+
+`swift build` 後、`KIKIGAKI_BOARD_APPKIT_PERF=/tmp/kikigaki-board-appkit .build/debug/Kikigaki` でDEBUG専用の比較計測を実行する。
+
+- 構成: 本物の `TranscriptWindowController` と議事録ペインのボードタブ。1500×900pt、文字100%、図100%、非永続WKWebView。画面のRetina倍率と最大更新頻度も結果へ保存する。
+- 入力: 独立タイマーから120HzでAppKitへ配送する。ページ内の合成イベントやOSへの `CGEventPost` は使わない。
+    - スクロール: ピクセル単位のCGEventを `NSEvent(cgEvent:)` に変換し、窓内座標で `NSWindow.sendEvent` へ渡す。
+    - ドラッグ: CGEventをNSEventへ変換した後、公開のマウスイベントfactoryで窓番号を付け直し、`NSApp.sendEvent` へ渡す。
+    - 検証: ページ側の `isTrusted`、入力の時刻との対応、transform更新、現在のキャンバス、キーウィンドウを確認する。成立しない場合は途中結果を保存して失敗する。
+- 比較: 30・60ノード、会話の静止・更新、粗いミニマップ・詳細なミニマップ・非表示、`will-change: transform` の有無、スクロール・ドラッグの48条件を3回ずつ。
+    - 会話: 初期300行。更新条件は8回/秒の速報文字更新と2行/秒の追加を本番の `apply` へ渡す。音声認識・話者判別・AIは動かさない。
+    - ミニマップ: 詳細条件だけを元のSVGへの `use` に差し替える。非表示条件はCSSで隠す。100msの枠更新と本体の入力処理は全条件で同じ。
+    - 合成レイヤー: 計測するstageだけに `will-change` を設定する。描画資産や利用者の設定は変更しない。
+- 記録: 実rAFの間隔、25ms超のフレーム数、入力配送時間、入力からtransform更新までの時間、5ms周期のメインキュー配送の遅れ、`sendEvent` と会話更新の処理時間。平均・p50・p95・最大をJSONへ残す。
+    - 入力配送時間: DOMイベントの時刻をネイティブ入力と対応付け、`sendEvent` 直前からページのlistenerまでを測る。WebKitが統合した入力は残ったイベントの時刻へ対応付ける。
+    - 精度: ページの時刻は1ms単位。切捨てで負になる端数だけ0へ丸める。生の時刻も保存する。1ms未満の差を性能差として扱わない。
+    - メインキューの遅れ: バックグラウンドからmainへ渡した処理が開始するまでの時間。メインスレッド停止の代理指標で、CPUのスタック計測ではない。
+    - 限界: WindowServerからAppKitへの実トラックパッド入力、慣性・gestureのphase、音声処理の負荷、GPUの描画・合成・実画素の提示時刻は測らない。rAFとtransformの時刻だけでGPUの遅れを否定しない。
+- 保存: 指定した `/tmp` 配下の `results.json` と使い捨てMarkdownだけ。専用UserDefaultsは終了時に削除する。通常の起動・テストでは実行しない。`.build/KIKIGAKI.app` は更新しない。
+- 調整:
+    - `KIKIGAKI_BOARD_PERF_SECONDS`: 各条件の入力秒数。既定3、1〜30。
+    - `KIKIGAKI_BOARD_PERF_REPEATS`: 反復数。既定3、1〜10。
+    - `KIKIGAKI_BOARD_PERF_QUICK=1`: 30ノード・粗いミニマップだけの配送確認。
+    - `KIKIGAKI_BOARD_PERF_MAP`: `coarse`・`detailed`・`none` の1条件だけを選ぶ。未指定なら3条件すべて。
+- 60Hz制限の診断: `KIKIGAKI_BOARD_PERF_HIGH_FPS=1` を添えると、DEBUG計測器だけがWebKitのprivate feature `PreferPageRenderingUpdatesNear60FPSEnabled` を無効にして比較する[^board-perf-feature]。
+    - 用途: 画面の最大更新頻度とrAFの差が、WebKitの設定によるものかを切り分ける。
+    - 境界: private APIは製品の手当てには使わない。値は計測プロセス内だけに適用し、通常のWebViewやSafariの設定へ保存しない。
+
+[^board-perf-feature]: WebKit公式ヘッダーの [WKPreferencesPrivate.h](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/API/Cocoa/WKPreferencesPrivate.h) と [_WKFeature.h](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/API/Cocoa/_WKFeature.h)。
+
 右ペインの開閉・パス欄・履歴・幅の復元は [議事録ペイン](minutes-pane.md)、AIとの受け渡しの契約は [議事録プレビューの設計](minutes-preview.md) を参照する。
