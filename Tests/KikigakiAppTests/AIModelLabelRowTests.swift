@@ -4,6 +4,7 @@ import KikigakiCore
 @testable import Kikigaki
 
 /// AIの返事行のモデル表記。名前行には出さず、本文の下のフッターへ2つの塊で置く。
+extension AppKitTests {
 @Suite @MainActor struct AIModelLabelRowTests {
     private let started = Date(timeIntervalSince1970: 1_788_759_600)
     private let label = AIModelLabel(model: "gpt-6-astra", effort: "high", directory: "minutes")
@@ -184,4 +185,5 @@ import KikigakiCore
         }
         #expect(seen == ["gpt-6-astra (high) · minutes", "claude (max) · owlery", "gpt-6-astra · kikigaki"])
     }
+}
 }

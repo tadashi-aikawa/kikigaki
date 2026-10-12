@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct UtteranceConfirmationRowTests {
     private let tokens = [TimedToken(text: "前の発言。", phraseId: 0, start: 0, end: 1),
                           TimedToken(text: "次の発言。", phraseId: 1, start: 1.1, end: 2),
@@ -105,4 +106,5 @@ import KikigakiCore
         tentative.updateExclusion(true)
         #expect(tentative.content.layer?.opacity == TranscriptRow.excludedOpacity)
     }
+}
 }

@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct MinutesToggleTests {
     /// 画面は1800×1000に固定する。実行機の画面を使うと、CIの狭い画面ではウィンドウを伸ばせず期待が崩れる。
     static let screen = NSRect(x: 0, y: 0, width: 1800, height: 1000)
@@ -215,4 +216,5 @@ import KikigakiCore
         controller.toggleMinutes()
         #expect(!controller.minutesSplit.isTransitioning && controller.minutesSplit.preview.isHidden)
     }
+}
 }

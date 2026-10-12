@@ -4,6 +4,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AIAppendixRowTests {
     private final class CaptureCanvas: NSView {
         override var isFlipped: Bool { true }
@@ -77,4 +78,5 @@ import KikigakiCore
             }
         }
     }
+}
 }

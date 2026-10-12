@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AICompactFooterTests {
     @Test func 会話行のない警告はクリックで全文を表示する() async throws {
         _ = NSApplication.shared
@@ -67,4 +68,5 @@ import KikigakiCore
         #expect(window.footerMenu().items.map(\.title) == ["会話をコピー"])
         #expect(window.footerMenu().items[0].isEnabled)
     }
+}
 }

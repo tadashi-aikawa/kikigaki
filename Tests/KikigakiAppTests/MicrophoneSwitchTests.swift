@@ -181,6 +181,7 @@ private final class SwitchFixture {
     }
 }
 
+extension AppKitTests {
 @Suite(.serialized, .timeLimit(.minutes(1))) @MainActor struct MicrophoneSwitchUITests {
     @Test func マイク行は値だけで追従し長い名前でもシートの高さを変えない() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
@@ -285,4 +286,5 @@ private final class SwitchFixture {
         try Task.checkCancellation()
         Issue.record("マイクの装置名を読む前に通知が終了しました")
     }
+}
 }

@@ -3,6 +3,7 @@ import Darwin
 import Testing
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct MinutesMonitorRevisionTests {
     private actor Gate {
         var entered = false
@@ -102,4 +103,5 @@ import Testing
         try await Task.sleep(for: .milliseconds(100))
         #expect(view.document.renderedText == "非表示中更新")
     }
+}
 }

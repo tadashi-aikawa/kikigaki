@@ -3,6 +3,7 @@ import WebKit
 import Testing
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct DiagramUpdateTests {
     private func ready(_ document: MinutesWebView, source: String) async throws {
         var rendered = false
@@ -93,4 +94,5 @@ import Testing
         _ = try await document.webView.callAsyncJavaScript("return await window.minutes.render('# 文書だけ','test',false,3,null,true,true)",arguments:[:],contentWorld:.page)
         #expect(try await document.webView.evaluateJavaScript("document.getElementById('minutes').innerText.includes('文書だけ') && !document.querySelector('.diagram') && !document.body.classList.contains('board-canvas-mode')") as? Bool == true)
     }
+}
 }

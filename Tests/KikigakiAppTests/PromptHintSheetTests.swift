@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct PromptHintSheetTests {
     private func profiles(_ root: URL) -> [ResolvedAIConfig] {
         let names: [String] = ["指示あり", "指示なし", "別の指示"]
@@ -182,4 +183,5 @@ import KikigakiCore
         }
         #expect(sheet.editor.string == "開始時の編集")
     }
+}
 }

@@ -3,6 +3,7 @@ import WebKit
 import Testing
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct DiagramInteractionTests {
     private func wait(_ condition: () async throws -> Bool) async throws {
         for _ in 0..<500 {
@@ -546,6 +547,7 @@ import Testing
             }
         }
     }
+}
 }
 
 // WebKitのEventSenderProxyと同様にmagnifyWithEventへ渡す、テスト専用NSEvent。

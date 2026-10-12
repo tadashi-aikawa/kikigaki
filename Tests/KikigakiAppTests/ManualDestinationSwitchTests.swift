@@ -4,6 +4,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized, .timeLimit(.minutes(1))) @MainActor struct ManualDestinationSwitchTests {
     @MainActor private struct Fixture {
         let session: MeetingSession
@@ -184,4 +185,5 @@ import KikigakiAIIO
         #expect(controller.conversation.questions.last?.request.envelope.participant.profileSlot == 2)
         #expect(session.meetingManualAI?.slot == 1 && session.snapshot.manualDestination?.slot == 1)
     }
+}
 }

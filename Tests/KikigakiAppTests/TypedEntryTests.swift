@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct TypedEntryTests {
     @Test func 会話範囲の終点はフォールバックも秒を表示する() throws {
         let start = Date(timeIntervalSince1970: 0)
@@ -294,4 +295,5 @@ import KikigakiCore
         value.tentativeText = nil; value.utterances = [entry]
         #expect(value.voiceQuestionPlaceholder == "空欄なら声の末尾を送ります")
     }
+}
 }

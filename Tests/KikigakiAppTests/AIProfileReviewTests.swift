@@ -5,6 +5,7 @@ import KikigakiCore
 
 /// 複数プロファイルの行とシートを検証する。検証は常に動き、
 /// 画像の書き出しだけ `KIKIGAKI_UI_CAPTURE` を渡したときに行う。
+extension AppKitTests {
 @Suite @MainActor struct AIProfileReviewTests {
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
     private func capture(_ name: String, _ view: NSView, to output: String) throws {
@@ -220,4 +221,5 @@ import KikigakiCore
         single.updateDestinations([.init(slot: 1, name: "迅雷")], selected: 1, participant: "迅雷")
         if let output { try capture("profiles-sheet-single", single.window.contentView!, to: output) }
     }
+}
 }

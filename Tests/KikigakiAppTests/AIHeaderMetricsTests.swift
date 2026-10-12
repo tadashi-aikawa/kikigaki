@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AIHeaderMetricsTests {
     @Test func 記録範囲と認識人数を11ptで表示して600幅に収める() throws {
         _ = NSApplication.shared
@@ -28,4 +29,5 @@ import KikigakiCore
         #expect((speakers.countText as NSString).size(withAttributes: [.font: speakers.countFont]).width <= speakers.bounds.width)
         #expect(content.convert(range.bounds, from: range).maxX <= content.convert(speakers.bounds, from: speakers).minX)
     }
+}
 }

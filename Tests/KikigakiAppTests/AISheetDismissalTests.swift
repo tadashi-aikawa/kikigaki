@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AISheetDismissalTests {
     private func parentWindow() -> NSWindow {
         _ = NSApplication.shared
@@ -65,4 +66,5 @@ import KikigakiCore
         #expect(session.aiRecord?.controller.conversation.questions.first?.state == .submitted)
         #expect(session.snapshot.aiSchedule.active)
     }
+}
 }

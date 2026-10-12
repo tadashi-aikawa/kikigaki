@@ -5,6 +5,7 @@ import KikigakiAIIO
 @testable import Kikigaki
 
 /// 録音停止後の後片付け。返事待ちが片付いてからherdrのペインを閉じる。
+extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct AIPaneCloseTests {
     private func session(_ root: URL, herdr: @escaping AIHerdr.Run) throws -> MeetingSession {
         var config = ResolvedConfig(config: try ConfigLoader.parse(toml: ""), home: root)
@@ -169,4 +170,5 @@ import KikigakiAIIO
         #expect(session.aiRecord == nil)
         #expect(await fake.commands.isEmpty)
     }
+}
 }

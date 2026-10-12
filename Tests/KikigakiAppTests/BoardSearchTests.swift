@@ -3,6 +3,7 @@ import WebKit
 import Testing
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct BoardSearchTests {
     private func wait(_ condition: () async throws -> Bool) async throws {
         for _ in 0..<500 {
@@ -133,4 +134,5 @@ import Testing
         preview.receive(.body("# 会議\nボードが消えた", [], modifiedAt: Date()))
         #expect(preview.searchField.placeholderString == "議事録を検索")
     }
+}
 }

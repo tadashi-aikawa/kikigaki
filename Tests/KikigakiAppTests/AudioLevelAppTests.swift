@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AudioLevelAppTests {
     @Test func 注釈だけの更新でも行の高さが変わり本文を隠さない() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
@@ -89,4 +90,5 @@ import KikigakiCore
         await session.stop()
         #expect(FileManager.default.fileExists(atPath: MeetingFiles.levelsURL(for: reenabledURL).path))
     }
+}
 }

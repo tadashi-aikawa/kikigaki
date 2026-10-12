@@ -34,6 +34,7 @@ private final class ChangedRenderingSetter: NSObject {
     @objc(_setEnabled:forFeature:) func setEnabled(_ value: Int, feature: NSObject) { writes += 1 }
 }
 
+extension AppKitTests {
 @Suite @MainActor struct MinutesRenderingPreferencesTests {
     @Test func 設定があれば60Hz優先だけを外す() {
         let preferences = RenderingPreferences()
@@ -65,4 +66,5 @@ private final class ChangedRenderingSetter: NSObject {
         }
         #expect(MinutesRenderingPreferences.near60FPS(on: other) == before)
     }
+}
 }

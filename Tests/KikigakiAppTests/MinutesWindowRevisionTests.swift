@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct MinutesWindowRevisionTests {
     @Test func メニューは閉じた画面を開いて切り替え表題とAXを更新する() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
@@ -182,4 +183,5 @@ import KikigakiCore
         store.beforeSave = nil; try session.selectMinutes("/tmp/再確定.md")
         #expect(store.state.humanMinutesPath == "/tmp/再確定.md")
     }
+}
 }

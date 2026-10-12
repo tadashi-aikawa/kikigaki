@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct HoverButtonTests {
     @Test func レイアウトではポインタの内外が変わったときだけ再描画する() throws {
         final class ObservedButton: HoverButton {
@@ -226,4 +227,5 @@ import KikigakiCore
         button.isEnabled = true; button.frame = .zero; button.resetCursorRects()
         #expect(button.registered.isEmpty)
     }
+}
 }

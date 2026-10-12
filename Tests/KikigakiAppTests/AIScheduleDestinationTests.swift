@@ -4,6 +4,7 @@ import KikigakiCore
 @testable import Kikigaki
 
 // 実際にシートを開くケースは順番に実行し、複数のモーダル表示を競合させない。
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct AIScheduleDestinationTests {
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
 
@@ -122,4 +123,5 @@ import KikigakiCore
         let next = AIScheduleSheet(session: session, profile: profiles[0])
         #expect(next.draft.prompt == "議事録を更新" && next.draft.minutes == 7)
     }
+}
 }

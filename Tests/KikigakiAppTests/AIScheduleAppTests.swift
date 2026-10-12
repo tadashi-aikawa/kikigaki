@@ -4,6 +4,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct AIScheduleAppTests {
     private final class Hook {
         var action: (() -> Void)?
@@ -401,4 +402,5 @@ import KikigakiAIIO
         button.performClick(nil); button.performClick(nil)
         #expect(options?.interval == 420 && options?.sendFinal == true && options?.workAllowed == false)
     }
+}
 }

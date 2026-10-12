@@ -2,6 +2,7 @@ import AppKit
 import Testing
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AISheetKeyboardTests {
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
     private func enter(_ window: NSWindow, modifiers: NSEvent.ModifierFlags = [], keyCode: UInt16 = 36) throws {
@@ -55,4 +56,5 @@ import Testing
         try enter(window, modifiers: .command)
         #expect(count == 1)
     }
+}
 }

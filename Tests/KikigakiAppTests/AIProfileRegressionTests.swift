@@ -6,6 +6,7 @@ import KikigakiAIIO
 @testable import Kikigaki
 
 /// クロスレビューで見つかった、プロファイル間の状態混在の再発防止。
+extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct AIProfileRegressionTests {
     private func profiles(_ root: URL, toml: String) throws -> [ResolvedAIConfig] {
         ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: root).aiProfiles
@@ -665,4 +666,5 @@ import KikigakiAIIO
         #expect(controller.hasChanges(lines: lines + ["[12:00:10] B: 追記"], slot: 1))
         #expect(controller.hasChanges(lines: lines + ["[12:00:10] B: 追記"], slot: 2))
     }
+}
 }

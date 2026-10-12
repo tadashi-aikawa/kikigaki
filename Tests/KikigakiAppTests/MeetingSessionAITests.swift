@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct MeetingSessionAITests {
     private final class Gate {
         var opened = false
@@ -170,4 +171,5 @@ import KikigakiCore
         #expect(await fake.commands.filter { $0.prefix(2) == ["agent", "prompt"] }.isEmpty)
         await session.stop()
     }
+}
 }

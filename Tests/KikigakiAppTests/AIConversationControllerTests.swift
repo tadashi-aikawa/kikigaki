@@ -4,6 +4,7 @@ import Testing
 import KikigakiCore
 import KikigakiAIIO
 
+extension AppKitTests {
 @Suite @MainActor struct AIConversationControllerTests {
     @MainActor private final class CancelOnObserve {
         var action: (() throws -> Void)?
@@ -276,4 +277,5 @@ import KikigakiAIIO
         #expect(try store.read(path) == Data("既存".utf8))
         #expect(await fake.commands.filter { $0.prefix(2) == ["agent", "start"] }.isEmpty)
     }
+}
 }

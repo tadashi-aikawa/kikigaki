@@ -4,6 +4,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized, .timeLimit(.minutes(1))) @MainActor struct ManualDestinationTests {
     private func profiles(_ root: URL) -> [ResolvedAIConfig] {
         ["議事録", "スライド"].enumerated().map {
@@ -146,4 +147,5 @@ import KikigakiCore
         #expect(questions[1].request.envelope.participant.question == "スライドの下書き")
         #expect(sounds == [true])
     }
+}
 }

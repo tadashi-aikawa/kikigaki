@@ -4,6 +4,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct AIScheduleReviewTests {
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
     private func key(_ window: NSWindow, code: UInt16, shift: Bool = false, command: Bool = false) throws {
@@ -103,4 +104,5 @@ import KikigakiAIIO
         #expect(try #require(items.first).notes == ["2発言"])
         #expect(try #require(items.last).body == conversation.questions[0].result?.body)
     }
+}
 }

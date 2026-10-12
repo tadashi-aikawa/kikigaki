@@ -2,6 +2,7 @@ import AppKit
 import Testing
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct EscapeTests {
     @Test func 未処理のEscapeは本文から届いてもウィンドウを閉じず検索は閉じる() throws {
         let suite = UUID().uuidString
@@ -46,4 +47,5 @@ import Testing
         window.performClose(nil)
         #expect(!window.isVisible)
     }
+}
 }

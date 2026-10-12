@@ -4,6 +4,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct MinutesRevisionTests {
     private func question(root: URL, meeting: UUID, generation: Int) throws -> AIQuestion {
         var history = try AIStreamHistory(meetingID: meeting, sessionGeneration: generation)
@@ -110,4 +111,5 @@ import KikigakiAIIO
         controller.scan(); #expect(controller.conversation.questions[0].result?.body == "回答")
         #expect(session.snapshot.aiSchedule.active == scheduled.active)
     }
+}
 }

@@ -5,6 +5,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct MinutesPreviewTests {
     private func eventually(_ condition: () -> Bool) async throws {
         for _ in 0..<500 {
@@ -205,4 +206,5 @@ import KikigakiAIIO
         #expect(!store.hasUnseenMinutes)
         #expect(MinutesLayout.load(defaults).visible)
     }
+}
 }

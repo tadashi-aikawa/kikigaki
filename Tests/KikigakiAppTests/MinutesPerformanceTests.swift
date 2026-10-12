@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct MinutesPerformanceTests {
     @Test func 四MiBの描画更新と検索を測る() async throws {
         guard ProcessInfo.processInfo.environment["KIKIGAKI_MINUTES_PERF"] == "1" else { return }
@@ -37,4 +38,5 @@ import KikigakiCore
         #expect(result?["count"] == 10000)
         print("MINUTES_PERF initial_s=\(updated.timeIntervalSince(started)) update_s=\(searched.timeIntervalSince(updated)) search_s=\(Date().timeIntervalSince(searched)) bytes=\(text.utf8.count)")
     }
+}
 }

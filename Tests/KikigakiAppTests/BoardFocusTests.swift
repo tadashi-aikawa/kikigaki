@@ -3,6 +3,7 @@ import WebKit
 import Testing
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct BoardFocusTests {
     private func wait(_ condition: () async throws -> Bool) async throws {
         for _ in 0..<500 {
@@ -94,4 +95,5 @@ import Testing
         #expect(try await web.evaluateJavaScript("queued===1 && writes===1 && reads===0 && Math.abs(new DOMMatrix(stage.style.transform).e-previous.e+16)<0.01 && Math.abs(new DOMMatrix(stage.style.transform).f-previous.f+24)<0.01") as? Bool == true)
         _ = try await web.evaluateJavaScript("observer.disconnect();Element.prototype.getBoundingClientRect=originalRect;void 0")
     }
+}
 }

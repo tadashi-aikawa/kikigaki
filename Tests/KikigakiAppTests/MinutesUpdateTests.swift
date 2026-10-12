@@ -2,6 +2,7 @@ import AppKit
 import Testing
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct MinutesUpdateTests {
     @Test func 相対時間は十秒単位から分時間日へ変わる() {
         let date = Date(timeIntervalSince1970: 1000)
@@ -80,4 +81,5 @@ import Testing
         view.update(path:file.path, source:.human, active:false)
         #expect(!view.updateStatus.active && view.updateStatus.modifiedAt == nil)
     }
+}
 }

@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct TranscriptScrollTests {
     private func controller(rows count: Int) -> (TranscriptWindowController, SessionSnapshot) {
         NSApplication.shared.setActivationPolicy(.prohibited)
@@ -93,4 +94,5 @@ import KikigakiCore
         window.contentView?.layoutSubtreeIfNeeded()
         expectMountedNearViewport(controller)
     }
+}
 }

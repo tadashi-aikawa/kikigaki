@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AIDestinationButtonTests {
     private func waitingState(automatic: Bool, both: Bool = false) throws -> SessionSnapshot {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
@@ -186,4 +187,5 @@ import KikigakiCore
         #expect(Set(widths).count == 1)
         #expect(button.statusFont.pointSize == 10 && button.nameFont.pointSize == 12)
     }
+}
 }

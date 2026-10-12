@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AIProgressViewTests {
     private let sent = Date(timeIntervalSince1970: 100)
     private func conversation(count: Int = 1, accepted: Bool = true) throws -> AIConversation {
@@ -196,4 +197,5 @@ import KikigakiCore
         #expect(process.terminationStatus == 0, Comment(rawValue: log))
         #expect(log.contains("AI progress window verification passed"), Comment(rawValue: log))
     }
+}
 }

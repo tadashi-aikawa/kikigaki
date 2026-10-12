@@ -6,6 +6,7 @@ import KikigakiAIIO
 @testable import Kikigaki
 @testable import KikigakiCLI
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct SpeakerIdentificationAppTests {
     private func session(_ root: URL, enabled: Bool = true, diarization: Bool = true) -> MeetingSession {
         let fake = FakeHerdr()
@@ -276,4 +277,5 @@ import KikigakiAIIO
         let confirmed = window.makeSpeakerPopover(slot: 0)
         #expect(confirmed.evidenceLabel.isHidden)
     }
+}
 }

@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AudioExclusionAppTests {
     @Test func 除外された音声質問は本番送信経路で止まり明示質問は空本文を送る() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
@@ -145,4 +146,5 @@ import KikigakiCore
             }
         }
     }
+}
 }

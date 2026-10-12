@@ -3,6 +3,7 @@ import WebKit
 import Testing
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct MermaidScaleTests {
     private let fixtures: [(String, String)] = [
         ("flowchart", """
@@ -136,4 +137,5 @@ import Testing
                 to: output.appendingPathComponent("measurements.json"))
         }
     }
+}
 }

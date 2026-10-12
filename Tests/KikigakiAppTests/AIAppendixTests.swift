@@ -5,6 +5,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct AIAppendixTests {
     private func setup(_ root: URL, fake: FakeHerdr, scheduled: Bool = false) async throws -> (AIConversationController, ResolvedAIConfig, AIRequest) {
         let config = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path), home: root)
@@ -166,4 +167,5 @@ import KikigakiAIIO
         #expect(controller.conversation.questions.count == 3)
         #expect(controller.conversation.questions.last?.request.displayQuestion.contains("残りの指示") == true)
     }
+}
 }

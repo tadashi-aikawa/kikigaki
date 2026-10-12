@@ -5,6 +5,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized, .timeLimit(.minutes(1))) @MainActor struct NextMeetingAppTests {
     @Test func シートを開く時だけ失効分を消し取消は予約を残す() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
@@ -135,4 +136,5 @@ import KikigakiAIIO
             DispatchQueue.main.async { continuation.resume() }
         }
     }
+}
 }

@@ -4,6 +4,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AIRangeViewTests {
     private func capture(_ name: String, _ view: NSView) throws {
         guard let output = ProcessInfo.processInfo.environment["KIKIGAKI_UI_CAPTURE"] else { return }
@@ -148,4 +149,5 @@ import KikigakiAIIO
         defer { newRecord.controller.stopWatching() }
         #expect(newRecord.controller.rangeBoundaries(slot: 1, utterances: utterances) == .init())
     }
+}
 }

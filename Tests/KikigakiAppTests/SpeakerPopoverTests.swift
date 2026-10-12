@@ -5,6 +5,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct SpeakerPopoverTests {
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
 
@@ -237,4 +238,5 @@ import KikigakiAIIO
         #expect(labels(custom.contentView).contains("伊藤"))
         #expect(!labels(custom.contentView).contains("松岡"))
     }
+}
 }

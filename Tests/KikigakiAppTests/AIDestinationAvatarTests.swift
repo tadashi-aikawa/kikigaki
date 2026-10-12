@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AIDestinationAvatarTests {
     @Test func 宛先の各行にアバターを表示する() throws {
         _ = NSApplication.shared
@@ -50,4 +51,5 @@ import KikigakiCore
         #expect(popup.itemArray[1].image != nil)
         #expect(popup.indexOfSelectedItem == 1)
     }
+}
 }

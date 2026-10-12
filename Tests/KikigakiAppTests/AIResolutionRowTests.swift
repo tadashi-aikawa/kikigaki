@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AIResolutionRowTests {
     @Test func 確認の三状態に文字倍率を掛け撮影する() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
@@ -79,4 +80,5 @@ import KikigakiCore
             }
         }
     }
+}
 }

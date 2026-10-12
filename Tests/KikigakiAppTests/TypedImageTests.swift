@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct TypedImageTests {
     private func image() throws -> TypedImageDraft {
         let bitmap = try #require(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 96, pixelsHigh: 64,
@@ -178,4 +179,5 @@ import KikigakiCore
         #expect(descendants(row).contains { ($0 as? NSButton)?.toolTip == "画像1を開く" })
         try capture("image-posted")
     }
+}
 }

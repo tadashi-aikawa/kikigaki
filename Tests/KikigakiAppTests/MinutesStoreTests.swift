@@ -5,6 +5,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct MinutesStoreTests {
     private func question(root: URL, meeting: UUID, workAllowed: Bool = true) throws -> AIQuestion {
         var history = try AIStreamHistory(meetingID: meeting)
@@ -206,4 +207,5 @@ import KikigakiAIIO
         #expect(minutes.state.humanMinutesPath == "/tmp/次回.md")
         #expect(first.state == .submitted)
     }
+}
 }

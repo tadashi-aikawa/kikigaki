@@ -5,6 +5,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AIViewTests {
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
     private func capture(_ name: String, view: NSView) throws {
@@ -728,4 +729,5 @@ import KikigakiAIIO
         // 声と自動だけが細い1行。問い欄からの送信は文字があるので人側の行になる。
         #expect(window.transcriptDocument.rows.compactMap { $0 as? AISendLineRow }.count == 6)
     }
+}
 }

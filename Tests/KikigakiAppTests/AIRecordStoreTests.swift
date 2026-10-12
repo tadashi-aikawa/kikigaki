@@ -4,6 +4,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AIRecordStoreTests {
     private struct LegacyArchive: Encodable {
         let original: MeetingMarkdown.Meeting
@@ -150,4 +151,5 @@ import KikigakiAIIO
         let corrupted = AIRecordStore(directory: root); corrupted.recover()
         #expect(!corrupted.warnings.isEmpty)
     }
+}
 }

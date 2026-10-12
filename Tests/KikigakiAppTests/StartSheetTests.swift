@@ -4,6 +4,7 @@ import KikigakiCore
 @testable import Kikigaki
 
 // 実シートの焦点と閉じる操作を確かめるため、同時に複数を開かない。
+extension AppKitTests {
 @Suite(.serialized, .timeLimit(.minutes(1))) @MainActor struct StartSheetTests {
     @Test func システム音声の自動判定が追従し開始時に固定する() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
@@ -808,7 +809,9 @@ import KikigakiCore
             .write(to: URL(fileURLWithPath: directory).appendingPathComponent(name + ".png"))
     }
 }
+}
 
+extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct StartSheetScheduleTests {
     /// 開始シートの値で自動送信を始める。設定の `autoStart` は使わない。
     @Test func シートの宛先と依頼で自動送信を始める() async throws {
@@ -889,4 +892,5 @@ import KikigakiCore
         #expect(try session.previewMinutesStore()?.state.humanMinutesPath == "/tmp/次の会議.md")
         #expect(throws: (any Error).self) { try session.prepareMinutes("relative.md") }
     }
+}
 }

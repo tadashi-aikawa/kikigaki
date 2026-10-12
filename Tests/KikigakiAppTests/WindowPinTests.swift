@@ -2,6 +2,7 @@ import AppKit
 import Testing
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct WindowPinTests {
     @Test func ピンボタンは最前面を切り替え表示更新でも保持する() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
@@ -17,4 +18,5 @@ import Testing
         button.performClick(nil)
         #expect(window.level == .normal && button.symbolName == "pin")
     }
+}
 }

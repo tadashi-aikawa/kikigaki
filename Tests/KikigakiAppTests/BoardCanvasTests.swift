@@ -4,6 +4,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct BoardCanvasTests {
     private func wait(_ condition: () async throws -> Bool) async throws {
         for _ in 0..<500 {
@@ -332,4 +333,5 @@ import KikigakiCore
             try await capture("minimap-avoids-focus-\(scale*100)",source:source,web:web)
         }
     }
+}
 }

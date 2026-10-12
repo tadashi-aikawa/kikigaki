@@ -5,6 +5,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct BoardAppTests {
     private func config(_ root: URL) throws -> ResolvedConfig {
         try ResolvedConfig(config: ConfigLoader.parse(toml: """
@@ -333,4 +334,5 @@ import KikigakiAIIO
         #expect(!preview.minutesDocument.renderedText.contains("更新済み"))
         #expect(try await preview.minutesDocument.webView.evaluateJavaScript("window.originalHeading === document.querySelector('h1')") as? Bool == true)
     }
+}
 }

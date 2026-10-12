@@ -4,6 +4,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct MinutesSubmissionRevisionTests {
     @Test(arguments: ["自動", "確認", "再送"])
     func 全送信入口で人の指定だけを採取する(_ route: String) async throws {
@@ -46,4 +47,5 @@ import KikigakiAIIO
         if route == "自動" { #expect(next.trigger == .scheduled) }
         if route == "確認" { #expect(next.envelope.participant.inReplyToRequestID == first.id) }
     }
+}
 }

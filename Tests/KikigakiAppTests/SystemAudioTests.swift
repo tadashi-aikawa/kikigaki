@@ -111,6 +111,7 @@ struct SystemAudioTests {
     }
 }
 
+extension AppKitTests {
 @MainActor struct SystemAudioFallbackTests {
     final class DelayedCapture: SystemAudioCapturing {
         var onFailure: ((String) -> Void)?
@@ -216,4 +217,5 @@ struct SystemAudioTests {
             #expect(mic.starts == 1 && warnings.count == 1)
         }
     }
+}
 }

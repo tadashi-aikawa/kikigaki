@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AIConfirmationWaitTests {
     private func value(final: Bool) throws -> AICapture {
         try AICapture(tokens: [.init(text: "質問", phraseId: 0, start: 0, end: 1)], speakers: [0], finalCount: final ? 1 : 0,
@@ -45,4 +46,5 @@ import KikigakiCore
         #expect(polls == 2)
         #expect(!capture.needsAudioProcessing)
     }
+}
 }

@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized, .timeLimit(.minutes(1))) @MainActor struct DestinationFooterTests {
     private func state(_ root: URL, long: Bool, notices: Bool = true,
                        automaticWaiting: Bool = false, manualWaiting: Bool = false) throws -> SessionSnapshot {
@@ -204,4 +205,5 @@ import KikigakiCore
                 .write(to: URL(fileURLWithPath: output).appendingPathComponent(name + suffix + ".png"))
         }
     }
+}
 }

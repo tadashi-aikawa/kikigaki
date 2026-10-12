@@ -2,6 +2,7 @@ import AppKit
 import Testing
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct AISheetCloseLabelTests {
     @Test func 表示を閉じるシートは閉じると表記してEscの操作を保つ() throws {
         _ = NSApplication.shared
@@ -19,4 +20,5 @@ import Testing
         }
         #expect(closed == 2)
     }
+}
 }

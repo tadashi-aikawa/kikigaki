@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct MarkdownBodyViewTests {
     // 会議を受けた返事の例。描画する全要素を、実際に読む順序で混ぜる。
     private let minutes = """
@@ -279,4 +280,5 @@ import KikigakiCore
         try #require(bitmap.representation(using: .png, properties: [:]))
             .write(to: URL(fileURLWithPath: output).appendingPathComponent(name + ".png"))
     }
+}
 }

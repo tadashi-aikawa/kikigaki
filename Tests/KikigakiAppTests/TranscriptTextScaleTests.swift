@@ -4,6 +4,7 @@ import KikigakiCore
 import WebKit
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct TranscriptTextScaleAppTests {
     private func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
     private func defaults() -> UserDefaults { UserDefaults(suiteName: "KikigakiTextScaleTest.\(UUID())")! }
@@ -404,4 +405,5 @@ import WebKit
             }
         }
     }
+}
 }

@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct AIProfileAppTests {
     private final class NoAudio: AudioSource {
         func start(onSamples: @escaping ([Float]) -> Void) throws { Issue.record("テストでは音源を起動しない") }
@@ -127,4 +128,5 @@ import KikigakiCore
                               .init(slot: 2, name: "相談")], selected: 2)
         #expect(!picker.isHidden && picker.selected == 2)
     }
+}
 }

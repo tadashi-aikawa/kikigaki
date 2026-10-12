@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct DiarizationTests {
     private func config(_ root: URL) throws -> ResolvedConfig {
         ResolvedConfig(config: try ConfigLoader.parse(toml: "outputDir = \"\(root.path)\""))
@@ -234,4 +235,5 @@ import KikigakiCore
             try ReplayDebugOptions.load(arguments: ["--replay"], environment: ["KIKIGAKI_DEBUG_DIARIZATION": "invalid"])
         }
     }
+}
 }

@@ -4,6 +4,7 @@ import KikigakiCore
 import KikigakiAIIO
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct AutoSendPhraseAppTests {
     private func session(_ root: URL, fake: FakeHerdr, diarization: Bool = true,
                          phrases: [String]? = nil) -> MeetingSession {
@@ -233,4 +234,5 @@ import KikigakiAIIO
         publish(session, diarization: true)
         #expect(session.aiRecord == nil && sounds.isEmpty)
     }
+}
 }

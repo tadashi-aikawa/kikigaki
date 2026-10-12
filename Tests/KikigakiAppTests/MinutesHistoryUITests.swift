@@ -2,6 +2,7 @@ import AppKit
 import Testing
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct MinutesHistoryUITests {
     private final class CountingDefaults: UserDefaults, @unchecked Sendable {
         var historyWrites = 0
@@ -191,4 +192,5 @@ import Testing
         let editor = try #require(view.pathField.currentEditor() as? NSTextView)
         #expect(!view.control(view.pathField, textView: editor, doCommandBy: #selector(NSResponder.moveDown(_:))))
     }
+}
 }

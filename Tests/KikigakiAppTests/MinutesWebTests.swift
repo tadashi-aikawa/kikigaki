@@ -4,6 +4,7 @@ import Darwin
 import Testing
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite(.serialized) @MainActor struct MinutesWebTests {
     @Test func WebKitのカーソル更新を親の矢印で上書きしない() throws {
         final class Parent: NSView {
@@ -832,4 +833,5 @@ import Testing
         #expect(calls[1].contains("w2")); #expect(calls[1].contains("/tmp"))
         #expect(calls[2].prefix(3) == ["pane", "run", "w2:p3"])
     }
+}
 }

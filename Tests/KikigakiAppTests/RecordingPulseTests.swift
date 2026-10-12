@@ -3,6 +3,7 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+extension AppKitTests {
 @Suite @MainActor struct RecordingPulseTests {
     @Test func 録音の点は秒境界だけで切り替わりアニメーションを持たない() throws {
         let chip = RecordingStatusChip()
@@ -42,4 +43,5 @@ import KikigakiCore
         chip.update(snapshot, reduceMotion: true)
         #expect(elapsed.isHidden && chip.accessibilityLabel() == "保存済み")
     }
+}
 }
