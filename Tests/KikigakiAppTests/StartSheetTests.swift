@@ -39,7 +39,7 @@ import KikigakiCore
         model = "claude-opus-5"
         effort = "max"
         cwd = "~/work/kikigaki"
-        autoPrompt = "気になった点を3つまで挙げてください"
+        initialPrompt = "気になった点を3つまで挙げてください"
 
         [[ai]]
         name = "議事録"
@@ -48,7 +48,7 @@ import KikigakiCore
         effort = "high"
         cwd = "~/work/minutes"
         autoStart = true
-        autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
+        initialPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
         autoIntervalMinutes = 5
         allowWork = false
         """)
@@ -828,7 +828,7 @@ import KikigakiCore
         command = "/bin/echo"
         cwd = "\(root.path)"
         autoStart = true
-        autoPrompt = "設定の依頼"
+        initialPrompt = "設定の依頼"
         """), home: root).aiProfiles
         let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"),
                                      config: config, aiStore: store, recordedSamples: 16_000)
@@ -857,7 +857,7 @@ import KikigakiCore
         command = "/bin/echo"
         cwd = "\(root.path)"
         autoStart = true
-        autoPrompt = "設定の依頼"
+        initialPrompt = "設定の依頼"
         """), home: root).aiProfiles
         let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"),
                                      config: config, aiStore: store, recordedSamples: 16_000)

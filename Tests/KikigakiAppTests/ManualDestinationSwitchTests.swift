@@ -23,7 +23,7 @@ import KikigakiAIIO
         var config = ResolvedConfig(config: KikigakiConfig(), home: root)
         config.aiProfiles = ["議事録", "スライド"].enumerated().map {
             ResolvedAIConfig(config: AIConfig(name: $0.element, command: "/bin/echo", cwd: root.path,
-                                              autoPrompt: $0.element + "を更新"), home: root, slot: $0.offset + 1)
+                                              initialPrompt: $0.element + "を更新"), home: root, slot: $0.offset + 1)
         }
         let store = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { args, timeout in
             if failConnection && args.prefix(2) == ["workspace", "create"] { throw AIHerdrError.notReady }

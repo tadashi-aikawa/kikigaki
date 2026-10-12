@@ -10,7 +10,7 @@ name = "議事録とボード"
 cli = "codex"
 board = "## ボード"
 boardLocation = "~/Documents/minutes/${yyyyMMdd_HHmmss}.md として作成し、変数は現在日時"
-autoPrompt = "議事録を更新してください"
+initialPrompt = "議事録を更新してください"
 autoStart = true
 autoIntervalMinutes = 1
 # boardPrompt = "ボードの独自プロンプト全文"
@@ -21,7 +21,7 @@ autoIntervalMinutes = 1
 - board省略時は従来の動作。board無しのboardPrompt・boardLocation、空または空白だけの値、型違いはエラー。作成指示を付けたプロンプト全体も32 KiB以内に収める。
 - boardLocationは任意の自由文。議事録パスが無いときの書き先の作り方をAIへ伝える。`${...}` や `~` はアプリで展開しない。任意の保存先への書き込み許可を追加する設定ではない。
 - ボードの自動送信は議事録パスかboardLocationがあれば開始できる。どちらも無ければ「ボードの自動送信には議事録のパスか boardLocation が必要です」と表示して拒否する。録音開始シート、録音中の自動開始、AIScheduleSheetで同じ条件を使う。
-- 自動送信は内蔵文面またはboardPromptを使う。boardPromptは全文差し替えのまま。パスが無い送信だけ共通の作成・通知指示とboardLocationを末尾に付け、通知後は付けない。autoPromptは手動シートの初期値として維持する。
+- 自動送信は内蔵文面またはboardPromptを使う。boardPromptは全文差し替えのまま。パスが無い送信だけ共通の作成・通知指示とboardLocationを末尾に付け、通知後は付けない。initialPromptは手動シートの初期値として維持する。
 - participant.board_headingは任意の文字列。明示nullを拒否する。手動にも会議の固定値を渡し、Skillでボードの見出しと配下の変更を禁止する。
 - 会議Markdownの送信文は「ボードを更新(## ボード)」とこの文書への参照にする。送信した全文は固定requestに残る。
 

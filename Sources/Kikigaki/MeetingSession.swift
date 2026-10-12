@@ -220,7 +220,7 @@ final class MeetingSession {
     /// 通常の手動依頼は自動と独立して宛先ごとに保持する。空文字も編集済みとして扱う。
     private var manualDrafts: [Int: String] = [:]
     func manualDraft(for profile: ResolvedAIConfig) -> String {
-        manualDrafts[profile.slot] ?? profile.autoPrompt
+        manualDrafts[profile.slot] ?? profile.initialPrompt
     }
     func updateManualDraft(_ text: String, slot: Int) { manualDrafts[slot] = text }
     private(set) var aiWorkAllowed: Bool

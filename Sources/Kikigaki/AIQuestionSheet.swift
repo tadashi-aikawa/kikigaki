@@ -1,6 +1,31 @@
 import AppKit
 import KikigakiCore
 
+/// 文面とは別に、送信の末尾へ毎回付く指示を知らせる。操作部の文字は固定サイズ。
+@MainActor
+final class AIAlwaysPromptHint: NSView {
+    let label = Washi.label("＋ 毎回付く指示あり", size: 11, color: Washi.muted)
+    init() {
+        super.init(frame: .zero)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor),
+            label.topAnchor.constraint(equalTo: topAnchor),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        update("")
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func update(_ prompt: String) {
+        isHidden = prompt.isEmpty
+        toolTip = prompt.isEmpty ? nil : prompt
+        label.toolTip = toolTip
+        label.setAccessibilityHelp(toolTip)
+    }
+}
+
 /// シート共通の窓。Escで閉じ、Enterはプロンプト編集中だけ改行へ回す。
 /// 開始シート(`StartSheetWindow`)がここへ⌘⏎の開始を足すため、継承できるようにしてある。
 class AIQuestionWindow: NSWindow {
@@ -95,6 +120,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     private let destination = AIDestinationPicker()
     private let title = Washi.label("", size: 17, weight: .semibold)
     private let editor = AIQuestionEditor()
+    let alwaysPromptHint = AIAlwaysPromptHint()
     private let sendButton = NSButton(title: "送信", target: nil, action: nil)
     private let hint = NSTextField(wrappingLabelWithString: "")
     private let range = Washi.label(size: 11, color: Washi.muted)
@@ -109,9 +135,9 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
     /// 選択欄を隠すだけでは `owningSlot` が選択値を見るので、取消の宛先が動く。
     private let fixedSlot: Int?
 
-    init(participant: String, parentNumber: Int?, draft: String, voice: String, range: String, tentative: Bool, canSubmit: Bool, confirmation: String? = nil, workAllowed: Bool = true, fixedSlot: Int? = nil) {
+    init(participant: String, parentNumber: Int?, draft: String, voice: String, range: String, tentative: Bool, canSubmit: Bool, confirmation: String? = nil, workAllowed: Bool = true, fixedSlot: Int? = nil, alwaysPrompt: String = "") {
         self.fixedSlot = fixedSlot
-        window = AIQuestionWindow(contentRect: NSRect(x: 0, y: 0, width: 504, height: 344), styleMask: [.titled], backing: .buffered, defer: false)
+        window = AIQuestionWindow(contentRect: NSRect(x: 0, y: 0, width: 504, height: 370), styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
         window.appearance = NSAppearance(named: .aqua); window.backgroundColor = Washi.paper
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
@@ -148,9 +174,10 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
             context.font = .systemFont(ofSize: 12); context.textColor = Washi.ink
             context.maximumNumberOfLines = 3; context.toolTip = confirmation
             views.append(context)
-            window.setContentSize(NSSize(width: 504, height: 394))
+            window.setContentSize(NSSize(width: 504, height: 420))
         }
-        views += [scroll, Washi.label("⌘Enterで送信 · Enterで改行", size: 11, color: Washi.muted), hint, full, work, actions]
+        alwaysPromptHint.update(alwaysPrompt)
+        views += [scroll, alwaysPromptHint, Washi.label("⌘Enterで送信 · Enterで改行", size: 11, color: Washi.muted), hint, full, work, actions]
         for view in views {
             stack.addArrangedSubview(view); view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
         }
@@ -176,6 +203,7 @@ final class AIQuestionSheet: NSObject, NSTextViewDelegate {
         (window as? AIQuestionWindow)?.monitorOutsideClicks()
     }
     var draft: String { editor.string }
+    func updateAlwaysPrompt(_ prompt: String) { alwaysPromptHint.update(prompt) }
     func restoreDraft(_ text: String) {
         editor.unmarkText()
         editor.string = text

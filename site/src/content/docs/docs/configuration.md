@@ -51,7 +51,7 @@ notifySound = false       # 返事が届いたときの通知音
 cwd = "~/work/minutes"    # 起動時の作業ディレクトリ。省略時は固定の既定
 autoStart = true          # 録音開始シートの自動送信の既定にする。全体で1つまで
 # 手動・自動実行シートと録音開始シートのプロンプト初期値
-autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
+initialPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
 autoIntervalMinutes = 3   # 1〜120分
 
 [[ai]]
@@ -127,7 +127,7 @@ avatar = "~/Pictures/avatars/tanaka.png"
 
 | キー | 既定 | 説明 |
 | --- | --- | --- |
-| `prompt` | 空 | すべての送信に付ける追加の指示。32 KiBまで |
+| `alwaysPrompt` | 空 | すべての送信の末尾に「追加プロンプト」として付く補助指示。32 KiBまで |
 | `allowWork` | `true` | 送信シートの「作業を許可する」の初期値 |
 | `identifySpeakers` | `false` | `true` で、会話を送るときにAIへ話者名の割当も頼む。名乗りなどの根拠がある名前だけを付ける |
 | `notifySound` | `false` | `true` で、この宛先から返事や確認質問が届いたときに通知音を鳴らす。自動送信への通常の返事では鳴らさない |
@@ -136,8 +136,8 @@ avatar = "~/Pictures/avatars/tanaka.png"
 
 | キー | 既定 | 説明 |
 | --- | --- | --- |
-| `autoStart` | `false` | `true` で、録音開始シートの自動送信の宛先の既定にする。全宛先で1つまで。`board` の無い宛先では `autoPrompt` が必要 |
-| `autoPrompt` | 空 | 手動・自動実行シートと録音開始シートのプロンプトの初期値。32 KiBまで |
+| `autoStart` | `false` | `true` で、録音開始シートの自動送信の宛先の既定にする。全宛先で1つまで。`board` の無い宛先では `initialPrompt` が必要 |
+| `initialPrompt` | 空 | 手動・自動実行シートと録音開始シートのプロンプトの初期値。32 KiBまで |
 | `autoIntervalMinutes` | `3` | 自動送信の間隔。1〜120分。シートの選択肢に無い値も、その値で選べるようになる |
 
 ### ボード
@@ -203,6 +203,8 @@ herdrが見つからない間も、「会話をコピー」は使えます。
 | キー | 扱い |
 | --- | --- |
 | 単数の `[ai]` | 設定エラー。`[[ai]]` と書き直す |
+| `[[ai]]` の `prompt` | 設定エラー。値はそのまま、キー名を `alwaysPrompt` へ書き直す |
+| `[[ai]]` の `autoPrompt` | 設定エラー。値はそのまま、キー名を `initialPrompt` へ書き直す |
 | `[[ai]]` の `attach` と `displayAgent` | 設定エラー。起動中のherdrのペインへつなぐ機能は無くなった。KIKIGAKIが自分でAIエージェントを起動する |
 
 「準備済みAIセッション」の機能も無くなりました。

@@ -62,7 +62,7 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         cwd = "~/project"
         effort = "high"
         extraArgs = ["--permission-mode", "plan"]
-        prompt = "短く答える"
+        alwaysPrompt = "短く答える"
         notifySound = true
         """)
         let ai = try #require(ResolvedConfig(config: parsed, home: URL(fileURLWithPath: "/home/person")).ai)
@@ -81,7 +81,7 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
     @Test func 改行とサイズ超過を拒否する() throws {
         #expect(throws: ConfigError.self) { try AIConfig(address: "人\n名").validate() }
         #expect(throws: ConfigError.self) { try AIConfig(address: " へ ").validate() }
-        #expect(throws: ConfigError.self) { try AIConfig(prompt: String(repeating: "あ", count: 10923)).validate() }
+        #expect(throws: ConfigError.self) { try AIConfig(alwaysPrompt: String(repeating: "あ", count: 10923)).validate() }
     }
 
     @Test(arguments: ["--settings=x", "--setting-sources=user", "--safe-mode", "--bare", "--bg", "-p", "--resume=x", "--model=x", "--", "prompt"])
@@ -364,7 +364,7 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
     @Test func 特殊文字をJSON内へ閉じ込めIDとパスを復元できる() throws {
         let root = URL(fileURLWithPath: "/tmp/日本語 空白 \" ```\n")
         let r = try request(question: "```\n$() `command`", root: root)
-        let prompt = try r.envelope.prompt(extraPrompt: "追加の指示")
+        let prompt = try r.envelope.prompt(alwaysPrompt: "追加の指示")
         #expect(prompt.hasPrefix("$kikigaki\n迅雷へ\n\nKIKIGAKI_CONTEXT"))
         #expect(prompt.components(separatedBy: "```").count == 3)
         #expect(prompt.hasSuffix("追加プロンプト:\n追加の指示"))

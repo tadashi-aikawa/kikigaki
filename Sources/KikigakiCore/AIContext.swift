@@ -295,13 +295,13 @@ public struct AIEnvelope: Codable, Equatable, Sendable {
         }
     }
 
-    public func prompt(address: String = "迅雷へ", extraPrompt: String = "") throws -> String {
+    public func prompt(address: String = "迅雷へ", alwaysPrompt: String = "") throws -> String {
         try validate()
         guard AIValidation.singleLine(address) else { throw AIError.invalid("address") }
-        try AIValidation.text(extraPrompt, limit: AILimits.questionBytes)
+        try AIValidation.text(alwaysPrompt, limit: AILimits.questionBytes)
         let json = String(decoding: try AIJSON.encode(self), as: UTF8.self).replacingOccurrences(of: "`", with: "\\u0060")
         return "$kikigaki\n\(address)\n\nKIKIGAKI_CONTEXT\n```json\n\(json)\n```"
-            + (extraPrompt.isEmpty ? "" : "\n\n追加プロンプト:\n\(extraPrompt)")
+            + (alwaysPrompt.isEmpty ? "" : "\n\n追加プロンプト:\n\(alwaysPrompt)")
     }
 
     enum CodingKeys: String, CodingKey {

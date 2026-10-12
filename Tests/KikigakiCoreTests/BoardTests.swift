@@ -65,12 +65,12 @@ import Testing
         let parsed = try ConfigLoader.parse(toml: """
         [[ai]]
         board = "## ボード"
-        autoPrompt = "議事録を更新"
+        initialPrompt = "議事録を更新"
         autoStart = true
         """)
         let profile = try #require(ResolvedConfig(config: parsed, home: URL(fileURLWithPath: "/tmp")).aiProfiles.first)
         #expect(profile.scheduledPrompt == BoardPrompt.builtIn)
-        #expect(profile.autoPrompt == "議事録を更新")
+        #expect(profile.initialPrompt == "議事録を更新")
         #expect(try AIJSON.decode(ResolvedAIConfig.self, from: AIJSON.encode(profile)) == profile)
         let custom = ResolvedAIConfig(config: AIConfig(board: "# ボード", boardPrompt: "独自のボード"), home: URL(fileURLWithPath: "/tmp"))
         #expect(custom.scheduledPrompt == "独自のボード")

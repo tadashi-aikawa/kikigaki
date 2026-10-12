@@ -29,7 +29,7 @@ import KikigakiCore
         let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect((json["participant"] as? [String: Any])?["work_allowed"] as? Bool == allowed)
         #expect(try AIJSON.decode(AIEnvelope.self, from: data).participant.workAllowed == allowed)
-        #expect(try envelope.prompt(extraPrompt: "").contains("\"work_allowed\" : \(allowed)"))
+        #expect(try envelope.prompt(alwaysPrompt: "").contains("\"work_allowed\" : \(allowed)"))
         var conversation = AIConversation(meetingID: meeting)
         try conversation.append(request)
         #expect(AIMarkdown.section(conversation).contains("- 作業許可: " + (allowed ? "あり" : "なし")))

@@ -47,7 +47,7 @@ import Testing
         address = "迅雷へ"
         cwd = "~/work/minutes"
         autoStart = true
-        autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
+        initialPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
         autoIntervalMinutes = 3
 
         [[ai]]
@@ -111,12 +111,12 @@ import Testing
 
     // MARK: - autoStart
 
-    @Test func autoStartは1つまででautoPromptを要る() throws {
+    @Test func autoStartは1つまででinitialPromptを要る() throws {
         let profiles = try resolved("""
         [[ai]]
         name = "議事録"
         autoStart = true
-        autoPrompt = "議事録を更新して"
+        initialPrompt = "議事録を更新して"
         autoIntervalMinutes = 5
 
         [[ai]]
@@ -126,7 +126,7 @@ import Testing
         [[ai]]
         name = "議事録"
         autoStart = true
-        autoPrompt = "議事録を更新して"
+        initialPrompt = "議事録を更新して"
 
         [[ai]]
         name = "相談"
@@ -138,12 +138,12 @@ import Testing
             [[ai]]
             name = "一"
             autoStart = true
-            autoPrompt = "a"
+            initialPrompt = "a"
 
             [[ai]]
             name = "二"
             autoStart = true
-            autoPrompt = "b"
+            initialPrompt = "b"
             """)
         }
     }
@@ -220,7 +220,7 @@ import Testing
         effort = "xhigh"
         cwd = "~/work"
         autoStart = true
-        autoPrompt = "更新して"
+        initialPrompt = "更新して"
         """)[0]
         let decoded = try AIJSON.decode(ResolvedAIConfig.self, from: AIJSON.encode(profile))
         #expect(decoded == profile)

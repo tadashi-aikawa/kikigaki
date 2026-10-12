@@ -630,7 +630,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             draft: fixed ? session.aiDraft : session.manualDraft(for: config), voice: snapshot.voiceQuestionPlaceholder,
             range: range, tentative: snapshot.tentativeText != nil,
             canSubmit: snapshot.ai?.canSubmit(slot: slot) == true, confirmation: question?.result?.body,
-            workAllowed: session.aiWorkAllowed, fixedSlot: fixed ? slot : nil)
+            workAllowed: session.aiWorkAllowed, fixedSlot: fixed ? slot : nil, alwaysPrompt: config.alwaysPrompt)
         sheet.updateDestinations(session.aiDestinationItems, selected: slot, participant: config.participantName)
         // 紐づけがsessionの選択を先に変えても、表示していた宛先へ編集内容を保存する。
         var displayedSlot = slot
@@ -642,6 +642,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let profile = session.aiConfiguration else { return }
             displayedSlot = profile.slot
             sheet.restoreDraft(session.manualDraft(for: profile))
+            sheet.updateAlwaysPrompt(profile.alwaysPrompt)
             // シートが持つ枠も選び直しに追随させる。開始処理と抑制判定の対象を揃える。
             session.beginAIDraft(slot: profile.slot)
             self?.aiSheetSlot = profile.slot

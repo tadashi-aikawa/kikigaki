@@ -112,7 +112,7 @@ Mermaidの図をクリックすると、紫の枠と手のひらカーソルが�
 [[ai]]
 cli = "codex"
 address = "迅雷へ"
-autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
+initialPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
 ```
 
 - 議事録のパスを指定していれば、AIエージェントはそのファイルへ書きます
@@ -143,14 +143,14 @@ cli = "codex"
 address = "迅雷へ"
 board = "## ボード"
 boardLocation = "~/Documents/minutes/${yyyyMMdd_HHmmss}.md として作成し、変数は現在日時"
-autoPrompt = "議事録を更新してください"
+initialPrompt = "議事録を更新してください"
 autoStart = true
 autoIntervalMinutes = 1
 ```
 
 - `board` は、ボードにする見出しを1行で書きます
 - 自動送信には、内蔵のプロンプトを使います
-- `autoPrompt` は、手動の依頼の初期値に使います
+- `initialPrompt` は、手動の依頼の初期値に使います
 - `boardLocation` は、議事録のパスが無いときの書き先をAIエージェントに伝えます
     - しくみ: `${...}` や `~` はAIエージェントが解釈します
 - 自動送信を始めるには、議事録のパスか `boardLocation` が要ります

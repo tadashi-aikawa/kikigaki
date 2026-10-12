@@ -98,7 +98,7 @@ import KikigakiCore
         cwd = "\(root.path)"
         address = "迅雷へ"
         autoStart = true
-        autoPrompt = "議事録を更新してください"
+        initialPrompt = "議事録を更新してください"
         autoIntervalMinutes = 5
         """)
         let session = session(root, profiles: list, fake: fake, recordedSamples: 16_000)

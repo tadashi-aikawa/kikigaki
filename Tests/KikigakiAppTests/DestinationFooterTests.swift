@@ -159,7 +159,7 @@ import KikigakiCore
         defaults.set("スライド", forKey: StartSheet.manualDefaultsKey)
         let profiles = ["議事録", "スライド"].enumerated().map {
             ResolvedAIConfig(config: AIConfig(name: $0.element, command: "/bin/echo", cwd: root.path,
-                autoPrompt: "会議の内容を更新してください", autoStart: $0.offset == 0), home: root, slot: $0.offset + 1)
+                initialPrompt: "会議の内容を更新してください", autoStart: $0.offset == 0), home: root, slot: $0.offset + 1)
         }
         let parent = NSWindow(contentRect: NSRect(x: 20000, y: 20000, width: width, height: 578),
                               styleMask: [.titled], backing: .buffered, defer: false)
@@ -175,7 +175,8 @@ import KikigakiCore
         let scroll = try #require(sheet.window.contentView as? NSScrollView)
         let view = try #require(scroll.documentView)
         view.layoutSubtreeIfNeeded()
-        let manualRow = try #require(sheet.manualDestination.superview as? NSStackView)
+        let manualChoices = try #require(sheet.manualDestination.superview as? NSStackView)
+        let manualRow = try #require(manualChoices.superview as? NSStackView)
         let rows = try #require(manualRow.superview as? NSStackView)
         let index = try #require(rows.arrangedSubviews.firstIndex { $0 === manualRow })
         let separator = rows.arrangedSubviews[index - 1]

@@ -13,10 +13,10 @@ import KikigakiCore
         let config = try ResolvedConfig(config: ConfigLoader.parse(toml: """
         [[ai]]
         name = "議事録"
-        autoPrompt = "議事録を更新"
+        initialPrompt = "議事録を更新"
         [[ai]]
         name = "相談"
-        autoPrompt = "疑問点を列挙"
+        initialPrompt = "疑問点を列挙"
         [[ai]]
         name = "空欄"
         """), home: root)
@@ -67,11 +67,11 @@ import KikigakiCore
         config.aiProfiles = try ResolvedConfig(config: ConfigLoader.parse(toml: """
         [[ai]]
         name = "議事録"
-        autoPrompt = "議事録を更新"
+        initialPrompt = "議事録を更新"
         autoIntervalMinutes = 7
         [[ai]]
         name = "相談"
-        autoPrompt = "疑問点を列挙"
+        initialPrompt = "疑問点を列挙"
         autoIntervalMinutes = 11
         [[ai]]
         name = "空欄"

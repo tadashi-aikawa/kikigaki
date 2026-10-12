@@ -77,6 +77,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - 稼働中のherdrペインへ接続する `attach` / `displayAgent` と、会議に紐づかない準備済みAIセッション。[AI設定の複数プロファイル](docs/ai-profiles.md)
   - AIの返事の未読表示と既読操作。[AIへの定期自動送信](docs/ai-scheduled.md)
   - 単数の `[ai]`。設定エラーにして `[[ai]]` を示す。[設定リファレンス](docs/config.md)
+  - `[[ai]]` の `prompt` と `autoPrompt`。設定エラーにして `alwaysPrompt` と `initialPrompt` を示す。[設定リファレンス](docs/config.md)
 - 停止後は新しい依頼を送れない: フッターの「手動」「返答する」「再送」は停止で無効になり、後片付けの後にherdrのペインを閉じる。[AI参加者の設計](docs/ai-participant.md)
 - 利用者のグローバル設定は書き換えない: CodexとClaudeの設定は、セッション限定の引数と専用の `--settings` JSONで渡す。[AI参加者の設計](docs/ai-participant.md)
 - manifestが欠損した会議登録は保持するが、対処できない警告は出さない。`AIRecordStore` の復元がこの扱い

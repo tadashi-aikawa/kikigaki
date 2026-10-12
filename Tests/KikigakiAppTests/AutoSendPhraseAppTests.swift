@@ -141,7 +141,7 @@ import KikigakiAIIO
     @Test func 自動非稼働でも設定の手動プロンプトで送信する() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         var config = ResolvedConfig(config: KikigakiConfig(), home: root)
-        config.ai = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path, autoPrompt: "設定の手動文面"), home: root)
+        config.ai = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path, initialPrompt: "設定の手動文面"), home: root)
         let fake = FakeHerdr()
         let store = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
         let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config, aiStore: store, recordedSamples: 16_000)

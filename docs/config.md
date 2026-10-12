@@ -41,8 +41,9 @@ notifySound = false       # プロファイルごとに効く。返答元の設�
 cwd = "~/work/minutes"    # 起動時の作業ディレクトリ。省略時は固定の既定
 autoStart = true          # 録音開始シートの宛先の既定になる。配列で1つまで
 # 手動・自動実行シートと録音開始シートのプロンプト初期値
-autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください" # 省略時は空欄
-# board = "## ボード"          # 自動はこの見出しだけ更新。autoPromptは手動の初期値
+initialPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください" # 省略時は空欄
+# alwaysPrompt = "結論を先に短く答えてください" # すべての送信の末尾へ付く補助指示
+# board = "## ボード"          # 自動はこの見出しだけ更新。initialPromptは手動の初期値
 # boardLocation = "~/Documents/minutes/${yyyyMMdd_HHmmss}.md として作成し、変数は現在日時" # パス未指定時の作成指示
 # boardPrompt = "独自のボードのプロンプト全文" # board指定時のみ。省略時は内蔵
 autoIntervalMinutes = 3 # 1〜120分、省略時は3分
@@ -122,12 +123,12 @@ address = "ネオへ"
 | `avatar` | 紫のイニシャル | AIの返事行の画像。話者台帳と同じローカルパスか HTTP・HTTPS のURL |
 | `cwd` | 固定の既定 | 起動時の作業ディレクトリ。絶対パスか `~/` 始まり |
 | `extraArgs` | 空 | CLIへの追加引数。対応済みの指定だけを受け付ける |
-| `prompt` | 空 | 全送信に付く追加指示 |
+| `alwaysPrompt` | 空 | 全送信の末尾に「追加プロンプト」として付く補助指示。32 KiBまで |
 | `notifySound` | `false` | 返事が届いたときの通知音。返答元の設定で鳴らす |
 | `allowWork` | `true` | 送信シートの「作業を許可する」の初期値 |
 | `identifySpeakers` | `false` | 送信に話者名の割当を同梱する。詳細は [AI参加者の設計](ai-participant.md#話者名の割当) |
-| `autoStart` | `false` | 録音開始シートの自動送信の宛先の既定にする。配列全体で1つまで。`board` を指定しない宛先は `autoPrompt` が必要 |
-| `autoPrompt` | 空 | 手動・自動実行シートと録音開始シートのプロンプト初期値 |
+| `autoStart` | `false` | 録音開始シートの自動送信の宛先の既定にする。配列全体で1つまで。`board` を指定しない宛先は `initialPrompt` が必要 |
+| `initialPrompt` | 空 | 手動・自動実行シートと録音開始シートのプロンプト初期値 |
 | `autoIntervalMinutes` | `3` | 自動送信の間隔。1〜120分 |
 | `board` | ボードなし | ボードとして自動更新する見出し。1行のMarkdown見出し。宛先間で同じ見出しを使える |
 | `boardPrompt` | 内蔵 | ボードのプロンプト全文の差し替え。`board` があるときだけ指定できる |
@@ -147,6 +148,10 @@ address = "ネオへ"
 設定ファイルに残っていると、次のように扱う。
 
 - 単数の `[ai]`: 設定エラーにする。`[[ai]]` と書く
+- `[[ai]]` の `prompt`: 設定エラーにする。`alwaysPrompt` に書き直す。
+    - 案内: `prompt は alwaysPrompt に名前が変わりました`。新旧両方を書いても拒否する。
+- `[[ai]]` の `autoPrompt`: 設定エラーにする。`initialPrompt` に書き直す。
+    - 案内: `autoPrompt は initialPrompt に名前が変わりました`。新旧両方を書いても拒否する。
 - `attach` と `displayAgent`: 稼働中のherdrペインへ接続する案の取り下げに伴い、書くと設定エラーにする。KIKIGAKI が自分でセッションを起こす。経緯は [AI設定の複数プロファイル](ai-profiles.md) の「取り下げた案(経緯)」
 - 会議に紐づかない「準備済みAIセッション」: 実装ごと撤去した。利用者の台帳 `~/Library/Application Support/KIKIGAKI/ai-prepared.json` と準備用の置き場は読まず、消さない
 

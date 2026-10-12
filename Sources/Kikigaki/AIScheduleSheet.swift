@@ -18,6 +18,7 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
     private let destination = AIDestinationPicker()
     private let title = Washi.label("", size: 17, weight: .semibold)
     private let editor = AIQuestionEditor()
+    let alwaysPromptHint = AIAlwaysPromptHint()
     private let interval = NSPopUpButton()
     private let work = NSButton(checkboxWithTitle: "作業を許可する(ファイル編集・コマンド実行)", target: nil, action: nil)
     private let final = NSButton(checkboxWithTitle: "録音停止時に最後の1回を送る", target: nil, action: nil)
@@ -30,7 +31,7 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
     convenience init(session: MeetingSession, profile: ResolvedAIConfig) {
         let draft = session.scheduleDraft(for: profile)
         self.init(prompt: draft.prompt, minutes: draft.minutes, workAllowed: draft.workAllowed,
-                  sendFinal: draft.sendFinal, participant: profile.participantName)
+                  sendFinal: draft.sendFinal, participant: profile.participantName, alwaysPrompt: profile.alwaysPrompt)
         // session側の宛先が先に変わり得る。エディターに表示中の枠へ保存し、
         // 一覧の非同期更新では文面を初期化しない。
         var displayedSlot = profile.slot
@@ -47,6 +48,7 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
             session.selectAIProfile(slot: slot, forSchedule: true)
             displayedSlot = slot
             self.restoreDraft(session.scheduleDraft(for: target))
+            self.alwaysPromptHint.update(target.alwaysPrompt)
             self.editor.isEditable = target.board == nil
             self.updateDestinations(session.aiDestinationItems, selected: slot, participant: target.participantName)
         }
@@ -80,8 +82,8 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         interval.selectItem(withTag: minutes)
     }
 
-    init(prompt: String, minutes: Int, workAllowed: Bool, sendFinal: Bool = true, participant: String = "迅雷") {
-        window = AIQuestionWindow(contentRect: NSRect(x: 0, y: 0, width: 504, height: 360), styleMask: [.titled], backing: .buffered, defer: false)
+    init(prompt: String, minutes: Int, workAllowed: Bool, sendFinal: Bool = true, participant: String = "迅雷", alwaysPrompt: String = "") {
+        window = AIQuestionWindow(contentRect: NSRect(x: 0, y: 0, width: 504, height: 386), styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
         window.appearance = NSAppearance(named: .aqua); window.backgroundColor = Washi.paper
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
@@ -111,7 +113,8 @@ final class AIScheduleSheet: NSObject, NSTextViewDelegate {
         let cancel = NSButton(title: "閉じる", target: self, action: #selector(cancel))
         cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
         let actions = NSStackView(views: [NSView(), cancel, startButton]); actions.spacing = 12
-        for view in [title, destination, scroll, Washi.label("⌘Enterで送信して開始 · Enterで改行", size: 11, color: Washi.muted), frequency, hint, work, final, actions] {
+        alwaysPromptHint.update(alwaysPrompt)
+        for view in [title, destination, scroll, alwaysPromptHint, Washi.label("⌘Enterで送信して開始 · Enterで改行", size: 11, color: Washi.muted), frequency, hint, work, final, actions] {
             stack.addArrangedSubview(view)
             view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
         }

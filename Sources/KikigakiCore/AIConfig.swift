@@ -38,11 +38,13 @@ public struct AIConfig: Codable, Equatable, Sendable {
     /// 取り下げた接続案のキー。書かれていたら設定エラーにして移行先を示す
     public var displayAgent: String?
     public var extraArgs: [String]?
-    public var prompt: String?
+    /// すべての送信の末尾へ付く補助指示。
+    public var alwaysPrompt: String?
     public var notifySound: Bool?
     public var allowWork: Bool?
     public var identifySpeakers: Bool?
-    public var autoPrompt: String?
+    /// 手動・自動実行・録音開始シートの文面の初期値。
+    public var initialPrompt: String?
     public var board: String?
     public var boardPrompt: String?
     public var boardLocation: String?
@@ -53,9 +55,9 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public init(name: String? = nil, cli: AIProvider? = nil, command: String? = nil, herdrCommand: String? = nil, model: String? = nil,
                 effort: String? = nil, address: String? = nil, avatar: String? = nil, cwd: String? = nil, attach: Bool? = nil,
                 displayAgent: String? = nil,
-                extraArgs: [String]? = nil, prompt: String? = nil, notifySound: Bool? = nil,
+                extraArgs: [String]? = nil, alwaysPrompt: String? = nil, notifySound: Bool? = nil,
                 allowWork: Bool? = nil,
-                autoPrompt: String? = nil, autoIntervalMinutes: Int? = nil, autoStart: Bool? = nil,
+                initialPrompt: String? = nil, autoIntervalMinutes: Int? = nil, autoStart: Bool? = nil,
                 board: String? = nil, boardPrompt: String? = nil, boardLocation: String? = nil,
                 identifySpeakers: Bool? = nil) {
         self.identifySpeakers = identifySpeakers
@@ -64,10 +66,45 @@ public struct AIConfig: Codable, Equatable, Sendable {
         self.cli = cli; self.command = command; self.herdrCommand = herdrCommand; self.model = model; self.effort = effort
         self.address = address; self.avatar = avatar
         self.cwd = cwd; self.attach = attach; self.displayAgent = displayAgent
-        self.extraArgs = extraArgs; self.prompt = prompt
+        self.extraArgs = extraArgs; self.alwaysPrompt = alwaysPrompt
         self.notifySound = notifySound
         self.allowWork = allowWork
-        self.autoPrompt = autoPrompt; self.autoIntervalMinutes = autoIntervalMinutes; self.autoStart = autoStart
+        self.initialPrompt = initialPrompt; self.autoIntervalMinutes = autoIntervalMinutes; self.autoStart = autoStart
+    }
+
+    private enum RetiredKeys: String, CodingKey { case prompt, autoPrompt }
+
+    public init(from decoder: Decoder) throws {
+        let retired = try decoder.container(keyedBy: RetiredKeys.self)
+        let migrations: [(RetiredKeys, String)] = [(.prompt, "alwaysPrompt"), (.autoPrompt, "initialPrompt")]
+        let issues = migrations.filter { retired.contains($0.0) }.map { "\($0.0.rawValue) は \($0.1) に名前が変わりました" }
+        guard issues.isEmpty else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                    debugDescription: issues.joined(separator: "。")))
+        }
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = try values.decodeIfPresent(String.self, forKey: .name)
+        cli = try values.decodeIfPresent(AIProvider.self, forKey: .cli)
+        command = try values.decodeIfPresent(String.self, forKey: .command)
+        herdrCommand = try values.decodeIfPresent(String.self, forKey: .herdrCommand)
+        model = try values.decodeIfPresent(String.self, forKey: .model)
+        effort = try values.decodeIfPresent(String.self, forKey: .effort)
+        address = try values.decodeIfPresent(String.self, forKey: .address)
+        avatar = try values.decodeIfPresent(String.self, forKey: .avatar)
+        cwd = try values.decodeIfPresent(String.self, forKey: .cwd)
+        attach = try values.decodeIfPresent(Bool.self, forKey: .attach)
+        displayAgent = try values.decodeIfPresent(String.self, forKey: .displayAgent)
+        extraArgs = try values.decodeIfPresent([String].self, forKey: .extraArgs)
+        alwaysPrompt = try values.decodeIfPresent(String.self, forKey: .alwaysPrompt)
+        notifySound = try values.decodeIfPresent(Bool.self, forKey: .notifySound)
+        allowWork = try values.decodeIfPresent(Bool.self, forKey: .allowWork)
+        identifySpeakers = try values.decodeIfPresent(Bool.self, forKey: .identifySpeakers)
+        initialPrompt = try values.decodeIfPresent(String.self, forKey: .initialPrompt)
+        board = try values.decodeIfPresent(String.self, forKey: .board)
+        boardPrompt = try values.decodeIfPresent(String.self, forKey: .boardPrompt)
+        boardLocation = try values.decodeIfPresent(String.self, forKey: .boardLocation)
+        autoIntervalMinutes = try values.decodeIfPresent(Int.self, forKey: .autoIntervalMinutes)
+        autoStart = try values.decodeIfPresent(Bool.self, forKey: .autoStart)
     }
 
     /// address から導く既定のプロファイル名。設定の name を省略したときのキーにもなる
@@ -110,12 +147,12 @@ public struct AIConfig: Codable, Equatable, Sendable {
         if let effort, !AIEffort.values(for: cli ?? .codex).contains(effort) {
             throw invalid("effort must be one of " + AIEffort.values(for: cli ?? .codex).joined(separator: ", "))
         }
-        if let prompt, prompt.utf8.count > AILimits.questionBytes || prompt.contains("\0") {
-            throw invalid("prompt exceeds limit or contains NUL")
+        if let alwaysPrompt, alwaysPrompt.utf8.count > AILimits.questionBytes || alwaysPrompt.contains("\0") {
+            throw invalid("alwaysPrompt exceeds limit or contains NUL")
         }
         try AIExtraArguments.validate(extraArgs ?? [], provider: cli ?? .codex, label: label)
-        if let autoPrompt, autoPrompt.utf8.count > AILimits.questionBytes || autoPrompt.contains("\0") {
-            throw invalid("autoPrompt exceeds limit or contains NUL")
+        if let initialPrompt, initialPrompt.utf8.count > AILimits.questionBytes || initialPrompt.contains("\0") {
+            throw invalid("initialPrompt exceeds limit or contains NUL")
         }
         if let autoIntervalMinutes, !(1...120).contains(autoIntervalMinutes) {
             throw invalid("autoIntervalMinutes must be 1...120")
@@ -131,8 +168,8 @@ public struct AIConfig: Codable, Equatable, Sendable {
             try AIValidation.text(BoardPrompt.compose(base: boardPrompt ?? BoardPrompt.builtIn, location: boardLocation),
                                   limit: AILimits.questionBytes, nonempty: true)
         }
-        if autoStart == true, board == nil, (autoPrompt ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw invalid("autoStart requires a non-empty autoPrompt")
+        if autoStart == true, board == nil, (initialPrompt ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw invalid("autoStart requires a non-empty initialPrompt")
         }
     }
 }
@@ -196,15 +233,15 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public let avatar: String?
     public let cwd: URL
     public let extraArgs: [String]
-    public let prompt: String
+    public let alwaysPrompt: String
     public let notifySound: Bool
     public let allowWork: Bool
     public let identifySpeakers: Bool
-    public let autoPrompt: String
+    public let initialPrompt: String
     public let board: String?
     public let boardPrompt: String?
     public let boardLocation: String?
-    public var scheduledPrompt: String { board == nil ? autoPrompt : (boardPrompt ?? BoardPrompt.builtIn) }
+    public var scheduledPrompt: String { board == nil ? initialPrompt : (boardPrompt ?? BoardPrompt.builtIn) }
     public func scheduledPrompt(minutesPath: String?) -> String {
         guard board != nil, minutesPath == nil, let boardLocation else { return scheduledPrompt }
         return BoardPrompt.compose(base: scheduledPrompt, location: boardLocation)
@@ -229,18 +266,21 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
                 ? $0 : ResolvedConfig.expand($0, home: home).path
         }
         cwd = ResolvedConfig.expand(config.cwd ?? Self.defaultCWD, home: home)
-        extraArgs = config.extraArgs ?? []; prompt = config.prompt ?? ""
+        extraArgs = config.extraArgs ?? []; alwaysPrompt = config.alwaysPrompt ?? ""
         notifySound = config.notifySound ?? false
         allowWork = config.allowWork ?? true
         identifySpeakers = config.identifySpeakers ?? false
-        autoPrompt = config.autoPrompt ?? ""; autoIntervalMinutes = config.autoIntervalMinutes ?? 3
+        initialPrompt = config.initialPrompt ?? ""; autoIntervalMinutes = config.autoIntervalMinutes ?? 3
         board = config.board; boardPrompt = config.boardPrompt; boardLocation = config.boardLocation
         autoStart = config.autoStart ?? false
     }
 
     private enum CodingKeys: String, CodingKey {
-        case cli, command, herdrCommand, model, address, cwd, extraArgs, prompt, notifySound, allowWork
-        case autoPrompt, autoIntervalMinutes, board, boardPrompt, boardLocation
+        // 保存済みmanifestのキーは改名せず、新旧アプリで同じ形式を読む。
+        case cli, command, herdrCommand, model, address, cwd, extraArgs, notifySound, allowWork
+        case alwaysPrompt = "prompt"
+        case autoIntervalMinutes, board, boardPrompt, boardLocation
+        case initialPrompt = "autoPrompt"
         case slot, name, effort, autoStart, avatar, identifySpeakers
     }
     public init(from decoder: Decoder) throws {
@@ -253,12 +293,12 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         avatar = try values.decodeIfPresent(String.self, forKey: .avatar)
         cwd = try values.decode(URL.self, forKey: .cwd)
         extraArgs = try values.decode([String].self, forKey: .extraArgs)
-        prompt = try values.decode(String.self, forKey: .prompt)
+        alwaysPrompt = try values.decode(String.self, forKey: .alwaysPrompt)
         notifySound = try values.decode(Bool.self, forKey: .notifySound)
         // 旧会議のmanifestにこのキーが無い場合だけ、以前の作業可能な契約を引き継ぐ。
         allowWork = try values.contains(.allowWork) ? values.decode(Bool.self, forKey: .allowWork) : true
         identifySpeakers = try values.contains(.identifySpeakers) ? values.decode(Bool.self, forKey: .identifySpeakers) : false
-        autoPrompt = try values.contains(.autoPrompt) ? values.decode(String.self, forKey: .autoPrompt) : ""
+        initialPrompt = try values.contains(.initialPrompt) ? values.decode(String.self, forKey: .initialPrompt) : ""
         board = try values.contains(.board) ? values.decode(String.self, forKey: .board) : nil
         boardPrompt = try values.contains(.boardPrompt) ? values.decode(String.self, forKey: .boardPrompt) : nil
         boardLocation = try values.contains(.boardLocation) ? values.decode(String.self, forKey: .boardLocation) : nil
@@ -274,7 +314,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         // 長い宛名の会議が復号できなくなると未完了の回収まで止まる。
         // 明示された `name` は設定の解析時と同じ基準で検証する。
         try AIConfig(name: name == fallbackName ? nil : name, cli: cli, effort: effort, avatar: avatar,
-                     autoPrompt: autoPrompt, autoIntervalMinutes: autoIntervalMinutes, board: board, boardPrompt: boardPrompt,
+                     initialPrompt: initialPrompt, autoIntervalMinutes: autoIntervalMinutes, board: board, boardPrompt: boardPrompt,
                      boardLocation: boardLocation).validate()
     }
 }

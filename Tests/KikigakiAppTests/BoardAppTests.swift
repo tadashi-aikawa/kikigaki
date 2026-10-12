@@ -10,7 +10,7 @@ import KikigakiAIIO
         try ResolvedConfig(config: ConfigLoader.parse(toml: """
         [[ai]]
         board = "## ボード"
-        autoPrompt = "議事録本文を更新"
+        initialPrompt = "議事録本文を更新"
         autoStart = true
         """), home: root)
     }

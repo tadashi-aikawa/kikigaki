@@ -313,7 +313,7 @@ final class AIConversationController {
               slot(of: supplied) == config.slot else { throw AIHerdrError.notReady }
         channel.isSending = true
         defer { channel.isSending = false; onChange?() }
-        let text = try stored.request.envelope.prompt(address: config.address, extraPrompt: config.prompt)
+        let text = try stored.request.envelope.prompt(address: config.address, alwaysPrompt: config.alwaysPrompt)
         try await refreshConnection(slot: config.slot)
         try Task.checkCancellation()
         guard channel.connectionStatus == .idle, let target = channel.connection else { throw AIHerdrError.notReady }

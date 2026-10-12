@@ -33,7 +33,7 @@ AIの行は常に展開し、畳む操作は持たない。
 
 ### 送信の表し方の分岐
 
-送信の形は `question_source` だけでは決まらない。自動送信は `autoPrompt` を送るので `question_source` はtypedだが、人側の行にはしない。
+送信の形は `question_source` だけでは決まらない。自動送信は自動実行シートの文面を送るので `question_source` はtypedだが、人側の行にはしない。
 
 | 条件 | 送信の行 | 返事の上の引用 |
 |---|---|---|

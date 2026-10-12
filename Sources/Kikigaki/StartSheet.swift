@@ -84,6 +84,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     let interval = NSPopUpButton()
     private let cwdLabel = Washi.label(size: 12, color: Washi.muted)
     let editor = AIQuestionEditor()
+    let alwaysPromptHint = AIAlwaysPromptHint()
+    let manualAlwaysPromptHint = AIAlwaysPromptHint()
     let work = NSButton(checkboxWithTitle: "作業を許可する(ファイル編集・コマンド実行)", target: nil, action: nil)
     let final = NSButton(checkboxWithTitle: "録音停止時に最後の1回を送る", target: nil, action: nil)
     let aiDetails = NSStackView()
@@ -212,7 +214,9 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             manualDestination.font = .systemFont(ofSize: 13)
             manualDestination.target = self; manualDestination.action = #selector(manualDestinationChanged)
             add(separator(), to: rows)
-            add(row("手動送信", manualDestination), to: rows)
+            // 指示が無い宛先でも1行分を残し、選び直しても操作部の位置を変えない。
+            let manualChoices = column([manualDestination, manualAlwaysPromptHint], spacing: 6, detachesHiddenViews: false)
+            add(row("手動送信", manualChoices), to: rows)
             rebuildDestinationMenu(manual: true)
         }
         stack.addArrangedSubview(Washi.label("録音を開始", size: 17, weight: .semibold))
@@ -416,9 +420,10 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         value.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
         return stack
     }
-    private func column(_ views: [NSView], spacing: CGFloat) -> NSStackView {
+    private func column(_ views: [NSView], spacing: CGFloat, detachesHiddenViews: Bool = true) -> NSStackView {
         let stack = NSStackView()
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = spacing
+        stack.detachesHiddenViews = detachesHiddenViews
         for view in views { add(view, to: stack) }
         return stack
     }
@@ -468,7 +473,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
 
         for control in [work, final] { control.target = self; control.action = #selector(draftChanged) }
         aiDetails.orientation = .vertical; aiDetails.alignment = .leading; aiDetails.spacing = 6
-        for view in [cwdRow, scroll] { add(view, to: aiDetails) }
+        for view in [cwdRow, scroll, alwaysPromptHint] { add(view, to: aiDetails) }
         aiDetails.addArrangedSubview(intervalRow)
         aiDetails.addArrangedSubview(work)
         aiDetails.addArrangedSubview(final)
@@ -496,7 +501,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
                 attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)])
             title.append(NSAttributedString(string: "\n" + Self.meta(profile), attributes: [
                 .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]))
-            if let prompt = Self.promptLine(profile.board.map { BoardPrompt.summary(heading: $0) } ?? profile.autoPrompt) {
+            if let prompt = Self.promptLine(profile.board.map { BoardPrompt.summary(heading: $0) } ?? profile.initialPrompt) {
                 title.append(NSAttributedString(string: "\n" + prompt, attributes: [
                     .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]))
             }
@@ -522,6 +527,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     func selectManualDestination(_ slot: Int?) {
         selectedManualSlot = slot
         manualDestination.selectItem(withTag: slot ?? 0)
+        manualAlwaysPromptHint.update(profiles.first(where: { $0.slot == slot })?.alwaysPrompt ?? "")
         refreshManualDestinationTitle()
     }
     private func refreshManualDestinationTitle() {
@@ -580,6 +586,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     private func selectDestination(_ slot: Int?) {
         selectedSlot = slot
         destination.selectItem(withTag: slot ?? 0)
+        alwaysPromptHint.update(profiles.first(where: { $0.slot == slot })?.alwaysPrompt ?? "")
         // 高さを保ったまま、送らない設定は薄くして操作を止める。
         aiDetails.alphaValue = slot == nil ? 0.4 : 1
         for control in [interval, work, final] { control.isEnabled = slot != nil }

@@ -12,7 +12,7 @@
     - 手動: 開くたびに会議の手動送信の宛先を選ぶ。「指定しない」なら設定の1つ目。
     - 自動: 既定は1つ目、会議内では前回の選択を覚える。
     - 同時送信: 手動と自動で別のプロファイルを使える。
-- 通常の手動実行も宛先の `autoPrompt` を初期表示する。空欄を含む編集内容は宛先ごとに保持し、送信後やシートの開き直しでも復元する。自動実行の下書きとは独立し、新しい録音でリセットする。確認への返答・失敗した依頼の再送にはこの初期値を使わない。
+- 通常の手動実行も宛先の `initialPrompt` を初期表示する。空欄を含む編集内容は宛先ごとに保持し、送信後やシートの開き直しでも復元する。自動実行の下書きとは独立し、新しい録音でリセットする。確認への返答・失敗した依頼の再送にはこの初期値を使わない。
 - herdrセッション・世代・`AIStreamHistory` はプロファイルごとに持つ。会議内の `#n` は全体で通し、印とMarkdownの宛名で区別する。
 - AIセッションはKIKIGAKIが `workspace create` と `agent start` で起こす。フック・サンドボックス許可・返送コマンド許可を渡せる形を保つ。
 - プロファイルの `autoStart = true` は、録音開始シートの自動送信の宛先の既定になる。自動送信の始まり方は [ai-scheduled.md](ai-scheduled.md) を参照する。
@@ -30,7 +30,7 @@ effort = "high"
 address = "迅雷へ"
 cwd = "~/work/minutes"         # 起動時の作業ディレクトリ。省略時は固定の既定
 autoStart = true
-autoPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
+initialPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ更新してください"
 autoIntervalMinutes = 3
 
 [[ai]]
@@ -52,12 +52,12 @@ address = "ネオへ"                # cwd を省いたので既定のディレ�
 | avatar | 省略時は紫のイニシャル。ローカルパスまたはhttp/httpsのURL。下記の「アバターの指定」を参照。 |
 | cwd | 省略時は従来どおり固定の `~/Library/Application Support/KIKIGAKI/ai-work/`。起動時の作業ディレクトリで、プロファイルごとに変えられる。指定時は絶対パスまたは先頭の `~/` を解決し、存在するディレクトリであることを確認する。 |
 | extraArgs | 空配列。引数の配列でありシェル文字列ではない。下記の規則で検証する。 |
-| prompt | 空文字列。利用者が指定する追加指示。32 KiBまで。接続プロトコルを上書きする位置へ置かない。 |
+| alwaysPrompt | 空文字列。すべての送信の末尾へ「追加プロンプト」として付く補助指示。32 KiBまで。接続プロトコルを上書きする位置へ置かない。 |
 | notifySound | false。trueのときだけ、返事が届いた枠の設定でアプリから通知音を鳴らす。 |
 | allowWork | true。送信シートの「作業を許可する」の初期値。会議内の変更を次の質問にも引き継ぎ、新しい録音で設定値へ戻す。 |
 | identifySpeakers | false。trueの宛先の送信に話者名の割当を同梱する。真偽値だけを認める。契約は [AI参加者の設計](ai-participant.md#話者名の割当) を参照。 |
-| autoStart | false。trueは配列全体で1つまで。`board` を指定しない宛先は `autoPrompt` が空なら設定エラー。録音開始シートの宛先の既定になる。 |
-| autoPrompt | 空文字列。手動・自動実行シートと録音開始シートのプロンプトの初期値。32 KiBまで。 |
+| autoStart | false。trueは配列全体で1つまで。`board` を指定しない宛先は `initialPrompt` が空なら設定エラー。録音開始シートの宛先の既定になる。 |
+| initialPrompt | 空文字列。手動・自動実行シートと録音開始シートのプロンプトの初期値。32 KiBまで。 |
 | autoIntervalMinutes | 3。1〜120分。 |
 | board | 省略時はボードなし。単一のMarkdown見出し(`#` から `######`)。配列内の重複を許す。 |
 | boardPrompt | `board` があるときだけ指定できる。省略時は内蔵のボードプロンプト。 |
@@ -66,7 +66,7 @@ address = "ネオへ"                # cwd を省いたので既定のディレ�
 
 単数 `[ai]` は設定エラーにし、`[[ai]]` と書くよう示す。
 
-`board` を指定した宛先は、自動だけ内蔵のボードプロンプトを使い、`autoPrompt` は手動の初期値に残す。`boardPrompt` で全文差し替えが可能。`autoStart` はboardがあれば `autoPrompt` の省略を許す。詳細は [議論のボード](board.md)。
+`board` を指定した宛先は、自動だけ内蔵のボードプロンプトを使い、`initialPrompt` は手動の初期値に残す。`boardPrompt` で全文差し替えが可能。`autoStart` はboardがあれば `initialPrompt` の省略を許す。詳細は [議論のボード](board.md)。
 
 ### CLIとherdrの実行ファイルの探し方
 
@@ -189,6 +189,8 @@ manifestは `schemaVersion` を2へ上げ、`config` を `profiles: [ResolvedAIP
 ## 互換
 
 - 旧manifest(schemaVersion 1)を持つ会議は回収できる。旧requestは `profile` を持たないので slot 1 として表示し、旧 `sessionPath` 形式で検証する。
+- manifestの設定は、保存キー `prompt` と `autoPrompt` を読み書きし続ける。
+    - 理由: TOML設定の改名で保存済み会議の回収を壊さない。コード内では `alwaysPrompt` と `initialPrompt` に対応付ける。
 - 旧 `state.json` と `archive.json` はそのまま読める。`AIConversation` の形を変えない。
 - 旧 `ai/sessions/<generation>.json` は残したまま読む。新規も、プロファイルが1つだけの会議は同じ平置きへ書き、2つ以上のときだけ枝を切る。同じ会議を新旧アプリで交互に開く運用は想定しない。
 - 配布用Skillの契約は変えない。envelopeの追加キーは既知の任意キーとして無視されてよい。
