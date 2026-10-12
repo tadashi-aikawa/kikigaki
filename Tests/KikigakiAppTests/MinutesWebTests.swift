@@ -259,12 +259,11 @@ import Testing
         _ = try await web.evaluateJavaScript("""
         window.matchMedia = () => ({ matches:false }); navigate(10);
         window.pendingNavigation = testFrameID;
-        const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
-        Object.defineProperty(document.querySelector('main'), 'innerHTML', {
-          configurable:true,
-          get() { return descriptor.get.call(this); },
-          set(value) { window.cancelledBeforeReplacement = !testFrames.has(pendingNavigation); descriptor.set.call(this, value); }
-        });
+        const main = document.querySelector('main'), replace = main.replaceChildren.bind(main);
+        main.replaceChildren = (...nodes) => {
+          window.cancelledBeforeReplacement = !testFrames.has(pendingNavigation);
+          replace(...nodes);
+        };
         void 0;
         """)
         document.render("# 新しい議事録", reset: true)

@@ -202,7 +202,8 @@ async function renderDiagram(id, definition) {
   measure.style.cssText = `position:fixed;visibility:hidden;zoom:${1 / scale};width:${document.body.clientWidth}px`;
   document.body.append(measure);
   try {
-    const result = await mermaid.render(id, definition, scale === 1 ? undefined : measure);
+    // 等倍でも隠した計測先を渡す。省略するとMermaidがbodyへ作る途中のSVGが見える。
+    const result = await mermaid.render(id, definition, measure);
     // 非同期描画の途中で倍率が変わったら、新しい倍率を打ち消して計測し直す。
     if (scale !== textScale) { measure.remove(); return renderDiagram(id, definition); }
     measure.innerHTML = result.svg;
@@ -367,8 +368,30 @@ window.minutes = {
     canvas.positionControls();
   },
   async render(text, newContext, reset, ticket, newVault, boardLinksEnabled = false, boardCanvasEnabled = false) {
-    cancelNavigation();
     const current = ++generation;
+    // 次の本文はDOMへ接続せずに組み、全ての図ができるまで今の表示と操作を残す。
+    // 画面位置の記憶も差し替え直前に行い、描画待ちの間の操作を引き継ぐ。
+    const draft = document.createElement('div'), codeBlocks = [], prepared = [];
+    draft.innerHTML = safeHTML(md.render(withoutFrontmatter(text), {
+      context:newContext, vault:newVault || '', cleanHTML, codeBlocks,
+    }));
+    const primarySource = boardCanvasEnabled ? draft.querySelector('.mermaid-source') : null;
+    for (const pre of [...draft.querySelectorAll('.mermaid-source')]) {
+      if (current !== generation) return;
+      try {
+        const board = boardLinksEnabled ? boardLinks(pre.textContent) : { definition:pre.textContent, links:new Map() };
+        const definition = isTimeline(board.definition) ? wrapTimeline(board.definition, fitsTimelineNode) : board.definition;
+        const { svg } = await renderDiagram('diagram-' + current + '-' + crypto.randomUUID(), definition);
+        if (current !== generation) return;
+        const holder = document.createElement('div'); holder.className = 'diagram';
+        holder.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg:true, svgFilters:true }, FORBID_TAGS: ['foreignObject', 'script', 'a'] });
+        pre.replaceWith(holder);
+        prepared.push({ holder, board, primary:pre === primarySource });
+      } catch { pre.title = '図を描画できないため、記法を表示しています'; }
+    }
+    if (current !== generation) return;
+    // ここから描画完了までawaitを挟まず、本文・図の操作・検索を一度に見せ直す。
+    cancelNavigation();
     if (reset) updates.reset();
     if (reset) diagrams.reset(); else diagrams.detach();
     if (reset) canvas.reset(); else canvas.detach();
@@ -381,11 +404,9 @@ window.minutes = {
     };
     source = text; context = newContext; vault = newVault || '';
     closeImage();
-    const codeBlocks = [];
-    root.innerHTML = safeHTML(md.render(withoutFrontmatter(text), { context, vault, cleanHTML, codeBlocks }));
+    root.replaceChildren(...draft.childNodes);
     // 図がない旧ボードは従来の文書としてそのまま読める。
-    const primarySource = boardCanvasEnabled ? root.querySelector('.mermaid-source') : null;
-    document.body.classList.toggle('board-canvas-mode', !!primarySource);
+    document.body.classList.toggle('board-canvas-mode', prepared.some(diagram => diagram.primary));
     decorateCodeBlocks(codeBlocks, ticket);
     prepareSections(reset);
     decorateCallouts();
@@ -400,7 +421,7 @@ window.minutes = {
       image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(clean);
       pre.replaceWith(image);
     }
-    // 画像要求が即完了しても取りこぼさないよう、図の非同期描画より前に登録する。
+    // 画像要求が即完了しても取りこぼさないよう、本文へ接続した直後に登録する。
     let restore = true;
     const stop = () => { restore = false; };
     addEventListener('wheel', stop, { once: true, passive: true, signal: updateListeners.signal });
@@ -421,46 +442,34 @@ window.minutes = {
       image.addEventListener('error', failed, { once: true, signal: updateListeners.signal });
       if (image.complete) { if (image.naturalWidth) loaded(); else failed(); }
     }
-    restoreAnchor(saved); restoreSelection(selection); refreshSearch();
     const diagramCounts = new Map(), diagramKeys = new Set();
-    for (const pre of [...root.querySelectorAll('.mermaid-source')]) {
-      if (current !== generation) return;
-      const holder = document.createElement('div'); holder.className = 'diagram';
-      try {
-        const board = boardLinksEnabled ? boardLinks(pre.textContent) : { definition: pre.textContent, links: new Map() };
-        const definition = isTimeline(board.definition) ? wrapTimeline(board.definition, fitsTimelineNode) : board.definition;
-        const { svg } = await renderDiagram('diagram-' + current + '-' + crypto.randomUUID(), definition);
-        if (current !== generation) return;
-        holder.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true }, FORBID_TAGS: ['foreignObject', 'script', 'a'] });
-        const navigate = target => {
-          // 詳細図は同じボード内。そこに無い見出しだけ議事録タブへ渡す。
-          if (!window.minutes.jump(target)) report({ kind: 'boardAnchor', target });
-        };
-        if (pre !== primarySource) attachBoardLinks(holder, board.links, navigate);
-        pre.replaceWith(holder);
-        // 文言の更新ではキーを変えない。見出しのIDと、その節内の図の順番で対応付ける。
-        const section = holder.closest('.heading-section');
-        const sectionID = section?.querySelector(':scope > :is(h1,h2,h3,h4,h5,h6)')?.id || '';
-        const index = diagramCounts.get(sectionID) || 0; diagramCounts.set(sectionID, index + 1);
-        const key = JSON.stringify([sectionID, index]); diagramKeys.add(key);
-        const primary = pre === primarySource;
-        const cleanup = primary ? canvas.attach(holder, 'board', { canvas:true, navigate:id => {
-          if (board.links.has(id)) navigate(board.links.get(id));
-        } }) : diagrams.attach(holder, key);
-        if (primary) {
-          // 残りは消さず、キャンバスの手前で開ける文書へ移す。旧複数図も読み続けられる。
-          holder.remove();
-          const legacy = document.createElement('details'); legacy.className = 'board-legacy';
-          legacy.open = !!legacyState?.open;
-          const summary = document.createElement('summary'); summary.dataset.label = '以前の本文';
-          summary.setAttribute('aria-label', '以前のボードの本文を表示');
-          const body = document.createElement('div'); body.className = 'board-legacy-body';
-          body.append(...root.childNodes); legacy.append(summary, body);
-          root.append(holder);
-          if (body.textContent.trim() || body.querySelector('.diagram,img')) root.append(legacy);
-        }
-        updateListeners.signal.addEventListener('abort', cleanup, { once:true });
-      } catch { pre.title = '図を描画できないため、記法を表示しています'; }
+    for (const { holder, board, primary } of prepared) {
+      const navigate = target => {
+        // 詳細図は同じボード内。そこに無い見出しだけ議事録タブへ渡す。
+        if (!window.minutes.jump(target)) report({ kind: 'boardAnchor', target });
+      };
+      if (!primary) attachBoardLinks(holder, board.links, navigate);
+      // 文言の更新ではキーを変えない。見出しのIDと、その節内の図の順番で対応付ける。
+      const section = holder.closest('.heading-section');
+      const sectionID = section?.querySelector(':scope > :is(h1,h2,h3,h4,h5,h6)')?.id || '';
+      const index = diagramCounts.get(sectionID) || 0; diagramCounts.set(sectionID, index + 1);
+      const key = JSON.stringify([sectionID, index]); diagramKeys.add(key);
+      const cleanup = primary ? canvas.attach(holder, 'board', { canvas:true, navigate:id => {
+        if (board.links.has(id)) navigate(board.links.get(id));
+      } }) : diagrams.attach(holder, key);
+      if (primary) {
+        // 残りは消さず、キャンバスの手前で開ける文書へ移す。旧複数図も読み続けられる。
+        holder.remove();
+        const legacy = document.createElement('details'); legacy.className = 'board-legacy';
+        legacy.open = !!legacyState?.open;
+        const summary = document.createElement('summary'); summary.dataset.label = '以前の本文';
+        summary.setAttribute('aria-label', '以前のボードの本文を表示');
+        const body = document.createElement('div'); body.className = 'board-legacy-body';
+        body.append(...root.childNodes); legacy.append(summary, body);
+        root.append(holder);
+        if (body.textContent.trim() || body.querySelector('.diagram,img')) root.append(legacy);
+      }
+      updateListeners.signal.addEventListener('abort', cleanup, { once:true });
     }
     if (current !== generation) return;
     document.body.classList.toggle('board-canvas-mode', !!root.querySelector('.board-canvas'));

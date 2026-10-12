@@ -157,6 +157,7 @@ AIへ依頼を送った時点と、その依頼の `progress --editing` を観�
     - 解除: Escまたは余白のクリック。図の操作はその後も有効。
     - キーボード: Enter・Spaceもクリックと同じ2段階。
 - 更新: 最初の表示または「全体」のままなら、新しい図全体へ収め直す。
+    - 描画待ち: 前の図の表示と操作を保つ。新しい本文内の全図を準備してから、本文と図を一度に差し替える。
     - フォーカス中: MermaidのT番号を突き合わせ、倍率とノードの画面内位置を保つ。
     - 手動操作後: フォーカスがなければ、キャンバス中央に最も近いノードを同じ位置へ置き直す。
     - 対応するノードがない場合: 倍率と移動量の数値を保つ。
@@ -185,6 +186,13 @@ WKWebViewは`allowsMagnification = false`を維持する[^diagram-gesture]。
 [^diagram-gesture]: [Apple: allowsMagnification](https://developer.apple.com/documentation/webkit/wkwebview/allowsmagnification)、[WebKit: WebViewImpl::magnifyWithEvent](https://github.com/WebKit/WebKit/blob/main/Source/WebKit/UIProcess/mac/WebViewImpl.mm)。実際のトラックパッド操作は実機確認が必要。
 
 ファイル切替・取消の世代をSwiftとJavaScriptの両側で確認する。同じファイルの更新は先頭可視ブロックとその位置、選択の文字位置を保存して復元する。短縮時は有効範囲へ収める。別ファイルは先頭へ戻す。
+
+議事録タブのMermaid図も、前の表示を保ったまま新しい図を準備する。
+
+- 準備: 次の本文はDOMへ接続せずに組む。Mermaidの文字計測だけは、等倍でも非表示の接続済み要素へ描画する。
+- 差し替え: 全図の描画後に世代を確認し、本文・図の操作・検索を同期的に更新する。閲読位置と図の状態は差し替え直前に記憶する。
+    - 理由: 描画待ちの間の操作も更新後へ引き継ぐため。
+- 失敗: 描画できない図は、差し替え後にその定義文を表示する。成功した他の図は通常どおり表示する。
 
 Vaultの判定はSwift側で行い、議事録の切替ごとにやり直す。議事録の親から上へ `.obsidian` ディレクトリを探し、最も近いものがあるディレクトリをVaultルート、そのbasenameをVault名とする。探索はファイルシステムのルートまでで、シンボリックリンクは追わず、`.obsidian` 自身がリンクやファイルのものは採らない。Vault名は本文とは別の引数でJavaScriptへ渡し、Vault外ではnullにして他ノートへのwikilinkを描かない[^vault]。クリックしたwikilinkは宛先だけをSwiftへ返し、`obsidian://open?vault=…&file=…` を組んで開く。末尾の `.md` は落とし、`/` や空白や `#` を含む予約文字はすべてパーセント符号化する。
 
@@ -241,6 +249,15 @@ debug版.appは `--preview-minutes <絶対パス>` で議事録の検証画面�
 
 - 撮影: 初期表示、ノードへのフォーカス、ズーム中の更新前後、ミニマップ、旧ボードの本文。
 - 保存: `/tmp` 配下だけ。画素比較用のPNGと使い捨てMarkdown。通常のテストでは撮影しない。
+
+`KIKIGAKI_DIAGRAM_UPDATE_CAPTURE=/tmp/kikigaki-diagram-update/after.json swift web/minutes/measure-update.swift` で、ボードと議事録の更新前・途中・後を計測する。
+
+- 条件: 900×850pt、文字100%・200%。ボードは60ノード、議事録は同じ図とmindmap・timelineの3図。
+- 計測: MutationObserverと実requestAnimationFrameで、前の図が残る回数、定義文・図なし・可視の一時SVGが現れる回数を記録する。
+- 比較: `KIKIGAKI_DIAGRAM_UPDATE_ASSETS` に `/tmp` 配下の別資産ディレクトリを指定できる。
+    - 変更前: `node web/minutes/measure-update-assets.mjs /tmp/kikigaki-diagram-update/before-assets` でHEADの更新経路を生成する。
+- 保存: `/tmp` 配下のJSONだけ。非永続WKWebViewを使い、利用者の設定・会議データは読まない。
+- 回帰: `DiagramUpdateTests` で両タブの100%・200%、待機中の操作、連続更新、取消、描画失敗を検証する。
 
 `KIKIGAKI_BOARD_SEARCH_CAPTURE=/tmp/kikigaki-board-search` を付けて `swift test --filter BoardSearchTests` を実行すると、30ノードの検索前・1件目・2件目を文字100%・200%で撮影する。
 
