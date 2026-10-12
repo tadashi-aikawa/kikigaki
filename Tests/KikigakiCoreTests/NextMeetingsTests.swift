@@ -53,12 +53,17 @@ struct NextMeetingsTests {
     }
     @Test func JSONはローカル日時と登録時刻の精度を保ち不正な値を復元しない() throws {
         let original = try NextMeeting(minutesPath: "/会議/定例.md", title: "定例", at: "2026-10-10T12:00",
-                                       ai: "未設定の宛先", createdAt: Date(timeIntervalSince1970: 1000.000125))
+                                       ai: "未設定の宛先", manual: "スライド", createdAt: Date(timeIntervalSince1970: 1000.000125))
         let data = try JSONEncoder().encode(original)
         #expect(try JSONDecoder().decode(NextMeeting.self, from: data) == original)
         let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(json["at"] as? String == "2026-10-10T12:00")
         #expect(json["minutes_path"] as? String == "/会議/定例.md")
+        #expect(json["manual"] as? String == "スライド")
+        var old = json; old.removeValue(forKey: "manual")
+        #expect(try JSONDecoder().decode(NextMeeting.self, from: JSONSerialization.data(withJSONObject: old)).manual == nil)
+        var invalidManual = json; invalidManual["manual"] = "\n"
+        #expect(throws: (any Error).self) { try JSONDecoder().decode(NextMeeting.self, from: JSONSerialization.data(withJSONObject: invalidManual)) }
         var bad = json; bad["minutes_path"] = "relative.md"
         #expect(throws: (any Error).self) { try JSONDecoder().decode(NextMeeting.self, from: JSONSerialization.data(withJSONObject: bad)) }
     }

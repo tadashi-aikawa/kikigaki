@@ -158,12 +158,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var replayDestinationPending = false
     init(replayDebug: ReplayDebugOptions = .init()) { self.replayDebug = replayDebug; super.init() }
 
+    private var aiHelper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
+
     convenience init(testingSession: MeetingSession, config: ResolvedConfig,
-                     window: TranscriptWindowController? = nil, nextMeetingStore: NextMeetingStore? = nil) {
+                     window: TranscriptWindowController? = nil, nextMeetingStore: NextMeetingStore? = nil,
+                     aiHelper: URL? = nil) {
         self.init()
         self.session = testingSession; self.config = config
         self.window = window
         self.nextMeetingStore = nextMeetingStore
+        if let aiHelper { self.aiHelper = aiHelper }
     }
 
     /// `KIKIGAKI_TRIAL=1 ./scripts/make-app.sh` が組む試験用 `.app` の識別子
@@ -410,6 +414,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do { try session.prepareMinutes(options.minutesPath) }
             catch { Self.log("議事録の指定を引き継げません: \(error)") }
             session.pendingAutomaticSchedule = .init(slot: options.scheduleSlot, options: options.schedule)
+            session.pendingManualDestination = .init(slot: options.manualSlot)
         }
         window?.show()
         if replayURL != nil {
@@ -429,6 +434,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch { Self.log("replay 自動送信の指定が不正: \(error)"); exit(1) }
         }
         let started = await session.start(source: source)
+        if started, let options, !session.meetingAIProfiles.isEmpty {
+            let name = session.meetingAIProfiles.first { $0.slot == options.manualSlot }?.name ?? ""
+            UserDefaults.standard.set(name, forKey: StartSheet.manualDefaultsKey)
+        }
         consumeNextMeeting(options: options, started: started)
         // 議事録を指定したら、開始と同時に右のペインへ出す。
         if started, options?.minutesPath != nil || replayDebug.minutesPath != nil { window?.showMinutes() }
@@ -450,7 +459,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let options = try AIScheduleOptions(prompt: automatic.prompt, interval: automatic.interval,
                                                     workAllowed: session.aiWorkAllowed)
                 try session.startAISchedule(options: options,
-                    helper: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli"))
+                    helper: aiHelper)
                 Self.log("replay 自動送信開始: \(options.interval)秒")
             } catch { Self.log("replay 自動送信を開始できない: \(error)"); exit(1) }
         }
@@ -539,7 +548,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nextDebugQuestion += 1
         let target = session.aiConfiguration
         Self.log("replay AI質問\(nextDebugQuestion): 指定\(question.seconds)秒、音声\(snapshot.elapsed)秒、宛先\(target?.name ?? "-")で送信開始")
-        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
+        let helper = aiHelper
         session.submitAI(question: question.text, full: false, parent: nil, helper: helper, profile: target)
         // 入口で弾かれると何も起きない。始まったかどうかを残す。
         Self.log("replay AI質問\(nextDebugQuestion): 送信タスク開始 \(session.isAIBusy(slot: target?.slot ?? 1))")
@@ -602,6 +611,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let parent = parent ?? source?.request.envelope.participant.inReplyToRequestID
         // 確認への返答と再送はシート全体を元質問の宛先へ固定する。送信先だけ直しても、
         // 送信可否・進捗・範囲・ペイン操作・表題が現在の選択を見ていては噛み合わない。
+        if parent == nil && resend == nil && aiSheet == nil { session.selectManualSheetDestination() }
         guard let config = (resend ?? parent).flatMap({ session.aiProfile(forRequest: $0) }) ?? session.aiConfiguration else { return }
         let fixed = parent != nil || resend != nil
         if let aiSheet { aiSheet.window.makeFirstResponder(aiSheet.window.firstResponder); return }
@@ -655,10 +665,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sheet.onPane = { session.showAIPane(slot: fixed ? slot : session.aiConfiguration?.slot) }
         sheet.onSubmit = { [weak self] text, full in
             if !fixed { session.updateManualDraft(text, slot: displayedSlot) }
-            let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
+            guard let self else { return }
+            let helper = self.aiHelper
             let target = fixed ? config : session.aiConfiguration
-            self?.aiSheetSlot = target?.slot
-            session.submitAI(question: text, full: full, parent: parent, helper: helper, profile: target)
+            self.aiSheetSlot = target?.slot
+            session.submitAI(question: text, full: full, parent: parent, helper: helper, profile: target,
+                             updateManualDestination: !fixed)
         }
         aiSheet = sheet; aiSheetMeetingID = session.aiMeetingID
         aiSheetSlot = slot
@@ -669,12 +681,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               session.snapshot.state == .recording || session.snapshot.state == .paused,
               aiSheet == nil, scheduleSheet == nil else { return }
         let target = session.aiScheduleConfiguration ?? config
+        let helper = aiHelper
         let sheet = AIScheduleSheet(session: session, profile: target)
         sheet.onCancel = { [weak self] in self?.scheduleSheet = nil }
         sheet.onStart = { [weak self, weak sheet] options in
             do {
                 try session.startAISchedule(options: options,
-                    helper: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli"),
+                    helper: helper,
                     profile: session.aiScheduleConfiguration)
                 sheet?.close(); self?.scheduleSheet = nil
             } catch {

@@ -4,7 +4,7 @@ import KikigakiAIIO
 
 struct NextCommand {
     enum Failure: Error { case arguments, invalidPath, invalidAt, missing }
-    static let usage = "kikigaki-cli next add --minutes <path> [--title <題>] [--at <HH:mm|YYYY-MM-DDTHH:mm>] [--ai <name>] | next list | next remove <id>"
+    static let usage = "kikigaki-cli next add --minutes <path> [--title <題>] [--at <HH:mm|YYYY-MM-DDTHH:mm>] [--ai <name>] [--manual <name>] | next list | next remove <id>"
     enum Action { case add, list, remove(UUID) }
     let action: Action
     private let values: [String: String]
@@ -23,7 +23,7 @@ struct NextCommand {
             var index = 2
             while index < arguments.count {
                 let key = arguments[index]
-                guard ["--minutes", "--title", "--at", "--ai"].contains(key),
+                guard ["--minutes", "--title", "--at", "--ai", "--manual"].contains(key),
                       options[key] == nil, index + 1 < arguments.count else { throw Failure.arguments }
                 options[key] = arguments[index + 1]; index += 2
             }
@@ -44,12 +44,12 @@ struct NextCommand {
             do { at = try values["--at"].map { try NextMeeting.resolveAt($0, now: now, timeZone: timeZone) } }
             catch { throw Failure.invalidAt }
             let meeting = try NextMeeting(minutesPath: path, title: values["--title"], at: at,
-                                          ai: values["--ai"], createdAt: now)
+                                          ai: values["--ai"], manual: values["--manual"], createdAt: now)
             try store.add(meeting)
             return [meeting.id.uuidString]
         case .list:
             return try store.load().meetings.map { meeting in
-                [meeting.id.uuidString, meeting.at ?? "-", meeting.title ?? "-", meeting.ai ?? "-", meeting.minutesPath].joined(separator: "\t")
+                [meeting.id.uuidString, meeting.at ?? "-", meeting.title ?? "-", meeting.ai ?? "-", meeting.minutesPath, meeting.manual ?? "-"].joined(separator: "\t")
             }
         case let .remove(id):
             do { try store.remove(id) } catch AIFileError.missing { throw Failure.missing }

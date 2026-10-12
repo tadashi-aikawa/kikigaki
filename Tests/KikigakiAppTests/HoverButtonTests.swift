@@ -122,7 +122,7 @@ import KikigakiCore
         let speaker = SpeakerButton(); speaker.title = ""; speaker.isBordered = false
         let action = WashiActionButton(title: "停止", target: nil, action: nil)
         action.isBordered = false; action.emphasis = .accentOutline
-        let buttons: [HoverButton] = [AIRobotButton(), AIFooterCount(),
+        let buttons: [HoverButton] = [AIFooterDestination(automatic: true), AIFooterCount(),
             AIFooterButton(symbol: "ellipsis", label: "その他"), AIFooterButton(symbol: "exclamationmark.triangle", label: "警告"),
             SpeakerCountButton(), speaker, AIActionButton("返答する", action: {}),
             AIActionButton("取消", action: {}), action, HoverButton(title: "開く", target: nil, action: nil)]

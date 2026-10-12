@@ -89,6 +89,9 @@ struct AIViewState {
     var progress: String?
     /// 確定待ち・起動・接続からCLI入力試行直前まで。
     var isPreparing = false
+    /// 送信経路ごとの準備状態。宛先を選び直しても自動と手動の表示を混ぜない。
+    var automaticPreparing = false
+    var manualPreparing = false
     var unconfirmed: Set<UUID> = []
     /// 編集・返答へ入ったと確認できた依頼。自己申告とフック観測をまとめた結果だけを持つ
     var progressReports: [UUID: AIProgressReport] = [:]

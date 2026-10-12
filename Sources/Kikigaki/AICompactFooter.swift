@@ -2,7 +2,7 @@ import AppKit
 import KikigakiCore
 
 enum AIFooterMetrics {
-    /// 40ptの部品内で、顔と要返答の丸の中心、下ラベルの原点を揃える。
+    /// 40ptのアイコン部品内で、要返答の丸と下ラベルの原点を揃える。
     static let iconCenterY: CGFloat = 24.5
     static let labelY: CGFloat = 2
     static let labelFont = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium)
@@ -66,63 +66,108 @@ final class AIFooterCount: AIFooterButton {
     }
 }
 
-final class AIRobotButton: AIFooterButton {
+/// 種別・アバター・状態の幅を保ち、宛先名だけを末尾省略する固定サイズの操作部。
+final class AIFooterDestination: HoverButton {
+    let automatic: Bool
+    private let avatars = AvatarStore()
+    var callback: (() -> Void)?
+    private(set) var destination: AIDestinationPicker.Item?
     private(set) var displayText = ""
-    private(set) var eyeOffset: CGFloat = 0
     private(set) var isRunning = false
     private(set) var isPreparing = false
-    var statusFont: NSFont { AIFooterMetrics.labelFont }
-    var eyeColor: NSColor { isRunning && isEnabled ? .white : isEnabled ? tint : Washi.muted }
-    var headFrame: NSRect { NSRect(x: bounds.midX - 11.5, y: AIFooterMetrics.iconCenterY - 8.5, width: 23, height: 17) }
-    init() { super.init(symbol: "", label: "AIの操作") }
+    var statusFont: NSFont { .monospacedDigitSystemFont(ofSize: 10, weight: .medium) }
+    var kindFont: NSFont { .systemFont(ofSize: 10, weight: .medium) }
+    var nameFont: NSFont { .systemFont(ofSize: 12) }
+    var destinationName: String { destination?.name ?? (automatic ? "送らない" : "指定しない") }
+    var filled: Bool { isRunning || isPreparing }
+    var foreground: NSColor { filled ? .white : isEnabled ? Washi.ink : Washi.muted }
+    var fillColor: NSColor {
+        filled ? Washi.red.withAlphaComponent(isEnabled ? 1 : 0.55) : Washi.paper.withAlphaComponent(0.6)
+    }
+    var statusWidth: CGFloat { (displayText as NSString).size(withAttributes: [.font: statusFont]).width }
+    var nameFrame: NSRect {
+        let start: CGFloat = destination == nil ? 32 : 53
+        let end = bounds.width - 7 - (automatic ? 13 : 0) - (displayText.isEmpty ? 0 : statusWidth + 6)
+        return NSRect(x: start, y: bounds.midY - 7, width: max(0, end - start), height: 15)
+    }
+    init(automatic: Bool) {
+        self.automatic = automatic
+        super.init(frame: .zero)
+        title = ""; isBordered = false; target = self; action = #selector(pressed)
+        widthAnchor.constraint(greaterThanOrEqualToConstant: 112).isActive = true
+        heightAnchor.constraint(equalToConstant: 20).isActive = true
+        setContentCompressionResistancePriority(.init(200), for: .horizontal)
+        setContentHuggingPriority(.init(200), for: .horizontal)
+        avatars.onChange = { [weak self] in self?.needsDisplay = true }
+    }
     required init?(coder: NSCoder) { fatalError() }
-    func update(schedule: AIScheduleViewState, waiting: Bool, preparing: Bool = false, animate: Bool, now: Date) {
+    override var isFlipped: Bool { false }
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: min(320, (destinationName as NSString).size(withAttributes: [.font: nameFont]).width + 110), height: 20)
+    }
+    @objc private func pressed() { guard isEnabled else { return }; callback?() }
+    func update(_ item: AIDestinationPicker.Item?, schedule: AIScheduleViewState,
+                waiting: Bool, preparing: Bool, now: Date) {
+        let previousDestination = destination, previousStatusWidth = statusWidth
+        destination = item
         isRunning = waiting
         isPreparing = preparing && !waiting
-        tint = waiting || preparing || schedule.active ? Washi.red : Washi.muted
         let remaining = max(0, Int(ceil(schedule.nextFire?.timeIntervalSince(now) ?? 0)))
         let countdown = String(format: "%d:%02d", remaining / 60, remaining % 60)
-        displayText = waiting ? "実行中" : preparing ? "準備中" : !schedule.active ? "" :
+        displayText = waiting ? "実行中" : preparing ? "準備中" : !automatic || !schedule.active ? "" :
             !schedule.canCountDown || schedule.nextFire == nil ? "—" : countdown
-        eyeOffset = (waiting || preparing) && animate ? (Int(now.timeIntervalSince1970) % 2 == 0 ? -1.5 : 1.5) : 0
-        let status = waiting ? "AI実行中・返事待ち" : preparing ? "AI送信の準備中" : !schedule.active ? "クリックで自動実行・手動実行を選択" :
+        let status = waiting ? "AI実行中・返事待ち" : preparing ? "AI送信の準備中" :
+            !automatic ? (isEnabled ? "クリックで手動実行" : "録音停止後は手動実行できません") :
+            !schedule.active ? "クリックで自動実行を選択" :
             schedule.skipReason ?? (schedule.nextFire == nil ? "最終送信を待っています" : "自動実行を待っています")
-        let tooltip = isEnabled ? [status, schedule.active ? schedule.destination.map { $0 + "へ" } : nil,
-            waiting ? schedule.skipReason : nil].compactMap { $0 }.joined(separator: " · ") : "AI連携が設定されていません"
+        let tooltip = automatic
+            ? [status, schedule.active ? item.map { $0.name + "へ" } ?? schedule.destination.map { $0 + "へ" } : nil,
+               waiting ? schedule.skipReason : nil].compactMap { $0 }.joined(separator: " · ")
+            : ["手動: " + destinationName, status].joined(separator: " · ")
         if toolTip != tooltip { toolTip = tooltip }
-        setAccessibilityLabel("AIの操作、" + (toolTip ?? ""))
+        setAccessibilityLabel((automatic ? "自動、" : "手動、") + destinationName + "、" + tooltip)
+        if previousDestination != destination || previousStatusWidth != statusWidth { invalidateIntrinsicContentSize() }
         needsDisplay = true
     }
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize); needsDisplay = true
+    }
     override func draw(_ dirtyRect: NSRect) {
-        drawHoverBackground()
-        let color = isEnabled ? tint : Washi.muted
-        let face = headFrame
-        let x = face.minX
-        color.setStroke()
-        let head = NSBezierPath(roundedRect: face, xRadius: 4, yRadius: 4)
-        head.lineWidth = 1.7
-        if isRunning && isEnabled { color.setFill(); head.fill() }
-        head.stroke()
-        let antenna = NSBezierPath(); antenna.lineWidth = 1.7
-        antenna.move(to: NSPoint(x: bounds.midX, y: face.maxY)); antenna.line(to: NSPoint(x: bounds.midX, y: face.maxY + 4)); antenna.stroke()
-        color.setFill()
-        NSBezierPath(ovalIn: NSRect(x: bounds.midX - 1.5, y: face.maxY + 4, width: 3, height: 3)).fill()
-        eyeColor.setFill()
-        for eye: CGFloat in [6, 16] {
-            NSBezierPath(ovalIn: NSRect(x: x + eye + eyeOffset - 1.5, y: face.midY - 1.5, width: 3, height: 3)).fill()
+        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 5, yRadius: 5)
+        let accent = isEnabled ? Washi.red : Washi.muted
+        fillColor.setFill(); shape.fill()
+        if !filled { drawHoverBackground() }
+        (destination == nil && !filled ? Washi.muted : accent).setStroke()
+        if destination == nil && !filled { shape.setLineDash([3, 2], count: 2, phase: 0) }
+        shape.lineWidth = 1; shape.stroke()
+        ((automatic ? "自動" : "手動") as NSString).draw(at: NSPoint(x: 6, y: bounds.midY - 6),
+            withAttributes: [.font: kindFont, .foregroundColor: foreground])
+        if let destination {
+            let avatar = AIProfileAvatar.image(name: destination.name, source: destination.avatar, store: avatars)
+            avatar.draw(in: NSRect(x: 32, y: bounds.midY - 8, width: 16, height: 16),
+                        from: .zero, operation: .sourceOver, fraction: isEnabled ? 1 : 0.45)
         }
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: statusFont,
-            .foregroundColor: displayText == "実行中" ? color : Washi.muted]
-        let width = (displayText as NSString).size(withAttributes: attributes).width
-        (displayText as NSString).draw(at: NSPoint(x: bounds.midX - width / 2, y: AIFooterMetrics.labelY), withAttributes: attributes)
+        let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byTruncatingTail
+        (destinationName as NSString).draw(in: nameFrame, withAttributes: [
+            .font: nameFont, .foregroundColor: destination == nil && !filled ? Washi.muted : foreground,
+            .paragraphStyle: paragraph])
+        let statusX = bounds.width - 7 - (automatic ? 13 : 0) - statusWidth
+        (displayText as NSString).draw(at: NSPoint(x: statusX, y: bounds.midY - 6),
+            withAttributes: [.font: statusFont, .foregroundColor: filled ? .white : Washi.muted])
+        if automatic {
+            ("▾" as NSString).draw(at: NSPoint(x: bounds.width - 14, y: bounds.midY - 6),
+                withAttributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: foreground])
+        }
     }
 }
 
 /// 1秒単位の更新だけ。CALayerへ連続アニメーションを登録しない。
 final class AICompactFooter: NSStackView {
     let minutesNotice = AIFooterButton(symbol: "doc.text", label: "議事録")
-    let robot = AIRobotButton()
+    let automaticDestination = AIFooterDestination(automatic: true)
+    let manualDestination = AIFooterDestination(automatic: false)
+    let destinations = NSStackView()
+    private let spacer = NSView()
     private let rule = NSView()
     let confirmation = AIFooterCount()
     let warning = AIFooterButton(symbol: "exclamationmark.triangle", label: "警告")
@@ -130,7 +175,6 @@ final class AICompactFooter: NSStackView {
     let pin = AIFooterButton(symbol: "pin", label: "最前面に固定")
     var onSelect: ((String) -> Void)?
     private var state = SessionSnapshot()
-    private var reduceMotion = false
     private var timer: Timer?
     private let visibility: (() -> Bool)?
     private var observers: [any NSObjectProtocol] = []
@@ -139,7 +183,9 @@ final class AICompactFooter: NSStackView {
         self.visibility = visibility
         super.init(frame: .zero)
         orientation = .horizontal; alignment = .centerY; spacing = 8
+        distribution = .fill
         edgeInsets = NSEdgeInsets(top: 6, left: 16, bottom: 6, right: 16)
+        heightAnchor.constraint(equalToConstant: 54).isActive = true
         Washi.surface(rule, color: Washi.rule)
         rule.widthAnchor.constraint(equalToConstant: 1).isActive = true
         rule.heightAnchor.constraint(equalToConstant: 24).isActive = true
@@ -147,7 +193,16 @@ final class AICompactFooter: NSStackView {
         minutesNotice.tint = Washi.muted
         minutesNotice.visibleLabel = "議事録"
         minutesNotice.setAccessibilityLabel("議事録あり。議事録を表示")
-        for view in [robot, rule, confirmation, warning, NSView(), minutesNotice, pin, more] { addArrangedSubview(view) }
+        destinations.orientation = .vertical; destinations.alignment = .leading; destinations.spacing = 2
+        destinations.distribution = .fill
+        destinations.heightAnchor.constraint(equalToConstant: 42).isActive = true
+        destinations.addArrangedSubview(automaticDestination)
+        destinations.addArrangedSubview(manualDestination)
+        automaticDestination.widthAnchor.constraint(equalTo: destinations.widthAnchor).isActive = true
+        manualDestination.widthAnchor.constraint(equalTo: destinations.widthAnchor).isActive = true
+        destinations.setContentHuggingPriority(.init(200), for: .horizontal)
+        destinations.setContentCompressionResistancePriority(.init(200), for: .horizontal)
+        for view in [destinations, rule, confirmation, warning, spacer, minutesNotice, pin, more] { addArrangedSubview(view) }
         pin.tint = Washi.muted
         pin.setAccessibilityValue("OFF")
         pin.callback = { [weak self] in
@@ -167,9 +222,11 @@ final class AICompactFooter: NSStackView {
     required init?(coder: NSCoder) { fatalError() }
     deinit { timer?.invalidate(); observers.forEach { NotificationCenter.default.removeObserver($0) } }
     func update(_ state: SessionSnapshot, reduceMotion: Bool, now: Date = Date()) {
-        self.state = state; self.reduceMotion = reduceMotion
-        robot.isEnabled = state.ai != nil
-        robot.isHidden = state.ai == nil; rule.isHidden = robot.isHidden
+        self.state = state
+        destinations.isHidden = state.ai == nil; rule.isHidden = destinations.isHidden
+        spacer.isHidden = state.ai != nil
+        automaticDestination.isEnabled = state.ai != nil
+        manualDestination.isEnabled = state.ai != nil && state.canSubmitAI
         let questions = state.ai?.conversation?.questions ?? []
         let matching = questions.filter { AIBadgeKind.confirmation.matches($0, in: questions) }
         confirmation.count = matching.count; confirmation.isHidden = matching.isEmpty; confirmation.needsDisplay = true
@@ -209,8 +266,9 @@ final class AICompactFooter: NSStackView {
         return window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
     }
     func updateVisibility() {
-        let waiting = state.ai?.conversation?.questions.contains { $0.isAwaitingResult } == true
-        let needsTimer = displayed && (waiting || state.ai?.isPreparing == true ? !reduceMotion : state.aiSchedule.active)
+        let needsTimer = displayed && state.ai != nil && state.aiSchedule.active
+            && state.aiSchedule.canCountDown && state.aiSchedule.nextFire != nil
+            && !automaticDestination.isRunning && !automaticDestination.isPreparing
         if needsTimer && timer == nil {
             let value = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
                 MainActor.assumeIsolated {
@@ -237,8 +295,13 @@ final class AICompactFooter: NSStackView {
     override func viewDidHide() { super.viewDidHide(); updateVisibility() }
     override func viewDidUnhide() { super.viewDidUnhide(); updateVisibility() }
     func refresh(now: Date) {
-        let waiting = state.ai?.conversation?.questions.contains { $0.isAwaitingResult } == true
-        robot.update(schedule: state.aiSchedule, waiting: waiting, preparing: state.ai?.isPreparing == true,
-                     animate: !reduceMotion && displayed, now: now)
+        let waiting = state.ai?.conversation?.questions.filter { $0.isAwaitingResult } ?? []
+        automaticDestination.update(state.aiSchedule.active ? state.automaticDestination : nil,
+            schedule: state.aiSchedule, waiting: waiting.contains { $0.request.trigger == .scheduled },
+            preparing: state.ai?.automaticPreparing == true, now: now)
+        // 通常の手動シートで送信に成功した宛先を、声の合図と共通で表示する。
+        manualDestination.update(state.manualDestination, schedule: state.aiSchedule,
+            waiting: waiting.contains { $0.request.trigger != .scheduled },
+            preparing: state.ai?.manualPreparing == true, now: now)
     }
 }

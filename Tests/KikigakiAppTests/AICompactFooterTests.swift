@@ -47,7 +47,7 @@ import KikigakiCore
         state.aiSchedule.active = true; state.aiSchedule.nextFire = Date().addingTimeInterval(180)
         state.aiRecoveryWarning = "復元できない会議があります"
         window.apply(state)
-        // 自動送信・作り直しはロボットへ集め、前の会議の案内は出さない。
+        // 自動送信は自動の段へ置き、前の会議の案内は出さない。
         let quiet = window.footerMenu()
         #expect(quiet.items.map(\.title) == ["会話をコピー"])
         #expect(!quiet.items[0].isEnabled)
@@ -56,7 +56,7 @@ import KikigakiCore
         state.ai?.canOpenPane = true; state.ai?.saveFailed = true; state.ai?.canRecreate = true
         window.apply(state)
         let menu = window.footerMenu()
-        #expect(menu.items.map(\.title) == ["会話をコピー", "", "ペインを開く", "保存を再試行"])
+        #expect(menu.items.map(\.title) == ["会話をコピー", "", "ペインを開く", "保存を再試行", "AIセッションを作り直す"])
         #expect(menu.items.filter { !$0.isSeparatorItem }.allSatisfy { $0.isEnabled })
         var opened = false, retried = false
         window.onOpenAIPane = { opened = true }; window.onRetryAISave = { retried = true }

@@ -22,6 +22,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         var nextMeetingID: UUID?
         /// 自動送信の宛先の枠。nilは「送らない」
         var scheduleSlot: Int?
+        /// 会議で固定する手動送信の宛先。nilは「指定しない」。
+        var manualSlot: Int?
         /// 宛先があるときの自動送信の指定
         var schedule: AIScheduleOptions?
     }
@@ -40,6 +42,9 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     private var drafts: [Int: AIScheduleSheet.Draft] = [:]
     /// 表示中の宛先。nilは「送らない」
     private(set) var selectedSlot: Int?
+    private(set) var selectedManualSlot: Int?
+    private let defaultManualSlot: Int?
+    static let manualDefaultsKey = "KikigakiManualDestination"
     private(set) var nextMeetings: [NextMeeting]
     private var selectedNextMeetingID: UUID?
     private(set) var nextButtons: [NSButton] = []
@@ -75,6 +80,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     private let minutesHint = Washi.label(size: 11, color: Washi.gold)
     private let aiSection = NSStackView()
     let destination = NSPopUpButton()
+    let manualDestination = NSPopUpButton()
     let interval = NSPopUpButton()
     private let cwdLabel = Washi.label(size: 12, color: Washi.muted)
     let editor = AIQuestionEditor()
@@ -87,10 +93,14 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     init(profiles: [ResolvedAIConfig], diarizationEnabled: Bool, exclusion: AudioExclusion,
          minutesPath: String? = nil, minutesHistory: [String] = [],
          nextMeetings: [NextMeeting] = [],
+         defaults: UserDefaults = .standard,
          systemAudioMode: SystemAudioMode = .automatic,
          outputKind: @escaping () -> AudioOutputKind = { .unknown },
          microphoneName: @escaping () -> String = { MicrophoneDevice.currentName }) {
         self.profiles = profiles
+        if let remembered = defaults.string(forKey: Self.manualDefaultsKey) {
+            defaultManualSlot = remembered.isEmpty ? nil : profiles.first(where: { $0.name == remembered })?.slot ?? profiles.first?.slot
+        } else { defaultManualSlot = profiles.first?.slot }
         self.nextMeetings = NextMeetings(nextMeetings).candidates
         self.outputKind = outputKind
         self.microphoneName = microphoneName
@@ -195,7 +205,15 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         // 自動送信。`[[ai]]` が無ければ区画ごと出さない。
         if !profiles.isEmpty {
             add(separator(), to: rows)
-            add(row("自動送信", buildAISection()), to: rows)
+            let automaticRow = row("自動送信", buildAISection())
+            add(automaticRow, to: rows)
+            // 複数行の自動送信の末尾にも、次の区切り線まで10ptの余白を取る。
+            rows.setCustomSpacing(10, after: automaticRow)
+            manualDestination.font = .systemFont(ofSize: 13)
+            manualDestination.target = self; manualDestination.action = #selector(manualDestinationChanged)
+            add(separator(), to: rows)
+            add(row("手動送信", manualDestination), to: rows)
+            rebuildDestinationMenu(manual: true)
         }
         stack.addArrangedSubview(Washi.label("録音を開始", size: 17, weight: .semibold))
         stack.addArrangedSubview(rows)
@@ -230,6 +248,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         // 「送らない」で開いても、最初の宛先の下書きを無効表示する。
         selectDestination(profiles.first?.slot)
         selectDestination(profiles.first(where: \.autoStart)?.slot)
+        selectManualDestination(defaultManualSlot)
         if !self.nextMeetings.isEmpty { selectNextMeeting(at: 0) }
         reserveBodyHeight()
         fit()
@@ -252,9 +271,12 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             title.lineBreakMode = .byTruncatingTail
             title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let profile = meeting.ai.flatMap { name in profiles.first { $0.name == name } }
-            let unknown = meeting.ai != nil && profile == nil
+            let unknown = (meeting.ai != nil && profile == nil)
+                || (meeting.manual != nil && !profiles.contains { $0.name == meeting.manual })
             let missing = !FileManager.default.fileExists(atPath: meeting.minutesPath)
-            var details = [meeting.ai ?? "送らない", (meeting.minutesPath as NSString).lastPathComponent]
+            var details = [meeting.ai ?? "送らない"]
+            if let manual = meeting.manual { details.append("手動: " + manual) }
+            details.append((meeting.minutesPath as NSString).lastPathComponent)
             if unknown { details.append("設定にありません") }
             if missing { details.append("見つかりません") }
             let label = Washi.label(details.joined(separator: " · "), size: 11,
@@ -368,10 +390,12 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             selectedNextMeetingID = meeting.id
             minutesBox.stringValue = meeting.minutesPath
             selectDestination(meeting.ai.flatMap { name in profiles.first { $0.name == name }?.slot })
+            selectManualDestination(meeting.manual.flatMap { name in profiles.first { $0.name == name }?.slot } ?? defaultManualSlot)
         } else {
             selectedNextMeetingID = nil
             minutesBox.stringValue = ""
             selectDestination(profiles.first(where: \.autoStart)?.slot)
+            selectManualDestination(defaultManualSlot)
         }
         showMinutesHint(nil)
     }
@@ -460,9 +484,9 @@ final class StartSheet: NSObject, NSTextViewDelegate {
 
     /// 宛先メニュー。行はavatar・name・cli+model+effort・プロンプトの3行で、「送らない」だけ1行。
     /// プロンプトも並べるのは、同じ名前と型のプロファイルを依頼の中身で見分けるため。
-    private func rebuildDestinationMenu() {
+    private func rebuildDestinationMenu(manual: Bool = false) {
         let menu = NSMenu()
-        let none = NSMenuItem(title: "送らない", action: nil, keyEquivalent: "")
+        let none = NSMenuItem(title: manual ? "指定しない" : "送らない", action: nil, keyEquivalent: "")
         none.tag = 0
         menu.addItem(none)
         for profile in profiles {
@@ -479,15 +503,37 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             item.attributedTitle = title
             menu.addItem(item)
         }
-        destination.menu = menu
+        (manual ? manualDestination : destination).menu = menu
         refreshDestinationImages()
     }
     private func refreshDestinationImages() {
         for profile in profiles {
-            guard let item = destination.menu?.items.first(where: { $0.tag == profile.slot }) else { continue }
-            item.image = AIProfileAvatar.image(name: profile.name, source: profile.avatar, store: avatars)
+            for popup in [destination, manualDestination] {
+                popup.menu?.items.first(where: { $0.tag == profile.slot })?.image =
+                    AIProfileAvatar.image(name: profile.name, source: profile.avatar, store: avatars)
+            }
         }
         refreshDestinationTitle()
+        refreshManualDestinationTitle()
+    }
+    @objc private func manualDestinationChanged() {
+        selectManualDestination(manualDestination.selectedTag() == 0 ? nil : manualDestination.selectedTag())
+    }
+    func selectManualDestination(_ slot: Int?) {
+        selectedManualSlot = slot
+        manualDestination.selectItem(withTag: slot ?? 0)
+        refreshManualDestinationTitle()
+    }
+    private func refreshManualDestinationTitle() {
+        let item = NSMenuItem(title: "指定しない", action: nil, keyEquivalent: "")
+        if let profile = profiles.first(where: { $0.slot == selectedManualSlot }) {
+            item.title = profile.name + AIModelLabel.separator + Self.meta(profile)
+            item.image = AIProfileAvatar.image(name: profile.name, source: profile.avatar, store: avatars)
+        }
+        (manualDestination.cell as? NSPopUpButtonCell)?.menuItem = item
+        manualDestination.setAccessibilityValue(item.title)
+        manualDestination.toolTip = item.title
+        manualDestination.needsDisplay = true
     }
     /// 閉じた状態の1行。メニューの2行をそのまま出すとボタンが伸びるので、別の項目を描く。
     private func refreshDestinationTitle() {
@@ -722,6 +768,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         var result = Options(diarizationEnabled: diarizeOn.state == .on, exclusionEnabled: exclusionSwitch.state == .on)
         result.systemAudioMode = selectedSystemAudioMode
         result.recordSystemAudio = selectedSystemAudioMode.includes(outputKind())
+        result.manualSlot = selectedManualSlot
         if let path = minutesInput {
             guard (try? MinutesPath.validate(path)) != nil else { return nil }
             result.minutesPath = path

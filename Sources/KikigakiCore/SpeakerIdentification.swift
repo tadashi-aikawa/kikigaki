@@ -44,7 +44,7 @@ public enum SpeakerIdentificationPrompt {
     }
 }
 
-/// 別イベント。返事・受領・進行・ロボットの状態には数えない。
+/// 別イベント。返事・受領・進行・宛先ボタンの状態には数えない。
 public struct AISpeakerEvent: Codable, Equatable, Sendable {
     public static let evidenceBytes = 2048
     public let schemaVersion: Int

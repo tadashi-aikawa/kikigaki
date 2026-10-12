@@ -135,8 +135,22 @@ final class MeetingSession {
     }
     /// 会議開始時に固定したプロファイル。並び順が宛先ポップアップの並びになる
     private(set) var meetingAIProfiles: [ResolvedAIConfig] = []
-    /// 手動送信の宛先。会議内では前回の選択を覚える
+    /// 手動実行シート内で選んだ、その送信の宛先。
     private var meetingAI: ResolvedAIConfig?
+    /// 開始シートの宛先。通常の手動シートから送信に成功したら、その宛先へ切り替える。
+    private(set) var meetingManualAI: ResolvedAIConfig?
+    struct PendingManualDestination { let slot: Int? }
+    var pendingManualDestination: PendingManualDestination?
+#if DEBUG
+    func setMeetingManualDestination(slot: Int?) {
+        meetingManualAI = meetingAIProfiles.first { $0.slot == slot }
+        emit()
+    }
+#endif
+    func selectManualSheetDestination() {
+        meetingAI = meetingManualAI ?? meetingAIProfiles.first
+        emit()
+    }
     /// 自動送信の宛先。手動と別に覚え、別プロファイルなら同時に使える
     private var scheduleAI: ResolvedAIConfig?
     /// 送信の進行はプロファイルごとに持つ。会議に1つだと、Aの確定待ちや起動待ちの間
@@ -254,6 +268,9 @@ final class MeetingSession {
         scheduleDrafts = [:]
         manualDrafts = [:]
         meetingAIProfiles = meetingConfig.aiProfiles
+        let manualSlot = pendingManualDestination.map(\.slot) ?? meetingConfig.aiProfiles.first?.slot
+        meetingManualAI = meetingConfig.aiProfiles.first { $0.slot == manualSlot }
+        pendingManualDestination = nil
         meetingAI = meetingConfig.aiProfiles.first; scheduleAI = meetingConfig.aiProfiles.first
         aiDraft = ""; aiWarning = nil; aiCompleted = nil
         pendingAIDispatch = [:]
@@ -267,6 +284,7 @@ final class MeetingSession {
         self.config = config
         autoSendPhraseState = AutoSendPhraseState(phrases: config.autoSendPhrases)
         self.aiStore = aiStore; meetingAIProfiles = config.aiProfiles
+        meetingManualAI = config.aiProfiles.first
         // 手動と自動の宛先はどちらも先頭で独立に初期化する。
         meetingAI = config.aiProfiles.first; scheduleAI = config.aiProfiles.first
         aiWorkAllowed = config.ai?.allowWork ?? true
@@ -709,6 +727,8 @@ final class MeetingSession {
         refreshAudioSnapshot()
         snapshot.timeline = pause.timeline
         snapshot.aiRecoveryWarning = aiStore?.warnings.first
+        snapshot.manualDestination = meetingManualAI.map { .init(slot: $0.slot, name: $0.name, avatar: $0.avatar) }
+        snapshot.automaticDestination = aiScheduleConfiguration.map { .init(slot: $0.slot, name: $0.name, avatar: $0.avatar) }
         snapshot.aiSchedule = AIScheduleViewState(schedule: aiSchedule, warning: aiScheduleWarning,
             destination: meetingAIProfiles.count > 1 ? aiScheduleConfiguration?.name : nil,
             availability: scheduleAvailability, hasChanges: scheduleHasChanges)
@@ -738,6 +758,8 @@ final class MeetingSession {
             state.warning = aiWarning ?? aiRecord?.saveWarning ?? controller?.warning
             state.progress = aiProgresses[slot]
             state.isPreparing = !pendingAIDispatch.isEmpty
+            state.automaticPreparing = pendingAIDispatch.keys.contains { aiSubmissionTriggers[$0] == .scheduled }
+            state.manualPreparing = pendingAIDispatch.keys.contains { aiSubmissionTriggers[$0] != .scheduled }
             let unconfirmed = controller?.conversation.questions.filter { controller!.isReturnUnconfirmed($0) } ?? []
             state.unconfirmed = Set(unconfirmed.map { $0.request.id })
             state.progressReports = controller?.progressReports ?? [:]
@@ -870,7 +892,8 @@ final class MeetingSession {
     func submitAI(question: String, full: Bool, parent: UUID?, helper: URL,
                   launch: ((ResolvedAIConfig, URL, AIConversationController) throws -> (URL, [String]))? = nil,
                   trigger: AIParticipantContext.Trigger? = nil, workAllowed suppliedWorkAllowed: Bool? = nil,
-                  profile: ResolvedAIConfig? = nil) {
+                  profile: ResolvedAIConfig? = nil, updateManualDestination: Bool = false,
+                  onSent: ((Bool) -> Void)? = nil) {
         // 確認への返答は元質問の宛先へ固定する。呼び手が別の宛先を渡していても、そちらを優先しない。
         let parentSlot = parent.flatMap { id in
             aiRecord?.controller.conversation.questions.first { $0.request.id == id }?
@@ -917,6 +940,8 @@ final class MeetingSession {
         aiPhases[slot] = .confirmationWait
         aiTasks[slot] = Task { [weak self] in
             guard let self else { return }
+            var sent = false
+            defer { onSent?(sent) }
             var request: AIRequest?
             defer {
                 if let request { aiRequestOwners[request.id] = nil }
@@ -1007,6 +1032,13 @@ final class MeetingSession {
                     }
                     self.emit()
                 })
+                sent = true
+                // 選び直しだけでは変えず、送信成功後に合図と次のシートの宛先へ反映する。
+                // 返答・再送・自動・声の合図の呼び出しでは、この指定を渡さない。
+                if updateManualDestination, parent == nil, trigger == nil,
+                   handoff.meetingID == meetingID, aiSubmissionOwners[slot] == owner {
+                    meetingManualAI = config
+                }
                 if trigger == nil { aiDraft = ""; aiCompleted = fixed.id }
             } catch is CancellationError {
                 if let request { try? aiStore.records[meetingID]?.controller.cancel(request.id) }
@@ -1427,16 +1459,29 @@ extension MeetingSession {
         // 通常行はfinalCountの範囲。手入力と暫定末尾はCoreへ渡さない。
         for row in snapshot.utterances where row.kind == .voice {
             guard let event = autoSendPhraseState.observe(row, now: now.timeIntervalSince1970,
-                automaticActive: aiSchedule?.phase == .running, canFireNow: snapshot.canFireAutomatic) else { continue }
+                automaticActive: meetingManualAI != nil && snapshot.canSubmitAI,
+                canFireNow: canSendVoiceManual) else { continue }
             log(diagnostics.autoSendPhraseLine(event))
             switch event.decision {
             case .fire:
-                let effect = fireAIScheduleNow(now: now)
-                if case .send = effect { playAutoSendSound(true) } else { playAutoSendSound(false) }
+                guard let profile = meetingManualAI, let helper = automaticHelper else {
+                    playAutoSendSound(false); continue
+                }
+                submitAI(question: manualDraft(for: profile), full: false, parent: nil, helper: helper,
+                         profile: profile, onSent: { [weak self] sent in
+                             if !sent { self?.playAutoSendSound(false) }
+                         })
+                // 非同期の確定待ち・起動へ進む前に受付を知らせる。入口で失敗なら低い音だけ。
+                playAutoSendSound(aiTasks[profile.slot] != nil)
             case .unavailable: playAutoSendSound(false)
             case .cooldown, .watermark: break
             }
         }
+    }
+    private var canSendVoiceManual: Bool {
+        guard snapshot.canSubmitAI, aiStore != nil, automaticHelper != nil, let profile = meetingManualAI,
+              aiTasks[profile.slot] == nil else { return false }
+        return aiRecord?.controller.canSend(slot: profile.slot) ?? true
     }
 
     @discardableResult

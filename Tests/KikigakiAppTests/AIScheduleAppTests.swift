@@ -83,11 +83,11 @@ import KikigakiAIIO
         #expect(session.snapshot.aiSchedule.nextFire == now.addingTimeInterval(180))
         let footer = AICompactFooter(visibility: { false })
         footer.update(session.snapshot, reduceMotion: true, now: now)
-        #expect(footer.robot.displayText == "3:00")
+        #expect(footer.automaticDestination.displayText == "3:00")
         let window = TranscriptWindowController()
         window.onFireScheduleAI = { session.fireAIScheduleNow(now: now.addingTimeInterval(42)) }
         window.apply(session.snapshot)
-        let menu = window.robotMenu()
+        let menu = window.automaticMenu()
         #expect(menu.items[0].isEnabled)
         menu.performActionForItem(at: 0)
         #expect(session.snapshot.aiSchedule.nextFire == now.addingTimeInterval(222))
@@ -104,16 +104,18 @@ import KikigakiAIIO
         await fake.onCommand { args in
             await MainActor.run {
                 footer.update(session.snapshot, reduceMotion: false, now: Date(timeIntervalSince1970: 1000))
+                let button = manual ? footer.manualDestination : footer.automaticDestination
+                let other = manual ? footer.automaticDestination : footer.manualDestination
                 if args.prefix(2) == ["workspace", "create"] {
                     preparedSeen = true
-                    #expect(footer.robot.isPreparing && !footer.robot.isRunning)
-                    #expect(footer.robot.displayText == "準備中" && footer.robot.eyeColor == Washi.red)
-                    #expect(footer.robot.eyeOffset == -1.5 && footer.timerRunning)
+                    #expect(button.isPreparing && !button.isRunning)
+                    #expect(button.displayText == "準備中" && button.foreground == .white)
+                    #expect(!other.filled)
                 }
                 if args.prefix(2) == ["agent", "prompt"] {
                     runningSeen = true
-                    #expect(!footer.robot.isPreparing && footer.robot.isRunning)
-                    #expect(footer.robot.displayText == "実行中" && footer.robot.eyeColor == .white)
+                    #expect(!button.isPreparing && button.isRunning)
+                    #expect(button.displayText == "実行中" && button.foreground == .white)
                 }
             }
         }
@@ -193,7 +195,7 @@ import KikigakiAIIO
         #expect(noAI.scheduleLinesBuildCount == 0)
     }
 
-    @Test func ロボットメニューの即時実行が本番の送信経路へ入り期限を更新する() async throws {
+    @Test func 自動メニューの即時実行が本番の送信経路へ入り期限を更新する() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let session = try session(root, fake: FakeHerdr()), now = Date()
         defer { session.stopAISchedule() }
@@ -205,7 +207,7 @@ import KikigakiAIIO
         let window = TranscriptWindowController()
         window.onFireScheduleAI = { session.fireAIScheduleNow(now: now.addingTimeInterval(42)) }
         window.apply(session.snapshot)
-        let menu = window.robotMenu()
+        let menu = window.automaticMenu()
         menu.performActionForItem(at: try #require(menu.items.firstIndex { $0.title == "今すぐ送る" }))
         await settle(session)
         let request = try #require(session.aiRecord?.controller.conversation.questions.first)

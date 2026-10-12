@@ -8,19 +8,20 @@ public struct NextMeeting: Codable, Equatable, Sendable {
     /// タイムゾーンを付けないローカル日時。登録時の「今日」を保存し、翌日に読み替えない。
     public let at: String?
     public let ai: String?
+    public let manual: String?
     public let createdAt: Date
 
     public init(id: UUID = UUID(), minutesPath: String, title: String? = nil, at: String? = nil,
-                ai: String? = nil, createdAt: Date = Date()) throws {
+                ai: String? = nil, manual: String? = nil, createdAt: Date = Date()) throws {
         self.id = id; self.minutesPath = minutesPath; self.title = title
-        self.at = at; self.ai = ai; self.createdAt = createdAt
+        self.at = at; self.ai = ai; self.manual = manual; self.createdAt = createdAt
         try validate()
     }
 
     public func validate() throws {
         try MinutesPath.validate(minutesPath)
         guard createdAt.timeIntervalSince1970.isFinite else { throw AIError.invalid("next date") }
-        for value in [title, ai].compactMap({ $0 }) {
+        for value in [title, ai, manual].compactMap({ $0 }) {
             guard !value.trimmingCharacters(in: .whitespaces).isEmpty,
                   value.utf8.count <= 4096,
                   !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
@@ -51,7 +52,7 @@ public struct NextMeeting: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, at, ai, minutesPath = "minutes_path", createdAt = "created_at"
+        case id, title, at, ai, manual, minutesPath = "minutes_path", createdAt = "created_at"
     }
     /// 登録順の精度をISOのミリ秒へ丸めない。連続登録した候補の順序も再読込で保つ。
     public func encode(to encoder: any Encoder) throws {
@@ -61,6 +62,7 @@ public struct NextMeeting: Codable, Equatable, Sendable {
         try values.encodeIfPresent(title, forKey: .title)
         try values.encodeIfPresent(at, forKey: .at)
         try values.encodeIfPresent(ai, forKey: .ai)
+        try values.encodeIfPresent(manual, forKey: .manual)
         try values.encode(createdAt.timeIntervalSince1970, forKey: .createdAt)
     }
     public init(from decoder: any Decoder) throws {
@@ -70,6 +72,7 @@ public struct NextMeeting: Codable, Equatable, Sendable {
                       title: values.decodeIfPresent(String.self, forKey: .title),
                       at: values.decodeIfPresent(String.self, forKey: .at),
                       ai: values.decodeIfPresent(String.self, forKey: .ai),
+                      manual: values.decodeIfPresent(String.self, forKey: .manual),
                       createdAt: Date(timeIntervalSince1970: values.decode(Double.self, forKey: .createdAt)))
     }
 }

@@ -18,7 +18,7 @@ saveRecording = false
 measureAudioLevels = false
 # 話者名の候補の「参加者」を読む、議事録のfrontmatterのキー。既定: participants
 participantsKey = "participants"
-# 声の合図で今すぐ自動送信する。省略時もこの既定で有効、[]で無効
+# 声の合図で会議の手動宛先へ送信する。省略時もこの既定で有効、[]で無効
 autoSendPhrases = ["アバンティ", "アヴァンティ"]
 
 # 話者候補とアバター。省略可
@@ -62,7 +62,7 @@ address = "ネオへ"
 | `saveRecording` | `false` | 録音WAVを Markdown と並べて残す |
 | `measureAudioLevels` | `false` | 発話ごとの音量と小音量候補の診断表示と保存。除外の設定とは独立。次の会議から効く。詳細は [小音量発話の計測](audio-levels.md) |
 | `participantsKey` | `participants` | 話者名の候補の「参加者」を読む、議事録のfrontmatterのキー。空白・`:`・`#`・引用符・`[]{},` を含む値、空文字、`-` 始まりは設定エラー。読み方は [書き起こしウィンドウ](transcript-window.md) の「候補の出どころ」 |
-| `autoSendPhrases` | `["アバンティ", "アヴァンティ"]` | 声で「今すぐ送る」を実行する合図。空配列は無効。最大20要素、各64文字まで。文字列以外、正規化後の空要素・重複は設定エラー。次の会議から効く。詳細は [声の合図](ai-scheduled.md#声の合図) |
+| `autoSendPhrases` | `["アバンティ", "アヴァンティ"]` | 声で会議の手動宛先へ送信する合図。空配列は無効。最大20要素、各64文字まで。文字列以外、正規化後の空要素・重複は設定エラー。次の会議から効く。詳細は [声の合図](ai-scheduled.md#声の合図) |
 
 `outputDir` は Codex の書き込み許可にも追加する。議事録を書けるようにするためで、許可の範囲と受け入れたリスクは [議事録プレビューの設計](minutes-preview.md) の「Skillの規則と書き込み許可」を参照する。
 
@@ -137,7 +137,7 @@ address = "ネオへ"
     - 注意: 実際に通る値はモデルによる
     - 注意: `extraArgs` での effort 指定は二重指定になるため設定エラー
 - CLIとherdrの探し方: PATH のほか `~/.local/bin`・mise の shims・Homebrew を探す。見つからないときは `command` / `herdrCommand` の絶対パスで指定する。詳細は [AI設定の複数プロファイル](ai-profiles.md) の「CLIとherdrの実行ファイルの探し方」
-- 宛先の選び方: 「手動実行…」と「自動実行…」のシートと録音開始シートで送信ごとに選ぶ。詳細は [AI設定の複数プロファイル](ai-profiles.md)
+- 宛先の選び方: 手動実行シート・自動実行シート・録音開始シートで選ぶ。詳細は [AI設定の複数プロファイル](ai-profiles.md)
 - 自動送信の始まり方: 詳細は [AIへの定期自動送信](ai-scheduled.md) と [録音開始シート](start-sheet.md)
 - ボード: `board` の設定・内蔵文面・限界は [議論のボード](board.md)
 - 手動コピーだけで使う場合は `[[ai]]` を書かなくてよい。手順は [会議中の会話をAIへ渡す](ai-handoff.md)

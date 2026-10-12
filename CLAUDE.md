@@ -77,7 +77,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - 稼働中のherdrペインへ接続する `attach` / `displayAgent` と、会議に紐づかない準備済みAIセッション。[AI設定の複数プロファイル](docs/ai-profiles.md)
   - AIの返事の未読表示と既読操作。[AIへの定期自動送信](docs/ai-scheduled.md)
   - 単数の `[ai]`。設定エラーにして `[[ai]]` を示す。[設定リファレンス](docs/config.md)
-- 停止後は新しい依頼を送れない: 「手動実行…」「返答する」「再送」は停止で無効になり、後片付けの後にherdrのペインを閉じる。[AI参加者の設計](docs/ai-participant.md)
+- 停止後は新しい依頼を送れない: フッターの「手動」「返答する」「再送」は停止で無効になり、後片付けの後にherdrのペインを閉じる。[AI参加者の設計](docs/ai-participant.md)
 - 利用者のグローバル設定は書き換えない: CodexとClaudeの設定は、セッション限定の引数と専用の `--settings` JSONで渡す。[AI参加者の設計](docs/ai-participant.md)
 - manifestが欠損した会議登録は保持するが、対処できない警告は出さない。`AIRecordStore` の復元がこの扱い
 - 受け入れたリスク
@@ -140,7 +140,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | [Homebrew tapの更新](docs/tap-update.md) | tap更新の認証と一時領域の後始末 | `update_tap.sh`を変える前 |
 | [AIへの受け渡し](docs/ai-handoff.md) | 「会話をコピー」と会話ファイルの契約 | 手動コピーを変える前 |
 | [AI設定の複数プロファイル](docs/ai-profiles.md) | `[[ai]]` のキー・検証、宛先の選択 | `AIConfig` ・宛先選択を変える前 |
-| [AIへの定期自動送信](docs/ai-scheduled.md) | 自動送信の状態機械、ロボットの操作、最後の1回 | 自動送信・ロボットの表示を変える前 |
+| [AIへの定期自動送信](docs/ai-scheduled.md) | 自動送信の状態機械、2段の宛先ボタン、最後の1回 | 自動送信・宛先ボタンの表示を変える前 |
 | [AI依頼の進行表示](docs/ai-progress.md) | 返事待ち行の進行文と4分割バー | `AIProgress` を変える前 |
 | [AIを会話の参加者として並べる](docs/ai-timeline.md) | AIの行の種類と並べ方 | AIの行・送信の印を変える前 |
 | [AIの返事のMarkdown表示](docs/ai-markdown.md) | 返事本文の分解と描画 | `MarkdownBlocks` を変える前 |

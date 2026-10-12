@@ -21,12 +21,13 @@ struct NextCommandTests {
         #expect(try NextCommand(["next", "list"]).execute(store: f.store).isEmpty)
         let now = Date(timeIntervalSince1970: 0)
         let command = try NextCommand(["next", "add", "--minutes", "/未作成/定例 '$().md", "--title", "定例",
-                                       "--at", "09:05", "--ai", "設定に無い宛先"])
+                                       "--at", "09:05", "--ai", "設定に無い宛先", "--manual", "スライド"])
         let id = try #require(command.execute(store: f.store, now: now, timeZone: TimeZone(secondsFromGMT: 0)!).first)
         let second = try #require(NextCommand(["next", "add", "--minutes", "/次.md"])
             .execute(store: f.store, now: now.addingTimeInterval(1)).first)
         let lines = try NextCommand(["next", "list"]).execute(store: f.store)
-        #expect(lines == ["\(id)\t1970-01-01T09:05\t定例\t設定に無い宛先\t/未作成/定例 '$().md", "\(second)\t-\t-\t-\t/次.md"])
+        #expect(lines == ["\(id)\t1970-01-01T09:05\t定例\t設定に無い宛先\t/未作成/定例 '$().md\tスライド", "\(second)\t-\t-\t-\t/次.md\t-"])
+        #expect(try f.store.load().meetings.first?.manual == "スライド")
         #expect(try FileManager.default.contentsOfDirectory(atPath: f.store.directory.path).sorted() == [id + ".json", second + ".json"].sorted())
         let attributes = try FileManager.default.attributesOfItem(atPath: f.store.directory.appendingPathComponent(id + ".json").path)
         #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
@@ -57,6 +58,8 @@ struct NextCommandTests {
         for args in [["next"], ["next", "unknown"], ["next", "add"], ["next", "add", "--minutes"],
                      ["next", "add", "--minutes", "/a.md", "--minutes", "/b.md"],
                      ["next", "add", "--minutes", "/a.md", "--bad", "x"],
+                     ["next", "add", "--minutes", "/a.md", "--manual"],
+                     ["next", "add", "--minutes", "/a.md", "--manual", "A", "--manual", "B"],
                      ["next", "list", "extra"], ["next", "remove"], ["next", "remove", "not-id"]] {
             #expect(throws: NextCommand.Failure.arguments) { try NextCommand(args) }
         }

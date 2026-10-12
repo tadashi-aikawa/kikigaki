@@ -12,7 +12,7 @@ AIだけを別種の畳んだ1行にすると、本文がすぐ見えず、送�
 - 声の送信印を `voiceUtteranceStart` の直下へ置く規則。`AIRequest.voiceAnchorIndex(in:)` をそのまま使う
 - 到着時に前面化しないこと。末尾追従中はAIの行と状態変化も人の発話と同じく追い、上へスクロール中・検索中だけ位置を動かさない
 
-フッターとロボットの見た目と操作は [ai-scheduled.md](ai-scheduled.md) を正本とする。
+フッターと宛先ボタンの見た目と操作は [ai-scheduled.md](ai-scheduled.md) を正本とする。
 
 ## 行の種類
 

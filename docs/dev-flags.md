@@ -43,7 +43,8 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
 
 ## replayでのAI送信
 
-- 声の合図の確認: `KIKIGAKI_DEBUG_REPLAY_REALTIME=1 KIKIGAKI_DEBUG_AI_AUTO="3600:議事録を更新してください" .build/KIKIGAKI.app/Contents/MacOS/KIKIGAKI --config <検証用config.toml> --replay <アバンティを含む.wav>` で、stderrの `[auto-send-phrase fire] phrase=あばんてぃ ...` と `[schedule] send(final: false) ... immediate=true` を確認する。
+- 声の合図の確認: `KIKIGAKI_DEBUG_REPLAY_REALTIME=1 .build/KIKIGAKI.app/Contents/MacOS/KIKIGAKI --config <検証用config.toml> --replay <アバンティを含む.wav>` で、stderrの `[auto-send-phrase fire] phrase=あばんてぃ ...` と手動requestを確認する。
+    - 宛先: シートを通さないreplayは設定の1つ目を使う。文面はその宛先の `autoPrompt`。自動送信を開始する環境変数は不要。
 - 環境変数 `KIKIGAKI_DEBUG_AI_ASK="40:;100:問い"`: replayの音声経過秒に達したら本番のsubmitAIで送信する。空の問いは声の末尾を使い、返事待ちは順番を保つ。前問がfailed/cancelledで接続が送信不可なら次問のために新世代へ作り直す。期限に達していない問いや失敗した問いの再送は行わない
 - 環境変数 `KIKIGAKI_DEBUG_AI_ASK_PROFILE="相談"`: `KIKIGAKI_DEBUG_AI_ASK` の送信先プロファイルを名前で固定する。`autoStart` と別のプロファイルを指定すると、手動と自動が同時に別のAIへ飛ぶことを確かめられる。設定に無い名前なら起動時に止まる
 - 環境変数 `KIKIGAKI_DEBUG_AI_AUTO="3:議事録を更新してください"`: replay開始時に本番の自動送信を開始し、直後に1回判定する。変更があれば即送信、空会話を含む変更なしなら開始から1間隔待つ。間隔は有限の正の秒数、プロンプトは必須。最初のコロンだけで分割し、以後のコロン・改行を保持する。作業許可は設定値、停止時の最後の1回はON。返事待ちをスキップし、自動で世代を再作成しない。判定時の効果・接続可否・変更の有無・request数をstderrへ出す。ASKと併用でき、停止後の最終待機と返送回収にはHOLDを設定する。通常起動では無視し、`--smoke --replay <wav>` は形式だけを検証する
@@ -106,6 +107,10 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
 - `KIKIGAKI_TEST_SPEECH=1 swift test --filter DiarizationTests`: 通常はスキップする実Apple Speechの結合テストも実行できます。マイクを使わず無音を入力し、話者モデルの呼出ゼロ・会議ごとの切替を確認します。
 - 環境変数 `KIKIGAKI_TEST_DIARIZATION=1 swift test --filter SpeakerDiarizerTests`: 実モデルで短い入力とchunk境界の末尾処理を確かめる。初回はモデルを取得する
 - 開始シートの見た目は `KIKIGAKI_START_SHEET_CAPTURE=<出力先> swift test --filter StartSheetTests` でPNGへ撮り、モックと突き合わせます。
+- 手動宛先とフッターは `KIKIGAKI_VOICE_CAPTURE=<出力先> swift test --filter DestinationFooterTests` で撮ります。
+    - 解像度: 1ptあたり1pxと2pxで撮る。2xの画像名には `-2x` を付ける。
+    - 幅: 親窓を420pt・600ptにする。開始シート自体は仕様どおり640pt固定。
+    - 内容: 自動の返事待ち、要返答・警告あり、手動の返事待ち、両方未指定、停止後の2段フッター。準備中と両方の返事待ちも撮る。開始シートは予約と手動宛先ありを撮る。
 - 撮影用の環境変数: 次の変数は、値に出力先を渡したときだけ、該当のテストがPNGを書き出す。指定しなければ何も書かない
     - `KIKIGAKI_UI_CAPTURE`: `HoverButtonTests` ・ `NarrowWindowTests` ・ `TranscriptTextScaleAppTests`
     - `KIKIGAKI_TYPED_CAPTURE`: `TypedImageTests` ・ `TypedEntryTests`
@@ -113,7 +118,7 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
     - `KIKIGAKI_EXCLUSION_CAPTURE`: `AudioExclusionAppTests`
     - `KIKIGAKI_LEVEL_CAPTURE`: `AudioLevelAppTests`
     - `KIKIGAKI_PATH_CAPTURE`: `MinutesWindowRevisionTests`
-    - `KIKIGAKI_STATE_CAPTURE`: `AIRobotTests`
+    - `KIKIGAKI_STATE_CAPTURE`: `DestinationFooterTests`。2段の宛先ボタンの状態を撮る
     - `KIKIGAKI_DIARIZATION_CAPTURE`: `DiarizationTests`
     - `KIKIGAKI_MICROPHONE_CAPTURE`: `MicrophoneSwitchUITests`。開始シートのマイク行と、切替の区切り行を撮る。実機のマイクは開かない
     - `KIKIGAKI_SPEAKER_CAPTURE`: `SpeakerPopoverTests` と `SpeakerIdentificationAppTests`。話者名の候補と、AIが付けた名前の点・話者一覧・根拠の行を撮る

@@ -15,7 +15,7 @@ import KikigakiAIIO
         try #require(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: output).appendingPathComponent(name + ".png"))
     }
     private let started = Date(timeIntervalSince1970: 1_788_759_600)
-    @Test func 一行フッターを600と900で録音停止と明滅の各状態で撮る() throws {
+    @Test func 二段フッターを600と900で録音停止と実行中の各状態で撮る() throws {
         _ = NSApplication.shared
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)
@@ -48,7 +48,7 @@ import KikigakiAIIO
             content.layoutSubtreeIfNeeded()
             #expect(window.compactFooter.frame.height <= 54)
             #expect(window.compactFooter.confirmation.count == 1)
-            #expect(window.compactFooter.robot.displayText == "1:42")
+            #expect(window.compactFooter.automaticDestination.displayText == "1:42")
             try capture("footer-recording-\(width)", view: content.superview!)
             state.state = .idle; state.saved = true; state.aiSchedule = AIScheduleViewState()
             window.apply(state); window.compactFooter.refresh(now: now)
@@ -62,14 +62,14 @@ import KikigakiAIIO
         for width in [600, 900] {
             window.window!.setContentSize(NSSize(width: width, height: 650)); window.apply(state)
             for second in [0, 1] {
-                window.compactFooter.robot.update(schedule: state.aiSchedule, waiting: true, animate: true, now: Date(timeIntervalSince1970: Double(1000 + second)))
-                #expect(window.compactFooter.robot.eyeOffset == (second == 1 ? 1.5 : -1.5))
-                #expect(window.compactFooter.robot.layer?.animationKeys()?.isEmpty != false)
+                window.compactFooter.refresh(now: Date(timeIntervalSince1970: Double(1000 + second)))
+                #expect(window.compactFooter.manualDestination.displayText == "実行中")
+                #expect(window.compactFooter.automaticDestination.layer?.animationKeys()?.isEmpty != false)
                 try capture("footer-pulse-\(second)-\(width)", view: window.window!.contentView!.superview!)
             }
         }
         window.compactFooter.update(state, reduceMotion: true, now: Date(timeIntervalSince1970: 1001))
-        #expect(window.compactFooter.robot.eyeOffset == 0)
+        #expect(window.compactFooter.manualDestination.displayText == "実行中")
         if ProcessInfo.processInfo.environment["KIKIGAKI_UI_MENU_CAPTURE"] == "1",
            let output = ProcessInfo.processInfo.environment["KIKIGAKI_UI_CAPTURE"] {
             NSApplication.shared.setActivationPolicy(.regular)
@@ -78,7 +78,7 @@ import KikigakiAIIO
                 window.window!.setContentSize(NSSize(width: width, height: 650))
                 window.window!.setFrameOrigin(NSPoint(x: 100, y: 100)); window.show()
                 RunLoop.main.run(until: Date().addingTimeInterval(0.2))
-                let menu = window.robotMenu()
+                let menu = window.automaticMenu()
                 var captureError: Error?
                 let timer = Timer(timeInterval: 1, repeats: false) { _ in
                     MainActor.assumeIsolated {
@@ -86,7 +86,7 @@ import KikigakiAIIO
                             let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
                             let frame = window.window!.frame
                             let y = (NSScreen.screens.first?.frame.maxY ?? 0) - frame.maxY
-                            process.arguments = ["-x", "-T", "1", "-R\(Int(frame.minX)),\(Int(y)),\(Int(frame.width)),\(Int(frame.height))", output + "/robot-menu-\(width).png"]
+                            process.arguments = ["-x", "-T", "1", "-R\(Int(frame.minX)),\(Int(y)),\(Int(frame.width)),\(Int(frame.height))", output + "/automatic-menu-\(width).png"]
                             process.terminationHandler = { process in
                                 RunLoop.main.perform(inModes: [.common]) {
                                     if process.terminationStatus != 0 { captureError = CocoaError(.fileWriteUnknown) }
@@ -98,7 +98,7 @@ import KikigakiAIIO
                     }
                 }
                 RunLoop.main.add(timer, forMode: .common)
-                menu.popUp(positioning: nil, at: window.robotMenuPosition(menu), in: window.compactFooter.robot)
+                menu.popUp(positioning: nil, at: window.automaticMenuPosition(menu), in: window.compactFooter.automaticDestination)
                 if let captureError { throw captureError }
             }
             window.window?.orderOut(nil)

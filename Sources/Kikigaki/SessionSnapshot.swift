@@ -6,6 +6,8 @@ struct SessionSnapshot {
     var aiSchedule = AIScheduleViewState()
     var ai: AIViewState?
     var aiRecoveryWarning: String?
+    var manualDestination: AIDestinationPicker.Item?
+    var automaticDestination: AIDestinationPicker.Item?
     var state: RecordingState = .idle
     var utterances: [Utterance] = []
     var microphoneSwitches: [MicrophoneSwitch] = []
@@ -69,7 +71,7 @@ struct SessionSnapshot {
         markdownURL != nil && (state == .recording || state == .paused)
     }
 
-    /// メニューと声の合図が共有する即時自動送信の入口。
+    /// 自動の段のメニューから即時送信する入口。
     var canFireAutomatic: Bool {
         aiSchedule.active && aiSchedule.nextFire != nil && aiSchedule.canFireNow
             && ai?.isPreparing != true

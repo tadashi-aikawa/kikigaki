@@ -469,7 +469,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             // 画面外の行はサブビューに載っていないので、行自身ではなく文書側からスクロールする。
             transcriptDocument.scrollRowToVisible(view); scrolled()
         }
-        compactFooter.robot.callback = { [weak self] in self?.showRobotMenu() }
+        compactFooter.automaticDestination.callback = { [weak self] in self?.showAutomaticMenu() }
+        compactFooter.manualDestination.callback = { [weak self] in self?.askPressed() }
         compactFooter.more.callback = { [weak self] in self?.showFooterMenu() }
         compactFooter.minutesNotice.target = self; compactFooter.minutesNotice.action = #selector(toggleMinutes)
         let footer = compactFooter
@@ -601,7 +602,10 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         return view
     }
 
-    @objc private func askPressed() { onAskAI?(nil) }
+    @objc private func askPressed() {
+        guard snapshot.ai != nil && snapshot.canSubmitAI else { return }
+        onAskAI?(nil)
+    }
     func footerMenu() -> NSMenu {
         let menu = NSMenu(); menu.autoenablesItems = false
         func add(_ title: String, _ action: Selector, enabled: Bool = true) {
@@ -612,9 +616,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         menu.items.last?.toolTip = snapshot.handoffMessage
         // AIの項目は使える時だけ出す。停止後などに押せない項目を並べて読み飛ばさせない。
         let panes = snapshot.ai?.canOpenPane == true, saveFailed = snapshot.ai?.saveFailed == true
-        if panes || saveFailed { menu.addItem(.separator()) }
+        let recreate = snapshot.canSubmitAI && snapshot.ai?.canRecreate == true
+        if panes || saveFailed || recreate { menu.addItem(.separator()) }
         if panes { add("ペインを開く", #selector(panePressed)) }
         if saveFailed { add("保存を再試行", #selector(retrySavePressed)) }
+        if recreate { add("AIセッションを作り直す", #selector(recreatePressed)) }
         return menu
     }
     private func showFooterMenu() {
@@ -628,7 +634,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private var canFireAutomatic: Bool {
         snapshot.canFireAutomatic
     }
-    func robotMenu() -> NSMenu {
+    func automaticMenu() -> NSMenu {
         let menu = NSMenu(); menu.autoenablesItems = false
         func add(_ title: String, _ action: Selector, enabled: Bool) {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
@@ -641,20 +647,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             add("自動実行…", #selector(configureAutomaticPressed),
                 enabled: snapshot.ai != nil && (snapshot.state == .recording || snapshot.state == .paused))
         }
-        add("手動実行…", #selector(askPressed), enabled: snapshot.ai != nil && snapshot.canSubmitAI)
-        // 接続が切れた時だけ出す。停止後は依頼を送れないので作り直しても使い道がない。
-        if snapshot.canSubmitAI, snapshot.ai?.canRecreate == true {
-            menu.addItem(.separator())
-            add("AIセッションを作り直す", #selector(recreatePressed), enabled: true)
-        }
         return menu
     }
-    func robotMenuPosition(_ menu: NSMenu) -> NSPoint {
-        NSPoint(x: 0, y: compactFooter.robot.bounds.maxY + menu.size.height + 6)
+    func automaticMenuPosition(_ menu: NSMenu) -> NSPoint {
+        NSPoint(x: 0, y: compactFooter.automaticDestination.bounds.maxY + menu.size.height + 6)
     }
-    private func showRobotMenu() {
-        let menu = robotMenu()
-        compactFooter.robot.popUpMenu(menu, at: robotMenuPosition(menu))
+    private func showAutomaticMenu() {
+        let menu = automaticMenu()
+        compactFooter.automaticDestination.popUpMenu(menu, at: automaticMenuPosition(menu))
     }
     @objc private func configureAutomaticPressed() { onScheduleAI?() }
     @objc private func stopAutomaticPressed() { onStopScheduleAI?() }
