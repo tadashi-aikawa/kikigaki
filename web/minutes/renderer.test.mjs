@@ -6,6 +6,40 @@ import { changedEntries, UpdateHighlighter, foldUpdateMarks } from './updates.js
 import { isTimeline, wrapTimeline } from './timeline.js';
 import { fitColumns } from './tables.js';
 import { boardLinks } from './board.js';
+import { zoomDiagram, diagramOverflow, fitDiagram } from './diagrams.js';
+test('図の続きははみ出した辺だけで、丸め誤差は表示しない', () => {
+  const viewport = { width:300, height:200 };
+  assert.deepEqual(diagramOverflow({ x:0, y:0, width:300, height:200 }, viewport),
+    { left:false, right:false, top:false, bottom:false });
+  assert.deepEqual(diagramOverflow({ x:0, y:0, width:800, height:200 }, viewport),
+    { left:false, right:true, top:false, bottom:false });
+  assert.deepEqual(diagramOverflow({ x:-100, y:-50, width:300, height:400 }, viewport),
+    { left:true, right:false, top:true, bottom:true });
+  assert.deepEqual(diagramOverflow({ x:-0.2, y:0, width:300.5, height:200.2 }, viewport),
+    { left:false, right:false, top:false, bottom:false });
+});
+test('全体は中央へ収め、下限でも収まらない図は25%で中央に置く', () => {
+  const state = { scale:3, x:-200, y:90 }, viewport = { width:300, height:200 };
+  fitDiagram(state, { x:20, y:0, width:600, height:200 }, viewport);
+  assert.deepEqual(state, { scale:0.5, x:-10, y:50 });
+  fitDiagram(state, { x:0, y:10, width:200, height:800 }, viewport);
+  assert.deepEqual(state, { scale:0.25, x:125, y:-2.5 });
+  fitDiagram(state, { x:0, y:0, width:2000, height:1200 }, viewport);
+  assert.deepEqual(state, { scale:0.25, x:-100, y:-50 });
+  fitDiagram(state, { x:0, y:0, width:100, height:100 }, { width:0, height:0 });
+  assert.deepEqual(state, { scale:0.25, x:-100, y:-50 });
+});
+test('図のズームは中心を保ち25%〜400%に収める', () => {
+  const state = { scale:1, x:10, y:-20 }, point = { x:110, y:80 };
+  zoomDiagram(state, 2, point);
+  assert.deepEqual(state, { scale:2, x:-90, y:-120 });
+  zoomDiagram(state, 100, point);
+  assert.equal(state.scale, 4);
+  zoomDiagram(state, 0.001, point);
+  assert.equal(state.scale, 0.25);
+  assert.equal((point.x - state.x) / state.scale, 100);
+  assert.equal((point.y - state.y) / state.scale, 100);
+});
 test('板のclickはT番号から内部見出しへの単独行だけを抽出する', () => {
   const source = 'flowchart TB\nT1["論点"]\nclick T1 "#決定事項"\nclick T2 href "#some-id";\nclick T3 "#%E6%9D%BF"';
   const result = boardLinks(source);

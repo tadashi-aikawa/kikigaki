@@ -34,10 +34,12 @@ export function updateEntries(root) {
   const groups = new Map(), walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
     const node = walker.currentNode, parent = node.parentElement;
-    if (!node.textContent.trim() || parent.closest('.heading-toggle,.code-copy,.katex-mathml,annotation,script,style')) continue;
+    if (!node.textContent.trim() || parent.closest('.heading-toggle,.code-copy,.diagram-controls,.katex-mathml,annotation,script,style')) continue;
     const block = parent.closest('h1,h2,h3,h4,h5,h6,p,li,td,th,pre,.callout-title,.diagram,div,summary') || parent;
     let entry = groups.get(block);
-    if (!entry) { entry = { key:block.tagName + ':' + (block.getAttribute('style') || ''), nodes:[], element:block }; groups.set(block, entry); }
+    // 図を動かしただけでは、本文の更新として強調しない。
+    const style = block.classList.contains('diagram-stage') ? '' : block.getAttribute('style') || '';
+    if (!entry) { entry = { key:block.tagName + ':' + style, nodes:[], element:block }; groups.set(block, entry); }
     entry.nodes.push(node); entry.key += node.textContent;
     for (let element = parent; element && element !== block; element = element.parentElement) {
       entry.key += '[' + element.tagName + ':' + (element.getAttribute('style') || '') + ']';

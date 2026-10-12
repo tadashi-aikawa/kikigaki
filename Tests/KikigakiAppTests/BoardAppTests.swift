@@ -263,6 +263,7 @@ import KikigakiAIIO
         for selector in ["main a[href^=\"#\"]", ".diagram g.node[role=link]"] {
             _ = try await web.evaluateJavaScript("scrollTo(0, 0); true")
             _ = try await web.callAsyncJavaScript("""
+            if (selector.startsWith('.diagram')) document.querySelector('.diagram').click();
             document.querySelector(selector).dispatchEvent(new MouseEvent('click', {bubbles:true}));
             return true;
             """, arguments: ["selector": selector], contentWorld: .page)
@@ -309,6 +310,9 @@ import KikigakiAIIO
         let nodes = try await web.evaluateJavaScript("JSON.stringify([...document.querySelectorAll('.diagram g.node')].map(n=>[n.id,n.getAttribute('role')]))") as? String ?? "なし"
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.diagram g.node[role=link]').length") as? Int == 1, "ノード: \(nodes)、本文: \(preview.boardDocument.renderedText)")
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.diagram a,.diagram script').length") as? Int == 0)
+        _ = try await web.evaluateJavaScript("document.querySelector('.diagram g.node[role=link]').dispatchEvent(new MouseEvent('click', {bubbles:true}))")
+        #expect(preview.selectedBoard)
+        #expect(try await web.evaluateJavaScript("document.querySelector('.diagram').classList.contains('diagram-selected')") as? Bool == true)
         _ = try await web.evaluateJavaScript("document.querySelector('.diagram g.node[role=link]').dispatchEvent(new MouseEvent('click', {bubbles:true}))")
         for _ in 0..<100 {
             if !preview.selectedBoard { break }

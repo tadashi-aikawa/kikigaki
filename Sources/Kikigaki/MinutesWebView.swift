@@ -180,6 +180,8 @@ actor MinutesImageReader {
         config.setURLSchemeHandler(resources, forURLScheme: "minutes-image")
         config.userContentController.add(relay, name: "minutes")
         let webView = WKWebView(frame: .zero, configuration: config)
+        // 図のピンチはDOMのgestureイベントで扱う。ページ全体の拡大は許可しない。
+        webView.allowsMagnification = false
         webView.pageZoom = textScale
         loadedWebView = webView
         webView.navigationDelegate = self

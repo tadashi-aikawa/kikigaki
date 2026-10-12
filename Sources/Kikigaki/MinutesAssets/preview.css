@@ -50,7 +50,36 @@ pre code { padding:0; background:none; } img { max-width:100%; height:auto; } .i
 .code-copy:hover,.code-copy:focus-visible { background:var(--paper); }
 .code-copy:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .code-copy.copied { color:var(--accent); }
-.diagram { margin:14px 0; overflow-x:auto; } .diagram svg { display:block; max-width:none; height:auto; margin:auto; }
+.diagram { position:relative; margin:14px 0; overflow-x:auto; } .diagram svg { display:block; max-width:none; height:auto; margin:auto; }
+.diagram-stage { transform-origin:0 0; }
+.diagram-window { overflow:hidden; }
+/* 操作を透過する装飾。文字は持たず、本文・検索・更新比較へ混ぜない。 */
+.diagram-edges { position:absolute; pointer-events:none; overflow:hidden; }
+.diagram-edge { position:absolute; display:grid; place-items:center; color:var(--accent); font:16px/1 -apple-system,sans-serif; }
+.diagram-edge[hidden] { display:none; }
+.diagram-edge[data-side="left"],.diagram-edge[data-side="right"] { top:0; bottom:0; width:28px; }
+.diagram-edge[data-side="top"],.diagram-edge[data-side="bottom"] { left:0; right:0; height:28px; }
+.diagram-edge[data-side="left"] { left:0; background:linear-gradient(to right,var(--paper),transparent); }
+.diagram-edge[data-side="right"] { right:0; background:linear-gradient(to left,var(--paper),transparent); }
+.diagram-edge[data-side="top"] { top:0; background:linear-gradient(to bottom,var(--paper),transparent); }
+.diagram-edge[data-side="bottom"] { bottom:0; background:linear-gradient(to top,var(--paper),transparent); }
+.diagram-edge[data-side="left"]::before { content:'◂'; }
+.diagram-edge[data-side="right"]::before { content:'▸'; }
+.diagram-edge[data-side="top"]::before { content:'▴'; }
+.diagram-edge[data-side="bottom"]::before { content:'▾'; }
+/* 非選択の図へキーボードで入ったときも、現在の操作対象を示す。解除時はblurする。 */
+.diagram:focus { outline:2px solid var(--accent); }
+.diagram-selected { outline:2px solid var(--accent); outline-offset:0; cursor:grab; user-select:none; }
+.diagram-selected svg,.diagram-selected svg * { cursor:inherit !important; }
+.diagram-selected.diagram-dragging { cursor:grabbing; }
+.diagram-controls { display:none; position:fixed; z-index:1; align-items:center; flex-wrap:wrap; gap:3px; padding:3px; border:1px solid var(--rule); border-radius:6px; background:var(--paper); color:var(--accent); font:12px/1.5 -apple-system,sans-serif; cursor:default; }
+.diagram-selected .diagram-controls { display:flex; }
+.diagram-controls [data-label]::before { content:attr(data-label); }
+.diagram-controls output { min-width:42px; text-align:center; }
+.diagram-controls button { min-width:25px; padding:3px 5px; border:0; border-radius:3px; background:transparent; color:inherit; font:inherit; cursor:pointer; }
+.diagram-controls button:hover { background:var(--shade); }
+.diagram-controls button:focus-visible { outline:2px solid var(--accent); }
+.diagram-controls button:disabled { opacity:.35; cursor:default; }
 .katex-display { overflow-x:auto; overflow-y:hidden; padding:4px 0; } eq { display:inline; } eqn { display:block; }
 .footnotes { border-top:1px solid var(--rule); margin-top:24px; font-size:12px; color:var(--muted); }
 .footnotes p { margin:4px 0; } .footnote-ref { font-size:10px; }

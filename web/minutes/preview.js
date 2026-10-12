@@ -6,7 +6,9 @@ import { UpdateHighlighter, updateEntries, clearUpdates, highlightUpdates } from
 import { isTimeline, wrapTimeline } from './timeline.js';
 import { layoutTables } from './tables.js';
 import { boardLinks, attachBoardLinks } from './board.js';
+import { DiagramInteractions } from './diagrams.js';
 const md = createRenderer(), root = document.getElementById('minutes');
+const diagrams = new DiagramInteractions();
 const toc = document.getElementById('toc'), tocNav = toc.querySelector('nav');
 let textScale = 1;
 let headings = [], tocLinks = [], activeTOCLink = null, tocFrame = 0;
@@ -204,6 +206,10 @@ async function renderDiagram(id, definition) {
     // width:100%とmax-widthによる縮小を外し、文字の大きさをペイン幅に依存させない。
     // 自然寸法のSVGをpageZoomで拡大し、はみ出した分は.diagramがスクロールする。
     const svg = measure.querySelector('svg');
+    // ノードの太い枠線もSVG自身で切らないよう、描画範囲の四辺へ8pxの余白を足す。
+    // viewBoxと自然幅を同じだけ広げ、図の文字やノードを縮めない。
+    const box = svg.viewBox.baseVal, padding = 8;
+    svg.setAttribute('viewBox', `${box.x - padding} ${box.y - padding} ${box.width + 2 * padding} ${box.height + 2 * padding}`);
     svg.style.width = `${svg.viewBox.baseVal.width}px`;
     svg.style.maxWidth = 'none';
     for (const text of measure.querySelectorAll('text,tspan')) {
@@ -251,7 +257,7 @@ function decorateCodeBlocks(codeBlocks, ticket) {
 
 function nodes() {
   const all = [], walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: node => node.parentElement.closest('script,style,.katex-mathml,annotation,.heading-toggle,.code-copy') ||
+    acceptNode: node => node.parentElement.closest('script,style,.katex-mathml,annotation,.heading-toggle,.code-copy,.diagram-controls') ||
       (node.parentElement === root && !node.textContent.trim()) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
   });
   while (walker.nextNode()) all.push(walker.currentNode);
@@ -349,11 +355,13 @@ window.minutes = {
     textScale = scale;
     root.classList.toggle('text-expanded', textScale > 1 && !toc.hidden);
     restoreAnchor(saved);
+    diagrams.positionControls();
   },
   async render(text, newContext, reset, ticket, newVault, boardLinksEnabled = false) {
     cancelNavigation();
     const current = ++generation;
     if (reset) updates.reset();
+    if (reset) diagrams.reset(); else diagrams.detach();
     clearUpdates();
     updateListeners.abort(); updateListeners = new AbortController();
     const saved = reset ? null : anchor(), selection = reset ? null : selectionOffsets();
@@ -397,6 +405,7 @@ window.minutes = {
       if (image.complete) { if (image.naturalWidth) loaded(); else failed(); }
     }
     restoreAnchor(saved); restoreSelection(selection); refreshSearch();
+    const diagramCounts = new Map(), diagramKeys = new Set();
     for (const pre of [...root.querySelectorAll('.mermaid-source')]) {
       if (current !== generation) return;
       const holder = document.createElement('div'); holder.className = 'diagram';
@@ -411,9 +420,17 @@ window.minutes = {
           if (!window.minutes.jump(target)) report({ kind: 'boardAnchor', target });
         });
         pre.replaceWith(holder);
+        // 文言の更新ではキーを変えない。見出しのIDと、その節内の図の順番で対応付ける。
+        const section = holder.closest('.heading-section');
+        const sectionID = section?.querySelector(':scope > :is(h1,h2,h3,h4,h5,h6)')?.id || '';
+        const index = diagramCounts.get(sectionID) || 0; diagramCounts.set(sectionID, index + 1);
+        const key = JSON.stringify([sectionID, index]); diagramKeys.add(key);
+        const cleanup = diagrams.attach(holder, key);
+        updateListeners.signal.addEventListener('abort', cleanup, { once:true });
       } catch { pre.title = '図を描画できないため、記法を表示しています'; }
     }
     if (current !== generation) return;
+    for (const key of diagrams.states.keys()) if (!diagramKeys.has(key)) diagrams.states.delete(key);
     if (restore) { restoreAnchor(saved); restoreSelection(selection); }
     updateTOCPosition();
     refreshSearch();
@@ -421,6 +438,8 @@ window.minutes = {
     const plan = updates.plan(updateEntries(root));
     // rebuildTOC はこの前に走るため、目次の印は描画のたびに今のリンクへ付け直す。
     highlightUpdates(plan.entries, plan.persist, heading => tocLinks[headings.indexOf(heading)]);
+    // 全ての図と閲読位置を復元してから、操作列を最終の配置へ合わせる。
+    diagrams.positionControls();
     report({ kind: 'rendered', ticket, text: root.innerText });
     return true;
   },
@@ -432,7 +451,7 @@ window.minutes = {
     jumpTo(target);
     return !!target;
   },
-  clear() { cancelNavigation(); generation++; updates.reset(); clearUpdates(); updateListeners.abort(); closeImage(); folded.clear(); source = ''; root.replaceChildren(); rebuildTOC(true); query = ''; refreshSearch(); scrollTo(0, 0); },
+  clear() { cancelNavigation(); diagrams.reset(); generation++; updates.reset(); clearUpdates(); updateListeners.abort(); closeImage(); folded.clear(); source = ''; root.replaceChildren(); rebuildTOC(true); query = ''; refreshSearch(); scrollTo(0, 0); },
   invalidate() { cancelNavigation(); generation++; clearUpdates(); updateListeners.abort(); },
   search(value, direction = 0, reveal = true) {
     if (query !== value) { query = value; hit = 0; return refreshSearch(reveal); }
