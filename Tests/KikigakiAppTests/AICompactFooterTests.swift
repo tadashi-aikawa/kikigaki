@@ -19,7 +19,11 @@ extension AppKitTests {
         footer.update(state, reduceMotion: true)
         footer.update(state, reduceMotion: true)
         #expect(footer.warning.toolTip == state.aiRecoveryWarning)
-        footer.warning.performClick(nil)
+        // performClickの入れ子のRunLoopとシートのアニメーションが外側の
+        // メインループまで止めると、Swift Testingは集計前にexit(0)する。
+        // ボタンに配線された本番のtarget/actionで、警告シートの内容を検証する。
+        // ランタイムの経路: https://github.com/swiftlang/swift/issues/91716
+        #expect(footer.warning.sendAction(footer.warning.action, to: footer.warning.target))
         let sheet = try #require(window.attachedSheet)
         func text(_ view: NSView) -> [String] {
             (view as? NSTextField).map { [$0.stringValue] } ?? view.subviews.flatMap(text)
