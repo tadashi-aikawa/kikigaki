@@ -1,0 +1,199 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "KIKIGAKI 設定",
+  "description": "config.toml の設定。省略したキーには既定値を使います。未知のキーはアプリでは無視しますが、入力ミスを見つけるためエディタでは指摘します。",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "outputDir": {
+      "description": "Markdownと録音WAVの保存先。絶対パスか ~ 始まり。\n\n任意 · 既定: `\"~/Documents/KIKIGAKI\"`",
+      "type": "string",
+      "pattern": "^[/~]",
+      "default": "~/Documents/KIKIGAKI"
+    },
+    "saveRecording": {
+      "description": "録音WAVをMarkdownと並べて保存する。\n\n任意 · 既定: `false`",
+      "type": "boolean",
+      "default": false
+    },
+    "measureAudioLevels": {
+      "description": "発話ごとの音量と小音量候補を診断表示・保存する。次の会議から反映。\n\n任意 · 既定: `false`",
+      "type": "boolean",
+      "default": false
+    },
+    "participantsKey": {
+      "description": "話者候補の参加者を読む議事録frontmatterのキー。空白・区切り文字と先頭の - は不可。\n\n任意 · 既定: `\"participants\"`",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!-)[^\\s:#\"'\\[\\]{},]+$",
+      "default": "participants"
+    },
+    "autoSendPhrases": {
+      "description": "プロファイルで未指定の場合に使う共通の声の合図。空配列で無効。最大20個、各64文字まで。かな・記号の正規化後の空と重複はアプリで検証する。\n\n任意 · 既定: `[\"アバンティ\",\"アヴァンティ\"]`",
+      "type": "array",
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "pattern": "\\S" },
+      "default": ["アバンティ", "アヴァンティ"]
+    },
+    "speakers": {
+      "description": "話者名の候補とアバターの台帳。[[speakers]] を1人ごとに書く。正規化後の名前の重複はアプリで検証する。\n\n任意 · 既定: `[]`",
+      "type": "array",
+      "default": [],
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "description": "話者名。空白だけの名前と正規化後の重複は不可。\n\n必須",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "avatar": {
+            "description": "画像のローカルパスかHTTP・HTTPSのURL。~/ 始まりも可。省略・読込失敗時はイニシャル。\n\n任意 · 既定: イニシャル",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ai": {
+      "description": "AI参加の宛先。[[ai]] で書き、1つ目が既定。省略時はAI機能が無効。名前の重複、autoStartの複数指定、herdrCommandの不一致はアプリで検証する。\n\n任意 · 既定: 無効",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "宛先の表示名。省略時はaddressから導く。空・複数行・重複は不可。UTF-8で64バイトまで。\n\n任意 · 既定: addressから導く参加者名",
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]*[^\\s\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029][^\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]*$"
+          },
+          "cli": {
+            "description": "参加するAIのCLI。\n\n任意 · 既定: `\"codex\"`",
+            "type": "string",
+            "enum": ["codex", "claude"],
+            "default": "codex"
+          },
+          "command": {
+            "description": "CLIの絶対パス。省略時はPATHと既知の置き場から探す。\n\n任意 · 既定: PATHと既知の置き場から探す",
+            "type": "string",
+            "pattern": "^/[^\\u0000]*$"
+          },
+          "herdrCommand": {
+            "description": "herdrの絶対パス。省略時は自動探索。2つ目以降は先頭の値を引き継ぐ。異なる値は不可。\n\n任意 · 既定: 先頭の値を引き継ぎ、未指定ならPATHと既知の置き場から探す",
+            "type": "string",
+            "pattern": "^/[^\\u0000]*$"
+          },
+          "model": {
+            "description": "モデル名。省略時はCLIの既定。空・複数行は不可。\n\n任意 · 既定: CLIの既定",
+            "type": "string",
+            "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]*[^\\s\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029][^\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]*$"
+          },
+          "effort": {
+            "description": "推論の強さ。省略時はCLIの既定。候補は両CLIの値の和集合。CLIごとの値域はアプリで検証し、モデルによる対応はCLIが判定する。extraArgsでの指定は不可。\n\n任意 · 既定: CLIの既定",
+            "type": "string",
+            "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+          },
+          "address": {
+            "description": "宛名。末尾の「へ」を除いた部分が参加者名。空・複数行・「へ」だけは不可。\n\n任意 · 既定: `\"迅雷へ\"`",
+            "type": "string",
+            "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]*[^\\s\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029][^\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]*$",
+            "default": "迅雷へ"
+          },
+          "avatar": {
+            "description": "返事行の画像のローカルパスかHTTP・HTTPSのURL。URLのスキームとホストはアプリで検証する。省略・読込失敗時は紫のイニシャル。\n\n任意 · 既定: 紫のイニシャル",
+            "type": "string",
+            "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]*[^\\s\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029][^\\x00-\\x1f\\x7f-\\x9f\\u2028\\u2029]*$"
+          },
+          "cwd": {
+            "description": "CLI起動時の作業ディレクトリ。絶対パスか ~/ 始まり。存在確認はアプリで行う。\n\n任意 · 既定: `\"~/Library/Application Support/KIKIGAKI/ai-work/\"`",
+            "type": "string",
+            "pattern": "^(?:/|~/)[^\\u0000]*$",
+            "default": "~/Library/Application Support/KIKIGAKI/ai-work/"
+          },
+          "extraArgs": {
+            "description": "CLIへの追加引数。対応済みの指定だけを受け付ける。CLIごとの許可リストと引数・値の組合せはアプリで検証する。effortはここへ書かない。\n\n任意 · 既定: `[]`",
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[^\\u0000]*$" },
+            "default": []
+          },
+          "alwaysPrompt": {
+            "description": "すべての送信の末尾へ付く補助指示。UTF-8で32 KiBまで。NULは不可。\n\n任意 · 既定: `\"\"`",
+            "type": "string",
+            "maxLength": 32768,
+            "pattern": "^[^\\u0000]*$",
+            "default": ""
+          },
+          "notifySound": {
+            "description": "この宛先から返事が届いたときに通知音を鳴らす。\n\n任意 · 既定: `false`",
+            "type": "boolean",
+            "default": false
+          },
+          "allowWork": {
+            "description": "送信シートの「作業を許可する」の初期値。\n\n任意 · 既定: `true`",
+            "type": "boolean",
+            "default": true
+          },
+          "identifySpeakers": {
+            "description": "送信に話者名の割当を同梱する。\n\n任意 · 既定: `false`",
+            "type": "boolean",
+            "default": false
+          },
+          "autoStart": {
+            "description": "録音開始シートの自動送信の宛先の既定にする。全宛先で1つまで。boardが無い場合は空でないinitialPromptが必要。\n\n任意 · 既定: `false`",
+            "type": "boolean",
+            "default": false
+          },
+          "initialPrompt": {
+            "description": "手動・自動実行シートと録音開始シートのプロンプト初期値。UTF-8で32 KiBまで。NULは不可。\n\n任意 · 既定: `\"\"`",
+            "type": "string",
+            "maxLength": 32768,
+            "pattern": "^[^\\u0000]*$",
+            "default": ""
+          },
+          "autoIntervalMinutes": {
+            "description": "自動送信の間隔。1〜120分。\n\n任意 · 既定: `3`",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 120,
+            "default": 3
+          },
+          "autoSendPhrases": {
+            "description": "このプロファイルが手動宛先の間に効く声の合図。未指定は共通設定を使い、指定すると置き換える。空配列でこの宛先の間だけ無効。最大20個、各64文字まで。かな・記号の正規化後の空と重複はアプリで検証する。\n\n任意 · 既定: 共通設定を使う",
+            "type": "array",
+            "maxItems": 20,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "pattern": "\\S" }
+          },
+          "board": {
+            "description": "ボードとして自動更新する1行のMarkdown見出し。# から ###### まで。省略時はボードなし。\n\n任意 · 既定: ボードなし",
+            "type": "string",
+            "pattern": "^#{1,6} [^\\r\\n\\u0000\\u000b\\u000c\\u0085\\u2028\\u2029]*[^\\s\\u0000][^\\r\\n\\u0000\\u000b\\u000c\\u0085\\u2028\\u2029]*$"
+          },
+          "boardPrompt": {
+            "description": "ボードのプロンプト全文。boardが必要。省略時は内蔵。空白だけは不可、UTF-8で32 KiBまで。\n\n任意 · 既定: 内蔵のボードプロンプト",
+            "type": "string",
+            "maxLength": 32768,
+            "pattern": "^[^\\u0000]*[^\\s\\u0000\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff][^\\u0000]*$"
+          },
+          "boardLocation": {
+            "description": "議事録のパスが無いときの作成指示。boardが必要。変数はAIが解釈する。空白だけは不可、UTF-8で32 KiBまで。プロンプト合成後の上限はアプリで検証する。\n\n任意 · 既定: なし",
+            "type": "string",
+            "maxLength": 32768,
+            "pattern": "^[^\\u0000]*[^\\s\\u0000\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff][^\\u0000]*$"
+          }
+        },
+        "dependencies": {
+          "boardPrompt": ["board"],
+          "boardLocation": ["board"]
+        }
+      }
+    }
+  }
+}

@@ -17,9 +17,33 @@ description: config.toml に書ける設定と、画面で選ぶもの
 - 書式や値が正しくないと、読み直しを止めて理由を表示します
 - 開始シートや画面で決めた値は、設定ファイルへ書き戻しません
 
+## エディタでキーを補完する
+
+1. エディタでTaploのTOML言語サーバーを有効にします
+    - 例: VS Codeでは「Even Better TOML」拡張を入れます
+2. `~/.config/kikigaki/config.toml` の先頭に次の1行を加えます
+
+```toml
+#:schema /Applications/KIKIGAKI.app/Contents/Resources/config.schema.json
+```
+
+- Homebrewで通常の場所に入れた場合は、このパスをそのまま使えます
+- アプリを別の場所に置いた場合は、`KIKIGAKI.app` までの部分を実際の絶対パスへ書き換えます
+- キーの補完と説明が表示されます
+- 綴りの誤り・値の範囲外・廃止したキーを指摘します
+    - 補足: 未知のキーはアプリでは無視されますが、エディタでは入力ミスとして指摘します
+- 名前の重複など、設定全体の検証は「設定を再読込」で確認できます
+- 次の条件も「設定を再読込」で検証します
+    - CLIに応じた推論の強さ
+    - 追加引数の許可リストと値の組合せ
+    - アバターURLのスキームとホスト
+    - 宛名が「へ」だけでないこと
+    - 自動送信を開始するための初期プロンプト
+
 ## 設定例
 
 ```toml
+#:schema /Applications/KIKIGAKI.app/Contents/Resources/config.schema.json
 # Markdown (と録音WAV) の保存先。既定: ~/Documents/KIKIGAKI
 outputDir = "~/Documents/KIKIGAKI"
 # 録音WAVを Markdown と並べて残すか。既定: false

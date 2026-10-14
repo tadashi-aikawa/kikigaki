@@ -43,6 +43,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `KikigakiAppTests`: AppKitとセッション。撮影用の環境変数は [開発用のフラグと環境変数](docs/dev-flags.md)
   - `KikigakiCLITests`: 同梱CLI
 - `Resources/`: アプリバンドル用の Info.plist。マイクの `NSMicrophoneUsageDescription`、システム音声の `NSAudioCaptureUsageDescription` を含む
+  - `config.schema.json`: Taplo用の設定スキーマ。`.app/Contents/Resources/` へ同梱する
 - `skills/kikigaki/`: AI参加者用の配布Skill。`.app` へ同梱し、同梱CLIの `skill install` が利用者のSkill置き場へリンクする
 - `web/minutes/`: 議事録の描画資産のソース。再生成は [議事録の描画と検索](docs/minutes-rendering.md)
 - `site/`: 利用者向けのサイト。Astro 1本で、トップのティザーは `src/pages/index.astro`、ドキュメントはStarlightで `src/content/docs/docs/` に置く

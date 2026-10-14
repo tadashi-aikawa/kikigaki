@@ -1,15 +1,49 @@
 # 設定リファレンス
 
-`~/.config/kikigaki/config.toml` (TOML) の全キーを1か所で引けるようにする。すべて省略可で、省略時は既定値。ファイルが無くても起動する。
+`~/.config/kikigaki/config.toml` (TOML) の全キーを1か所で引けるようにする。トップレベルのキーはすべて省略可で、省略時は既定値。ファイルが無くても起動する。
 
 - 変更の反映: メニューバーのフクロウの「設定を再読込」で読み直す。
     - 範囲: AIの設定と `autoSendPhrases` は会議開始時に固定する。進行中の会議には効かず、次の会議から反映する。
 - 読み込めないとき: 構文や検証に失敗すると再読込は止まり、理由を表示する
 - 画面から決める値は設定ファイルへ書き戻さない。下の「設定ファイルで決めないもの」を参照する
 
+## エディタでの補完と検証
+
+`config.toml` の先頭に次の1行を書く。
+
+```toml
+#:schema /Applications/KIKIGAKI.app/Contents/Resources/config.schema.json
+```
+
+- TaploのLSPでキーの補完・説明・値の検証が効く
+- 各キーの説明末尾には空行を挟んで「必須」か「任意 · 既定: 値」を1行で示す。JSONで書ける既定値はバッククォートで囲む
+- スキーマのソースは `Resources/config.schema.json`
+- アプリの署名前に `Contents/Resources/config.schema.json` へ同梱する
+    - 理由: 手元のアプリの版と設定定義を一致させる
+- 補完には現行のキーだけを出す
+- スキーマには合成キーワードを使わない
+    - 理由: Taploで表の中の補完が消えたり候補が重複したりする
+- 未知のキーと廃止したキーはスキーマ検証で指摘する
+    - 差異: アプリのパーサーは未知のキーを無視する。Taploでは入力ミスの検出のためエラーとして指摘する
+- 次の条件はアプリで検証する
+    - 正規化後の重複
+    - UTF-8のバイト数
+        - 範囲: スキーマの文字数上限はバイト数上限の必要条件だけを検証する
+    - 合図の64文字制限
+        - 理由: Swiftの文字単位とJSON Schemaの単位が異なるためスキーマでは制限しない
+    - 宛先間の制約
+    - CLIごとの `effort` の値域
+        - 補完: 両CLIの値の和集合を候補にする
+    - 追加引数のCLIごとの許可リストと引数・値の組合せ
+        - 範囲: スキーマは文字列の配列とNUL禁止を検証する
+    - AIの `avatar` のURLスキームとホスト
+    - AIの `address` が「へ」だけでないこと
+    - `board` が無いときの `autoStart = true` に空でない `initialPrompt` が必要なこと
+
 ## 設定例
 
 ```toml
+#:schema /Applications/KIKIGAKI.app/Contents/Resources/config.schema.json
 # Markdown (と録音WAV) の保存先。既定: ~/Documents/KIKIGAKI
 outputDir = "~/Documents/KIKIGAKI"
 # 録音WAVを Markdown と並べて残すか。既定: false (通常利用では不要でディスクを食うだけ)
@@ -94,7 +128,7 @@ autoSendPhrases = ["アバンティ", "アヴァンティ"]
 
 | キー | 説明 |
 | --- | --- |
-| `name` | 話者名。空と重複は設定エラー |
+| `name` | 必須の話者名。省略・空・重複は設定エラー |
 | `avatar` | 省略可。ローカルパス (`~/` 始まりも可) か HTTP・HTTPS の画像URL |
 
 - 取得できない画像は、枡の色の地にイニシャルを出す

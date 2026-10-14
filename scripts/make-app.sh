@@ -25,6 +25,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Helpers"
 cp "$BIN" "$APP/Contents/MacOS/KIKIGAKI"
 cp "$ROOT/.build/$CONFIG/kikigaki-cli" "$APP/Contents/Helpers/kikigaki-cli"
 cp "$ROOT/Resources/kikigaki.icns" "$APP/Contents/Resources/"
+cp "$ROOT/Resources/config.schema.json" "$APP/Contents/Resources/"
 cp -R "$ROOT/.build/$CONFIG/Kikigaki_Kikigaki.bundle" "$APP/Contents/Resources/"
 # AI参加者用のSkillを同梱する。Caskはここへリンクを張るので、利用者が
 # リポジトリをcloneしなくても導入でき、更新も.appの差し替えだけで届く。
