@@ -79,8 +79,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     /// 議事録の指定が読めないときだけ出す1行。説明文は置かない
     private let minutesHint = Washi.label(size: 11, color: Washi.gold)
     private let aiSection = NSStackView()
-    let destination = NSPopUpButton()
-    let manualDestination = NSPopUpButton()
+    let destination = StartSheetDestinationButton()
+    let manualDestination = StartSheetDestinationButton()
     let interval = NSPopUpButton()
     private let cwdLabel = Washi.label(size: 12, color: Washi.muted)
     let editor = AIQuestionEditor()
@@ -212,6 +212,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             // 複数行の自動送信の末尾にも、次の区切り線まで10ptの余白を取る。
             rows.setCustomSpacing(10, after: automaticRow)
             manualDestination.font = .systemFont(ofSize: 13)
+            manualDestination.setAccessibilityLabel("手動送信の宛先")
             manualDestination.target = self; manualDestination.action = #selector(manualDestinationChanged)
             add(separator(), to: rows)
             // 指示が無い宛先でも1行分を残し、選び直しても操作部の位置を変えない。
@@ -499,6 +500,16 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             item.tag = profile.slot
             let title = NSMutableAttributedString(string: profile.name,
                 attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)])
+            if profile.identifySpeakers {
+                // 名前だけを先に縮め、一覧でも札を欠かさない。標準メニューの選択操作はそのまま使う。
+                let name = SpeakerEstimationChip.truncated(profile.name, font: .systemFont(ofSize: 13, weight: .semibold),
+                    width: 440 - SpeakerEstimationChip.size.width - 6)
+                title.mutableString.setString(name)
+                title.append(NSAttributedString(string: "  "))
+                title.append(SpeakerEstimationChip.attachment(for: item))
+                item.setAccessibilityLabel(profile.name + " 話者名を推定 " + Self.meta(profile))
+                item.toolTip = profile.name + " 話者名を推定"
+            }
             title.append(NSAttributedString(string: "\n" + Self.meta(profile), attributes: [
                 .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]))
             if let prompt = Self.promptLine(profile.board.map { BoardPrompt.summary(heading: $0) } ?? profile.initialPrompt) {
@@ -537,7 +548,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             item.image = AIProfileAvatar.image(name: profile.name, source: profile.avatar, store: avatars)
         }
         (manualDestination.cell as? NSPopUpButtonCell)?.menuItem = item
-        manualDestination.setAccessibilityValue(item.title)
+        manualDestination.showsSpeakerEstimation = profiles.first { $0.slot == selectedManualSlot }?.identifySpeakers == true
+        manualDestination.setAccessibilityValue(item.title + (manualDestination.showsSpeakerEstimation ? " 話者名を推定" : ""))
         manualDestination.toolTip = item.title
         manualDestination.needsDisplay = true
     }
@@ -549,7 +561,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             item.image = AIProfileAvatar.image(name: profile.name, source: profile.avatar, store: avatars)
         }
         (destination.cell as? NSPopUpButtonCell)?.menuItem = item
-        destination.setAccessibilityValue(item.title)
+        destination.showsSpeakerEstimation = profiles.first { $0.slot == selectedSlot }?.identifySpeakers == true
+        destination.setAccessibilityValue(item.title + (destination.showsSpeakerEstimation ? " 話者名を推定" : ""))
         destination.toolTip = item.title
         destination.needsDisplay = true
     }
