@@ -23,6 +23,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `SpeakerNames.swift` / `TranscriptRenderer.swift` / `MeetingMarkdown.swift` / `MeetingFiles.swift`: 話者名の枡・行の整形・Markdown 生成・ファイル命名
   - `Config.swift` / `AIConfig.swift`: 設定ファイルのパースと既定値。キーの一覧は [設定リファレンス](docs/config.md)
   - `RecordingState.swift`: 録音状態とメニュー表題
+  - `GlobalHotkey.swift`: 手動宛先へ送るグローバルキーの書式と表記。登録はアプリ側の `GlobalHotkeyRegistration.swift`
   - `SystemAudioMix.swift`: システム音声の3択、出力の3値判定、16kHzの加算とピーク保護
   - AI設定、独立stream履歴、envelope、質問と受信イベント、AIの返事のMarkdownもここに置く。契約は [AI参加者の設計](docs/ai-participant.md)
 - `Sources/KikigakiAIIO/`: アプリと返送CLIが共有するfd検証、原子的な保存、sessionとフック観測の型
@@ -72,7 +73,8 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 - 設定ファイルへ書き戻さない: 録音開始シートや画面で決めた値はその会議だけに効く。書き戻すと設定ファイルの正本が2つになる。[録音開始シート](docs/start-sheet.md)
 - 文字の倍率: 発言の行・AIの行に文字を足すときは、表示中の倍率を掛ける。拡大は参加者がみんなで読むものに限り、手入力欄・ヘッダー・シートなどの操作部は固定サイズのまま。[書き起こしウィンドウ](docs/transcript-window.md) の「文字の倍率」
 - 廃止して戻さないと決めたもの: 詳細は各リンク先
-  - グローバルショートカット。[録音開始シート](docs/start-sheet.md)
+  - 録音の開始・停止・一時停止のグローバルショートカット。[録音開始シート](docs/start-sheet.md)
+    - 例外: 手動宛先へ送るキー `manualSendHotkey` は持つ。[AIへの定期自動送信](docs/ai-scheduled.md) の「グローバルキー」
   - アプリを開くURLスキーム。[録音開始シート](docs/start-sheet.md)
   - 短い別話者区間をフレーズの多数派へ吸収する補正。[話者の割当と固定](docs/speaker-assignment.md)
   - 稼働中のherdrペインへ接続する `attach` / `displayAgent` と、会議に紐づかない準備済みAIセッション。[AI設定の複数プロファイル](docs/ai-profiles.md)

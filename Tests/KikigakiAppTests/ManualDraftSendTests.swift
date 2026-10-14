@@ -140,6 +140,40 @@ extension AppKitTests {
         #expect(footer.manualSend.accessibilityLabel() == "送信の準備中です")
     }
 
+    @Test func グローバルキーは手動宛先へ下書きを送りキーの表記で通知する() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), session = session(root, fake: fake)
+        session.updateManualDraft("スライドの下書き", slot: 2)
+        var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        var cues: [VoiceCueFeedback] = []; session.notifyVoiceCue = { cues.append($0) }
+        var keys: [VoiceCueFeedback] = []; session.notifyHotkey = { keys.append($0) }
+        let hotkey = try #require(GlobalHotkey("cmd+shift+space"))
+        #expect(session.sendManualDraft(trigger: .hotkey(hotkey)))
+        await session.submissionTaskForTesting(slot: 2)?.value
+        let request = try #require(session.aiRecord?.controller.conversation.questions.first?.request)
+        #expect(request.envelope.participant.profileSlot == 2)
+        #expect(request.envelope.participant.question == "スライドの下書き" && request.trigger == nil)
+        #expect(sounds == [true] && cues.isEmpty)
+        #expect(keys == [.accepted(destination: "スライド", phrase: "⇧⌘Space", appendix: false)])
+    }
+
+    @Test func グローバルキーは指定しないと停止後も低い音と理由で断る() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(root, fake: FakeHerdr())
+        var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        var keys: [VoiceCueFeedback] = []; session.notifyHotkey = { keys.append($0) }
+        let hotkey = try #require(GlobalHotkey("f19"))
+        session.setMeetingManualDestination(slot: nil)
+        #expect(!session.sendManualDraft(trigger: .hotkey(hotkey)))
+        session.setMeetingManualDestination(slot: 2)
+        await session.stop()
+        #expect(!session.sendManualDraft(trigger: .hotkey(hotkey)))
+        #expect(sounds == [false, false])
+        #expect(keys == [.failed(destination: nil, reason: "手動宛先を指定してください"),
+                         .failed(destination: nil, reason: "録音中・一時停止中だけ送れます")])
+        #expect(session.aiRecord?.controller.conversation.questions.isEmpty != false)
+    }
+
     @Test func クリックの受付後に失敗しても音だけで知らせる() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         var config = ResolvedConfig(config: KikigakiConfig(), home: root)

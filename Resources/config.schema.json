@@ -36,6 +36,11 @@
       "items": { "type": "string", "minLength": 1, "pattern": "\\S" },
       "default": ["アバンティ", "アヴァンティ"]
     },
+    "manualSendHotkey": {
+      "description": "どのアプリが前面でも、会議の手動宛先へ下書きを送るキー。`modifier+key` 形式で、ctrl・alt・cmd のどれかが要る(F1〜F20は単独可)。キーは英数字・space・enter・tab・escape・f1〜f20。空文字で未割り当て。\n\n任意 · 既定: 未割り当て",
+      "type": "string",
+      "examples": ["cmd+shift+space", "ctrl+alt+cmd+a"]
+    },
     "speakers": {
       "description": "話者名の候補とアバターの台帳。[[speakers]] を1人ごとに書く。正規化後の名前の重複はアプリで検証する。\n\n任意 · 既定: `[]`",
       "type": "array",

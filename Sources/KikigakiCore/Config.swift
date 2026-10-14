@@ -17,18 +17,21 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     /// 話者名の候補に使う、議事録のfrontmatterのキー
     public var participantsKey: String?
     public var autoSendPhrases: [String]?
+    /// 会議の手動宛先へ下書きを送る、OS全体で効くキー。空文字は未割り当て
+    public var manualSendHotkey: String?
     public var speakers: [Speaker]?
     /// 配列の `[[ai]]`
     public var ai: AIProfileList?
 
     public init(outputDir: String? = nil, saveRecording: Bool? = nil,
                 speakers: [Speaker]? = nil, ai: AIProfileList? = nil, measureAudioLevels: Bool? = nil,
-                participantsKey: String? = nil, autoSendPhrases: [String]? = nil) {
+                participantsKey: String? = nil, autoSendPhrases: [String]? = nil, manualSendHotkey: String? = nil) {
         self.outputDir = outputDir
         self.saveRecording = saveRecording
         self.measureAudioLevels = measureAudioLevels
         self.participantsKey = participantsKey
         self.autoSendPhrases = autoSendPhrases
+        self.manualSendHotkey = manualSendHotkey
         self.speakers = speakers
         self.ai = ai
     }
@@ -50,6 +53,8 @@ public struct ResolvedConfig: Equatable, Sendable {
     public var measureAudioLevels: Bool
     public var participantsKey: String
     public var autoSendPhrases: [String]
+    /// 既定は未割り当て。どのキーも誰かのOS・アプリの既定とぶつかりうる
+    public var manualSendHotkey: GlobalHotkey?
     public var speakers: [KikigakiConfig.Speaker]
     /// 設定順のプロファイル。slotは1始まりで、この並びが宛先ポップアップの並びになる
     public var aiProfiles: [ResolvedAIConfig]
@@ -71,6 +76,7 @@ public struct ResolvedConfig: Equatable, Sendable {
         measureAudioLevels = config.measureAudioLevels ?? false
         participantsKey = config.participantsKey ?? Self.defaultParticipantsKey
         autoSendPhrases = config.autoSendPhrases ?? Self.defaultAutoSendPhrases
+        manualSendHotkey = config.manualSendHotkey.flatMap(GlobalHotkey.init)
         speakers = (config.speakers ?? []).map { speaker in
             var speaker = speaker
             speaker.name = SpeakerNames.normalized(speaker.name)
@@ -128,6 +134,11 @@ public enum ConfigLoader {
         try config.ai?.validate()
         if let phrases = config.autoSendPhrases {
             try AutoSendPhrase.validate(phrases)
+        }
+        if let hotkey = config.manualSendHotkey, !hotkey.isEmpty, GlobalHotkey(hotkey) == nil {
+            // 単独キーやshiftだけの組は、全アプリでその文字を打てなくする
+            throw ConfigError.invalid(description:
+                "manualSendHotkey must be modifier+key with ctrl, alt or cmd (F1-F20 may stand alone) (got: \(hotkey))")
         }
         var speakerNames = Set<String>()
         for speaker in config.speakers ?? [] {

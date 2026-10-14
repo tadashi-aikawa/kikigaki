@@ -123,6 +123,7 @@ struct ReplayDebugOptions {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var voiceCueNotification: VoiceCueNotification?
+    private var manualSendHotkey: (hotkey: GlobalHotkey, registration: GlobalHotkeyRegistration)?
     private var statusItem: StatusItem?
     private var window: TranscriptWindowController?
     private var session: MeetingSession?
@@ -258,6 +259,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window?.show()
         }
         session.notifyVoiceCue = { [weak self] in self?.voiceCueNotification?.post($0) }
+        session.notifyHotkey = { [weak self] in self?.voiceCueNotification?.post($0, title: "KIKIGAKI · グローバルキー") }
+        registerManualSendHotkey(config)
 
         let statusItem = StatusItem()
         statusItem.onStartStop = { [weak self] in self?.toggleRecording() }
@@ -599,7 +602,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.config = config
         session?.update(config: config)
+        registerManualSendHotkey(config)
         Self.log("設定を再読込した")
+    }
+
+    /// AI設定と違い、キーは会議に属さないので再読込ですぐ差し替える。
+    /// 録音外でも登録したままにし、押されたら送れない理由を返す(押して何も起きない、を作らない)
+    private func registerManualSendHotkey(_ config: ResolvedConfig) {
+        // replayは利用者が起動中の本体とキーを奪い合わないよう登録しない
+        guard replayURL == nil, config.manualSendHotkey != manualSendHotkey?.hotkey else { return }
+        manualSendHotkey?.registration.unregister()
+        manualSendHotkey = nil
+        guard let hotkey = config.manualSendHotkey else { return }
+        guard let registration = GlobalHotkeyRegistration(hotkey, handler: { [weak self] in
+            self?.session?.sendManualDraft(trigger: .hotkey(hotkey))
+        }) else {
+            Self.log("グローバルキー \(hotkey.display) を登録できない")
+            showAlert("グローバルキー \(hotkey.display) を登録できません",
+                      detail: "他のアプリが同じキーを使っています。設定の manualSendHotkey を別のキーにしてください。")
+            return
+        }
+        manualSendHotkey = (hotkey, registration)
     }
 
     private func showAlert(_ message: String, detail: String) {

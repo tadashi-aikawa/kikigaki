@@ -169,6 +169,7 @@ final class MeetingSession {
         meetingManualAI?.autoSendPhrases ?? meetingAutoSendPhrases
     }
     var notifyVoiceCue: (VoiceCueFeedback) -> Void = { _ in }
+    var notifyHotkey: (VoiceCueFeedback) -> Void = { _ in }
     /// 合図の音は返事のnotifySoundと独立。テストでは音を捕捉する。
     var playAutoSendSound: (Bool) -> Void = { sent in
         NSSound(named: sent ? "Pop" : "Basso")?.play()
@@ -1505,31 +1506,61 @@ extension MeetingSession {
         }
     }
 
+    /// ▶ ボタン・声の合図・グローバルキーの区別。音は共通で、通知の有無と括弧の表記が変わる
+    enum ManualDraftTrigger: Equatable {
+        case button
+        case voiceCue(phrase: String)
+        case hotkey(GlobalHotkey)
+    }
+
     /// 水位・10秒の無視には触れず、声の合図とクリックを同じ本番入口へ通す。
     @discardableResult
     func sendManualDraft(voiceCuePhrase: String? = nil) -> Bool {
+        sendManualDraft(trigger: voiceCuePhrase.map { .voiceCue(phrase: $0) } ?? .button)
+    }
+
+    @discardableResult
+    func sendManualDraft(trigger: ManualDraftTrigger) -> Bool {
+        // キーは窓が見えないまま押すので、録音外や「指定しない」でも黙らず断る。
+        if case .hotkey = trigger {
+            let recording = snapshot.state == .recording || snapshot.state == .paused
+            if !recording || meetingManualAI == nil {
+                reportManualDraft(.failed(destination: nil,
+                    reason: recording ? manualDraftSendState.toolTip : "録音中・一時停止中だけ送れます"), trigger: trigger)
+                return false
+            }
+        }
         guard let profile = meetingManualAI else { return false }
         let destination = profile.name
         guard case let .ready(appendix) = manualDraftSendState, let helper = automaticHelper else {
-            reportManualDraft(.failed(destination: destination, reason: manualDraftSendState.toolTip), voiceCue: voiceCuePhrase != nil)
+            reportManualDraft(.failed(destination: destination, reason: manualDraftSendState.toolTip), trigger: trigger)
             return false
         }
         submitAI(question: manualDraft(for: profile), full: false, parent: nil, helper: helper,
                  profile: profile, onSent: { [weak self] sent, reason in
                      guard let self, !sent else { return }
                      self.reportManualDraft(.failed(destination: destination, reason: reason ?? "送信が中断されました"),
-                                            voiceCue: voiceCuePhrase != nil)
+                                            trigger: trigger)
                  })
         // 非同期の確定待ち・起動へ進む前に受付を知らせる。入口で失敗なら低い音だけ。
         let accepted = aiTasks[profile.slot] != nil
+        let label = switch trigger {
+        case .button: ""
+        case let .voiceCue(phrase): phrase
+        case let .hotkey(hotkey): hotkey.display
+        }
         reportManualDraft(accepted
-            ? .accepted(destination: destination, phrase: voiceCuePhrase ?? "", appendix: appendix)
-            : .failed(destination: destination, reason: aiWarning ?? "送信を始められません"), voiceCue: voiceCuePhrase != nil)
+            ? .accepted(destination: destination, phrase: label, appendix: appendix)
+            : .failed(destination: destination, reason: aiWarning ?? "送信を始められません"), trigger: trigger)
         return accepted
     }
-    private func reportManualDraft(_ feedback: VoiceCueFeedback, voiceCue: Bool) {
+    private func reportManualDraft(_ feedback: VoiceCueFeedback, trigger: ManualDraftTrigger) {
         playAutoSendSound(feedback.accepted)
-        if voiceCue { notifyVoiceCue(feedback) }
+        switch trigger {
+        case .button: break
+        case .voiceCue: notifyVoiceCue(feedback)
+        case .hotkey: notifyHotkey(feedback)
+        }
     }
     var manualDraftSendState: ManualDraftSendState {
         guard !meetingAIProfiles.isEmpty else { return .unavailable("AI設定がありません") }

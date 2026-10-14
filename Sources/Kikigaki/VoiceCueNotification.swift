@@ -2,9 +2,11 @@ import Foundation
 import UserNotifications
 
 /// 音と通知の共通イベント。通知センターを使わず文面を検証できる。
+/// `phrase` は括弧に添える合図の表記。グローバルキーではキーの表記を入れる。
 enum VoiceCueFeedback: Equatable {
     case accepted(destination: String, phrase: String, appendix: Bool)
-    case failed(destination: String, reason: String)
+    /// 宛先なしは、録音外でグローバルキーを押したときだけ
+    case failed(destination: String?, reason: String)
 
     var accepted: Bool {
         if case .accepted = self { return true }
@@ -14,8 +16,10 @@ enum VoiceCueFeedback: Equatable {
         switch self {
         case let .accepted(destination, phrase, appendix):
             return "\(destination)へ\(appendix ? "追記を送りました" : "送りました")（\(phrase)）"
-        case let .failed(destination, reason):
+        case let .failed(destination?, reason):
             return "\(destination)へ送れませんでした。\(reason)"
+        case let .failed(nil, reason):
+            return "送れませんでした。\(reason)"
         }
     }
 }
@@ -38,7 +42,7 @@ final class VoiceCueNotification: NSObject, UNUserNotificationCenterDelegate {
         center.delegate = self
     }
 
-    func post(_ feedback: VoiceCueFeedback) {
+    func post(_ feedback: VoiceCueFeedback, title: String = "KIKIGAKI · 声の合図") {
         let previous = delivery
         // 初回の許可待ち中に失敗が届いても、受付→失敗の順を保つ。
         delivery = Task { [center] in
@@ -51,7 +55,7 @@ final class VoiceCueNotification: NSObject, UNUserNotificationCenterDelegate {
             default: return
             }
             let content = UNMutableNotificationContent()
-            content.title = "KIKIGAKI · 声の合図"
+            content.title = title
             content.body = feedback.body
             content.sound = nil
             try? await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
