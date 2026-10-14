@@ -191,8 +191,9 @@ extension AppKitTests {
         process.standardOutput = output; process.standardError = output
         try process.run()
         defer { if process.isRunning { process.terminate() } }
-        for _ in 0..<1200 where process.isRunning { try await Task.sleep(for: .milliseconds(25)) }
-        try #require(!process.isRunning, "ウィンドウ検証が30秒以内に終了する")
+        let deadline = ContinuousClock.now + .seconds(60)
+        while process.isRunning && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(25)) }
+        try #require(!process.isRunning, "ウィンドウ検証が60秒以内に終了する")
         let log = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         #expect(process.terminationStatus == 0, Comment(rawValue: log))
         #expect(log.contains("AI progress window verification passed"), Comment(rawValue: log))

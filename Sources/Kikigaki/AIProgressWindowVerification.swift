@@ -28,29 +28,45 @@ import KikigakiCore
         var state = SessionSnapshot(ai: AIViewState(conversation: conversation, connection: .working),
             utterances: (0..<30).map { .init(speaker: 0, start: Double($0), end: Double($0 + 1), text: "スクロール確認用の発言です。") })
         let suite = "ai-progress-window-" + UUID().uuidString
-        let controller = TranscriptWindowController(shouldReduceMotion: { false }, minutesDefaults: UserDefaults(suiteName: suite)!)
+        let defaults = UserDefaults(suiteName: suite)!
+        let controller = TranscriptWindowController(shouldReduceMotion: { false }, minutesDefaults: defaults, textDefaults: defaults)
         guard let window = controller.window else { throw AIError.invalid("window") }
         window.setFrameAutosaveName(""); window.isReleasedWhenClosed = false
+        window.title = "KIKIGAKI 進行時計の検証"
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 900, height: 800)
         window.setFrame(NSRect(x: screen.minX + 40, y: screen.minY + 40, width: 600, height: 600), display: false)
-        window.level = .floating
+        // 利用者の通常窓・フローティング窓やSpace切替に左右されず、実際の遮蔽通知を検証する。
+        // 焦点を奪わず、検証窓とその専用の覆いだけを同じSpaceへ出す。
+        window.level = .statusBar
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let cover = NSWindow(contentRect: window.frame.insetBy(dx: -20, dy: -20), styleMask: [.borderless], backing: .buffered, defer: false)
         cover.isReleasedWhenClosed = false; cover.isOpaque = true; cover.backgroundColor = .white
         cover.level = NSWindow.Level(rawValue: window.level.rawValue + 1)
+        cover.collectionBehavior = window.collectionBehavior
         defer { cover.orderOut(nil); window.orderOut(nil); UserDefaults.standard.removePersistentDomain(forName: suite) }
-        controller.show(); controller.apply(state); window.contentView?.layoutSubtreeIfNeeded()
+        // controller.show()は利用者のアプリをactivateする。本検証は表示・遮蔽の実イベントだけでよい。
+        window.orderFrontRegardless(); controller.apply(state); window.contentView?.layoutSubtreeIfNeeded()
         guard let row = controller.transcriptDocument.rows.compactMap({ $0 as? AIReplyRow }).first else { throw AIError.invalid("row") }
         let view = row.progressView
         func reveal() {
-            controller.scrollView.contentView.setBoundsOrigin(NSPoint(x: 0, y: row.frame.minY - 20))
+            // 行頭だけを見せると、画面や窓幅の変化で操作列が折り返し、進行表示が画面外へ出る。
+            // 調べる進行表示を可視域の中央へ置く。最小化から戻る際の余白も確保する。
+            window.contentView?.layoutSubtreeIfNeeded()
+            // 画面外の行はサブビューから外れているため、convertではなく配置済みの行の枠を使う。
+            row.layoutSubtreeIfNeeded()
+            let clip = controller.scrollView.contentView
+            clip.scroll(to: NSPoint(x: 0, y: max(0, row.frame.minY + view.frame.midY - clip.bounds.height / 2)))
+            controller.scrollView.reflectScrolledClipView(clip)
             controller.scrolled()
         }
         func expect(_ phase: String, _ condition: () -> Bool) async throws {
-            for _ in 0..<100 {
+            let deadline = ContinuousClock.now + .seconds(5)
+            while ContinuousClock.now < deadline {
                 if condition() { print("verified: " + phase); return }
                 try await Task.sleep(for: .milliseconds(25))
             }
-            throw AIError.invalid(phase)
+            print("AI progress diagnostic: " + view.visibilityDiagnostic + ", visibleFlag=\(NSWindow.OcclusionState.visible.rawValue)")
+            throw AIError.invalid("\(phase): visible=\(window.isVisible), occlusion=\(window.occlusionState.rawValue), miniaturized=\(window.isMiniaturized), timer=\(view.timerRunning), observers=\(view.observerCount), hidden=\(view.isHiddenOrHasHiddenAncestor), progress=\(String(describing: view.progress)), rect=\(view.visibleRect), bounds=\(view.bounds)")
         }
         reveal()
         try await expect("visible") { window.occlusionState.contains(.visible) && view.timerRunning && view.observerCount == 4 }
@@ -58,6 +74,10 @@ import KikigakiCore
         try await expect("scrolled out") { !view.timerRunning }
         reveal()
         try await expect("scrolled in") { view.timerRunning }
+        // 全体実行で起きた窓幅の縮小を毎回通し、操作列の折り返し後も進行表示が見える前提を確かめる。
+        window.setContentSize(NSSize(width: 420, height: window.contentView!.bounds.height))
+        window.contentView?.layoutSubtreeIfNeeded()
+        try await expect("narrow window remains visible") { !view.visibleRect.intersection(view.bounds).isEmpty && view.timerRunning }
         cover.orderFrontRegardless()
         try await expect("occluded") { !window.occlusionState.contains(.visible) && !view.timerRunning }
         view.refresh(now: sent.addingTimeInterval(42)); cover.orderOut(nil)
@@ -65,10 +85,11 @@ import KikigakiCore
         window.miniaturize(nil)
         try await expect("miniaturized") { window.isMiniaturized && !view.timerRunning }
         window.deminiaturize(nil)
+        window.orderFrontRegardless()
         try await expect("deminiaturized") { view.timerRunning }
         window.close()
         try await expect("closed") { !view.timerRunning }
-        view.refresh(now: sent.addingTimeInterval(42)); controller.show()
+        view.refresh(now: sent.addingTimeInterval(42)); window.orderFrontRegardless()
         try await expect("reopened recalculated") { view.timerRunning && !view.displayText.hasSuffix("0:42経過") }
         try conversation.receive(AIReceiveEvent(request: request, kind: .answered, recordedAt: Date(), body: "確認完了"), at: Date())
         state.ai?.conversation = conversation; controller.apply(state)

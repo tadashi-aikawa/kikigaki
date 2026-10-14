@@ -15,6 +15,11 @@ final class AIProgressView: NSView {
     var timerRunning: Bool { timer != nil }
     var displayText: String { label.stringValue }
     var observerCount: Int { observers.count }
+    #if DEBUG
+    var visibilityDiagnostic: String {
+        "displayed=\(displayed), reduceMotion=\(reduceMotion), window=\(String(describing: window)), visible=\(String(describing: window?.isVisible)), occlusion=\(String(describing: window?.occlusionState.rawValue))"
+    }
+    #endif
     private(set) var textScale: CGFloat = 1
     func setTextScale(_ scale: CGFloat) {
         guard textScale != scale else { return }
