@@ -109,6 +109,11 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
 
 ## テスト
 
+- CIは `swift test` の終了コードに加え、Swift Testingの成功集計と期待件数を検査する。
+    - 件数: `swift test list` のJSONイベントからテスト関数を毎回数える。suiteと引数ごとのケースは数えない。スキップ・既知問題も1関数として含める。
+    - ローカルのログ検査: `bash scripts/check-swift-test-summary.sh /tmp/swift-test.log <期待件数>`。
+    - 理由: AppKitの入れ子のRunLoopが外側のメインループを止めると、集計前に終了コード0で抜けうる。
+    - 一覧の取得: 標準出力も欠けることがあるため、`--event-stream-output-path` で直接保存されたJSONを使う。空の一覧・不正なJSONもCIを失敗にする。
 - `KIKIGAKI_UI_CAPTURE=<出力先> swift test --filter TranscriptTextScaleAppTests`: 書き起こしとAIの行、議事録・ボードを420pt・600ptの全8倍率で検証し、PNGへ撮影する。
     - 通常実行: 100%と200%で、対象の拡大・対象外の固定サイズ・検索強調・閲読位置・保存幅を確認する。全段階の撮影と周辺画面の巡回は行わない。
     - 出力: AIの行を含む画像は出力先直下、書き起こし本体と議事録・ボードの画像は `review/` に置く。

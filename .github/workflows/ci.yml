@@ -12,7 +12,16 @@ jobs:
       - name: Build
         run: swift build
       - name: Test
-        run: swift test
+        shell: bash
+        run: |
+          set -euo pipefail
+          # テストをビルドして一覧を保存する。標準出力の欠落を避け、直接保存されたJSONを数える。
+          swift test list --event-stream-output-path "$RUNNER_TEMP/swift-tests.jsonl" --event-stream-version 0 > /dev/null
+          # 集計は関数単位。suiteと引数ごとのケースを除き、スキップ・既知問題も1関数として含める。
+          expected_tests=$(jq -se '[.[] | select(.version == 0 and .kind == "test" and .payload.kind == "function")] | length | select(. > 0)' "$RUNNER_TEMP/swift-tests.jsonl")
+          echo "Swift Testing: discovered $expected_tests test functions"
+          swift test --skip-build 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+          bash scripts/check-swift-test-summary.sh "$RUNNER_TEMP/swift-test.log" "$expected_tests"
       # 署名検証付きの build_release.sh はリリース時のみ。CI では ad-hoc 署名で
       # アプリバンドルの組み立てまでを検証する
       - name: Build app bundle
