@@ -48,6 +48,8 @@ final class AIConversationController {
     var onChange: (() -> Void)?
     /// 現在表示している会議だけが返す。旧会議・再起動回収では割当を適用しない。
     var speakerContext: (() -> (names: SpeakerNames, detected: [Int], mapping: [Int: Int], lines: [String])?)?
+    /// 保存に成功した新しい割当だけを渡す。再起動回収のcontrollerでは呼ばない。
+    var onSpeakersIdentified: ((SpeakerNames, SpeakerNames) -> Void)?
     var speakerDiagnostic: (String) -> Void = { NSLog("%@", $0) }
     /// 明示的なreplay検証だけで、受信直前に人のパス指定を再現する。
     var beforeMinutesScanForReplay: (() -> Void)?
@@ -552,7 +554,13 @@ final class AIConversationController {
             do { try next.recordSpeaker(event, names: accepted) }
             catch { speakerDiagnostic("話者の割当を記録できません: \(event.eventID): \(error)") }
         }
-        do { try commit(next); onChange?() }
+        do {
+            try commit(next)
+            if allowsSending, let previous = context?.names, let current = conversation.speakerNames, current != previous {
+                onSpeakersIdentified?(previous, current)
+            }
+            onChange?()
+        }
         catch { speakerDiagnostic("話者の割当の保存に失敗: \(error)") }
     }
 

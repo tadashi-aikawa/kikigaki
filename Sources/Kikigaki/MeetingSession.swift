@@ -274,6 +274,7 @@ final class MeetingSession {
     /// 会議をまたいで引き継がないAIの状態。録音開始のたびにここを通す。
     /// 宛先の選択も前の会議のものを残さない。
     private func resetMeetingAIState(_ meetingConfig: ResolvedConfig) {
+        snapshot.speakerReveals = []
         meetingAutoSendPhrases = meetingConfig.autoSendPhrases
         autoSendPhraseState = AutoSendPhraseState(phrases: meetingConfig.autoSendPhrases)
         scheduleDrafts = [:]
@@ -1103,6 +1104,10 @@ final class MeetingSession {
     func configureSpeakerIdentification(_ controller: AIConversationController) {
         let meetingID = handoff.meetingID
         controller.speakerDiagnostic = log
+        controller.onSpeakersIdentified = { [weak self] previous, current in
+            guard let self, self.handoff.meetingID == meetingID else { return }
+            self.snapshot.speakerReveals = SpeakerReveal.changes(from: previous, to: current, state: self.snapshot.state)
+        }
         controller.speakerContext = { [weak self] in
             guard let self, self.handoff.meetingID == meetingID else { return nil }
             return (self.snapshot.names, self.snapshot.detectedSpeakerSlots, self.snapshot.speakerMapping,

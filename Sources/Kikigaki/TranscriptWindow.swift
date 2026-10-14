@@ -18,6 +18,13 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onFireScheduleAI: (() -> Void)?
     var onSendManualDraft: (() -> Void)?
     let compactFooter = AICompactFooter()
+    let speakerRevealBanner = SpeakerRevealBanner()
+    private struct PendingSpeakerReveals {
+        let id: UUID
+        var reveals: [SpeakerReveal]
+        let timer: Timer
+    }
+    private var pendingSpeakerReveals: [PendingSpeakerReveals] = []
     private let recordingRange = Washi.label(size: 11, color: Washi.muted)
     var onOpenAIPane: (() -> Void)?
     var onCancelAI: ((UUID) -> Void)?
@@ -55,7 +62,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let emptyLabel = Washi.label(size: 13, color: Washi.muted)
     private var renamePopover: SpeakerPopover?
     private let tentativeRow = TranscriptRow(tentative: true)
-    private let avatars = AvatarStore()
+    private let avatars: AvatarStore
     private let shouldReduceMotion: () -> Bool
     // ここから下は TranscriptWindowSearch.swift の検索も読む。extension には保存プロパティを
     // 置けないため、検索の状態もこの本体で持つ
@@ -78,8 +85,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let textDefaults: UserDefaults
     private(set) var textScale: TranscriptTextScale
 
-    init(shouldReduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }, minutesDefaults: UserDefaults = .standard, textDefaults: UserDefaults = .standard) {
+    init(shouldReduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }, minutesDefaults: UserDefaults = .standard, textDefaults: UserDefaults = .standard, avatars: AvatarStore? = nil) {
         self.shouldReduceMotion = shouldReduceMotion
+        self.avatars = avatars ?? AvatarStore()
         self.textDefaults = textDefaults
         textScale = TranscriptTextScale(savedValue: textDefaults.object(forKey: Self.textScaleDefaultsKey))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 578),
@@ -95,6 +103,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         window.delegate = self
         minutesSplit = MinutesSplitView(left: buildContent(), defaults: minutesDefaults)
         window.contentView = minutesSplit
+        speakerRevealBanner.onChange = { [weak self] in
+            guard let self else { return }
+            // 帯の出入りで表示域の高さが変わっても、末尾追従と読んでいる行を維持する。
+            let anchor = self.transcriptDocument.anchor()
+            self.window?.contentView?.layoutSubtreeIfNeeded()
+            self.transcriptDocument.reflow(anchor: anchor)
+            self.scrolled()
+        }
         if let minutesHeader {
             minutesSplit.preview.headerBar.heightAnchor.constraint(equalTo: minutesHeader.heightAnchor).isActive = true
         }
@@ -112,10 +128,10 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         tentativeRow.setTextScale(CGFloat(textScale.multiplier))
         minutesSplit.preview.setTextScale(CGFloat(textScale.multiplier))
         updateHeader(width: minutesSplit.left.frame.width)
-        avatars.onChange = { [weak self] in
+        self.avatars.onChange = { [weak self] in
             guard let self else { return }
-            for row in rows.values { row.updateAvatar(speakers: snapshot.speakers, store: avatars, editable: snapshot.canShare) }
-            for row in aiRows.values { (row as? AIReplyRow)?.updateAvatar(store: avatars) }
+            for row in rows.values { row.updateAvatar(speakers: snapshot.speakers, store: self.avatars, editable: snapshot.canShare) }
+            for row in aiRows.values { (row as? AIReplyRow)?.updateAvatar(store: self.avatars) }
             renamePopover?.refreshAvatars()
         }
         scrollView.contentView.postsBoundsChangedNotifications = true
@@ -179,7 +195,12 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     @objc func toggleMinutes() { minutesSplit.setVisible(!minutesSplit.isPreviewVisible) }
     /// 開始シートで議事録を指定したときだけ使う。隠れていれば開き、開いていればそのまま。
     func showMinutes() { minutesSplit.setVisible(true) }
-    func windowWillClose(_ notification: Notification) { minutesSplit.preview.stop(); minutesStore?.isVisible = false }
+    func windowWillClose(_ notification: Notification) {
+        minutesSplit.preview.stop(); minutesStore?.isVisible = false
+        cancelPendingSpeakerReveals()
+        speakerRevealBanner.clear()
+        rows.values.forEach { $0.stopAnimations() }
+    }
     func windowDidChangeScreen(_ notification: Notification) { minutesSplit.fitWindow() }
     func windowDidExitFullScreen(_ notification: Notification) { minutesSplit.fitWindow() }
     func windowDidEndLiveResize(_ notification: Notification) { minutesSplit.fitWindow() }
@@ -188,6 +209,10 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     func apply(_ value: SessionSnapshot) {
         let previous = snapshot
         snapshot = value
+        // 仮の話者名の行しか無くても台帳画像を先読みし、割当時に共有ストアから使えるようにする。
+        if previous.speakers != value.speakers {
+            for speaker in value.speakers { _ = avatars.image(for: speaker.avatar) }
+        }
         compactFooter.update(value, reduceMotion: shouldReduceMotion())
         recordingRange.stringValue = value.markdownURL == nil ? "" : value.timeline.clock(at: 0) + "〜"
             + (value.state == .idle ? value.timeline.clock(at: value.elapsed) : "")
@@ -233,8 +258,99 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         updateRangeLabel()
         emptyView.isHidden = !value.utterances.isEmpty || !value.microphoneSwitches.isEmpty || value.tentativeText != nil || !(value.ai?.conversation?.questions.isEmpty ?? true)
         emptyLabel.stringValue = value.state == .idle ? "録音を開始すると、会話がここに表示されます。" : "発言を待っています…"
+        reconcilePendingSpeakerReveals(previous: previous)
         updateRows(previous: previous)
         refreshSearch(reset: previous.timeline.startedAt != value.timeline.startedAt, reveal: false)
+        showSpeakerReveals(previous: previous)
+    }
+
+    private func showSpeakerReveals(previous: SessionSnapshot) {
+        guard previous.timeline.startedAt == snapshot.timeline.startedAt,
+              snapshot.ai?.readOnly != true else {
+            speakerRevealBanner.clear()
+            rows.values.forEach { $0.stopSpeakerReveal() }
+            return
+        }
+        guard snapshot.canSubmitTyped else { return }
+        let previousIDs = Set(previous.speakerReveals.map(\.id))
+        let now = Date()
+        let reveals = snapshot.speakerReveals.filter {
+            !previousIDs.contains($0.id) && now.timeIntervalSince($0.receivedAt) < 3
+                && snapshot.names.name(for: $0.slot) == $0.name
+                && snapshot.names.attributions[$0.slot]?.event.eventID == $0.id
+        }
+        guard !reveals.isEmpty else { return }
+        if shouldReduceMotion() {
+            speakerRevealBanner.enqueue(reveals, reduceMotion: true)
+            return
+        }
+        // 行が画面外でも同じ5秒後に帯を出す。同時に決まった枠は一度に停止させる。
+        let batchID = UUID()
+        let timer = Timer(timeInterval: SpeakerRevealCoin.duration, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.finishPendingSpeakerReveals(id: batchID) }
+        }
+        pendingSpeakerReveals.append(.init(id: batchID, reveals: reveals, timer: timer))
+        guard window?.isVisible == true else {
+            RunLoop.main.add(timer, forMode: .common)
+            return
+        }
+        let visible = scrollView.contentView.bounds
+        var occurrences: [RowKey: Int] = [:]
+        for utterance in snapshot.utterances {
+            let key = RowKey(kind: utterance.kind, start: utterance.start)
+            let occurrence = occurrences[key, default: 0]
+            occurrences[key] = occurrence + 1
+            guard utterance.kind == .voice, let reveal = reveals.first(where: { $0.slot == utterance.speaker }) else { continue }
+            let id = RowID(kind: utterance.kind, start: utterance.start, occurrence: occurrence)
+            guard let row = rows[id], row.frame.intersects(visible) else { continue }
+            row.revealSpeaker(reveal, animated: !shouldReduceMotion())
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func finishPendingSpeakerReveals(id: UUID) {
+        guard let index = pendingSpeakerReveals.firstIndex(where: { $0.id == id }) else { return }
+        let batch = pendingSpeakerReveals.remove(at: index)
+        batch.timer.invalidate()
+        let ids = Set(batch.reveals.map(\.id))
+        for row in rows.values where row.activeSpeakerRevealID.map(ids.contains) == true {
+            if shouldReduceMotion() { row.stopSpeakerReveal() }
+            else { row.finishSpeakerReveal() }
+        }
+        speakerRevealBanner.enqueue(batch.reveals, reduceMotion: shouldReduceMotion())
+    }
+
+    private func cancelPendingSpeakerReveals() {
+        pendingSpeakerReveals.forEach { $0.timer.invalidate() }
+        pendingSpeakerReveals.removeAll()
+        rows.values.forEach { $0.stopSpeakerReveal() }
+    }
+
+    deinit { pendingSpeakerReveals.forEach { $0.timer.invalidate() } }
+
+    private func reconcilePendingSpeakerReveals(previous: SessionSnapshot) {
+        guard previous.timeline.startedAt == snapshot.timeline.startedAt,
+              snapshot.canSubmitTyped, snapshot.ai?.readOnly != true else {
+            cancelPendingSpeakerReveals()
+            speakerRevealBanner.clear()
+            return
+        }
+        // 人の確認・改名・統合で由来が消えた枠は、古い答えを後から出さない。
+        for index in pendingSpeakerReveals.indices {
+            pendingSpeakerReveals[index].reveals.removeAll { reveal in
+                snapshot.names.name(for: reveal.slot) != reveal.name
+                    || snapshot.names.attributions[reveal.slot]?.event.eventID != reveal.id
+            }
+        }
+        let ids = Set(pendingSpeakerReveals.flatMap { $0.reveals.map(\.id) })
+        for row in rows.values where row.activeSpeakerRevealID.map({ !ids.contains($0) }) == true {
+            row.stopSpeakerReveal()
+        }
+        pendingSpeakerReveals.removeAll { batch in
+            guard batch.reveals.isEmpty else { return false }
+            batch.timer.invalidate()
+            return true
+        }
     }
 
     /// 画面の外から届いた指定を断る1行。会話の受け渡しの知らせと同じ枠へ出し、4秒で消す。
@@ -506,7 +622,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         let entryArea = column([typedEntry, typedEntry.attachmentsView, typedEntry.attachmentError], spacing: 4, inset: 12)
         Washi.surface(entryArea, color: Washi.paper)
-        return column([header, searchBar, separator(), body, entryArea, separator(), footer], spacing: 0, inset: 0)
+        return column([header, searchBar, speakerRevealBanner, separator(), body, entryArea, separator(), footer], spacing: 0, inset: 0)
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -728,11 +844,19 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     @objc func scrolled() {
         // 新しく載った行の進行表示が下で可視判定を読むので、載せ替えを先に済ませる。
         transcriptDocument.mountVisibleRows()
+        let visible = scrollView.contentView.bounds
+        for row in rows.values where !row.speakerRevealCoin.isHidden && !row.frame.intersects(visible) {
+            row.stopSpeakerReveal()
+        }
         latestButton.isHidden = transcriptDocument.anchor().atBottom || (snapshot.utterances.isEmpty && snapshot.tentativeText == nil)
         for row in aiRows.values { (row as? AIReplyRow)?.progressView.updateVisibility() }
     }
     @objc private func motionChanged() {
-        if shouldReduceMotion() { rows.values.forEach { $0.stopAnimations() } }
+        if shouldReduceMotion() {
+            for id in pendingSpeakerReveals.map(\.id) { finishPendingSpeakerReveals(id: id) }
+            rows.values.forEach { $0.stopAnimations() }
+            speakerRevealBanner.stopAnimations()
+        }
         statusChip.update(snapshot, reduceMotion: shouldReduceMotion())
         compactFooter.update(snapshot, reduceMotion: shouldReduceMotion())
         for row in aiRows.values {

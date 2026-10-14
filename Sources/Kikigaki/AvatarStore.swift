@@ -18,12 +18,17 @@ final class AvatarStore {
     var onChange: (() -> Void)?
     private let cacheDirectory: URL
     private let log: (String) -> Void
+    private let loadImageData: @Sendable (String, URL) async throws -> Data
 
     init(cacheDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Caches/kikigaki/avatars"),
-         log: @escaping (String) -> Void = { NSLog("%@", $0) }) {
+         log: @escaping (String) -> Void = { NSLog("%@", $0) },
+         loadImageData: @escaping @Sendable (String, URL) async throws -> Data = {
+             try await AvatarStore.load($0, cacheDirectory: $1)
+         }) {
         self.cacheDirectory = cacheDirectory
         self.log = log
+        self.loadImageData = loadImageData
     }
 
     func image(for source: String?) -> NSImage? {
@@ -31,10 +36,11 @@ final class AvatarStore {
         if let image = images[source] { return image }
         guard requested.insert(source).inserted else { return nil }
         let directory = cacheDirectory
+        let loadImageData = loadImageData
         Task { [weak self] in
             do {
                 let data = try await Task.detached(priority: .utility) {
-                    try await Self.load(source, cacheDirectory: directory)
+                    try await loadImageData(source, directory)
                 }.value
                 guard let self else { return }
                 guard let image = NSImage(data: data), image.isValid else { throw CocoaError(.fileReadCorruptFile) }

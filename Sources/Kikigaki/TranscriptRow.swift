@@ -4,6 +4,9 @@ import KikigakiCore
 
 /// 画像もイニシャルも同じ吹き出し形にする。
 final class AvatarView: NSView {
+#if DEBUG
+    private(set) var drawCount = 0
+#endif
     override var isFlipped: Bool { true }
     var initial = "?"
     var slot: Int?
@@ -18,6 +21,9 @@ final class AvatarView: NSView {
         .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [Washi.paper]))
     var image: NSImage? { didSet { if image !== oldValue { needsDisplay = true } } }
     override func draw(_ dirtyRect: NSRect) {
+#if DEBUG
+        drawCount += 1
+#endif
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
         let transform = NSAffineTransform()
@@ -110,6 +116,17 @@ final class TranscriptRow: NSView, DocumentRow {
     private let flash = NSView()
     private let avatar = AvatarView()
     private let nameLabel = Washi.label(size: 12, weight: .semibold)
+    private let previousNameLabel = Washi.label(size: 12, weight: .semibold)
+    let speakerRevealCoin = SpeakerRevealCoin()
+    private var speakerRevealTimer: Timer?
+    private(set) var activeSpeakerRevealID: String?
+    private var previousAvatar: (initial: String, image: NSImage?)?
+#if DEBUG
+    private(set) var layoutCount = 0
+    private(set) var drawCount = 0
+    var avatarDrawCount: Int { avatar.drawCount }
+    override func draw(_ dirtyRect: NSRect) { drawCount += 1; super.draw(dirtyRect) }
+#endif
     private let timeLabel = Washi.label(color: Washi.muted)
     let attributionDot = SpeakerAttributionDot()
     private let levelLabel = Washi.label(size: 11, color: Washi.muted)
@@ -144,6 +161,7 @@ final class TranscriptRow: NSView, DocumentRow {
         guard textScale != scale else { return }
         textScale = scale
         nameLabel.font = .systemFont(ofSize: 12 * scale, weight: tentative ? .regular : .semibold)
+        previousNameLabel.font = nameLabel.font
         // 検索で属性付き文字列になった名前は、fontプロパティだけでは更新されない。
         nameLabel.attributedStringValue = TranscriptTypography.withFont(nameLabel.attributedStringValue, nameLabel.font!)
         timeLabel.font = .monospacedDigitSystemFont(ofSize: 12 * scale, weight: .regular)
@@ -174,6 +192,11 @@ final class TranscriptRow: NSView, DocumentRow {
         content.addSubview(flash)
         flash.layer?.opacity = 0
         avatar.tentative = tentative
+        previousNameLabel.isHidden = true
+        nameLabel.wantsLayer = true
+        previousNameLabel.wantsLayer = true
+        previousNameLabel.setAccessibilityElement(false)
+        previousNameLabel.lineBreakMode = .byTruncatingTail
         body.font = .systemFont(ofSize: 15)
         body.isSelectable = true
         body.allowsEditingTextAttributes = true
@@ -185,7 +208,8 @@ final class TranscriptRow: NSView, DocumentRow {
         levelLabel.isHidden = true
         levelLabel.lineBreakMode = .byTruncatingTail
         typedBody.isHidden = true
-        for view in [avatar, nameLabel, timeLabel, levelLabel, body, typedBody, imageStrip, attributionDot] { content.addSubview(view) }
+        for view in [avatar, nameLabel, previousNameLabel, timeLabel, levelLabel, body, typedBody, imageStrip, attributionDot] { content.addSubview(view) }
+        content.addSubview(speakerRevealCoin)
         speakerButton.isBordered = false
         speakerButton.title = ""
         speakerButton.target = self
@@ -214,6 +238,7 @@ final class TranscriptRow: NSView, DocumentRow {
     func updateAvatar(speakers: [KikigakiConfig.Speaker], store: AvatarStore, editable: Bool) {
         let source = utterance?.kind == .typed || utterance?.speaker == nil ? nil : speakers.first { $0.name == displayedName }?.avatar
         avatar.image = store.image(for: source)
+        speakerRevealCoin.updateBack(from: avatar)
         speakerButton.isHidden = tentative || utterance?.kind == .typed || utterance?.speaker == nil
         speakerButton.isEnabled = editable
         speakerButton.toolTip = "\(displayedName)の名前を変更"
@@ -227,6 +252,10 @@ final class TranscriptRow: NSView, DocumentRow {
         attributionDot.update(value.kind == .voice ? value.speaker.flatMap { names.attributions[$0] } : nil)
         needsLayout = true
         let name = names.displayName(for: value)
+        if displayedName != name || utterance?.speaker != value.speaker {
+            stopSpeakerReveal()
+            previousAvatar = (avatar.initial, avatar.image)
+        }
         guard utterance != value || displayedName != name || displayedTimeline != timeline else { return false }
         let changed = utterance != nil && (utterance?.text != value.text || utterance?.speaker != value.speaker || displayedName != name)
         utterance = value
@@ -332,14 +361,20 @@ final class TranscriptRow: NSView, DocumentRow {
     }
     override func layout() {
         super.layout()
+#if DEBUG
+        layoutCount += 1
+#endif
         content.frame = bounds
         flash.frame = NSRect(x: 12, y: 2, width: max(0, bounds.width - 24), height: bounds.height - 4)
         // アバター内のイニシャルも同じ倍率で描く。外側の紙の余白は固定する。
         avatar.frame = NSRect(x: 20, y: 8, width: 25 * textScale, height: 26 * textScale)
         // 太字の字形が計測幅の右端へ届くため、端数の丸めと描画の余白を確保する。
-        let nameWidth = min(ceil(nameLabel.intrinsicContentSize.width) + 4,
+        let oldWidth = previousNameLabel.isHidden ? 0 : previousNameLabel.intrinsicContentSize.width
+        let nameWidth = min(ceil(max(nameLabel.intrinsicContentSize.width, oldWidth)) + 4,
                             max(70 * textScale, bounds.width - bodyX - 104 - 62 * textScale))
         nameLabel.frame = NSRect(x: bodyX, y: 8, width: nameWidth, height: 18 * textScale)
+        previousNameLabel.frame = nameLabel.frame
+        speakerRevealCoin.frame = avatar.frame
         speakerButton.frame = NSRect(x: 18, y: 5, width: nameWidth + bodyX - 14, height: max(29, 29 * textScale))
         attributionDot.frame = NSRect(x: bodyX + nameWidth + 5, y: 8 + 9 * textScale - 2.5, width: 5, height: 5)
         timeLabel.frame = NSRect(x: bodyX + nameWidth + (attributionDot.isHidden ? 12 : 18), y: 8, width: 62 * textScale, height: 18 * textScale)
@@ -373,10 +408,66 @@ final class TranscriptRow: NSView, DocumentRow {
         layer.add(animation, forKey: "transcriptOpacity")
     }
     func stopAnimations() {
+        stopSpeakerReveal()
         layer?.removeAllAnimations()
         flash.layer?.removeAllAnimations()
         layer?.opacity = 1
         applyOpacity()
         flash.layer?.opacity = 0
     }
+
+    func revealSpeaker(_ reveal: SpeakerReveal, animated: Bool) {
+        stopSpeakerReveal()
+        guard animated, displayedName == reveal.name else { return }
+        activeSpeakerRevealID = reveal.id
+        previousNameLabel.stringValue = reveal.oldName
+        previousNameLabel.isHidden = false
+        nameLabel.layer?.opacity = 0
+        previousNameLabel.layer?.opacity = 1
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+        let oldAvatar = AvatarView(frame: avatar.bounds)
+        oldAvatar.slot = reveal.slot
+        oldAvatar.initial = previousAvatar?.initial ?? String(reveal.oldName.prefix(1))
+        oldAvatar.image = previousAvatar?.image
+        content.addSubview(oldAvatar)
+        speakerRevealCoin.start(front: oldAvatar, back: avatar)
+        oldAvatar.removeFromSuperview()
+        avatar.isHidden = true
+        // 名前と帯の確定はウィンドウの共通タイマーで揃える。回転中は旧名を保つ。
+    }
+    func finishSpeakerReveal() {
+        guard activeSpeakerRevealID != nil else { return }
+        stopSpeakerReveal()
+        previousNameLabel.isHidden = false
+        animateOpacity(nameLabel.layer, from: 0, to: 1, duration: 0.55)
+        animateOpacity(previousNameLabel.layer, from: 1, to: 0, duration: 0.55)
+        speakerRevealTimer = Timer(timeInterval: 0.55, repeats: false) { [weak self] _ in
+            self?.stopSpeakerReveal()
+        }
+        RunLoop.main.add(speakerRevealTimer!, forMode: .common)
+    }
+    func stopSpeakerReveal() {
+        activeSpeakerRevealID = nil
+        speakerRevealTimer?.invalidate(); speakerRevealTimer = nil
+        speakerRevealCoin.stop()
+        avatar.isHidden = false
+        previousNameLabel.isHidden = true
+        nameLabel.layer?.removeAllAnimations()
+        previousNameLabel.layer?.removeAllAnimations()
+        nameLabel.layer?.opacity = 1
+        needsLayout = true
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { stopSpeakerReveal() }
+    }
+#if DEBUG
+    /// 実際のCAアニメーションの時刻を止め、描画サーバーが合成した画面を撮る。
+    func freezeSpeakerRevealForCapture(at elapsed: TimeInterval) {
+        speakerRevealTimer?.invalidate(); speakerRevealTimer = nil
+        speakerRevealCoin.freezeForCapture(at: elapsed)
+    }
+#endif
+    deinit { speakerRevealTimer?.invalidate() }
 }

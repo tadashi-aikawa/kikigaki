@@ -24,6 +24,8 @@ struct SessionSnapshot {
     var unconfirmedRows: Set<Int> = []
     var timeline = MeetingTimeline(startedAt: Date())
     var names = SpeakerNames()
+    /// 最後に受け入れた一組だけを保持する。再描画で同じIDを再演せず、保存・回収には使わない。
+    var speakerReveals: [SpeakerReveal] = []
     var speakers: [KikigakiConfig.Speaker] = []
     var participantsKey = ResolvedConfig.defaultParticipantsKey
     /// 一時停止中を除いた会議の経過秒。

@@ -147,6 +147,7 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
     - `KIKIGAKI_DIARIZATION_CAPTURE`: `DiarizationTests`
     - `KIKIGAKI_MICROPHONE_CAPTURE`: `MicrophoneSwitchUITests`。開始シートのマイク行と、切替の区切り行を撮る。実機のマイクは開かない
     - `KIKIGAKI_SPEAKER_CAPTURE`: `SpeakerPopoverTests` と `SpeakerIdentificationAppTests`。話者名の候補と、AIが付けた名前の点・話者一覧・根拠の行を撮る
+        - 割当の演出: `SpeakerIdentificationAppTests` がコインの表・真横付近・裏・停止後と、複数枠の帯・画面外の話者・視差効果を減らす設定を撮る。回転は実際のCore Animationの時刻を止め、画面上の合成結果を撮る。PNGは撮影の中間物とし、確認用に非可逆WebPへ変換する。
     - `KIKIGAKI_UI_MENU_CAPTURE=1`: `AIViewTests` が宛先のメニューを撮る。`KIKIGAKI_UI_MENU_WIDTH` でウィンドウ幅を指定する。既定は600
     - `KIKIGAKI_UI_AVATAR=<画像>`: `AIProfileReviewTests` が宛先のメニューを画像付きで撮る
     - `KIKIGAKI_SCHEDULE_REVIEW_AI=<入力>`: `AIScheduleReviewTests` が、実herdrの保存済み会議を土台に自動送信のUIを撮る
