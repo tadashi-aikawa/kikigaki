@@ -1243,7 +1243,7 @@ final class MeetingSession {
                 guard Date().timeIntervalSince(lastDraw) >= 0.5 else { continue }
                 lastDraw = Date()
                 // 無効時の本文は結果通知だけで更新する。古いsnapshotが新しい確定結果を戻さない。
-                guard let diarizer else {
+                guard diarizer != nil else {
                     await MainActor.run {
                         guard self.preparationID == generation,
                               self.snapshot.state == .recording || self.snapshot.state == .paused else { return }
