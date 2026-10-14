@@ -164,6 +164,11 @@ final class MeetingSession {
     private var aiSchedule: AIScheduleState?
     private var autoSendPhraseState: AutoSendPhraseState
     private var meetingAutoSendPhrases: [String]
+    /// 現在の手動宛先で有効な設定表記。宛先の切替に追従し、再読込は次の会議から反映する。
+    private var voiceCueDisplayPhrases: [String] {
+        meetingManualAI?.autoSendPhrases ?? meetingAutoSendPhrases
+    }
+    var notifyVoiceCue: (VoiceCueFeedback) -> Void = { _ in }
     /// 合図の音は返事のnotifySoundと独立。テストでは音を捕捉する。
     var playAutoSendSound: (Bool) -> Void = { sent in
         NSSound(named: sent ? "Pop" : "Basso")?.play()
@@ -906,7 +911,7 @@ final class MeetingSession {
                   launch: ((ResolvedAIConfig, URL, AIConversationController) throws -> (URL, [String]))? = nil,
                   trigger: AIParticipantContext.Trigger? = nil, workAllowed suppliedWorkAllowed: Bool? = nil,
                   profile: ResolvedAIConfig? = nil, updateManualDestination: Bool = false,
-                  onSent: ((Bool) -> Void)? = nil) {
+                  onSent: ((Bool, String?) -> Void)? = nil) {
         // 確認への返答は元質問の宛先へ固定する。呼び手が別の宛先を渡していても、そちらを優先しない。
         let parentSlot = parent.flatMap { id in
             aiRecord?.controller.conversation.questions.first { $0.request.id == id }?
@@ -956,7 +961,8 @@ final class MeetingSession {
         aiTasks[slot] = Task { [weak self] in
             guard let self else { return }
             var sent = false
-            defer { onSent?(sent) }
+            var failureReason = "送信が中断されました"
+            defer { onSent?(sent, sent ? nil : failureReason) }
             var request: AIRequest?
             defer {
                 if let request { aiRequestOwners[request.id] = nil }
@@ -1003,7 +1009,8 @@ final class MeetingSession {
                 guard aiSubmissionOwners[slot] == owner else { throw CancellationError() }
                 guard consumedAudioTime >= cutoff else { throw AIError.invalid("audio not processed") }
                 if question.isEmpty, capture.voiceExcluded {
-                    aiWarning = "末尾の声は小音量のため除外されました。問いを入力するか、除外設定を調整してください"
+                    failureReason = "末尾の声は小音量のため除外されました。問いを入力するか、除外設定を調整してください"
+                    aiWarning = failureReason
                     return
                 }
                 if trigger == .scheduled, !record.controller.hasChanges(lines: capture.lines, slot: config.slot) { return }
@@ -1070,7 +1077,8 @@ final class MeetingSession {
                     try? aiStore.records[meetingID]?.controller.fail(request.id, reason: "入力前に停止しました。接続先と設定を確認してください")
                 }
                 log("AI送信に失敗(slot \(slot)): \(error)")
-                if meetingID == handoff.meetingID { aiWarning = "送信を完了できません。herdrのペインと設定を確認してください" }
+                failureReason = "送信を完了できません。herdrのペインと設定を確認してください"
+                if meetingID == handoff.meetingID { aiWarning = failureReason }
             }
         }
         emit()
@@ -1481,21 +1489,34 @@ extension MeetingSession {
                 automaticActive: meetingManualAI != nil && snapshot.canSubmitAI,
                 canFireNow: canSendVoiceManual) else { continue }
             log(diagnostics.autoSendPhraseLine(event))
+            let destination = meetingManualAI?.name ?? "AI"
+            let phrase = voiceCueDisplayPhrases.first { AutoSendPhrase.normalize($0) == event.phrase } ?? event.phrase
             switch event.decision {
             case .fire:
                 guard let profile = meetingManualAI, let helper = automaticHelper else {
-                    playAutoSendSound(false); continue
+                    reportVoiceCue(.failed(destination: destination, reason: "送信の設定がありません")); continue
                 }
+                let appendix = aiRecord?.controller.awaitingRequest(slot: profile.slot) != nil
                 submitAI(question: manualDraft(for: profile), full: false, parent: nil, helper: helper,
-                         profile: profile, onSent: { [weak self] sent in
-                             if !sent { self?.playAutoSendSound(false) }
+                         profile: profile, onSent: { [weak self] sent, reason in
+                             guard let self, !sent else { return }
+                             self.reportVoiceCue(.failed(destination: destination,
+                                 reason: reason ?? "送信が中断されました"))
                          })
                 // 非同期の確定待ち・起動へ進む前に受付を知らせる。入口で失敗なら低い音だけ。
-                playAutoSendSound(aiTasks[profile.slot] != nil)
-            case .unavailable: playAutoSendSound(false)
+                reportVoiceCue(aiTasks[profile.slot] != nil
+                    ? .accepted(destination: destination, phrase: phrase, appendix: appendix)
+                    : .failed(destination: destination, reason: aiWarning ?? "送信を始められません"))
+            case .unavailable:
+                reportVoiceCue(.failed(destination: destination,
+                    reason: aiTasks[meetingManualAI?.slot ?? 0] != nil ? "送信の準備中です" : "接続先と設定を確認してください"))
             case .cooldown, .watermark: break
             }
         }
+    }
+    private func reportVoiceCue(_ feedback: VoiceCueFeedback) {
+        playAutoSendSound(feedback.accepted)
+        notifyVoiceCue(feedback)
     }
     private var canSendVoiceManual: Bool {
         guard snapshot.canSubmitAI, aiStore != nil, automaticHelper != nil, let profile = meetingManualAI,

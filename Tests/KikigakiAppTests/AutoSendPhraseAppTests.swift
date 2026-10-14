@@ -21,6 +21,28 @@ extension AppKitTests {
         session.automaticHelper = URL(fileURLWithPath: "/bin/echo")
         return session
     }
+    @Test(arguments: [1, 2, 3], [true, false])
+    func 通知は初期宛先と切替先の専用合図か共通合図の設定表記を使う(slot: Int, diarization: Bool) async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(root, fake: FakeHerdr(), diarization: diarization, phrases: ["ｱﾊﾞﾝﾃｨ"], profiles: [
+            AIConfig(name: "議事録", command: "/bin/echo", cwd: root.path, autoSendPhrases: ["ＡＶＡＮＴＩ"]),
+            AIConfig(name: "相談", command: "/bin/echo", cwd: root.path, autoSendPhrases: ["ｱｳﾞｧﾝﾃｨ"]),
+            AIConfig(name: "共通", command: "/bin/echo", cwd: root.path)
+        ])
+        var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        var notifications: [VoiceCueFeedback] = []; session.notifyVoiceCue = { notifications.append($0) }
+        if slot != 1 { session.setMeetingManualDestination(slot: slot) }
+        let recognized = ["AVANTI", "アヴァンティ", "アバンティ"][slot - 1]
+        let configured = ["ＡＶＡＮＴＩ", "ｱｳﾞｧﾝﾃｨ", "ｱﾊﾞﾝﾃｨ"][slot - 1]
+        let destination = ["議事録", "相談", "共通"][slot - 1]
+        publish(session, diarization: diarization, text: recognized)
+        await session.pendingUndiarizedDrawForTesting?.value
+        #expect(notifications == [.accepted(destination: destination, phrase: configured, appendix: false)])
+        #expect(notifications.first?.body == "\(destination)へ送りました（\(configured)）")
+        await session.submissionTaskForTesting(slot: slot)?.value
+        #expect(session.aiRecord?.controller.conversation.questions.first?.request.envelope.participant.profileSlot == slot)
+        #expect(sounds == [true] && notifications.count == 1)
+    }
     @Test(arguments: [true, false])
     func 手動宛先の専用合図だけが着火し共通と別宛先の合図は効かない(diarization: Bool) async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
@@ -76,6 +98,7 @@ extension AppKitTests {
         ]
         let session = session(root, fake: FakeHerdr(), profiles: profiles)
         var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        var notifications: [VoiceCueFeedback] = []; session.notifyVoiceCue = { notifications.append($0) }
         session.setScheduleTranscriptForTesting("会議を始めます")
         session.submitAI(question: "依頼", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"),
                          profile: session.meetingAIProfiles[1], updateManualDestination: true)
@@ -92,10 +115,12 @@ extension AppKitTests {
         await session.submissionTaskForTesting?.value
         #expect(sounds == [true])
         #expect(session.aiRecord?.controller.conversation.questions.first?.appendices.count == 1)
+        #expect(notifications == [.accepted(destination: "新宛先", phrase: "新合図", appendix: true)])
         session.beginNextMeetingForTesting(recording: true)
         session.setMeetingManualDestination(slot: 2)
         publish(session, diarization: true, text: "新合図", start: 6, end: 7)
         #expect(sounds == [true])
+        #expect(notifications.count == 1)
     }
     private func start(_ session: MeetingSession) throws {
         try session.startAISchedule(options: .init(prompt: "議事録を更新", interval: 3600, sendFinal: false),
@@ -117,6 +142,7 @@ extension AppKitTests {
         let fake = FakeHerdr(), session = session(root, fake: fake, diarization: diarization)
         defer { session.stopAISchedule() }
         var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        var notifications: [VoiceCueFeedback] = []; session.notifyVoiceCue = { notifications.append($0) }
         try start(session)
         session.updateManualDraft("手動の下書き", slot: 1)
         let nextFire = session.snapshot.aiSchedule.nextFire
@@ -126,6 +152,7 @@ extension AppKitTests {
         publish(session, diarization: diarization)
         // MainActorを譲る前、確定待ちや接続開始より先に受付音を返す。
         #expect(sounds == [true])
+        #expect(notifications == [.accepted(destination: session.meetingManualAI!.name, phrase: "アバンティ", appendix: false)])
         #expect(session.aiRecord == nil)
         await session.submissionTaskForTesting?.value
         let request = try #require(session.aiRecord?.controller.conversation.questions.first?.request)
@@ -137,6 +164,7 @@ extension AppKitTests {
         #expect(sounds == [true])
         publish(session, diarization: diarization, text: "アヴァンティ。", accurate: 1)
         #expect(session.aiRecord?.controller.conversation.questions.count == 1 && sounds == [true])
+        #expect(notifications.count == 1)
     }
     @Test(arguments: [false, true])
     func 指定しないと空配列は送信も音も出さない(disabled: Bool) throws {
@@ -144,9 +172,24 @@ extension AppKitTests {
         let session = session(root, fake: FakeHerdr(), phrases: disabled ? [] : nil)
         defer { session.stopAISchedule() }
         var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        var notifications: [VoiceCueFeedback] = []; session.notifyVoiceCue = { notifications.append($0) }
         if disabled { try start(session) } else { session.setMeetingManualDestination(slot: nil) }
         publish(session, diarization: true)
         #expect(session.aiRecord == nil && sounds.isEmpty)
+        #expect(notifications.isEmpty)
+    }
+    @Test func 通知は設定表記を保ち水位と10秒の無視では出さない() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(root, fake: FakeHerdr(), phrases: ["ＡＶＡＮＴＩ"])
+        var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        var notifications: [VoiceCueFeedback] = []; session.notifyVoiceCue = { notifications.append($0) }
+        session.update(config: ResolvedConfig(config: KikigakiConfig(autoSendPhrases: []), home: root))
+        publish(session, diarization: true, text: "AVANTI")
+        await session.submissionTaskForTesting?.value
+        #expect(notifications.first?.body.contains("（ＡＶＡＮＴＩ）") == true)
+        publish(session, diarization: true, text: "AVANTI", start: 0.5, end: 1)
+        publish(session, diarization: true, text: "AVANTI", start: 1.1, end: 2)
+        #expect(notifications.count == 1 && sounds == [true])
     }
     @Test func 設定の再読込は次の会議から反映する() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
@@ -187,6 +230,7 @@ extension AppKitTests {
         let session = session(root, fake: FakeHerdr())
         defer { session.stopAISchedule() }
         var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        var notifications: [VoiceCueFeedback] = []; session.notifyVoiceCue = { notifications.append($0) }
         session.setScheduleTranscriptForTesting("会議を始めます")
         try start(session)
         if awaiting { await session.submissionTaskForTesting?.value }
@@ -195,6 +239,9 @@ extension AppKitTests {
         await session.submissionTaskForTesting?.value
         #expect(session.aiRecord?.controller.conversation.questions.count == 1)
         #expect(sounds == [awaiting])
+        #expect(notifications.count == 1)
+        #expect(notifications.first?.accepted == awaiting)
+        #expect(notifications.first?.body.contains("追記を送りました") == awaiting)
         let saved = session.aiRecord?.controller.conversation.questions.first
         #expect(saved?.appendices.count == (awaiting ? 1 : 0))
         if awaiting { #expect(saved?.request.trigger == .scheduled) }
@@ -289,10 +336,13 @@ extension AppKitTests {
         let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config, aiStore: store, recordedSamples: 16_000)
         session.automaticHelper = URL(fileURLWithPath: "/bin/echo")
         var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        var notifications: [VoiceCueFeedback] = []; session.notifyVoiceCue = { notifications.append($0) }
         publish(session, diarization: true)
         #expect(sounds == [true])
         await session.submissionTaskForTesting?.value
         #expect(sounds == [true, false])
+        #expect(notifications.map(\.accepted) == sounds)
+        #expect(notifications.last?.body.contains("送れませんでした。送信が中断されました") == true)
     }
 
     @Test func 送信の入口で議事録の確認に失敗したら低い音だけ鳴らす() throws {
@@ -302,8 +352,11 @@ extension AppKitTests {
         let store = try #require(session.aiStoreForTesting)
         _ = try store.minutesStores.store(meetingID: session.aiMeetingID, markdownURL: root.appendingPathComponent("another.md"))
         var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        var notifications: [VoiceCueFeedback] = []; session.notifyVoiceCue = { notifications.append($0) }
         publish(session, diarization: true)
         #expect(sounds == [false])
+        #expect(notifications.first?.body.contains("送れませんでした。議事録の書き先を確認できません") == true)
+        #expect(notifications.count == 1)
         #expect(session.submissionTaskForTesting == nil && session.aiRecord == nil)
     }
 

@@ -122,6 +122,7 @@ struct ReplayDebugOptions {
 /// 全体の配線。設定の読み込み、モデルの先読み、メニュー・ウィンドウとセッションの接続
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var voiceCueNotification: VoiceCueNotification?
     private var statusItem: StatusItem?
     private var window: TranscriptWindowController?
     private var session: MeetingSession?
@@ -196,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.config = config
         replayURL = Self.argument(after: "--replay").map { URL(fileURLWithPath: $0) }
+        voiceCueNotification = VoiceCueNotification(replay: replayURL != nil)
 
         let support = Self.aiSupportDirectory(
             isolatedReplay: replayURL != nil && (replayDebug.verifyTyped || replayDebug.verifyMinutes != nil || replayDebug.automaticProfile != nil
@@ -250,6 +252,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if session.snapshot.saved, let url = session.snapshot.markdownURL { NSWorkspace.shared.open(url) }
         }
         self.window = window
+        voiceCueNotification?.onClick = { [weak window] in
+            if window?.window?.isMiniaturized == true { window?.window?.deminiaturize(nil) }
+            window?.show()
+        }
+        session.notifyVoiceCue = { [weak self] in self?.voiceCueNotification?.post($0) }
 
         let statusItem = StatusItem()
         statusItem.onStartStop = { [weak self] in self?.toggleRecording() }
