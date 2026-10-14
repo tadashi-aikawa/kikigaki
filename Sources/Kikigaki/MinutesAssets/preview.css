@@ -83,7 +83,7 @@ body.board-canvas-mode { padding:0; overflow:hidden; }
 .board-canvas.diagram-dragging { cursor:grabbing; }
 .board-canvas svg,.board-canvas svg * { cursor:inherit; }
 .board-focus-ring { fill:none; stroke:#2b2420; stroke-width:3px; stroke-linecap:square; vector-effect:non-scaling-stroke; pointer-events:none; }
-.board-minimap { position:absolute; right:12px; bottom:12px; padding:3px; background:var(--paper); border:1px solid var(--rule); border-radius:5px; box-shadow:0 2px 6px #221f1c20; cursor:crosshair; touch-action:none; }
+.board-minimap { position:absolute; right:12px; bottom:12px; padding:3px; background:color-mix(in srgb,var(--paper) 90%,transparent); border:1px solid var(--rule); border-radius:5px; box-shadow:0 2px 6px #221f1c20; cursor:crosshair; touch-action:none; }
 .board-minimap[hidden] { display:none; }
 .board-minimap > svg { display:block; margin:0; }
 .board-map-frame { fill:#5b3e7a18; stroke:var(--accent); stroke-width:2px; vector-effect:non-scaling-stroke; pointer-events:none; }

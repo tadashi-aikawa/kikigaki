@@ -274,6 +274,16 @@ extension AppKitTests {
                 try await render(source, in: document, reset: true)
                 try await capture("colors-\(count)-\(scale*100)-whole", source: source, web: web)
                 _ = try await web.evaluateJavaScript("press('戻す'); void 0")
+                // 背景だけを透かす。親のopacityで箱・ID・表示範囲まで薄くしない。
+                #expect(try await web.evaluateJavaScript("""
+                (()=>{const map=canvas.querySelector('.board-minimap'),s=getComputedStyle(map),
+                  sample=document.createElement('canvas');sample.width=sample.height=1;
+                  const context=sample.getContext('2d');context.fillStyle=s.backgroundColor;context.fillRect(0,0,1,1);
+                  const alpha=context.getImageData(0,0,1,1).data[3]/255;
+                  return Math.abs(alpha-.90)<.01 && s.opacity==='1' && s.backdropFilter==='none' &&
+                    [...map.querySelectorAll('rect,text')].every(e=>getComputedStyle(e).opacity==='1') &&
+                    [...map.querySelectorAll('svg svg rect')].every(e=>getComputedStyle(e).fillOpacity==='1');})()
+                """) as? Bool == true)
                 #expect(try await web.evaluateJavaScript("""
                 (()=>{
                   const nodes=[...canvas.querySelectorAll('.diagram-stage g.node')], map=canvas.querySelector('.board-minimap'),
@@ -303,6 +313,21 @@ extension AppKitTests {
                     labels.every(t=>getComputedStyle(t).fontWeight==='400');})()
                 """) as? Bool == true)
                 try await capture("colors-\(count)-\(scale*100)-minimap", source: source, web: web)
+                if ProcessInfo.processInfo.environment["KIKIGAKI_BOARD_CANVAS_CAPTURE"] != nil {
+                    // 空白の上では透け具合を判断できないため、カード本文をミニマップの背後へ動かす。
+                    _ = try await web.evaluateJavaScript("""
+                    (()=>{const m=canvas.querySelector('.board-minimap').getBoundingClientRect(),p=point('T28');
+                      window.overlapPan={x:p.x-(m.left+m.width/2),y:p.y-(m.top+m.height/2)};
+                      wheel(false,overlapPan.x,overlapPan.y);flushDiagramFrames();})()
+                    """)
+                    #expect(try await web.evaluateJavaScript("""
+                    (()=>{const m=canvas.querySelector('.board-minimap').getBoundingClientRect(),
+                      label=node('T28').querySelector('.nodeLabel, .label').getBoundingClientRect();
+                      return label.left>=m.left && label.right<=m.right && label.top>=m.top && label.bottom<=m.bottom;})()
+                    """) as? Bool == true)
+                    try await capture("colors-\(count)-\(scale*100)-minimap-overlap", source: source, web: web)
+                    _ = try await web.evaluateJavaScript("wheel(false,-overlapPan.x,-overlapPan.y);flushDiagramFrames();void 0")
+                }
                 _ = try await web.evaluateJavaScript("""
                 window.cardStyleReads=0;window.savedGetComputedStyle=window.getComputedStyle;
                 window.getComputedStyle=function(element,...rest){
