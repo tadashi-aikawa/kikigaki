@@ -855,11 +855,11 @@ final class StartSheet: NSObject, NSTextViewDelegate {
 /// 実マウスとperformClickの両方でAppKitから戻ってから作り直す保持方式を選ぶ。
 @MainActor private final class NextMeetingRemoveButton: NSButton {
     private var handlingPress = false
-    private var pendingRemoval: (() -> Void)?
+    private var pendingRemoval: (@MainActor () -> Void)?
 
-    func afterPress(_ removal: @escaping () -> Void) {
+    func afterPress(_ removal: @escaping @MainActor () -> Void) {
         if handlingPress { pendingRemoval = removal }
-        else { DispatchQueue.main.async(execute: removal) }
+        else { DispatchQueue.main.async { removal() } }
     }
 
     override func mouseDown(with event: NSEvent) {
