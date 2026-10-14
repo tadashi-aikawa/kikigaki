@@ -1,5 +1,5 @@
 import { boardNodeID } from './board.js';
-import { createMinimap } from './minimap.js';
+import { createMinimap, minimapScale } from './minimap.js';
 // pageZoomとは独立した、図ごとの表示倍率。座標はページのCSS pxで保持する。
 export const MIN_DIAGRAM_SCALE = 0.25, MAX_DIAGRAM_SCALE = 4;
 export function zoomDiagram(state, scale, point) {
@@ -244,7 +244,7 @@ export class DiagramInteractions {
       }
       paintFocus();
     };
-    // 本体のSVGをuseで再描画せず、状態色を写した箱と線を1回作る。文字・マークは複製しない。
+    // 本体のSVGをuseで再描画せず、状態色を写した箱・論点ID・線を1回作る。
     const minimap = document.createElement('div'); minimap.className = 'board-minimap'; minimap.hidden = true;
     minimap.setAttribute('role', 'group'); minimap.setAttribute('aria-label', 'ボード全体と表示範囲');
     const mapSVG = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -256,9 +256,10 @@ export class DiagramInteractions {
       const size = viewport(), box = bounds(), natural = naturalBounds();
       minimap.hidden = !Object.values(diagramOverflow(box, size)).some(Boolean);
       if (minimap.hidden || natural.width <= 0 || natural.height <= 0) return;
-      // 固定px上限だと広いペイン・横長の図で箱が潰れる。図の比率は保ったまま、
-      // キャンバスの広さに従って全体の見取り図を大きくする。
-      const ratio = Math.min(size.width * 0.50 / natural.width, size.height * 0.40 / natural.height);
+      // SVG図単位の共通文字サイズを自然寸法のCSS pxへ戻す。
+      // 初回に保持した値だけを使い、操作中にラベル・色・箱を読み直さない。
+      const fontSize = Number(drawing.dataset.fontSize) * natural.height / drawing.viewBox.baseVal.height * pageZoom;
+      const ratio = minimapScale(natural, size, fontSize);
       mapSVG.setAttribute('viewBox', `0 0 ${natural.width} ${natural.height}`);
       mapSVG.style.width = natural.width * ratio + 'px'; mapSVG.style.height = natural.height * ratio + 'px';
       drawing.setAttribute('width', natural.width); drawing.setAttribute('height', natural.height);

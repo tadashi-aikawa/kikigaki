@@ -5,8 +5,114 @@ import { createRenderer, withoutFrontmatter, imageURL } from './renderer.js';
 import { changedEntries, UpdateHighlighter, foldUpdateMarks } from './updates.js';
 import { isTimeline, wrapTimeline } from './timeline.js';
 import { fitColumns } from './tables.js';
-import { boardLinks, isBoardHeading } from './board.js';
+import { boardLinks, boardNodeID, isBoardHeading } from './board.js';
 import { zoomDiagram, diagramOverflow, fitDiagram } from './diagrams.js';
+import { minimapTopicID, minimapTextColor, minimapFontSize, minimapScale } from './minimap.js';
+test('典型的なボードとIDなしの旧ボードは幅33%・高さ27%のまま', () => {
+  const viewport = { width:900, height:850 }, fontSize = minimapFontSize([42, 42, 62]);
+  assert.equal(minimapScale({ width:900, height:600 }, viewport, fontSize), 0.33);
+  assert.equal(minimapScale({ width:600, height:700 }, viewport, fontSize), 850 * 0.27 / 700);
+  assert.equal(minimapScale({ width:5000, height:600 }, viewport, 0), 297 / 5000);
+});
+test('IDが小さくなるときだけ7.5pxまで段階なく広げ縦横比を保つ', () => {
+  const viewport = { width:900, height:850 }, fontSize = minimapFontSize([42, 42, 62]);
+  for (const bounds of [{ width:1000, height:600 }, { width:1100, height:600 }, { width:600, height:800 }]) {
+    const ratio = minimapScale(bounds, viewport, fontSize);
+    assert.equal(ratio * fontSize, 7.5);
+    assert.ok(ratio > Math.min(297 / bounds.width, 229.5 / bounds.height));
+    assert.ok(bounds.width * ratio <= 450 && bounds.height * ratio <= 340);
+  }
+  // pageZoomでCSS viewportが半分になっても画面上の寸法は同じ。
+  assert.equal(minimapScale({ width:1000, height:600 }, { width:450, height:425 }, fontSize * 2) * 2,
+    minimapScale({ width:1000, height:600 }, viewport, fontSize));
+});
+test('下限を満たせない横長・縦長のボードは幅50%・高さ40%で止める', () => {
+  for (const bounds of [{ width:5000, height:600 }, { width:600, height:5000 }]) {
+    const ratio = minimapScale(bounds, { width:900, height:850 }, minimapFontSize([42]));
+    assert.ok(bounds.width * ratio <= 450 && bounds.height * ratio <= 340);
+    assert.ok(Math.abs(bounds.width * ratio - 450) < 1e-9 || Math.abs(bounds.height * ratio - 340) < 1e-9);
+    assert.ok(ratio * minimapFontSize([42]) < 7.5);
+  }
+});
+test('ミニマップの共通文字サイズは箱の高さの中央値から決める', () => {
+  const heights = [42, 62, 42, 62, 42];
+  assert.equal(minimapFontSize(heights), 42 * 0.75 * 0.75);
+  assert.deepEqual(heights, [42, 62, 42, 62, 42]);
+  assert.equal(minimapFontSize([42, 62]), 52 * 0.75 * 0.75);
+  assert.equal(minimapFontSize([42, 42, 42, 1000]), 42 * 0.75 * 0.75);
+  assert.equal(minimapFontSize([0, NaN, -1, 42]), 42 * 0.75 * 0.75);
+  assert.equal(minimapFontSize([]), 0);
+});
+test('MermaidのノードIDはSVGの接頭辞の有無にかかわらず完全一致で取り出す', () => {
+  const svg = { id:'mermaid-12' };
+  for (const id of ['flowchart-T4-0', 'mermaid-12-flowchart-T4-23'])
+    assert.equal(boardNodeID({ id }, svg), 'T4');
+  assert.equal(boardNodeID({ id:'mermaid-12-flowchart-T423-0' }, svg), 'T423');
+  for (const id of ['', 'T4', 'flowchart-Other-0', 'flowchart-T0-0', 'flowchart-T04-0',
+    'flowchart-T4extra-0', 'flowchart-T4-0-extra', 'other-mermaid-12-flowchart-T4-0'])
+    assert.equal(boardNodeID({ id }, svg), null);
+});
+test('ミニマップは数字始まりの本文や食い違ったラベルよりノードIDを優先する', () => {
+  for (const id of ['flowchart-T4-0', 'mermaid-12-flowchart-T4-23']) {
+    const nodeID = boardNodeID({ id }, { id:'mermaid-12' });
+    for (const label of ['✅ T423番は警告も消す', 'T423 別の論点', '番号なし', ''])
+      assert.equal(minimapTopicID(label, nodeID), 'T4');
+  }
+  for (const id of ['flowchart-Other-0', 'mermaid-12-flowchart-Other-23']) {
+    const nodeID = boardNodeID({ id }, { id:'mermaid-12' });
+    assert.equal(minimapTopicID('🟠 T5保留', nodeID), 'T5');
+    assert.equal(minimapTopicID('旧ボード', nodeID), null);
+  }
+});
+test('ノードIDが論点IDでないミニマップは状態印に続くラベル先頭の論点IDを読む', () => {
+  for (const label of ['T1 本文', '✅ T1 決定', '🟠 T1 保留', '❌ T1 却下', '💬 T1 所感', ' ✅\uFE0F T1\n本文', 'T1', 'T1本文'])
+    assert.equal(minimapTopicID(label), 'T1');
+  assert.equal(minimapTopicID('T123456789 本文'), 'T123456789');
+  for (const label of ['', '旧ボード', '本文 T3', '✅ 本文 T3', 'T0 本文', 'T01 本文'])
+    assert.equal(minimapTopicID(label), null);
+  assert.equal(minimapTopicID('❌T12345678901234567890却下'), 'T12345678901234567890');
+});
+test('ミニマップは折り返しで英字や記号と連結したIDを欠かさず読む', () => {
+  for (const [label, id] of [
+    ['💬 T8AI時代', 'T8'], ['💬 T9Neovim', 'T9'], ['✅ T11AIを', 'T11'],
+    ['T13APIの確認', 'T13'], ['T3a 本文', 'T3'], ['T3_本文', 'T3'],
+    ['T12AI時代', 'T12'], ['T12345', 'T12345'], ['T12345Neovim', 'T12345'],
+    ['T12 2026年の議論', 'T12'], ['T12\n2026年の議論', 'T12'],
+    ['T122026年の議論', 'T122026'],
+  ]) assert.equal(minimapTopicID(label), id);
+});
+test('ミニマップのIDは明るい塗りで濃灰、暗い塗りで明灰にする', () => {
+  for (const fill of ['rgb(227, 244, 225)', 'rgb(255, 241, 214)', 'rgb(249, 230, 227)'])
+    assert.equal(minimapTextColor(fill), '#3d3935');
+  assert.equal(minimapTextColor('rgb(34, 31, 28)'), '#eee9e2');
+  assert.equal(minimapTextColor('rgba(0, 0, 0, 0.1)'), '#3d3935');
+  assert.equal(minimapTextColor('rgb(0, 0, 0)', 0.1), '#3d3935');
+  assert.equal(minimapTextColor('none'), '#000');
+});
+test('ミニマップのIDは全状態色と中間色でコントラスト比4.5以上を保つ', () => {
+  // WCAGの相対輝度・コントラスト比で、描画側とは独立に計算する。
+  const luminance = rgb => rgb.map(channel => channel / 255).map(c =>
+    c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  ).reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i], 0);
+  const contrast = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  const fills = { done:[227,244,225], hold:[255,241,214], now:[239,230,248], rejected:[249,230,227],
+    hot:[237,224,205], cold:[237,224,205], normal:[237,224,205] };
+  for (const [state, rgb] of Object.entries(fills)) {
+    const color = minimapTextColor(`rgb(${rgb.join(',')})`);
+    assert.equal(color, '#3d3935', state);
+    const text = color.slice(1).match(/../g).map(hex => parseInt(hex, 16));
+    assert.ok(contrast(luminance(rgb), luminance(text)) >= 4.5, state);
+  }
+  // 灰色では下限を割る塗りだけ従来の黒・白へ戻す。
+  assert.equal(minimapTextColor('rgb(118,118,118)'), '#000');
+  assert.equal(minimapTextColor('rgb(117,117,117)'), '#fff');
+  for (let channel = 0; channel <= 255; channel++) {
+    const color = minimapTextColor(`rgb(${channel},${channel},${channel})`);
+    const text = color.length === 4 ? [...color.slice(1)].map(hex => parseInt(hex + hex, 16)) :
+      color.slice(1).match(/../g).map(hex => parseInt(hex, 16));
+    assert.ok(contrast(luminance([channel,channel,channel]), luminance(text)) >= 4.5, `gray ${channel}`);
+  }
+});
 test('却下色の対象はボードのATX節とその配下だけ', () => {
   const diagram = '\n```mermaid\nflowchart TB\nT1[却下]:::rejected\n```\n';
   const source = '## 普通の図' + diagram + '## ボード(23:59 更新)' + diagram + '### 詳細' + diagram +
