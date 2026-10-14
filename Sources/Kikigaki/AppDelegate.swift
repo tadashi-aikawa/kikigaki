@@ -216,10 +216,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nextMeetingStore = NextMeetingStore(directory: support.appendingPathComponent("next"))
         aiStore.recover()
         // 通知音は返答元のプロファイルの設定で決める。先頭の設定で全チャネルを鳴らさない。
-        aiStore.onNewResult = { [weak self] id, slot in
+        aiStore.onNewResult = { [weak self] id, notice in
             let profiles = self?.aiStore?.records[id]?.manifest.profiles ?? []
-            let source = profiles.first { $0.slot == slot } ?? profiles.first
-            if source?.notifySound == true { NSSound(named: "Glass")?.play() }
+            let source = profiles.first { $0.slot == notice.slot } ?? profiles.first
+            if notice.enabled(source?.notifySound) { NSSound(named: "Glass")?.play() }
+            if notice.enabled(source?.notifyBanner) {
+                self?.voiceCueNotification?.post(title: "KIKIGAKI · \(source?.name ?? "AI")", body: notice.text)
+            }
         }
         let session = MeetingSession(config: config, models: { [weak self] in
             guard let self else { throw CancellationError() }

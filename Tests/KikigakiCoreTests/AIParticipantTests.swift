@@ -49,7 +49,7 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         #expect(resolved.ai?.cli == .codex)
         #expect(resolved.ai?.participantName == "迅雷")
         #expect(resolved.ai?.cwd.path == "/home/test/Library/Application Support/KIKIGAKI/ai-work")
-        #expect(resolved.ai?.notifySound == false)
+        #expect(resolved.ai?.notifySound == nil && resolved.ai?.notifyBanner == nil)
     }
 
     @Test func 設定を全項目解釈しホームを引数から解決する() throws {
@@ -64,11 +64,12 @@ private func request(meeting: UUID = UUID(), stream: UUID = UUID(), generation: 
         extraArgs = ["--permission-mode", "plan"]
         alwaysPrompt = "短く答える"
         notifySound = true
+        notifyBanner = false
         """)
         let ai = try #require(ResolvedConfig(config: parsed, home: URL(fileURLWithPath: "/home/person")).ai)
         #expect(ai.cli == .claude && ai.command == "/test/Claude Code" && ai.model == "test-model")
         #expect(ai.cwd.path == "/home/person/project" && ai.participantName == "参加者")
-        #expect(ai.notifySound && ai.extraArgs == ["--permission-mode", "plan"])
+        #expect(ai.notifySound == true && ai.notifyBanner == false && ai.extraArgs == ["--permission-mode", "plan"])
         #expect(ai.effort == "high" && ai.effortArguments == ["--effort", "high"])
     }
 

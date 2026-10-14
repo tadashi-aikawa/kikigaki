@@ -53,7 +53,8 @@ address = "ネオへ"                # cwd を省いたので既定のディレ�
 | cwd | 省略時は従来どおり固定の `~/Library/Application Support/KIKIGAKI/ai-work/`。起動時の作業ディレクトリで、プロファイルごとに変えられる。指定時は絶対パスまたは先頭の `~/` を解決し、存在するディレクトリであることを確認する。 |
 | extraArgs | 空配列。引数の配列でありシェル文字列ではない。下記の規則で検証する。 |
 | alwaysPrompt | 空文字列。すべての送信の末尾へ「追加プロンプト」として付く補助指示。32 KiBまで。接続プロトコルを上書きする位置へ置かない。 |
-| notifySound | false。trueのときだけ、返事が届いた枠の設定でアプリから通知音を鳴らす。 |
+| notifySound | 省略時は人が待つ返事と確認質問だけ鳴らす。書けば手動・自動とも従う。返事が届いた枠の設定で鳴らす。判定は [返事の知らせ](ai-participant.md#返事の知らせ) を参照。 |
+| notifyBanner | notifySoundと同じ判定でOSの通知を出す。本文は返事の冒頭。 |
 | allowWork | true。送信シートの「作業を許可する」の初期値。会議内の変更を次の質問にも引き継ぎ、新しい録音で設定値へ戻す。 |
 | identifySpeakers | false。trueの宛先の送信に話者名の割当を同梱する。真偽値だけを認める。契約は [AI参加者の設計](ai-participant.md#話者名の割当) を参照。 |
 | autoStart | false。trueは配列全体で1つまで。`board` を指定しない宛先は `initialPrompt` が空なら設定エラー。録音開始シートの宛先の既定になる。 |

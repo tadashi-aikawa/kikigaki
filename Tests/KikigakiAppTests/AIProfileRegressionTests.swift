@@ -267,13 +267,13 @@ extension AppKitTests {
         config.aiProfiles = list
         let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config, aiStore: store)
         var notified: [Int] = []
-        store.onNewResult = { _, slot in notified.append(slot) }
+        store.onNewResult = { _, notice in notified.append(notice.slot) }
         try await submit(session, profile: list[1])
         let request = try #require(session.aiRecord?.controller.conversation.questions.first?.request)
         try deliver(session, request, kind: .answered, body: "回答")
         #expect(notified == [2])
         let source = try #require(session.aiRecord?.manifest.profiles.first { $0.slot == notified[0] })
-        #expect(source.notifySound)
+        #expect(source.notifySound == true)
     }
 
     /// 【低】相手側CLIの正常なフックを不正イベントに数えていた。

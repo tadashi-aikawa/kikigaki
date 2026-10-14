@@ -73,7 +73,8 @@ cli = "codex"
 address = "迅雷へ"
 avatar = "~/Pictures/jinrai.png" # 省略時は紫のイニシャル。http/httpsのURLも使える
 effort = "high"           # 推論の強さ
-notifySound = false       # 返事が届いたときの通知音
+notifySound = false       # 返事が届いたときの通知音。省略時は人が待つ返事だけ鳴る
+notifyBanner = false      # 返事が届いたときのOS通知。省略時は人が待つ返事だけ出る
 cwd = "~/work/minutes"    # 起動時の作業ディレクトリ。省略時は固定の既定
 autoStart = true          # 録音開始シートの自動送信の既定にする。全体で1つまで
 # 手動・自動実行シートと録音開始シートのプロンプト初期値
@@ -159,7 +160,8 @@ avatar = "~/Pictures/avatars/tanaka.png"
 | `alwaysPrompt` | 空 | すべての送信の末尾に「追加プロンプト」として付く補助指示。32 KiBまで |
 | `allowWork` | `true` | 送信シートの「作業を許可する」の初期値 |
 | `identifySpeakers` | `false` | `true` で、会話を送るときにAIへ話者名の割当も頼む。名乗りなどの根拠がある名前だけを付ける |
-| `notifySound` | `false` | `true` で、この宛先から返事や確認質問が届いたときに通知音を鳴らす。自動送信への通常の返事では鳴らさない |
+| `notifySound` | 人が待つ返事だけ | この宛先から返事が届いたときに通知音を鳴らす。省略時は、手動の依頼への返事と確認質問で鳴らし、自動送信への通常の返事では鳴らさない。`true` か `false` を書くと、手動・自動送信を問わずその値に従う。詳しくは [返事が届いたら音と通知で知らせる](../ai-participant/#返事が届いたら音と通知で知らせる) |
+| `notifyBanner` | 人が待つ返事だけ | この宛先から返事が届いたときにOSの通知を出す。本文は返事の冒頭。省略時と書いたときの効き方は `notifySound` と同じ |
 
 ### 自動送信
 

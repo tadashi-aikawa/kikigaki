@@ -53,7 +53,9 @@ import Testing
         #expect(ai["cli"]?["default"] as? String == profile.cli.rawValue)
         #expect(ai["cwd"]?["default"] as? String == ResolvedAIConfig.defaultCWD)
         #expect(ai["address"]?["default"] as? String == profile.address)
-        #expect(ai["notifySound"]?["default"] as? Bool == profile.notifySound)
+        // 未指定は手動と自動で既定が変わるため、固定の既定値を補完で挿入しない。
+        #expect(profile.notifySound == nil && profile.notifyBanner == nil)
+        #expect(ai["notifySound"]?["default"] == nil && ai["notifyBanner"]?["default"] == nil)
         #expect(ai["allowWork"]?["default"] as? Bool == profile.allowWork)
         #expect(ai["identifySpeakers"]?["default"] as? Bool == profile.identifySpeakers)
         #expect(ai["autoStart"]?["default"] as? Bool == profile.autoStart)

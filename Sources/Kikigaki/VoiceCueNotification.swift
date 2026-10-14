@@ -43,6 +43,11 @@ final class VoiceCueNotification: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func post(_ feedback: VoiceCueFeedback, title: String = "KIKIGAKI · 声の合図") {
+        post(title: title, body: feedback.body)
+    }
+
+    /// AIの返事の通知もここから出す。押したときに窓を前に出す動きを共有するため
+    func post(title: String, body: String) {
         let previous = delivery
         // 初回の許可待ち中に失敗が届いても、受付→失敗の順を保つ。
         delivery = Task { [center] in
@@ -56,7 +61,7 @@ final class VoiceCueNotification: NSObject, UNUserNotificationCenterDelegate {
             }
             let content = UNMutableNotificationContent()
             content.title = title
-            content.body = feedback.body
+            content.body = body
             content.sound = nil
             try? await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         }

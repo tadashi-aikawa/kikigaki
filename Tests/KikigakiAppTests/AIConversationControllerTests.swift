@@ -206,6 +206,35 @@ extension AppKitTests {
         #expect(await fake.commands.filter { $0.prefix(2) == ["workspace", "create"] }.count == 1)
         #expect(await fake.commands.filter { $0.prefix(2) == ["agent", "start"] }.count == 1)
     }
+    @Test func 返事の知らせは自動送信の回答だけ人が待たない返事として渡す() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let meeting = UUID(), store = AIFileStore(root: root), fake = FakeHerdr()
+        let base = [".kikigaki-context", meeting.uuidString, "ai"]
+        let controller = try testAIController(meetingID: meeting, outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
+        let config = ResolvedAIConfig(config: AIConfig(), home: root)
+        var notices: [AIReplyNotice] = []
+        controller.onResult = { notices.append($0) }
+        func deliver(_ request: AIRequest, _ kind: AIReceiveEvent.Kind, _ body: String?, reason: String? = nil) throws {
+            let event = try AIReceiveEvent(request: request, kind: kind, recordedAt: Date(), body: body, reason: reason)
+            try store.write(AIJSON.encode(event), to: base + ["inbox", event.filename], replacing: false)
+            controller.scan()
+        }
+        let manual = try prepare(controller, config)
+        try await controller.connect(config: config, label: "test", executable: URL(fileURLWithPath: "/tmp/fake"), arguments: [])
+        try await controller.send(manual, config: config)
+        try deliver(manual, .accept, nil)
+        try deliver(manual, .failed, "**書き込み**を拒まれました", reason: "work_failed")
+        let scheduled = try controller.prepare(lines: ["[12:00:00] A: 会話", "[12:00:01] A: 続き"], question: "更新", voiceQuestion: "",
+            capturedAt: Date(), cutoff: 2, tail: nil, config: config, helper: URL(fileURLWithPath: "/tmp/helper"), trigger: .scheduled)
+        try await controller.send(scheduled, config: config)
+        try deliver(scheduled, .answered, "## 更新\n- 決定事項を追加")
+        #expect(notices == [
+            AIReplyNotice(slot: 1, kind: .failed, awaited: true, body: "**書き込み**を拒まれました"),
+            AIReplyNotice(slot: 1, kind: .answered, awaited: false, body: "## 更新\n- 決定事項を追加"),
+        ])
+        #expect(notices.map { $0.enabled(nil) } == [true, false])
+        #expect(notices.map(\.text) == ["失敗: 書き込みを拒まれました", "更新 決定事項を追加"])
+    }
     @Test func 送信試行を先に保存し遅延回答と二重回収を扱う() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID(), store = AIFileStore(root: root), fake = FakeHerdr()

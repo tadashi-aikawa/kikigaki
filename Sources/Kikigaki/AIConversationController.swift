@@ -53,8 +53,8 @@ final class AIConversationController {
     var speakerDiagnostic: (String) -> Void = { NSLog("%@", $0) }
     /// 明示的なreplay検証だけで、受信直前に人のパス指定を再現する。
     var beforeMinutesScanForReplay: (() -> Void)?
-    /// 返事が届いた枠。通知音は返答元のプロファイルの設定で決める
-    var onResult: ((Int) -> Void)?
+    /// 新しく取り込んだ返事。知らせるかは返答元のプロファイルの設定で決める
+    var onResult: ((AIReplyNotice) -> Void)?
     private var channels: [Int: Channel] = [:]
     private var profiles: [Int: ResolvedAIConfig] = [:]
     private let files: AIFileStore
@@ -592,7 +592,7 @@ final class AIConversationController {
         var acknowledged: [Int: AIStreamHistory] = [:]
         /// 返事が届いたチャネル。警告を消してよいのはここに入った枠だけ
         var resolved = Set<Int>()
-        var notify: [Int] = []
+        var notify: [AIReplyNotice] = []
         let now = Date()
         for event in events {
             do {
@@ -601,8 +601,11 @@ final class AIConversationController {
                     let question = next.questions.first { $0.request.id == event.requestID }
                     guard let request = question?.request else { continue }
                     let target = slot(of: request)
-                    let scheduled = request.trigger == .scheduled
-                    if event.kind == .needsInput || (event.kind == .answered && !scheduled) { notify.append(target) }
+                    // 追記できるのは手動の入口だけなので、追記のある自動送信の依頼は人が待っている。
+                    let awaited = request.trigger != .scheduled || question?.appendices.isEmpty == false
+                    if event.kind != .accept {
+                        notify.append(AIReplyNotice(slot: target, kind: event.kind, awaited: awaited, body: event.body ?? ""))
+                    }
                     guard let channel = channels[target] else { continue }
                     // 別チャネルの結果でこの枠の送達不明が晴れることはない。世代も合っていなければ、
                     // その警告は今届いた結果では解消できない。
@@ -621,7 +624,7 @@ final class AIConversationController {
                 try commit(next)
                 for (slot, history) in acknowledged { channels[slot]?.history = history }
                 for slot in resolved { channels[slot]?.warning = nil }
-                for slot in notify { onResult?(slot) }
+                for notice in notify { onResult?(notice) }
             } catch { scanWarning = "返事の取り込み状態を保存できません" }
         }
         let oldReports = progressReports

@@ -40,7 +40,9 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var extraArgs: [String]?
     /// すべての送信の末尾へ付く補助指示。
     public var alwaysPrompt: String?
+    /// 返事の音とOS通知。nilは人が待つ返事だけ知らせる。判定は `AIReplyNotice.enabled`
     public var notifySound: Bool?
+    public var notifyBanner: Bool?
     public var allowWork: Bool?
     public var identifySpeakers: Bool?
     /// 手動・自動実行・録音開始シートの文面の初期値。
@@ -61,8 +63,9 @@ public struct AIConfig: Codable, Equatable, Sendable {
                 allowWork: Bool? = nil,
                 initialPrompt: String? = nil, autoIntervalMinutes: Int? = nil, autoStart: Bool? = nil,
                 board: String? = nil, boardPrompt: String? = nil, boardLocation: String? = nil,
-                identifySpeakers: Bool? = nil, autoSendPhrases: [String]? = nil) {
+                identifySpeakers: Bool? = nil, autoSendPhrases: [String]? = nil, notifyBanner: Bool? = nil) {
         self.autoSendPhrases = autoSendPhrases
+        self.notifyBanner = notifyBanner
         self.identifySpeakers = identifySpeakers
         self.board = board; self.boardPrompt = boardPrompt; self.boardLocation = boardLocation
         self.name = name
@@ -100,6 +103,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
         extraArgs = try values.decodeIfPresent([String].self, forKey: .extraArgs)
         alwaysPrompt = try values.decodeIfPresent(String.self, forKey: .alwaysPrompt)
         notifySound = try values.decodeIfPresent(Bool.self, forKey: .notifySound)
+        notifyBanner = try values.decodeIfPresent(Bool.self, forKey: .notifyBanner)
         allowWork = try values.decodeIfPresent(Bool.self, forKey: .allowWork)
         identifySpeakers = try values.decodeIfPresent(Bool.self, forKey: .identifySpeakers)
         initialPrompt = try values.decodeIfPresent(String.self, forKey: .initialPrompt)
@@ -239,7 +243,9 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public let cwd: URL
     public let extraArgs: [String]
     public let alwaysPrompt: String
-    public let notifySound: Bool
+    /// nilは未指定。人が待つ返事だけ知らせる。判定は `AIReplyNotice.enabled`
+    public let notifySound: Bool?
+    public let notifyBanner: Bool?
     public let allowWork: Bool
     public let identifySpeakers: Bool
     public let initialPrompt: String
@@ -273,7 +279,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         }
         cwd = ResolvedConfig.expand(config.cwd ?? Self.defaultCWD, home: home)
         extraArgs = config.extraArgs ?? []; alwaysPrompt = config.alwaysPrompt ?? ""
-        notifySound = config.notifySound ?? false
+        notifySound = config.notifySound; notifyBanner = config.notifyBanner
         allowWork = config.allowWork ?? true
         identifySpeakers = config.identifySpeakers ?? false
         initialPrompt = config.initialPrompt ?? ""; autoIntervalMinutes = config.autoIntervalMinutes ?? 3
@@ -284,7 +290,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         // 保存済みmanifestのキーは改名せず、新旧アプリで同じ形式を読む。
-        case cli, command, herdrCommand, model, address, cwd, extraArgs, notifySound, allowWork
+        case cli, command, herdrCommand, model, address, cwd, extraArgs, notifySound, notifyBanner, allowWork
         case alwaysPrompt = "prompt"
         case autoIntervalMinutes, board, boardPrompt, boardLocation
         case initialPrompt = "autoPrompt"
@@ -302,7 +308,9 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         cwd = try values.decode(URL.self, forKey: .cwd)
         extraArgs = try values.decode([String].self, forKey: .extraArgs)
         alwaysPrompt = try values.decode(String.self, forKey: .alwaysPrompt)
-        notifySound = try values.decode(Bool.self, forKey: .notifySound)
+        // 未指定を区別する前の会議は `false` を書いており、明示のfalseとして読む。
+        notifySound = try values.decodeIfPresent(Bool.self, forKey: .notifySound)
+        notifyBanner = try values.decodeIfPresent(Bool.self, forKey: .notifyBanner)
         // 旧会議のmanifestにこのキーが無い場合だけ、以前の作業可能な契約を引き継ぐ。
         allowWork = try values.contains(.allowWork) ? values.decode(Bool.self, forKey: .allowWork) : true
         identifySpeakers = try values.contains(.identifySpeakers) ? values.decode(Bool.self, forKey: .identifySpeakers) : false

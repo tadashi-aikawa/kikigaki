@@ -73,7 +73,8 @@ cli = "codex"
 address = "迅雷へ"
 avatar = "~/Pictures/jinrai.png" # 省略時は紫のイニシャル。http/httpsのURLも使える
 effort = "high"           # 推論の強さ。CLIごとの引数へ翻訳する。extraArgs との二重指定は不可
-notifySound = false       # プロファイルごとに効く。返答元の設定で鳴らす
+notifySound = false       # 省略時は人が待つ返事と確認質問だけ鳴らす。書けば手動・自動とも従う
+notifyBanner = false      # notifySoundと同じ判定でOSの通知を出す
 cwd = "~/work/minutes"    # 起動時の作業ディレクトリ。省略時は固定の既定
 autoStart = true          # 録音開始シートの宛先の既定になる。配列で1つまで
 # 手動・自動実行シートと録音開始シートのプロンプト初期値
@@ -163,7 +164,8 @@ autoSendPhrases = ["アバンティ", "アヴァンティ"]
 | `cwd` | 固定の既定 | 起動時の作業ディレクトリ。絶対パスか `~/` 始まり |
 | `extraArgs` | 空 | CLIへの追加引数。対応済みの指定だけを受け付ける |
 | `alwaysPrompt` | 空 | 全送信の末尾に「追加プロンプト」として付く補助指示。32 KiBまで |
-| `notifySound` | `false` | 返事が届いたときの通知音。返答元の設定で鳴らす |
+| `notifySound` | 人が待つ返事だけ | 返事が届いたときの通知音。返答元の設定で鳴らす。省略時は手動の依頼への返事と確認質問で鳴らし、自動送信の返事では鳴らさない。書けば手動・自動とも従う。詳細は [返事の知らせ](ai-participant.md#返事の知らせ) |
+| `notifyBanner` | 人が待つ返事だけ | 返事が届いたときのOSの通知。本文は返事の冒頭。判定は `notifySound` と同じ |
 | `allowWork` | `true` | 送信シートの「作業を許可する」の初期値 |
 | `identifySpeakers` | `false` | 送信に話者名の割当を同梱する。詳細は [AI参加者の設計](ai-participant.md#話者名の割当) |
 | `autoStart` | `false` | 録音開始シートの自動送信の宛先の既定にする。配列全体で1つまで。`board` を指定しない宛先は `initialPrompt` が必要 |
