@@ -7,6 +7,7 @@ struct SessionSnapshot {
     var ai: AIViewState?
     var aiRecoveryWarning: String?
     var manualDestination: AIDestinationPicker.Item?
+    var manualDraftSendState: ManualDraftSendState = .unavailable("AI設定がありません")
     var automaticDestination: AIDestinationPicker.Item?
     var state: RecordingState = .idle
     var utterances: [Utterance] = []

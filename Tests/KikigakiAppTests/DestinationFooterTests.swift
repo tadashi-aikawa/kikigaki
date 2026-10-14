@@ -31,6 +31,7 @@ extension AppKitTests {
         state.aiSchedule.nextFire = Date().addingTimeInterval(150)
         state.automaticDestination = .init(slot: 1, name: long ? "議事録と議論のボードを更新する担当" : "議事録")
         state.manualDestination = .init(slot: 2, name: long ? "会議で使うスライドを更新する担当" : "スライド")
+        state.manualDraftSendState = .ready(appendix: manualWaiting)
         return state
     }
 
@@ -64,8 +65,11 @@ extension AppKitTests {
                 #expect(button.frame.width == 36)
                 #expect(button.frame.maxX <= footer.bounds.maxX - 15)
             }
-            #expect(footer.automaticDestination.frame.width == footer.manualDestination.frame.width)
-            #expect(footer.automaticDestination.frame.minY > footer.manualDestination.frame.maxY)
+            #expect(footer.automaticDestination.frame.width == footer.manualDestination.frame.width + 25)
+            #expect(footer.automaticDestination.frame.minY > footer.manualRow.frame.maxY)
+            #expect(footer.manualSend.frame.size == NSSize(width: 22, height: 20))
+            #expect(footer.manualSend.frame.minX - footer.manualDestination.frame.maxX == 3)
+            #expect(footer.manualSend.isEnabled)
             #expect(footer.destinations.frame.maxX < footer.confirmation.frame.minX)
             #expect(footer.automaticDestination.nameFrame.width >= 36)
             #expect(footer.manualDestination.nameFrame.width >= 36)
@@ -79,10 +83,12 @@ extension AppKitTests {
             content.layoutSubtreeIfNeeded()
             #expect(footer.automaticDestination.nameFrame.width == nameWidth)
             #expect(footer.automaticDestination.nameFont.pointSize == 12)
+            #expect(footer.manualSend.frame.size == NSSize(width: 22, height: 20))
             controller.setTextScale(.actual)
             state.state = .idle; state.aiSchedule.active = false
             controller.apply(state)
             #expect(!footer.destinations.isHidden && !footer.manualDestination.isEnabled)
+            #expect(!footer.manualSend.isEnabled)
             #expect(footer.automaticDestination.destinationName == "送らない")
         }
     }
@@ -130,15 +136,22 @@ extension AppKitTests {
         window.setContentSize(NSSize(width: width, height: 578))
         window.setFrameOrigin(NSPoint(x: 20000, y: 20000)); window.orderFront(nil)
         defer { window.orderOut(nil) }
-        for phase in ["automatic", "automatic-notices", "manual", "off", "stopped", "preparing", "both", "stopped-waiting"] {
+        for phase in ["normal", "automatic", "automatic-notices", "manual", "off", "stopped", "preparing", "both", "stopped-waiting"] {
             var state = try state(root, long: true, notices: phase == "automatic-notices",
                 automaticWaiting: phase == "automatic" || phase == "automatic-notices" || phase == "both",
                 manualWaiting: phase == "manual" || phase == "both" || phase == "stopped-waiting")
-            if phase == "off" { state.aiSchedule.active = false; state.manualDestination = nil }
+            if phase == "off" {
+                state.aiSchedule.active = false; state.manualDestination = nil
+                state.manualDraftSendState = .unavailable("手動宛先を指定してください")
+            }
             if phase == "stopped" || phase == "stopped-waiting" {
                 state.state = .idle; state.aiSchedule.active = false; state.saved = true
+                state.manualDraftSendState = .unavailable("録音中・一時停止中だけ送れます")
             }
-            if phase == "preparing" { state.ai?.automaticPreparing = true; state.ai?.manualPreparing = true }
+            if phase == "preparing" {
+                state.ai?.automaticPreparing = true; state.ai?.manualPreparing = true
+                state.manualDraftSendState = .unavailable("送信の準備中です")
+            }
             controller.apply(state)
             controller.compactFooter.minutesNotice.isHidden = false
             let size = controller.windowWillResize(window, to: NSSize(width: width, height: 600))

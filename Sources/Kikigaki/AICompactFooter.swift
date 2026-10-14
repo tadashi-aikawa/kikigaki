@@ -161,11 +161,46 @@ final class AIFooterDestination: HoverButton {
     }
 }
 
+/// 手動の段と同じ高さの固定サイズ操作。本文の文字倍率は掛けない。
+final class AIFooterManualSend: HoverButton {
+    var callback: (() -> Void)?
+    override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
+    override var isFlipped: Bool { false }
+    init() {
+        super.init(frame: .zero)
+        title = ""; isBordered = false; target = self; action = #selector(pressed)
+        setButtonType(.momentaryPushIn)
+        widthAnchor.constraint(equalToConstant: 22).isActive = true
+        heightAnchor.constraint(equalToConstant: 20).isActive = true
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    @objc private func pressed() { guard isEnabled else { return }; callback?() }
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 5, yRadius: 5)
+        Washi.paper.setFill(); path.fill()
+        let active = isEnabled && (isHovered || isHighlighted)
+        if active {
+            Washi.red.withAlphaComponent(isHighlighted ? 0.22 : 0.14).setFill(); path.fill()
+        }
+        (isEnabled ? Washi.red : Washi.rule).setStroke(); path.lineWidth = 1; path.stroke()
+        let triangle = NSBezierPath()
+        triangle.move(to: NSPoint(x: bounds.midX - 3, y: bounds.midY - 4))
+        triangle.line(to: NSPoint(x: bounds.midX + 4, y: bounds.midY))
+        triangle.line(to: NSPoint(x: bounds.midX - 3, y: bounds.midY + 4))
+        triangle.close()
+        (isEnabled ? (active ? Washi.activeRedInk : Washi.red) : Washi.muted.withAlphaComponent(0.45)).setFill()
+        triangle.fill()
+    }
+}
+
 /// 1秒単位の更新だけ。CALayerへ連続アニメーションを登録しない。
 final class AICompactFooter: NSStackView {
     let minutesNotice = AIFooterButton(symbol: "doc.text", label: "議事録")
     let automaticDestination = AIFooterDestination(automatic: true)
     let manualDestination = AIFooterDestination(automatic: false)
+    let manualSend = AIFooterManualSend()
+    let manualRow = NSStackView()
     let destinations = NSStackView()
     private let spacer = NSView()
     private let rule = NSView()
@@ -197,9 +232,13 @@ final class AICompactFooter: NSStackView {
         destinations.distribution = .fill
         destinations.heightAnchor.constraint(equalToConstant: 42).isActive = true
         destinations.addArrangedSubview(automaticDestination)
-        destinations.addArrangedSubview(manualDestination)
+        manualRow.orientation = .horizontal; manualRow.alignment = .centerY; manualRow.spacing = 3
+        manualRow.distribution = .fill
+        manualRow.addArrangedSubview(manualDestination)
+        manualRow.addArrangedSubview(manualSend)
+        destinations.addArrangedSubview(manualRow)
         automaticDestination.widthAnchor.constraint(equalTo: destinations.widthAnchor).isActive = true
-        manualDestination.widthAnchor.constraint(equalTo: destinations.widthAnchor).isActive = true
+        manualRow.widthAnchor.constraint(equalTo: destinations.widthAnchor).isActive = true
         destinations.setContentHuggingPriority(.init(200), for: .horizontal)
         destinations.setContentCompressionResistancePriority(.init(200), for: .horizontal)
         for view in [destinations, rule, confirmation, warning, spacer, minutesNotice, pin, more] { addArrangedSubview(view) }
@@ -227,6 +266,10 @@ final class AICompactFooter: NSStackView {
         spacer.isHidden = state.ai != nil
         automaticDestination.isEnabled = state.ai != nil
         manualDestination.isEnabled = state.ai != nil && state.canSubmitAI
+        manualSend.isEnabled = state.ai != nil && state.canSubmitAI && state.manualDestination != nil && state.manualDraftSendState.canSend
+        let manualTip = state.manualDraftSendState.toolTip
+        if manualSend.toolTip != manualTip { manualSend.toolTip = manualTip }
+        manualSend.setAccessibilityLabel(manualTip)
         let questions = state.ai?.conversation?.questions ?? []
         let matching = questions.filter { AIBadgeKind.confirmation.matches($0, in: questions) }
         confirmation.count = matching.count; confirmation.isHidden = matching.isEmpty; confirmation.needsDisplay = true

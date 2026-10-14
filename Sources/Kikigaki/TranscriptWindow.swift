@@ -16,6 +16,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onScheduleAI: (() -> Void)?
     var onStopScheduleAI: (() -> Void)?
     var onFireScheduleAI: (() -> Void)?
+    var onSendManualDraft: (() -> Void)?
     let compactFooter = AICompactFooter()
     private let recordingRange = Washi.label(size: 11, color: Washi.muted)
     var onOpenAIPane: (() -> Void)?
@@ -472,6 +473,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         compactFooter.automaticDestination.callback = { [weak self] in self?.showAutomaticMenu() }
         compactFooter.manualDestination.callback = { [weak self] in self?.askPressed() }
+        compactFooter.manualSend.callback = { [weak self] in self?.onSendManualDraft?() }
         compactFooter.more.callback = { [weak self] in self?.showFooterMenu() }
         compactFooter.minutesNotice.target = self; compactFooter.minutesNotice.action = #selector(toggleMinutes)
         let footer = compactFooter

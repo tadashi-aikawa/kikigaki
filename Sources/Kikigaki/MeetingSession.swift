@@ -191,7 +191,9 @@ final class MeetingSession {
     private var aiScheduleTimer: Timer?
     private var aiScheduleHelper: URL?
     /// 同梱CLIの置き場。録音開始で自動送信を始めるときに使う。バンドル実行でない検証では差し替える
-    var automaticHelper: URL? = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
+    var automaticHelper: URL? = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli") {
+        didSet { emit() }
+    }
     /// replayだけで使う間隔の上書き。分単位の設定値では実行時間に収まらない
     var automaticIntervalOverride: Double?
     /// 開始シートで決めた自動送信。**シートを出したら必ず設定する。**
@@ -738,6 +740,7 @@ final class MeetingSession {
         snapshot.timeline = pause.timeline
         snapshot.aiRecoveryWarning = aiStore?.warnings.first
         snapshot.manualDestination = meetingManualAI.map { .init(slot: $0.slot, name: $0.name, avatar: $0.avatar) }
+        snapshot.manualDraftSendState = manualDraftSendState
         snapshot.automaticDestination = aiScheduleConfiguration.map { .init(slot: $0.slot, name: $0.name, avatar: $0.avatar) }
         snapshot.aiSchedule = AIScheduleViewState(schedule: aiSchedule, warning: aiScheduleWarning,
             destination: meetingAIProfiles.count > 1 ? aiScheduleConfiguration?.name : nil,
@@ -1487,42 +1490,54 @@ extension MeetingSession {
         for row in snapshot.utterances where row.kind == .voice {
             guard let event = autoSendPhraseState.observe(row, now: now.timeIntervalSince1970,
                 automaticActive: meetingManualAI != nil && snapshot.canSubmitAI,
-                canFireNow: canSendVoiceManual) else { continue }
+                canFireNow: manualDraftSendState.canSend) else { continue }
             log(diagnostics.autoSendPhraseLine(event))
-            let destination = meetingManualAI?.name ?? "AI"
             let phrase = voiceCueDisplayPhrases.first { AutoSendPhrase.normalize($0) == event.phrase } ?? event.phrase
             switch event.decision {
-            case .fire:
-                guard let profile = meetingManualAI, let helper = automaticHelper else {
-                    reportVoiceCue(.failed(destination: destination, reason: "送信の設定がありません")); continue
-                }
-                let appendix = aiRecord?.controller.awaitingRequest(slot: profile.slot) != nil
-                submitAI(question: manualDraft(for: profile), full: false, parent: nil, helper: helper,
-                         profile: profile, onSent: { [weak self] sent, reason in
-                             guard let self, !sent else { return }
-                             self.reportVoiceCue(.failed(destination: destination,
-                                 reason: reason ?? "送信が中断されました"))
-                         })
-                // 非同期の確定待ち・起動へ進む前に受付を知らせる。入口で失敗なら低い音だけ。
-                reportVoiceCue(aiTasks[profile.slot] != nil
-                    ? .accepted(destination: destination, phrase: phrase, appendix: appendix)
-                    : .failed(destination: destination, reason: aiWarning ?? "送信を始められません"))
-            case .unavailable:
-                reportVoiceCue(.failed(destination: destination,
-                    reason: aiTasks[meetingManualAI?.slot ?? 0] != nil ? "送信の準備中です" : "接続先と設定を確認してください"))
+            case .fire, .unavailable: sendManualDraft(voiceCuePhrase: phrase)
             case .cooldown, .watermark: break
             }
         }
     }
-    private func reportVoiceCue(_ feedback: VoiceCueFeedback) {
-        playAutoSendSound(feedback.accepted)
-        notifyVoiceCue(feedback)
+
+    /// 水位・10秒の無視には触れず、声の合図とクリックを同じ本番入口へ通す。
+    @discardableResult
+    func sendManualDraft(voiceCuePhrase: String? = nil) -> Bool {
+        guard let profile = meetingManualAI else { return false }
+        let destination = profile.name
+        guard case let .ready(appendix) = manualDraftSendState, let helper = automaticHelper else {
+            reportManualDraft(.failed(destination: destination, reason: manualDraftSendState.toolTip), voiceCue: voiceCuePhrase != nil)
+            return false
+        }
+        submitAI(question: manualDraft(for: profile), full: false, parent: nil, helper: helper,
+                 profile: profile, onSent: { [weak self] sent, reason in
+                     guard let self, !sent else { return }
+                     self.reportManualDraft(.failed(destination: destination, reason: reason ?? "送信が中断されました"),
+                                            voiceCue: voiceCuePhrase != nil)
+                 })
+        // 非同期の確定待ち・起動へ進む前に受付を知らせる。入口で失敗なら低い音だけ。
+        let accepted = aiTasks[profile.slot] != nil
+        reportManualDraft(accepted
+            ? .accepted(destination: destination, phrase: voiceCuePhrase ?? "", appendix: appendix)
+            : .failed(destination: destination, reason: aiWarning ?? "送信を始められません"), voiceCue: voiceCuePhrase != nil)
+        return accepted
     }
-    private var canSendVoiceManual: Bool {
-        guard snapshot.canSubmitAI, aiStore != nil, automaticHelper != nil, let profile = meetingManualAI,
-              aiTasks[profile.slot] == nil else { return false }
-        return (aiRecord?.controller.canSend(slot: profile.slot) ?? true)
-            || aiRecord?.controller.canAppend(slot: profile.slot) == true
+    private func reportManualDraft(_ feedback: VoiceCueFeedback, voiceCue: Bool) {
+        playAutoSendSound(feedback.accepted)
+        if voiceCue { notifyVoiceCue(feedback) }
+    }
+    var manualDraftSendState: ManualDraftSendState {
+        guard !meetingAIProfiles.isEmpty else { return .unavailable("AI設定がありません") }
+        guard let profile = meetingManualAI else { return .unavailable("手動宛先を指定してください") }
+        guard snapshot.state == .recording || snapshot.state == .paused else { return .unavailable("録音中・一時停止中だけ送れます") }
+        guard snapshot.markdownURL != nil else { return .unavailable("会議の保存先がありません") }
+        guard aiStore != nil, automaticHelper != nil else { return .unavailable("送信の設定がありません") }
+        guard aiTasks[profile.slot] == nil else { return .unavailable("送信の準備中です") }
+        let controller = aiRecord?.controller
+        guard (controller?.canSend(slot: profile.slot) ?? true) || controller?.canAppend(slot: profile.slot) == true else {
+            return .unavailable("接続先と設定を確認してください")
+        }
+        return .ready(appendix: controller?.awaitingRequest(slot: profile.slot) != nil)
     }
 
     @discardableResult

@@ -244,6 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onScheduleAI = { [weak self] in self?.showScheduleSheet() }
         window.onStopScheduleAI = { [weak session] in session?.stopAISchedule() }
         window.onFireScheduleAI = { [weak session] in session?.fireAIScheduleNow() }
+        window.onSendManualDraft = { [weak session] in session?.sendManualDraft() }
         window.onCancelAI = { session.cancelAI($0) }
         window.onOpenAIPane = { session.showAIPane() }
         window.onRecreateAI = { session.recreateAI() }
