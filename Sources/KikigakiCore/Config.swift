@@ -127,14 +127,7 @@ public enum ConfigLoader {
     private static func validate(_ config: KikigakiConfig) throws {
         try config.ai?.validate()
         if let phrases = config.autoSendPhrases {
-            guard phrases.count <= 20 else { throw ConfigError.invalid(description: "autoSendPhrases allows at most 20 phrases") }
-            var normalized = Set<String>()
-            for phrase in phrases {
-                let value = AutoSendPhrase.normalize(phrase)
-                guard phrase.count <= 64, !value.isEmpty, normalized.insert(value).inserted else {
-                    throw ConfigError.invalid(description: "autoSendPhrases must be non-empty and unique after normalization, with at most 64 characters per phrase")
-                }
-            }
+            try AutoSendPhrase.validate(phrases)
         }
         var speakerNames = Set<String>()
         for speaker in config.speakers ?? [] {

@@ -59,6 +59,7 @@ address = "ネオへ"                # cwd を省いたので既定のディレ�
 | autoStart | false。trueは配列全体で1つまで。`board` を指定しない宛先は `initialPrompt` が空なら設定エラー。録音開始シートの宛先の既定になる。 |
 | initialPrompt | 空文字列。手動・自動実行シートと録音開始シートのプロンプトの初期値。32 KiBまで。 |
 | autoIntervalMinutes | 3。1〜120分。 |
+| autoSendPhrases | 未指定ならトップレベルを使う。手動宛先の間に指定した合図で置き換える。`[]` は無効。検証と切替の正本は [声の合図](ai-scheduled.md#声の合図)。 |
 | board | 省略時はボードなし。単一のMarkdown見出し(`#` から `######`)。配列内の重複を許す。 |
 | boardPrompt | `board` があるときだけ指定できる。省略時は内蔵のボードプロンプト。 |
 | boardLocation | `board` があるときだけ指定できる。議事録のパスが無いときの作成指示。 |

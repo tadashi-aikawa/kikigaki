@@ -2,6 +2,17 @@ import Foundation
 
 /// 声の合図の比較。NFKCとかなの統一だけを使い、漢字の読みには変換しない。
 public enum AutoSendPhrase {
+    public static func validate(_ phrases: [String], label: String = "autoSendPhrases") throws {
+        guard phrases.count <= 20 else { throw ConfigError.invalid(description: "\(label) allows at most 20 phrases") }
+        var normalized = Set<String>()
+        for phrase in phrases {
+            let value = normalize(phrase)
+            guard phrase.count <= 64, !value.isEmpty, normalized.insert(value).inserted else {
+                throw ConfigError.invalid(description: "\(label) must be non-empty and unique after normalization, with at most 64 characters per phrase")
+            }
+        }
+    }
+
     public static func normalize(_ text: String) -> String {
         let compatible = text.precomposedStringWithCompatibilityMapping
         let hiragana = compatible.applyingTransform(.hiraganaToKatakana, reverse: true) ?? compatible
@@ -29,7 +40,7 @@ public struct AutoSendPhraseState: Sendable {
         public let at: TimeInterval
     }
     private struct Observation: Equatable, Sendable { let end: Double; let text: String }
-    private let phrases: [String]
+    private var phrases: [String]
     private var observed: [Double: Observation] = [:]
     /// 無効・10秒以内に認識した合図も、後の表示更新から再試行しない。
     private var handledStarts: Set<Double> = []
@@ -37,6 +48,11 @@ public struct AutoSendPhraseState: Sendable {
     public private(set) var lastFiredAt: TimeInterval?
 
     public init(phrases: [String]) { self.phrases = phrases.map(AutoSendPhrase.normalize).filter { !$0.isEmpty } }
+
+    /// 宛先が替わっても判定済みの行・水位・10秒の無視を引き継ぎ、同じ発話を再試行しない。
+    public mutating func replacePhrases(_ phrases: [String]) {
+        self.phrases = phrases.map(AutoSendPhrase.normalize).filter { !$0.isEmpty }
+    }
 
     public mutating func observe(_ row: Utterance, now: TimeInterval,
                                  automaticActive: Bool, canFireNow: Bool) -> Event? {

@@ -73,14 +73,60 @@ struct AutoSendPhraseTests {
     }
     @Test(arguments: ["true", "\"しおりを挟んで\"", "[1]", "[\"a\", 1]", "[\"\"]", "[\"　!?★\"]", "[\"シオリ、を挟んで\", \"ｼｵﾘを挟んで\"]",
                        "[\"" + String(repeating: "あ", count: 65) + "\"]",
-                       "[" + (1...21).map { "\"合図\($0)\"" }.joined(separator: ",") + "]"])
-    func 不正な合図設定を拒否する(value: String) {
-        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "autoSendPhrases = \(value)") }
+                       "[" + (1...21).map { "\"合図\($0)\"" }.joined(separator: ",") + "]"],
+          ["", "[[ai]]\n"])
+    func 不正な合図設定を拒否する(value: String, prefix: String) {
+        #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: prefix + "autoSendPhrases = \(value)") }
     }
-    @Test func 上限ちょうどは使える() throws {
+    @Test(arguments: ["", "[[ai]]\n"])
+    func 上限ちょうどは使える(prefix: String) throws {
         let phrases = [String(repeating: "あ", count: 64)] + (1...19).map { "合図\($0)" }
-        let config = try ConfigLoader.parse(toml: "autoSendPhrases = [" + phrases.map { "\"\($0)\"" }.joined(separator: ",") + "]")
-        #expect(config.autoSendPhrases == phrases)
+        let config = try ConfigLoader.parse(toml: prefix + "autoSendPhrases = [" + phrases.map { "\"\($0)\"" }.joined(separator: ",") + "]")
+        #expect((prefix.isEmpty ? config.autoSendPhrases : config.ai?.first?.autoSendPhrases) == phrases)
+    }
+    @Test func プロファイルの合図は指定と未指定と空配列を区別する() throws {
+        let config = try ConfigLoader.parse(toml: """
+        autoSendPhrases = ["共通の合図"]
+        [[ai]]
+        name = "専用"
+        autoSendPhrases = ["最新に更新してください"]
+        [[ai]]
+        name = "共通"
+        [[ai]]
+        name = "無効"
+        autoSendPhrases = []
+        """)
+        #expect(config.ai?.profiles.map(\.autoSendPhrases) == [["最新に更新してください"], nil, []])
+        let resolved = ResolvedConfig(config: config)
+        #expect(resolved.aiProfiles.map { $0.autoSendPhrases ?? resolved.autoSendPhrases }
+                == [["最新に更新してください"], ["共通の合図"], []])
+        let defaults = ResolvedConfig(config: try ConfigLoader.parse(toml: "[[ai]]"))
+        #expect(defaults.ai?.autoSendPhrases == nil)
+        #expect((defaults.ai?.autoSendPhrases ?? defaults.autoSendPhrases) == ResolvedConfig.defaultAutoSendPhrases)
+    }
+    @Test(arguments: [nil, [], ["最新に更新してください"]] as [[String]?])
+    func 保存したプロファイルの合図を復号し旧保存の欠損を許す(phrases: [String]?) throws {
+        let config = ResolvedAIConfig(config: AIConfig(autoSendPhrases: phrases), home: URL(fileURLWithPath: "/tmp"))
+        let data = try JSONEncoder().encode(config)
+        #expect(try JSONDecoder().decode(ResolvedAIConfig.self, from: data) == config)
+    }
+    @Test func 合図の切替は判定履歴と水位と十秒の無視を引き継ぐ() {
+        var state = AutoSendPhraseState(phrases: ["旧合図"])
+        #expect(state.observe(row("新合図", start: 0, end: 1), now: 99, automaticActive: true, canFireNow: true) == nil)
+        #expect(state.observe(row("旧合図", start: 1, end: 5), now: 100, automaticActive: true, canFireNow: true)?.decision == .fire)
+        state.replacePhrases(["新合図"])
+        #expect(state.watermark == 5 && state.lastFiredAt == 100)
+        #expect(state.observe(row("新合図", start: 0, end: 1), now: 120, automaticActive: true, canFireNow: true) == nil)
+        #expect(state.observe(row("新合図。", start: 1, end: 6), now: 120, automaticActive: true, canFireNow: true) == nil)
+        #expect(state.observe(row("新合図", start: 2, end: 4), now: 120, automaticActive: true, canFireNow: true)?.decision == .watermark)
+        #expect(state.observe(row("新合図", start: 6, end: 7), now: 109, automaticActive: true, canFireNow: true)?.decision == .cooldown)
+        state.replacePhrases([])
+        #expect(state.observe(row("新合図", start: 8, end: 9), now: 110, automaticActive: true, canFireNow: true) == nil)
+        state.replacePhrases(["新合図"])
+        #expect(state.observe(row("新合図", start: 8, end: 9), now: 120, automaticActive: true, canFireNow: true) == nil)
+        #expect(state.observe(row("新合図。", start: 6, end: 7), now: 120, automaticActive: true, canFireNow: true) == nil)
+        #expect(state.observe(row("新合図", start: 10, end: 11), now: 110, automaticActive: true, canFireNow: true)?.decision == .fire)
+        #expect(state.observe(row("旧合図", start: 12, end: 13), now: 120, automaticActive: true, canFireNow: true) == nil)
     }
     @Test func ログに本文を出さず正規化後の合図と時刻を残す() throws {
         var state = AutoSendPhraseState(phrases: ResolvedConfig.defaultAutoSendPhrases)

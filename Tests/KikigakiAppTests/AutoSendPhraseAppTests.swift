@@ -7,14 +7,95 @@ import KikigakiAIIO
 extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct AutoSendPhraseAppTests {
     private func session(_ root: URL, fake: FakeHerdr, diarization: Bool = true,
-                         phrases: [String]? = nil) -> MeetingSession {
+                         phrases: [String]? = nil, profiles: [AIConfig]? = nil) -> MeetingSession {
         var config = ResolvedConfig(config: KikigakiConfig(autoSendPhrases: phrases), home: root)
         config.ai = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path), home: root)
+        if let profiles {
+            config.aiProfiles = profiles.enumerated().map { index, profile in
+                ResolvedAIConfig(config: profile, home: root, slot: index + 1)
+            }
+        }
         let store = AIRecordStore(directory: root, makeHerdr: { AIHerdr(run: { try await fake.run($0, $1) }) })
         let session = MeetingSession(testingRecordingAt: root.appendingPathComponent("meeting.md"), config: config,
                                      aiStore: store, recordedSamples: 16_000, diarizationEnabled: diarization)
         session.automaticHelper = URL(fileURLWithPath: "/bin/echo")
         return session
+    }
+    @Test(arguments: [true, false])
+    func 手動宛先の専用合図だけが着火し共通と別宛先の合図は効かない(diarization: Bool) async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(root, fake: FakeHerdr(), diarization: diarization, phrases: ["共通の合図"], profiles: [
+            AIConfig(name: "議事録", command: "/bin/echo", cwd: root.path, autoSendPhrases: ["最新に更新してください"]),
+            AIConfig(name: "相談", command: "/bin/echo", cwd: root.path, autoSendPhrases: ["相談してください"])
+        ])
+        var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        publish(session, diarization: diarization, text: "共通の合図。相談してください", end: 0.3)
+        await session.pendingUndiarizedDrawForTesting?.value
+        #expect(sounds.isEmpty && session.submissionTaskForTesting == nil)
+        publish(session, diarization: diarization, text: "最新に更新してください", start: 0.4, end: 1)
+        await session.pendingUndiarizedDrawForTesting?.value
+        #expect(sounds == [true])
+        await session.submissionTaskForTesting?.value
+        #expect(session.aiRecord?.controller.conversation.questions.first?.request.envelope.participant.profileSlot == 1)
+    }
+    @Test(arguments: [nil, ["共通の合図"]] as [[String]?])
+    func 手動宛先の切替で共通へ戻り空配列と指定しないは無効になる(phrases: [String]?) async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(root, fake: FakeHerdr(), phrases: phrases, profiles: [
+            AIConfig(name: "専用", command: "/bin/echo", cwd: root.path, autoSendPhrases: ["最新に更新してください"]),
+            AIConfig(name: "共通", command: "/bin/echo", cwd: root.path),
+            AIConfig(name: "無効", command: "/bin/echo", cwd: root.path, autoSendPhrases: [])
+        ])
+        var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        let phrase = phrases?.first ?? "アバンティ"
+        session.setMeetingManualDestination(slot: 3)
+        publish(session, diarization: true, text: "無効の確認。" + phrase)
+        #expect(sounds.isEmpty && session.submissionTaskForTesting == nil)
+        session.setMeetingManualDestination(slot: 1)
+        publish(session, diarization: true, text: phrase)
+        session.setMeetingManualDestination(slot: 2)
+        publish(session, diarization: true, text: phrase)
+        #expect(sounds.isEmpty) // 切替前の判定済みの行は再試行しない。
+        publish(session, diarization: true, text: "最新に更新してください", start: 0.3, end: 0.5)
+        #expect(sounds.isEmpty)
+        publish(session, diarization: true, text: phrase, start: 0.6, end: 1)
+        await session.submissionTaskForTesting?.value
+        #expect(sounds == [true])
+        #expect(session.aiRecord?.controller.conversation.questions.first?.request.envelope.participant.profileSlot == 2)
+        session.setMeetingManualDestination(slot: 3)
+        publish(session, diarization: true, text: phrase, start: 6, end: 7)
+        session.setMeetingManualDestination(slot: nil)
+        publish(session, diarization: true, text: phrase, start: 8, end: 9)
+        #expect(sounds == [true])
+    }
+    @Test func 手動実行の成功で合図が替わり設定再読込は次の会議へ持ち越す() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let profiles = [
+            AIConfig(name: "旧宛先", command: "/bin/echo", cwd: root.path, autoSendPhrases: ["旧合図"]),
+            AIConfig(name: "新宛先", command: "/bin/echo", cwd: root.path, autoSendPhrases: ["新合図"])
+        ]
+        let session = session(root, fake: FakeHerdr(), profiles: profiles)
+        var sounds: [Bool] = []; session.playAutoSendSound = { sounds.append($0) }
+        session.setScheduleTranscriptForTesting("会議を始めます")
+        session.submitAI(question: "依頼", full: false, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"),
+                         profile: session.meetingAIProfiles[1], updateManualDestination: true)
+        #expect(session.meetingManualAI?.slot == 1)
+        await session.submissionTaskForTesting?.value
+        #expect(session.meetingManualAI?.slot == 2)
+        var updatedProfiles = profiles
+        updatedProfiles[1].autoSendPhrases = []
+        let updated = ResolvedConfig(config: KikigakiConfig(ai: AIProfileList(updatedProfiles)), home: root)
+        session.update(config: updated)
+        publish(session, diarization: true, text: "旧合図", start: 0.2, end: 0.4)
+        #expect(sounds.isEmpty)
+        publish(session, diarization: true, text: "新合図", start: 0.5, end: 1)
+        await session.submissionTaskForTesting?.value
+        #expect(sounds == [true])
+        #expect(session.aiRecord?.controller.conversation.questions.first?.appendices.count == 1)
+        session.beginNextMeetingForTesting(recording: true)
+        session.setMeetingManualDestination(slot: 2)
+        publish(session, diarization: true, text: "新合図", start: 6, end: 7)
+        #expect(sounds == [true])
     }
     private func start(_ session: MeetingSession) throws {
         try session.startAISchedule(options: .init(prompt: "議事録を更新", interval: 3600, sendFinal: false),

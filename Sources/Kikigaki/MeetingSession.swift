@@ -138,7 +138,9 @@ final class MeetingSession {
     /// 手動実行シート内で選んだ、その送信の宛先。
     private var meetingAI: ResolvedAIConfig?
     /// 開始シートの宛先。通常の手動シートから送信に成功したら、その宛先へ切り替える。
-    private(set) var meetingManualAI: ResolvedAIConfig?
+    private(set) var meetingManualAI: ResolvedAIConfig? {
+        didSet { autoSendPhraseState.replacePhrases(meetingManualAI?.autoSendPhrases ?? meetingAutoSendPhrases) }
+    }
     struct PendingManualDestination { let slot: Int? }
     var pendingManualDestination: PendingManualDestination?
 #if DEBUG
@@ -161,6 +163,7 @@ final class MeetingSession {
     private var cancelledAutomaticOwners: [Int: UUID] = [:]
     private var aiSchedule: AIScheduleState?
     private var autoSendPhraseState: AutoSendPhraseState
+    private var meetingAutoSendPhrases: [String]
     /// 合図の音は返事のnotifySoundと独立。テストでは音を捕捉する。
     var playAutoSendSound: (Bool) -> Void = { sent in
         NSSound(named: sent ? "Pop" : "Basso")?.play()
@@ -264,6 +267,7 @@ final class MeetingSession {
     /// 会議をまたいで引き継がないAIの状態。録音開始のたびにここを通す。
     /// 宛先の選択も前の会議のものを残さない。
     private func resetMeetingAIState(_ meetingConfig: ResolvedConfig) {
+        meetingAutoSendPhrases = meetingConfig.autoSendPhrases
         autoSendPhraseState = AutoSendPhraseState(phrases: meetingConfig.autoSendPhrases)
         scheduleDrafts = [:]
         manualDrafts = [:]
@@ -282,7 +286,8 @@ final class MeetingSession {
     init(config: ResolvedConfig, models: @escaping () async throws -> DiarizationModels.Loaded, log: @escaping (String) -> Void,
          aiStore: AIRecordStore? = nil, diarizationDefaults: UserDefaults? = nil) {
         self.config = config
-        autoSendPhraseState = AutoSendPhraseState(phrases: config.autoSendPhrases)
+        meetingAutoSendPhrases = config.autoSendPhrases
+        autoSendPhraseState = AutoSendPhraseState(phrases: config.aiProfiles.first?.autoSendPhrases ?? config.autoSendPhrases)
         self.aiStore = aiStore; meetingAIProfiles = config.aiProfiles
         meetingManualAI = config.aiProfiles.first
         // 手動と自動の宛先はどちらも先頭で独立に初期化する。

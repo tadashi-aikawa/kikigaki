@@ -51,6 +51,8 @@ public struct AIConfig: Codable, Equatable, Sendable {
     public var autoIntervalMinutes: Int?
     /// 録音開始で自動送信を始める。配列全体で1つまで
     public var autoStart: Bool?
+    /// 手動宛先の間に効く声の合図。nilは共通設定、空配列は無効。
+    public var autoSendPhrases: [String]?
 
     public init(name: String? = nil, cli: AIProvider? = nil, command: String? = nil, herdrCommand: String? = nil, model: String? = nil,
                 effort: String? = nil, address: String? = nil, avatar: String? = nil, cwd: String? = nil, attach: Bool? = nil,
@@ -59,7 +61,8 @@ public struct AIConfig: Codable, Equatable, Sendable {
                 allowWork: Bool? = nil,
                 initialPrompt: String? = nil, autoIntervalMinutes: Int? = nil, autoStart: Bool? = nil,
                 board: String? = nil, boardPrompt: String? = nil, boardLocation: String? = nil,
-                identifySpeakers: Bool? = nil) {
+                identifySpeakers: Bool? = nil, autoSendPhrases: [String]? = nil) {
+        self.autoSendPhrases = autoSendPhrases
         self.identifySpeakers = identifySpeakers
         self.board = board; self.boardPrompt = boardPrompt; self.boardLocation = boardLocation
         self.name = name
@@ -105,6 +108,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
         boardLocation = try values.decodeIfPresent(String.self, forKey: .boardLocation)
         autoIntervalMinutes = try values.decodeIfPresent(Int.self, forKey: .autoIntervalMinutes)
         autoStart = try values.decodeIfPresent(Bool.self, forKey: .autoStart)
+        autoSendPhrases = try values.decodeIfPresent([String].self, forKey: .autoSendPhrases)
     }
 
     /// address から導く既定のプロファイル名。設定の name を省略したときのキーにもなる
@@ -116,6 +120,7 @@ public struct AIConfig: Codable, Equatable, Sendable {
 
     public func validate(label: String = "ai") throws {
         func invalid(_ message: String) -> ConfigError { .invalid(description: label + ": " + message) }
+        if let autoSendPhrases { try AutoSendPhrase.validate(autoSendPhrases, label: label + ".autoSendPhrases") }
         if let name, !AIValidation.singleLine(name) || name.trimmingCharacters(in: .whitespaces).isEmpty
             || name.utf8.count > AILimits.profileNameBytes {
             throw invalid("name must be non-empty, single-line and at most \(AILimits.profileNameBytes) bytes")
@@ -251,6 +256,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     }
     public let autoIntervalMinutes: Int
     public let autoStart: Bool
+    public let autoSendPhrases: [String]?
     public var participantName: String { address.hasSuffix("へ") ? String(address.dropLast()) : address }
     /// 起動引数へ翻訳した effort
     public var effortArguments: [String] { AIEffort.arguments(effort, provider: cli) }
@@ -273,6 +279,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         initialPrompt = config.initialPrompt ?? ""; autoIntervalMinutes = config.autoIntervalMinutes ?? 3
         board = config.board; boardPrompt = config.boardPrompt; boardLocation = config.boardLocation
         autoStart = config.autoStart ?? false
+        autoSendPhrases = config.autoSendPhrases
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -282,6 +289,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         case autoIntervalMinutes, board, boardPrompt, boardLocation
         case initialPrompt = "autoPrompt"
         case slot, name, effort, autoStart, avatar, identifySpeakers
+        case autoSendPhrases
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -307,6 +315,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         slot = try values.contains(.slot) ? values.decode(Int.self, forKey: .slot) : 1
         effort = try values.decodeIfPresent(String.self, forKey: .effort)
         autoStart = try values.contains(.autoStart) ? values.decode(Bool.self, forKey: .autoStart) : false
+        autoSendPhrases = try values.decodeIfPresent([String].self, forKey: .autoSendPhrases)
         let fallbackName = address.hasSuffix("へ") ? String(address.dropLast()) : address
         name = try values.contains(.name) ? values.decode(String.self, forKey: .name) : fallbackName
         guard slot > 0, !name.isEmpty else { throw AIError.invalid("profile slot/name") }
@@ -315,7 +324,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         // 明示された `name` は設定の解析時と同じ基準で検証する。
         try AIConfig(name: name == fallbackName ? nil : name, cli: cli, effort: effort, avatar: avatar,
                      initialPrompt: initialPrompt, autoIntervalMinutes: autoIntervalMinutes, board: board, boardPrompt: boardPrompt,
-                     boardLocation: boardLocation).validate()
+                     boardLocation: boardLocation, autoSendPhrases: autoSendPhrases).validate()
     }
 }
 

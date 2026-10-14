@@ -47,12 +47,14 @@ initialPrompt = "会議の決定事項と担当・期限をMarkdown議事録へ�
 # boardLocation = "~/Documents/minutes/${yyyyMMdd_HHmmss}.md として作成し、変数は現在日時" # パス未指定時の作成指示
 # boardPrompt = "独自のボードのプロンプト全文" # board指定時のみ。省略時は内蔵
 autoIntervalMinutes = 3 # 1〜120分、省略時は3分
+autoSendPhrases = ["最新に更新してください"] # この手動宛先では共通の合図を置き換える
 
 [[ai]]
 name = "相談"
 cli = "claude"
 effort = "max"
 address = "ネオへ"
+autoSendPhrases = ["アバンティ", "アヴァンティ"]
 ```
 
 ## 共通のキー
@@ -63,7 +65,7 @@ address = "ネオへ"
 | `saveRecording` | `false` | 録音WAVを Markdown と並べて残す |
 | `measureAudioLevels` | `false` | 発話ごとの音量と小音量候補の診断表示と保存。除外の設定とは独立。次の会議から効く。詳細は [小音量発話の計測](audio-levels.md) |
 | `participantsKey` | `participants` | 話者名の候補の「参加者」を読む、議事録のfrontmatterのキー。空白・`:`・`#`・引用符・`[]{},` を含む値、空文字、`-` 始まりは設定エラー。読み方は [書き起こしウィンドウ](transcript-window.md) の「候補の出どころ」 |
-| `autoSendPhrases` | `["アバンティ", "アヴァンティ"]` | 声で会議の手動宛先へ送信する合図。空配列は無効。最大20要素、各64文字まで。文字列以外、正規化後の空要素・重複は設定エラー。次の会議から効く。詳細は [声の合図](ai-scheduled.md#声の合図) |
+| `autoSendPhrases` | `["アバンティ", "アヴァンティ"]` | プロファイルで未指定の場合に使う共通の声の合図。空配列は無効。最大20要素、各64文字まで。文字列以外、正規化後の空要素・重複は設定エラー。次の会議から効く。詳細は [声の合図](ai-scheduled.md#声の合図) |
 
 `outputDir` は Codex の書き込み許可にも追加する。議事録を書けるようにするためで、許可の範囲と受け入れたリスクは [議事録プレビューの設計](minutes-preview.md) の「Skillの規則と書き込み許可」を参照する。
 
@@ -130,6 +132,7 @@ address = "ネオへ"
 | `autoStart` | `false` | 録音開始シートの自動送信の宛先の既定にする。配列全体で1つまで。`board` を指定しない宛先は `initialPrompt` が必要 |
 | `initialPrompt` | 空 | 手動・自動実行シートと録音開始シートのプロンプト初期値 |
 | `autoIntervalMinutes` | `3` | 自動送信の間隔。1〜120分 |
+| `autoSendPhrases` | トップレベルを使う | 手動宛先の間に効く声の合図。指定すると共通の合図を置き換え、`[]` で無効。詳細は [声の合図](ai-scheduled.md#声の合図) |
 | `board` | ボードなし | ボードとして自動更新する見出し。1行のMarkdown見出し。宛先間で同じ見出しを使える |
 | `boardPrompt` | 内蔵 | ボードのプロンプト全文の差し替え。`board` があるときだけ指定できる |
 | `boardLocation` | なし | 議事録のパスが無いときの作成指示。`board` があるときだけ指定できる。変数はAIが解釈し、アプリでは展開しない |
