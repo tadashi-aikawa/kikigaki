@@ -52,11 +52,14 @@ extension AppKitTests {
         #expect(!controller.searchOpen)
     }
     private func wait(_ condition: () async throws -> Bool) async throws {
-        for _ in 0..<500 {
+        // 全体実行や遮蔽中はWebKitの起動・図の描画が遅れる。時間そのものではなく完了を待つ。
+        let deadline = ContinuousClock.now + .seconds(30)
+        while ContinuousClock.now < deadline {
             if try await condition() { return }
             try await Task.sleep(for: .milliseconds(20))
         }
-        Issue.record("WebKitの表示が完了しません")
+        // 失敗した前提で後続のDOMや配列を読まない。プロセス全体を落とさず、このケースで止める。
+        try #require(false, "WebKitの表示が30秒以内に完了しません")
     }
     @Test func コードコピーは両タブで原文だけを渡し本文と選択を変えない() async throws {
         let preferences = MinutesTestDefaults()
@@ -523,12 +526,18 @@ extension AppKitTests {
         window.contentView = preview; window.orderFront(nil); preview.layoutSubtreeIfNeeded()
         defer { preview.stop(); window.orderOut(nil) }
         preview.update(path: file.path, source: .human, active: true)
-        try await wait { preview.document.renderedText.contains("体験会の準備会議") }
         let web = preview.document.webView
+        do {
+            try await wait { preview.document.renderedText.contains("体験会の準備会議") }
+        } catch {
+            let state = try? await web.evaluateJavaScript("[document.readyState, document.body?.innerHTML.length, typeof window.minutes, location.href].join('|')")
+            print("WebKit diagnostic: visible=\(window.isVisible), occlusion=\(window.occlusionState.rawValue), hidden=\(preview.document.isHiddenOrHasHiddenAncestor), loading=\(web.isLoading), url=\(String(describing: web.url)), state=\(String(describing: state))")
+            throw error
+        }
         // チェックの有無で、本文に対する丸の縦位置が変わらないこと。
         let checkboxOffsets = try await web.evaluateJavaScript("[...document.querySelectorAll('.task-list-item-checkbox')].map(box => { const text = document.createRange(); text.selectNodeContents(box.nextSibling); return box.getBoundingClientRect().top - text.getBoundingClientRect().top; })") as? [Double]
         let offsets = try #require(checkboxOffsets)
-        #expect(offsets.count == 2)
+        try #require(offsets.count == 2)
         #expect(abs(offsets[0] - offsets[1]) < 0.5)
         #expect(try await web.evaluateJavaScript("getComputedStyle(document.body).fontSize") as? String == "15px")
         #expect(try await web.evaluateJavaScript("!document.getElementById('toc').hidden && !document.getElementById('toc').open") as? Bool == true)
@@ -565,8 +574,7 @@ extension AppKitTests {
         #expect(preview.pathField.stringValue == file.path)
         preview.closeSearch()
         preview.layoutSubtreeIfNeeded()
-        try await Task.sleep(for: .milliseconds(150))
-        #expect(web.bounds.width > 0 && web.bounds.height > 0)
+        try await wait { web.bounds.width > 0 && web.bounds.height > 0 }
         if let capture = ProcessInfo.processInfo.environment["KIKIGAKI_MINUTES_CAPTURE"] {
             _ = try await web.evaluateJavaScript("scrollTo(0, 0)")
             let snapshot = try await web.takeSnapshot(configuration: WKSnapshotConfiguration())
@@ -583,7 +591,7 @@ extension AppKitTests {
         let before = try await web.evaluateJavaScript("scrollY") as? Double
         try Data((fixture + "\n\n追記を確認").utf8).write(to: file, options: .atomic)
         try await wait { preview.document.renderedText.contains("追記を確認") }
-        try await Task.sleep(for: .milliseconds(150))
+        try await wait { try await web.evaluateJavaScript("[...document.querySelectorAll('main img')].every(i => i.complete && i.naturalWidth > 0)") as? Bool == true }
         let after = try await web.evaluateJavaScript("scrollY") as? Double
         #expect(abs(try #require(before) - #require(after)) < 2)
         preview.document.render(String(repeating: "# 見出し\n\n", count: 1000), reset: true)
