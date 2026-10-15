@@ -136,7 +136,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | [小音量発話の計測](docs/audio-levels.md) | 音量トラックと診断表示、`.levels.json` | 音量の計測・保存を変える前 |
 | [手入力の設計](docs/typed-entry.md) | 手入力の投稿、画像添付、併合、AI文脈 | 手入力・`TranscriptEntries.merge` を変える前 |
 | [録音開始シート](docs/start-sheet.md) | 会議ごとの指定、次の会議の予約 | 開始経路・予約を変える前 |
-| [書き起こしウィンドウ](docs/transcript-window.md) | 配色、行の構造、改名、フッター、ピン留め、幅 | ウィンドウの見た目・操作を変える前 |
+| [書き起こしウィンドウ](docs/transcript-window.md) | 配色、行の構造、改名、話者での絞り込み、フッター、ピン留め、幅 | ウィンドウの見た目・操作を変える前 |
 | [議事録ペイン](docs/minutes-pane.md) | 右ペインの操作、履歴、幅と復元、ファイル監視 | 議事録ペインのUIを変える前 |
 | [議事録の描画と検索](docs/minutes-rendering.md) | 対応する記法、検索、Wikiリンク、描画資産の再生成 | 議事録の描画・`web/minutes` を変える前 |
 | [議事録プレビューの設計](docs/minutes-preview.md) | 議事録の受け渡し、`ai/minutes.json`、書き込み許可と受け入れたリスク | 議事録の書き先・通知・Codexの許可を変える前 |

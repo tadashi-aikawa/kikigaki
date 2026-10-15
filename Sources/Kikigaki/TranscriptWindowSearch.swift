@@ -111,6 +111,8 @@ extension TranscriptWindowController {
     }
     private func revealCurrentHit() {
         guard let currentHit, let row = rows[searchHits[currentHit].row] else { return }
+        // 絞り込みで畳んだ行の一致へ移るときは、その区間を開いてから移る。
+        revealFilteredRow(.utterance(searchHits[currentHit].row))
         let clip = scrollView.contentView.bounds
         if row.frame.minY < clip.minY || row.frame.maxY > clip.maxY {
             transcriptDocument.scroll(NSPoint(x: 0, y: max(0, min(row.frame.minY - 8, transcriptDocument.frame.height - clip.height))))

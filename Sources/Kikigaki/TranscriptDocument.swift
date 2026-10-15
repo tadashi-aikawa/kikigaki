@@ -36,8 +36,11 @@ final class TranscriptDocument: NSView {
     var rows: [any DocumentRow] = []
     private(set) var rangeMarkers: [(row: NSView, view: AIRangeBoundaryView)] = []
     func setRangeBoundaries(_ boundaries: AIRangeBoundaries, utteranceRows: [NSView]) {
+        // 絞り込みで畳んだ行は枠が古いまま残るので、その行の印は出さない。
+        let displayed = Set(rows.map { ObjectIdentifier($0) })
         let targets: [(NSView, Bool)] = [(boundaries.answered, true), (boundaries.accepted, false)].compactMap { index, answered in
-            guard let index, utteranceRows.indices.contains(index) else { return nil }
+            guard let index, utteranceRows.indices.contains(index),
+                  displayed.contains(ObjectIdentifier(utteranceRows[index])) else { return nil }
             return (utteranceRows[index], answered)
         }
         if targets.count == rangeMarkers.count,

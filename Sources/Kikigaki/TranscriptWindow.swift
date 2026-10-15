@@ -32,7 +32,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onResendAI: ((UUID) -> Void)?
     var onRecreateAI: (() -> Void)?
     var onRetryAISave: (() -> Void)?
-    private var aiRows: [String: any AITimelineRowView] = [:]
+    var aiRows: [String: any AITimelineRowView] = [:]
     private var microphoneRows: [UUID: MicrophoneSwitchRow] = [:]
     private var aiProgress: [UUID: AIProgress] = [:]
     private let speakerButton = SpeakerCountButton(title: "話者…", target: nil, action: nil)
@@ -62,8 +62,17 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let emptyLabel = Washi.label(size: 13, color: Washi.muted)
     private var renamePopover: SpeakerPopover?
     private let tentativeRow = TranscriptRow(tentative: true)
-    private let avatars: AvatarStore
+    let avatars: AvatarStore
     private let shouldReduceMotion: () -> Bool
+    // 話者での絞り込み。TranscriptWindowFilter.swift も読む。表示だけを絞り、会議ごとに解除から始める
+    enum FilterRowKey: Hashable { case utterance(RowID), ai(String), microphone(UUID) }
+    var filterSelection: Set<TranscriptFilter.Subject> = []
+    /// 「ほかの発言N件」を押して開いた行。絞り込みを変えると閉じる。
+    var filterExpanded: Set<FilterRowKey> = []
+    var gapRows: [FilterRowKey: TranscriptFilterGapRow] = [:]
+    let filterButton = HoverButton()
+    let filterBar = TranscriptFilterBar()
+    var filterPopover: TranscriptFilterPopover?
     // ここから下は TranscriptWindowSearch.swift の検索も読む。extension には保存プロパティを
     // 置けないため、検索の状態もこの本体で持つ
     let scrollView = NSScrollView()
@@ -103,13 +112,19 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         window.delegate = self
         minutesSplit = MinutesSplitView(left: buildContent(), defaults: minutesDefaults)
         window.contentView = minutesSplit
-        speakerRevealBanner.onChange = { [weak self] in
+        // 帯の出入りで表示域の高さが変わっても、末尾追従と読んでいる行を維持する。
+        let keepReadingPosition = { [weak self] in
             guard let self else { return }
-            // 帯の出入りで表示域の高さが変わっても、末尾追従と読んでいる行を維持する。
             let anchor = self.transcriptDocument.anchor()
             self.window?.contentView?.layoutSubtreeIfNeeded()
             self.transcriptDocument.reflow(anchor: anchor)
             self.scrolled()
+        }
+        speakerRevealBanner.onChange = keepReadingPosition
+        filterBar.onHeightChange = keepReadingPosition
+        filterBar.onRemove = { [weak self] subject in
+            guard let self else { return }
+            setFilter(filterSelection.subtracting([subject]))
         }
         if let minutesHeader {
             minutesSplit.preview.headerBar.heightAnchor.constraint(equalTo: minutesHeader.heightAnchor).isActive = true
@@ -133,6 +148,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             for row in rows.values { row.updateAvatar(speakers: snapshot.speakers, store: self.avatars, editable: snapshot.canShare) }
             for row in aiRows.values { (row as? AIReplyRow)?.updateAvatar(store: self.avatars) }
             renamePopover?.refreshAvatars()
+            updateFilterControls()
         }
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification,
@@ -240,6 +256,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             }
         }
         if value.state == .preparing || previous.timeline.startedAt != value.timeline.startedAt { renamePopover?.close() }
+        if (value.state == .preparing && previous.state != .preparing) || previous.timeline.startedAt != value.timeline.startedAt {
+            resetFilter()
+        }
         startStopButton.isEnabled = value.state.canStart || value.state.canStop
         pauseButton.isEnabled = value.state.canPauseOrResume
         pauseButton.isHidden = value.state == .idle
@@ -260,6 +279,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         emptyLabel.stringValue = value.state == .idle ? "録音を開始すると、会話がここに表示されます。" : "発言を待っています…"
         reconcilePendingSpeakerReveals(previous: previous)
         updateRows(previous: previous)
+        updateFilterControls()
         refreshSearch(reset: previous.timeline.startedAt != value.timeline.startedAt, reveal: false)
         showSpeakerReveals(previous: previous)
     }
@@ -295,6 +315,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             return
         }
         let visible = scrollView.contentView.bounds
+        // 絞り込みで畳んだ行の枠は古いまま残るので、表示中の行だけで判定する。
+        let displayed = Set(transcriptDocument.rows.map { ObjectIdentifier($0) })
         var occurrences: [RowKey: Int] = [:]
         for utterance in snapshot.utterances {
             let key = RowKey(kind: utterance.kind, start: utterance.start)
@@ -302,7 +324,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             occurrences[key] = occurrence + 1
             guard utterance.kind == .voice, let reveal = reveals.first(where: { $0.slot == utterance.speaker }) else { continue }
             let id = RowID(kind: utterance.kind, start: utterance.start, occurrence: occurrence)
-            guard let row = rows[id], row.frame.intersects(visible) else { continue }
+            guard let row = rows[id], displayed.contains(ObjectIdentifier(row)), row.frame.intersects(visible) else { continue }
             row.revealSpeaker(reveal, animated: !shouldReduceMotion())
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -428,13 +450,16 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
     }
 
-    private func updateRows(previous: SessionSnapshot) {
-        var anchor = transcriptDocument.anchor()
+    /// 絞り込みの変更や区間を開いた時の並べ直し。行の内容は変わらないので点灯させない。
+    func refreshRows(anchor: TranscriptDocument.Anchor? = nil) { updateRows(previous: snapshot, anchor: anchor) }
+
+    private func updateRows(previous: SessionSnapshot, anchor preferred: TranscriptDocument.Anchor? = nil) {
+        var anchor = preferred ?? transcriptDocument.anchor()
         let sameMeeting = previous.timeline.startedAt == snapshot.timeline.startedAt
         if !sameMeeting {
             // 別の会議へ移る行に、前の会議の返答到着の点灯を持ち越さない。
             for row in aiRows.values { (row as? AIReplyRow)?.stopArrival() }
-            rows.removeAll(); aiRows.removeAll(); aiProgress.removeAll(); microphoneRows.removeAll()
+            rows.removeAll(); aiRows.removeAll(); aiProgress.removeAll(); microphoneRows.removeAll(); gapRows.removeAll()
             anchor = .init(candidates: [], y: 0, atBottom: true)
         }
         // AIの追加・状態変化も発話と同じ追従規則にする。上へスクロール中はanchor、
@@ -461,7 +486,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         for item in items { attached[item.slot, default: []].append(item) }
         let animated = sameMeeting && !shouldReduceMotion()
         var next: [RowID: TranscriptRow] = [:]
-        var ordered: [any DocumentRow] = []
+        var ordered: [FilterEntry] = []
         var rangeRows: [NSView] = []
         var occurrences: [RowKey: Int] = [:]
         var inserted: [TranscriptRow] = []
@@ -473,11 +498,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
                 let event = microphoneEvents[microphoneIndex]
                 let row = microphoneRows[event.id] ?? MicrophoneSwitchRow(event)
                 microphoneRows[event.id] = row
-                ordered.append(row)
+                ordered.append(FilterEntry(row: row, key: .microphone(event.id), subject: nil))
                 microphoneIndex += 1
             }
         }
-        for item in attached[-1, default: []] { ordered.append(aiRowView(item)) }
+        func appendAI(_ item: AITimeline.Item) {
+            ordered.append(FilterEntry(row: aiRowView(item), key: .ai(item.rowID), subject: .ai(item.participantName)))
+        }
+        for item in attached[-1, default: []] { appendAI(item) }
         for (index, utterance) in snapshot.utterances.enumerated() {
             appendMicrophoneEvents(through: utterance.start)
             let key = RowKey(kind: utterance.kind, start: utterance.start)
@@ -494,22 +522,24 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             row.updateAvatar(speakers: snapshot.speakers, store: avatars, editable: snapshot.canShare)
             row.onRename = { [weak self] slot, view in self?.showRename(slot: slot, relativeTo: view) }
             next[id] = row
-            ordered.append(row)
-            for item in attached[index, default: []] { ordered.append(aiRowView(item)) }
-            rangeRows.append(ordered.last!)
+            ordered.append(FilterEntry(row: row, key: .utterance(id), subject: TranscriptFilter.subject(for: utterance)))
+            for item in attached[index, default: []] { appendAI(item) }
+            rangeRows.append(ordered.last!.row)
         }
         appendMicrophoneEvents(through: .infinity)
         let microphoneIDs = Set(microphoneEvents.map(\.id))
         microphoneRows = microphoneRows.filter { microphoneIDs.contains($0.key) }
-        if let tentative = snapshot.tentativeText {
+        var displayed = arrangeFiltered(ordered)
+        // 聞き取り中の行には話者が無いので、絞り込み中は出さない。
+        if let tentative = snapshot.tentativeText, filterSelection.isEmpty {
             tentativeRow.updateTentative(tentative)
             tentativeRow.updateExclusion(snapshot.tentativeExcluded)
-            ordered.append(tentativeRow)
+            displayed.append(tentativeRow)
         }
         rows = next
         let rowIDs = Set(items.map(\.rowID))
         aiRows = aiRows.filter { rowIDs.contains($0.key) }
-        transcriptDocument.setRows(ordered, anchor: anchor)
+        transcriptDocument.setRows(displayed, anchor: anchor)
         transcriptDocument.setRangeBoundaries(ai?.rangeBoundaries ?? AIRangeBoundaries(),
             utteranceRows: rangeRows)
         for row in inserted {
@@ -528,6 +558,10 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         configure(latestButton, #selector(latestPressed))
         configure(speakerButton, #selector(speakerPressed))
         speakerButton.setAccessibilityLabel("話者")
+        configure(filterButton, #selector(filterPressed))
+        filterButton.isBordered = false
+        filterButton.widthAnchor.constraint(equalToConstant: 32).isActive = true
+        filterButton.heightAnchor.constraint(equalToConstant: 32).isActive = true
         for button in [startStopButton, pauseButton] {
             button.isBordered = false
             button.heightAnchor.constraint(equalToConstant: 32).isActive = true
@@ -549,7 +583,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         minutesButton.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "議事録")
         minutesButton.isBordered = false; minutesButton.refresh()
         minutesButton.heightAnchor.constraint(equalToConstant: 32).isActive = true
-        let controls = row([Washi.logoView(size: 26), statusChip, recordingRange, speakerButton, NSView(), pauseButton, startStopButton, openButton, minutesButton], spacing: 8)
+        let controls = row([Washi.logoView(size: 26), statusChip, recordingRange, speakerButton, filterButton, NSView(), pauseButton, startStopButton, openButton, minutesButton], spacing: 8)
         headerControls = controls
         let header = column([controls, messageLabel], spacing: 8, inset: 12)
         minutesHeader = header
@@ -584,6 +618,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         ])
         compactFooter.onSelect = { [weak self] id in
             guard let self, let view: NSView = aiRows[id] else { return }
+            revealFilteredRow(.ai(id))
             // 画面外の行はサブビューに載っていないので、行自身ではなく文書側からスクロールする。
             transcriptDocument.scrollRowToVisible(view); scrolled()
         }
@@ -622,7 +657,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         let entryArea = column([typedEntry, typedEntry.attachmentsView, typedEntry.attachmentError], spacing: 4, inset: 12)
         Washi.surface(entryArea, color: Washi.paper)
-        return column([header, searchBar, speakerRevealBanner, separator(), body, entryArea, separator(), footer], spacing: 0, inset: 0)
+        return column([header, filterBar, searchBar, speakerRevealBanner, separator(), body, entryArea, separator(), footer], spacing: 0, inset: 0)
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -787,9 +822,21 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     @objc private func retrySavePressed() { onRetryAISave?() }
     @objc private func pausePressed() { onPauseResume?() }
     @objc private func openPressed() { onOpenMarkdown?() }
+    @objc func filterPressed() {
+        if let popover = filterPopover, popover.isShown { popover.close(); return }
+        renamePopover?.close(); speakerSettingsPopover?.close()
+        let popover = TranscriptFilterPopover()
+        popover.onToggle = { [weak self] subject, on in
+            guard let self else { return }
+            setFilter(on ? filterSelection.union([subject]) : filterSelection.subtracting([subject]))
+        }
+        filterPopover = popover
+        updateFilterControls()
+        popover.present(relativeTo: filterButton.bounds, of: filterButton)
+    }
     @objc private func speakerPressed() {
         if let popover = speakerSettingsPopover, popover.isShown { popover.close(); return }
-        renamePopover?.close()
+        renamePopover?.close(); filterPopover?.close()
         let popover = SpeakerSettingsPopover(snapshot: snapshot)
         popover.onMappingChange = { [weak self] slot, target in self?.onSpeakerMappingChange?(slot, target) }
         popover.onAudioExclusionChange = { [weak self] value in self?.onAudioExclusionChange?(value) }
@@ -865,7 +912,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     }
     private func showRename(slot: Int, relativeTo view: NSView) {
         guard snapshot.canShare, (0..<SpeakerNames.slotCount).contains(slot) else { return }
-        speakerSettingsPopover?.close()
+        speakerSettingsPopover?.close(); filterPopover?.close()
         renamePopover?.close()
         let popover = makeSpeakerPopover(slot: slot)
         popover.onRename = { [weak self] name in self?.onRename?(slot, name) }

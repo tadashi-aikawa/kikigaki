@@ -152,7 +152,7 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
     - 操作: マウスを一時的に動かし、終了時に元へ戻す。他のUIテストと同時には実行しない。
     - 撮影: `KIKIGAKI_PROMPT_HINT_CAPTURE=/tmp/kikigaki-prompt-hint` を添えるとツールチップを撮る。PNGは描画キャッシュの中間物とし、確認用に非可逆WebPへ変換する。
 - 撮影用の環境変数: 次の変数は、値に出力先を渡したときだけ、該当のテストがPNGを書き出す。指定しなければ何も書かない
-    - `KIKIGAKI_UI_CAPTURE`: `HoverButtonTests` ・ `NarrowWindowTests` ・ `TranscriptTextScaleAppTests`
+    - `KIKIGAKI_UI_CAPTURE`: `HoverButtonTests` ・ `NarrowWindowTests` ・ `TranscriptTextScaleAppTests` ・ `TranscriptFilterWindowTests`
     - `KIKIGAKI_TYPED_CAPTURE`: `TypedImageTests` ・ `TypedEntryTests`
     - `KIKIGAKI_MINUTES_CAPTURE`: `MinutesUpdateTests` ・ `MinutesPreviewTests` ・ `MinutesWebTests`。`KIKIGAKI_MINUTES_SAMPLE` を添えると `MinutesWebTests` が指定の議事録を撮る
     - `KIKIGAKI_EXCLUSION_CAPTURE`: `AudioExclusionAppTests`

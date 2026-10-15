@@ -143,7 +143,7 @@ final class TranscriptRow: NSView, DocumentRow {
     private func bodyWidth(_ width: CGFloat) -> CGFloat { max(44, width - bodyX - 20) }
     private let speakerButton = SpeakerButton()
     var onRename: ((Int, NSView) -> Void)?
-    private var utterance: Utterance?
+    private(set) var utterance: Utterance?
     private var displayedName = ""
     private var displayedTimeline: MeetingTimeline?
     private var measuredWidth: CGFloat = -1
@@ -154,7 +154,7 @@ final class TranscriptRow: NSView, DocumentRow {
         let nameRanges: [NSRange]; let textRanges: [NSRange]
         let currentName: NSRange?; let currentText: NSRange?
     }
-    private let tentative: Bool
+    let tentative: Bool
     private(set) var textScale: CGFloat = 1
 
     func setTextScale(_ scale: CGFloat) {
