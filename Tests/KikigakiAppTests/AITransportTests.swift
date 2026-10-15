@@ -77,8 +77,17 @@ import TOMLKit
         // 実測(herdr 0.8.2): pane report-metadata は成功時に何も出力しない
         let captured = CapturedLog()
         let adapter = AIHerdr(run: { _, _ in AIProcessOutput(status: 0, stdout: Data("\n".utf8), stderr: Data()) }, log: { captured.append($0) })
-        try await adapter.label(.init(workspaceID: "w", paneID: "p", provider: .codex), participant: "迅雷")
+        try await adapter.label(.init(workspaceID: "w", paneID: "p", provider: .codex), participant: "迅雷", meetingID: UUID())
         #expect(captured.captured.isEmpty)
+    }
+    @Test func 名義の報告に会議IDのtokenを同じコマンドで付ける() async throws {
+        // parliamentがKIKIGAKIの起こしたペインと見分ける根拠はこのtokenだけ
+        let arguments = CapturedLog()
+        let adapter = AIHerdr(run: { args, _ in args.forEach(arguments.append); return AIProcessOutput(status: 0, stdout: Data(), stderr: Data()) })
+        let meetingID = UUID()
+        try await adapter.label(.init(workspaceID: "w", paneID: "p", provider: .claude), participant: "迅雷", meetingID: meetingID)
+        #expect(arguments.captured == ["pane", "report-metadata", "p", "--source", "owlery", "--display-agent", "迅雷",
+                                    "--token", "kikigaki=" + meetingID.uuidString])
     }
     @Test func interactive_readyが無いagentはidleなら入力可能とみなす() async throws {
         // 実測(herdr 0.8.2): command指定で pane run から起こしたCodexは agent get に interactive_ready を返さない

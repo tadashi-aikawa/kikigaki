@@ -390,7 +390,7 @@ final class AIConversationController {
     private func launch(_ channel: Channel, config: ResolvedAIConfig, label: String, executable: URL, arguments: [String]) async throws {
         let created = try await herdr.create(cwd: config.cwd, label: label, provider: config.cli)
         try saveConnection(channel, created, replacing: false)
-        do { try await herdr.label(created, participant: config.participantName) }
+        do { try await herdr.label(created, participant: config.participantName, meetingID: meetingID) }
         catch { channel.warning = "herdrの表示名を設定できません" }
         try Task.checkCancellation()
         channel.inputAttempted = true

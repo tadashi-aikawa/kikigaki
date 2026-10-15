@@ -86,8 +86,10 @@ struct AIHerdr: Sendable {
         guard Self.identifier(result.workspace.workspace_id), Self.identifier(result.root_pane.pane_id) else { throw AIProcessError.invalidResponse }
         return AIHerdrConnection(workspaceID: result.workspace.workspace_id, paneID: result.root_pane.pane_id, provider: provider)
     }
-    func label(_ target: AIHerdrConnection, participant: String) async throws {
-        _ = try await call(["pane", "report-metadata", target.paneID, "--source", "owlery", "--display-agent", participant], as: Empty.self)
+    /// 名義と同じ報告で `kikigaki=<会議ID>` のtokenを付ける。parliamentはこのtokenだけでKIKIGAKIが起こしたペインと見分ける。
+    func label(_ target: AIHerdrConnection, participant: String, meetingID: UUID) async throws {
+        _ = try await call(["pane", "report-metadata", target.paneID, "--source", "owlery", "--display-agent", participant,
+                            "--token", "kikigaki=" + meetingID.uuidString], as: Empty.self)
     }
     static func agentName(generation: Int, id: UUID = UUID()) throws -> String {
         guard generation > 0 else { throw AIProcessError.invalidInput }
