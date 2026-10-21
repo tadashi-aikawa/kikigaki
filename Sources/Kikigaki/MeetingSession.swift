@@ -77,6 +77,10 @@ final class MeetingSession {
     private var startedAt = Date()
     /// 停止後に話者名を付け直して保存し直すために持つ
     private var archive: MeetingArchive?
+    /// 録音中の途中保存。archiveは停止後の再保存の判定に使うので、録音中は作らずこちらで書く
+    private var interimSave = InterimSave()
+    private var interimSaveTask: Task<Void, Never>?
+    private var interimSaveIntervalSeconds = ResolvedConfig.defaultAutoSaveIntervalSeconds
     private var audioLevelMeter: AudioLevelMeter?
     static let audioExclusionDefaultsKey = "KikigakiAudioExclusion"
     private var audioExclusion = AudioExclusion()
@@ -445,6 +449,7 @@ final class MeetingSession {
             do { _ = try previewMinutesStore() }
             catch { snapshot.message = "議事録の設定を引き継げません。パスを指定し直してください" }
             startAutomaticSchedule()
+            startInterimSaves(intervalSeconds: meetingConfig.autoSaveIntervalSeconds)
             emit()
             return true
         } catch {
@@ -465,6 +470,9 @@ final class MeetingSession {
 
     func stop() async {
         guard snapshot.state.canStop else { return }
+        // 最終保存と同じファイルを書くので、停止の操作より後に途中保存を走らせない。
+        interimSaveTask?.cancel(); interimSaveTask = nil
+        snapshot.interimSaveWarning = nil
         aiSchedule?.recordingStopped()
         var finalizationSucceeded = true
         // 録音の停止で破棄するのは、まだ会話を確定していない問いだけ。
@@ -598,7 +606,46 @@ final class MeetingSession {
             return
         }
         refreshLive()
+        // 休憩の区切りを取りこぼさない。休憩中は中身が変わらないので、後の周期では書かない
+        if snapshot.state == .paused { saveInterim() }
         emit()
+    }
+
+    private func startInterimSaves(intervalSeconds: Int) {
+        interimSaveTask?.cancel()
+        interimSave = InterimSave()
+        interimSaveIntervalSeconds = intervalSeconds
+        let generation = preparationID
+        interimSaveTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(intervalSeconds))
+                guard !Task.isCancelled, let self, self.preparationID == generation else { return }
+                self.saveInterim()
+                self.emit()
+            }
+        }
+    }
+
+    /// 録音中の会議Markdownへ、画面の行をそのまま書く。半透明の行も今の話者で含め、暫定末尾は含めない
+    /// (「会話をコピー」と同じ範囲)。音量記録の `.levels.json` は停止時だけ書く。
+    /// 音量は確定した窓だけを使う。未完の窓まで読むと、コピーでは未計測として残す発話を小音量で除外してしまう
+    private func saveInterim(now: Date = Date()) {
+        guard snapshot.state == .recording || snapshot.state == .paused, archive == nil,
+              let url = snapshot.markdownURL else { return }
+        var meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: snapshot.elapsed, utterances: snapshot.utterances,
+                                              names: snapshot.names, pauses: pause.timeline.pauses,
+                                              ai: aiRecord?.controller.conversation,
+                                              audioLevels: audioLevelMeter?.track())
+        meeting.audioExclusion = audioExclusion
+        meeting.showAudioLevels = showAudioLevels
+        do {
+            try interimSave.save(meeting, at: now) { try PrivateFileIO.write($0, to: url) }
+            snapshot.interimSaveWarning = nil
+        } catch {
+            let interval = InterimSave.intervalLabel(seconds: interimSaveIntervalSeconds)
+            snapshot.interimSaveWarning = "途中保存に失敗: \(error.localizedDescription)。\(interval)後に再試行します"
+            log("途中保存に失敗: \(error)")
+        }
     }
 
     /// 注記の位置は消費側ではなく収録側の時計を読む。ASRが遅れても位置は動かない。
@@ -1158,6 +1205,8 @@ final class MeetingSession {
         publishUndiarized(value, generation: preparationID)
     }
     var pendingUndiarizedDrawForTesting: Task<Void, Never>? { pendingUndiarizedDraw }
+    func saveInterimForTesting(now: Date = Date()) { saveInterim(now: now); emit() }
+    func startInterimSavesForTesting(intervalSeconds: Int) { startInterimSaves(intervalSeconds: intervalSeconds) }
     var submissionTaskForTesting: Task<Void, Never>? { aiTasks[meetingAI?.slot ?? 1] ?? aiTasks.values.first }
     var paneCleanupTaskForTesting: Task<Void, Never>? { aiCleanupTask }
     func submissionTaskForTesting(slot: Int) -> Task<Void, Never>? { aiTasks[slot] }
@@ -1192,6 +1241,7 @@ final class MeetingSession {
     }
 
     private func tearDown() async {
+        interimSaveTask?.cancel(); interimSaveTask = nil
         pendingUndiarizedDraw?.cancel(); pendingUndiarizedDraw = nil
         source?.stop()
         source = nil

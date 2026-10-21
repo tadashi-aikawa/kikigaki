@@ -19,19 +19,23 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     public var autoSendPhrases: [String]?
     /// 会議の手動宛先へ下書きを送る、OS全体で効くキー。空文字は未割り当て
     public var manualSendHotkey: String?
+    /// 録音中に会議Markdownへ途中の記録を書く間隔(秒)
+    public var autoSaveIntervalSeconds: Int?
     public var speakers: [Speaker]?
     /// 配列の `[[ai]]`
     public var ai: AIProfileList?
 
     public init(outputDir: String? = nil, saveRecording: Bool? = nil,
                 speakers: [Speaker]? = nil, ai: AIProfileList? = nil, measureAudioLevels: Bool? = nil,
-                participantsKey: String? = nil, autoSendPhrases: [String]? = nil, manualSendHotkey: String? = nil) {
+                participantsKey: String? = nil, autoSendPhrases: [String]? = nil, manualSendHotkey: String? = nil,
+                autoSaveIntervalSeconds: Int? = nil) {
         self.outputDir = outputDir
         self.saveRecording = saveRecording
         self.measureAudioLevels = measureAudioLevels
         self.participantsKey = participantsKey
         self.autoSendPhrases = autoSendPhrases
         self.manualSendHotkey = manualSendHotkey
+        self.autoSaveIntervalSeconds = autoSaveIntervalSeconds
         self.speakers = speakers
         self.ai = ai
     }
@@ -45,6 +49,9 @@ public struct ResolvedConfig: Equatable, Sendable {
     public static let defaultParticipantsKey = "participants"
     /// 日本語の会話に紛れない短い外国語。正規化はヴァとバを揃えないので両方の表記を持つ
     public static let defaultAutoSendPhrases = ["アバンティ", "アヴァンティ"]
+    /// 異常終了で失うのを最大1分に抑える。1時間の会議でも本文は百KB前後で、書き込みの負担にならない
+    public static let defaultAutoSaveIntervalSeconds = 60
+    public static let autoSaveIntervalRange = 10...3600
 
     public var outputDir: URL
     /// 録音WAVは既定では残さない。通常利用では不要でディスクを食うだけで、要るのはデバッグや
@@ -55,6 +62,8 @@ public struct ResolvedConfig: Equatable, Sendable {
     public var autoSendPhrases: [String]
     /// 既定は未割り当て。どのキーも誰かのOS・アプリの既定とぶつかりうる
     public var manualSendHotkey: GlobalHotkey?
+    /// 録音開始時に会議へ固定する。進行中の会議の間隔は再読込で変えない
+    public var autoSaveIntervalSeconds: Int
     public var speakers: [KikigakiConfig.Speaker]
     /// 設定順のプロファイル。slotは1始まりで、この並びが宛先ポップアップの並びになる
     public var aiProfiles: [ResolvedAIConfig]
@@ -77,6 +86,7 @@ public struct ResolvedConfig: Equatable, Sendable {
         participantsKey = config.participantsKey ?? Self.defaultParticipantsKey
         autoSendPhrases = config.autoSendPhrases ?? Self.defaultAutoSendPhrases
         manualSendHotkey = config.manualSendHotkey.flatMap(GlobalHotkey.init)
+        autoSaveIntervalSeconds = config.autoSaveIntervalSeconds ?? Self.defaultAutoSaveIntervalSeconds
         speakers = (config.speakers ?? []).map { speaker in
             var speaker = speaker
             speaker.name = SpeakerNames.normalized(speaker.name)
@@ -139,6 +149,9 @@ public enum ConfigLoader {
             // 単独キーやshiftだけの組は、全アプリでその文字を打てなくする
             throw ConfigError.invalid(description:
                 "manualSendHotkey must be modifier+key with ctrl, alt or cmd (F1-F20 may stand alone) (got: \(hotkey))")
+        }
+        if let seconds = config.autoSaveIntervalSeconds, !ResolvedConfig.autoSaveIntervalRange.contains(seconds) {
+            throw ConfigError.invalid(description: "autoSaveIntervalSeconds must be 10...3600 (got: \(seconds))")
         }
         var speakerNames = Set<String>()
         for speaker in config.speakers ?? [] {

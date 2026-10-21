@@ -56,6 +56,8 @@ participantsKey = "participants"
 autoSendPhrases = ["アバンティ", "アヴァンティ"]
 # どのアプリを使っていても、会議の手動宛先へ送るキー。既定: 未割り当て
 manualSendHotkey = "cmd+shift+space"
+# 録音中にMarkdownへ途中の記録を書く間隔(秒)。既定: 60
+autoSaveIntervalSeconds = 60
 
 # 話者名の候補とアバター
 [[speakers]]
@@ -100,6 +102,7 @@ autoSendPhrases = ["アバンティ", "アヴァンティ"]
 | `participantsKey` | `participants` | 話者名の候補に「参加者」として出す名前を、議事録の先頭のどのキーから読むか。`attendees` などに変えられる。空白・`:`・`#`・`,`・引用符・括弧を含む名前、空文字、`-` で始まる名前は設定エラー |
 | `autoSendPhrases` | `["アバンティ", "アヴァンティ"]` | プロファイルで合図を指定しない場合に使う共通の合図。`[]` で無効。文字列の配列で最大20個、1個64文字まで。空白や記号を除き、かなを揃えた後の空と重複は設定エラー。次の会議から効く |
 | `manualSendHotkey` | 未割り当て | ほかのアプリを使っている間も、会議の手動宛先へ下書きを送るキー。`"cmd+shift+space"` のように `+` でつなぐ。修飾は `ctrl` `alt` `shift` `cmd`。`ctrl` `alt` `cmd` のどれかが要り、F1〜F20だけは単独で使える。キーは英数字・`space`・`enter`・`tab`・`escape`・`f1`〜`f20`。空文字は未割り当て。「設定を再読込」ですぐ効く。使い方は [グローバルキーで送る](../ai-participant/#グローバルキーで送る) |
+| `autoSaveIntervalSeconds` | `60` | 録音中に、会議のMarkdownへ途中の記録を書く間隔 (秒)。10〜3600の整数で書く。範囲外は設定エラー。次の会議から効く。詳細は [録音中の途中保存](../recording/#録音中の途中保存) |
 
 - `measureAudioLevels` は、小さな声を除外する設定とは別です
 - `outputDir` は、AIエージェントの参加でCodexに書き込みを許可する場所でもあります

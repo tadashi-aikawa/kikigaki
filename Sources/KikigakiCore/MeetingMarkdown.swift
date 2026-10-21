@@ -1,6 +1,7 @@
 import Foundation
 
-/// 1会議1ファイルの Markdown。停止時に保存し、話者名を付け直したら同じ内容構造で保存し直す
+/// 1会議1ファイルの Markdown。録音中は `InterimSave` が途中の記録を書き、停止時に保存し、
+/// 話者名を付け直したら同じ内容構造で保存し直す
 public enum MeetingMarkdown {
     /// 会議の基本情報。Markdown の見出しとメタ行に使う
     public struct Meeting: Codable, Equatable, Sendable {
@@ -29,13 +30,19 @@ public enum MeetingMarkdown {
         }
     }
 
-    public static func render(_ meeting: Meeting, timeZone: TimeZone = .current) -> String {
+    /// `interimSavedAt` は録音中の途中保存の時刻。異常終了で残った記録だと開いた人に分かるよう状態の行を出す。
+    /// 停止後の保存では渡さないので、正常に停止した記録には残らない
+    public static func render(_ meeting: Meeting, interimSavedAt: Date? = nil, timeZone: TimeZone = .current) -> String {
         let stamp = formatter(timeZone: timeZone).string(from: meeting.startedAt)
         var lines: [String] = []
         lines.append("# KIKIGAKI \(stamp)")
         lines.append("")
         lines.append("- 開始: \(stamp)")
         lines.append("- 長さ: \(TranscriptRenderer.elapsed(meeting.duration))")
+        if let interimSavedAt {
+            let clock = formatter(timeZone: timeZone, format: "HH:mm:ss").string(from: interimSavedAt)
+            lines.append("- 状態: 録音中の途中保存 (\(clock))")
+        }
         let speakers = appearingSlots(meeting.utterances)
         if !speakers.isEmpty {
             let list = speakers.map { "\(SpeakerNames.letter(for: $0))=\(meeting.names.name(for: $0))" }
@@ -76,11 +83,11 @@ public enum MeetingMarkdown {
         Array(Set(utterances.compactMap(\.speaker))).sorted()
     }
 
-    static func formatter(timeZone: TimeZone) -> DateFormatter {
+    static func formatter(timeZone: TimeZone, format: String = "yyyy-MM-dd HH:mm") -> DateFormatter {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = timeZone
-        f.dateFormat = "yyyy-MM-dd HH:mm"
+        f.dateFormat = format
         return f
     }
 }

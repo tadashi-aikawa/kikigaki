@@ -66,6 +66,7 @@ import Testing
         #expect(resolved.saveRecording == false)
         #expect(resolved.measureAudioLevels == false)
         #expect(resolved.participantsKey == "participants")
+        #expect(resolved.autoSaveIntervalSeconds == 60)
     }
 
     @Test func 全項目を読める() throws {
@@ -74,12 +75,22 @@ import Testing
             saveRecording = true
             measureAudioLevels = true
             participantsKey = "attendees"
+            autoSaveIntervalSeconds = 30
             """
         let resolved = ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: home)
         #expect(resolved.outputDir.path == "/Users/test/work/minerva/Notes/meetings")
         #expect(resolved.saveRecording == true)
         #expect(resolved.measureAudioLevels == true)
         #expect(resolved.participantsKey == "attendees")
+        #expect(resolved.autoSaveIntervalSeconds == 30)
+    }
+
+    @Test func 途中保存の間隔は10秒から3600秒まで() throws {
+        #expect(try ConfigLoader.parse(toml: "autoSaveIntervalSeconds = 10").autoSaveIntervalSeconds == 10)
+        #expect(try ConfigLoader.parse(toml: "autoSaveIntervalSeconds = 3600").autoSaveIntervalSeconds == 3600)
+        for value in ["9", "3601", "0", "-60", "1.5", "\"60\""] {
+            #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "autoSaveIntervalSeconds = \(value)") }
+        }
     }
 
     @Test func 参加者のキーはfrontmatterの行頭で照合できる名前だけを受け付ける() throws {

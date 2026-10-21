@@ -264,13 +264,10 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         pauseButton.isHidden = value.state == .idle
         openButton.isHidden = !(value.state == .idle && value.saved)
         statusChip.update(value, reduceMotion: shouldReduceMotion())
-        var message = value.message ?? ""
-        if value.saved, message.hasPrefix("保存:") {
-            message = message.components(separatedBy: " / ").dropFirst().joined(separator: " / ")
-        }
-        messageLabel.stringValue = message
-        messageLabel.isHidden = message.isEmpty
-        messageLabel.textColor = value.state == .idle && !value.saved && !message.isEmpty ? Washi.red : Washi.muted
+        let message = value.headerMessage
+        messageLabel.stringValue = message.text
+        messageLabel.isHidden = message.text.isEmpty
+        messageLabel.textColor = message.isError ? Washi.red : Washi.muted
         speakerButton.update(snapshot: value)
         updateHeader(width: minutesSplit.left.frame.width)
         speakerSettingsPopover?.update(snapshot: value)
@@ -436,16 +433,15 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private func updateRangeLabel() {
         compactFooter.more.toolTip = handoffNotice?.text ?? "その他の操作"
         if let notice = handoffNotice {
-            messageLabel.stringValue = notice.text
-            messageLabel.textColor = notice.failed ? Washi.red : Washi.muted
+            // コピー失敗の通知は自動で消えない。途中保存の失敗を隠さないよう先に並べる
+            let warning = snapshot.interimSaveWarning
+            messageLabel.stringValue = [warning, notice.text].compactMap { $0 }.joined(separator: " / ")
+            messageLabel.textColor = notice.failed || warning != nil ? Washi.red : Washi.muted
             messageLabel.isHidden = false
         } else {
-            var message = snapshot.message ?? ""
-            if snapshot.saved, message.hasPrefix("保存:") {
-                message = message.components(separatedBy: " / ").dropFirst().joined(separator: " / ")
-            }
-            messageLabel.stringValue = message
-            messageLabel.textColor = snapshot.state == .idle && !snapshot.saved && !message.isEmpty ? Washi.red : Washi.muted
+            let message = snapshot.headerMessage
+            messageLabel.stringValue = message.text
+            messageLabel.textColor = message.isError ? Washi.red : Washi.muted
             messageLabel.isHidden = messageLabel.stringValue.isEmpty
         }
     }

@@ -41,6 +41,13 @@
       "type": "string",
       "examples": ["cmd+shift+space", "ctrl+alt+cmd+a"]
     },
+    "autoSaveIntervalSeconds": {
+      "description": "録音中に会議Markdownへ途中の記録を書く間隔(秒)。10〜3600。次の会議から反映。\n\n任意 · 既定: `60`",
+      "type": "integer",
+      "minimum": 10,
+      "maximum": 3600,
+      "default": 60
+    },
     "speakers": {
       "description": "話者名の候補とアバターの台帳。[[speakers]] を1人ごとに書く。正規化後の名前の重複はアプリで検証する。\n\n任意 · 既定: `[]`",
       "type": "array",

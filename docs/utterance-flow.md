@@ -121,6 +121,8 @@ stateDiagram-v2
 
 図の「保存済み」はファイル保存の成功であり、エンジン最終化の成功や文字・話者の正解を意味しない。最終化に失敗しても `stop` は取得済みの高精度の確定・暫定を保存へ回し、話者の最終化失敗時も取得済み区間を使う。
 
+録音中も、表示中の行を一定時間ごとと一時停止の時点で同じMarkdownへ書く。図の停止時の保存がこれを最終版で上書きする。条件は [設定リファレンス](config.md#録音中の途中保存) の「録音中の途中保存」。
+
 ## 図と実コードの対応
 
 | 段・データ | 型・関数 | ファイルと役割 |
@@ -143,5 +145,6 @@ stateDiagram-v2
 | 停止・エンジン最終化 | `MeetingSession.stop`、`AppleTranscriber.finish` / `tokens`、`SpeakerDiarizer.finish` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[AppleTranscriber.swift](../Sources/Kikigaki/AppleTranscriber.swift)、[SpeakerDiarizer.swift](../Sources/Kikigaki/SpeakerDiarizer.swift)。消費完了後に高精度、話者の順で最終化 |
 | 全体再判定・最終行 | `MeetingResult.make` / `withoutDiarization` | [MeetingResult.swift](../Sources/KikigakiCore/MeetingResult.swift)。オンは凍結なしでAlignerを呼び、統合設定を反映。オフは話者なし行を生成 |
 | Markdown保存 | `MeetingSession.save`、`MeetingArchive.save`、`MeetingMarkdown.render` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[MeetingArchive.swift](../Sources/KikigakiCore/MeetingArchive.swift)、[MeetingMarkdown.swift](../Sources/KikigakiCore/MeetingMarkdown.swift)。保存結果の行を停止後の画面へ返す |
+| 録音中の途中保存 | `MeetingSession.saveInterim`、`InterimSave.save` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[InterimSave.swift](../Sources/KikigakiCore/InterimSave.swift)。表示中の行を周期と一時停止で書く |
 
 突き合わせ内部の順序は、凍結済みprefixの維持 → `SpeechTail` による窓判定と長い語頭の補正 → 語内の文字数の過半数への統一と、過半数が無い語の長い語頭の付け替え → 被りの島の補正 → 句読点を直前の話者へ付与、となる。
