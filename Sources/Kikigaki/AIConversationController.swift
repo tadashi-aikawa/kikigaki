@@ -47,7 +47,7 @@ final class AIConversationController {
     private var lastScanReturnStatus: [UUID: Bool] = [:]
     var onChange: (() -> Void)?
     /// 現在表示している会議だけが返す。旧会議・再起動回収では割当を適用しない。
-    var speakerContext: (() -> (names: SpeakerNames, detected: [Int], mapping: [Int: Int], lines: [String])?)?
+    var speakerContext: (() -> (names: SpeakerNames, detected: [Int], mapping: [Int: Int], lines: [String], texts: [String])?)?
     /// 保存に成功した新しい割当だけを渡す。再起動回収のcontrollerでは呼ばない。
     var onSpeakersIdentified: ((SpeakerNames, SpeakerNames) -> Void)?
     var speakerDiagnostic: (String) -> Void = { NSLog("%@", $0) }
@@ -548,7 +548,8 @@ final class AIConversationController {
                     throw AIError.invalid("not the current meeting")
                 }
                 try current.identify(event, participant: request.envelope.participant.participantName,
-                                     detected: context.detected, mapping: context.mapping, lines: context.lines)
+                                     candidates: request.envelope.participant.speakerIdentification?.candidates ?? [],
+                                     detected: context.detected, mapping: context.mapping, lines: context.lines, texts: context.texts)
                 accepted = current; names = current
             } catch { speakerDiagnostic("話者の割当を破棄: \(event.eventID): \(error)") }
             do { try next.recordSpeaker(event, names: accepted) }

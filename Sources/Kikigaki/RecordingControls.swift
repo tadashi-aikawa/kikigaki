@@ -130,14 +130,16 @@ final class RecordingStatusChip: NSStackView {
         let file = value.transcribingFile && value.state == .recording
         let recording = value.state == .recording && !file
         let paused = value.state == .paused
-        let outlined = value.state == .preparing || value.state == .finishing || file
-        let foreground = recording ? Washi.white : paused || file ? Washi.ink : Washi.muted
+        // 仕上げ中は保存済みでも、まだ終わっていないことを書き起こし中と同じ輪郭で見せる。
+        let reviewing = value.reviewingFile && value.state == .idle
+        let outlined = value.state == .preparing || value.state == .finishing || file || reviewing
+        let foreground = recording ? Washi.white : paused || file || reviewing ? Washi.ink : Washi.muted
         layer?.backgroundColor = (recording ? Washi.red : paused ? Washi.gold : .clear).cgColor
-        layer?.borderColor = (file ? Washi.rule : Washi.muted).cgColor
+        layer?.borderColor = (file || reviewing ? Washi.rule : Washi.muted).cgColor
         layer?.borderWidth = outlined ? 1 : 0
         mark.stringValue = paused ? "‖" : "●"
         mark.isHidden = !recording && !paused
-        label.stringValue = value.state == .idle && value.saved ? "保存済み"
+        label.stringValue = reviewing ? "仕上げ中" : value.state == .idle && value.saved ? "保存済み"
             : value.state.statusLabel(transcribingFile: value.transcribingFile)
         // 書き起こし中は処理した位置と全体の長さ。録音の経過時間と同じ読み方にする
         elapsed.stringValue = file ? value.audioFile?.progress(at: value.elapsed) ?? "" : TranscriptRenderer.elapsed(value.elapsed)

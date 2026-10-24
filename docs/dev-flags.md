@@ -22,7 +22,8 @@ swift run Kikigaki --config /path/to/config.toml --replay /path/to/audio.wav
 - DEBUGビルドの `KIKIGAKI_DEBUG_REPLAY_REALTIME=1` はreplayを等倍で入力する。省略時は従来の約10倍速。
 - 環境変数 `KIKIGAKI_DEBUG_REPLAY_FILE=1`: replayを録音の模擬ではなく、音声ファイルの書き起こしの経路で流す。`0` か `1` だけを受け付け、通常起動では無視する。
     - 流し方: 速報を止め、間を置かずに流す。`KIKIGAKI_DEBUG_REPLAY_REALTIME` は効かない。
-    - 会議: 録音日時はファイルのメタデータか作成日時。シートを出さないので、自動送信は設定の `autoStart` の宛先へ「完了時に送信」として1回だけ送る。
+    - 会議: 録音日時はファイルのメタデータか作成日時。自動送信は始めない。
+    - AIへの依頼: `KIKIGAKI_DEBUG_AI_ASK` の問いを、書き起こしの後の仕上げ中に指定の順で送る。送るのは `KIKIGAKI_DEBUG_REPLAY_HOLD` で終了を遅らせている間だけで、HOLDが無ければ送らずに終了する。秒の指定は音声の長さ以下なら効く。
     - 詳細: [音声ファイルの書き起こし](audio-file.md)
 - 環境変数 `KIKIGAKI_DEBUG_REPLAY_HOLD=180`: replayの停止・保存後に指定秒だけ終了を遅らせる。0〜86400秒、既定0。到達済みの送信待ちと回答回収を継続する。停止後にペインを閉じるところまで見るときも、返事が届くまでの時間をここで確保する
 - 環境変数 `KIKIGAKI_DEBUG_DIARIZATION=off` または `on`: replayで話者判別を指定する。通常起動では無視し、replayではUserDefaultsを読み書きしない。LIVE_TRACE併用時は、無効会議のASR確定受信と表示反映の単調時計を同じトークン数で照合できる。

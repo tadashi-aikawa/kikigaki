@@ -35,8 +35,6 @@ public struct AIScheduleState: Sendable {
     public private(set) var phase: Phase = .stopped
     public private(set) var nextFire: Date?
     public private(set) var consecutiveFailures = 0
-    /// 音声ファイルの書き起こし。周期を持たず、保存後の1回だけを送る
-    public private(set) var finalOnly = false
     private var requests: [UUID] = []
     private var outcomes: [UUID: Outcome] = [:]
 
@@ -47,17 +45,8 @@ public struct AIScheduleState: Sendable {
               now.addingTimeInterval(options.interval).timeIntervalSince1970.isFinite else {
             throw AIError.invalid("schedule start")
         }
-        self.options = options; self.runID = runID; finalOnly = false
+        self.options = options; self.runID = runID
         phase = .running; nextFire = now.addingTimeInterval(options.interval)
-        requests = []; outcomes = [:]; consecutiveFailures = 0
-    }
-
-    /// 音声ファイルの書き起こしの「完了時に送信」。周期の送信を飛ばし、保存を待つところから始める。
-    /// 書き起こし中は時間に依存する送信を持ち込まないため。仕様は docs/audio-file.md
-    public mutating func startFinalOnly(options: AIScheduleOptions, runID: UUID) throws {
-        guard phase == .stopped else { throw AIError.invalid("schedule start") }
-        self.options = options; self.runID = runID; finalOnly = true
-        phase = .awaitingSave; nextFire = nil
         requests = []; outcomes = [:]; consecutiveFailures = 0
     }
 

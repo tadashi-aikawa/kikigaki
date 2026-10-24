@@ -28,27 +28,26 @@ extension AppKitTests {
         """), home: root).aiProfiles
     }
 
-    @Test func 開始シートは使わない行を出さず完了時の1回を必ず送る() throws {
+    @Test func 開始シートは使わない行とAIの行を出さず手動宛先は前回の宛先から始める() throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        defaults.set("議事録", forKey: StartSheet.manualDefaultsKey)
         let next = try NextMeeting(minutesPath: "/work/minutes/定例.md", ai: "議事録")
         let sheet = StartSheet(profiles: try profiles(root), audioFile: file, diarizationEnabled: true,
                                exclusion: AudioExclusion(enabled: true, thresholdDBFS: -45),
-                               minutesPath: "/work/minutes/2026-10-20 定例.md", nextMeetings: [next])
+                               minutesPath: "/work/minutes/2026-10-20 定例.md", nextMeetings: [next], defaults: defaults)
         #expect(sheet.audioFileName.stringValue == "定例.m4a")
         #expect(sheet.audioFileSummary.stringValue == file.summary())
-        // システム音声・マイク・手動送信・次の会議は出さない。
-        for view in [sheet.systemAudioAutomatic, sheet.microphoneLabel, sheet.manualDestination] { #expect(view.superview == nil) }
+        // システム音声・マイク・自動送信・手動送信・次の会議は出さない。AIへは仕上げで頼む。
+        for view in [sheet.systemAudioAutomatic, sheet.microphoneLabel, sheet.destination, sheet.manualDestination] {
+            #expect(view.superview == nil)
+        }
         #expect(sheet.nextMeetings.isEmpty)
-        #expect(sheet.final.isHidden && sheet.interval.superview?.isHidden == true)
-        #expect(!sheet.work.isHidden)
-        #expect(sheet.selectedSlot == 2)
-        sheet.final.state = .off
         let options = try #require(sheet.options)
         #expect(options.audioFile == file)
-        #expect(options.manualSlot == nil && options.nextMeetingID == nil)
-        #expect(options.scheduleSlot == 2 && options.schedule?.sendFinal == true)
-        #expect(options.schedule?.workAllowed == false)
+        #expect(options.scheduleSlot == nil && options.schedule == nil && options.nextMeetingID == nil)
+        #expect(options.manualSlot == 2)
         try capture("file-sheet", sheet)
         // 録音のシートは今までどおり。
         let recording = StartSheet(profiles: try profiles(root), diarizationEnabled: true, exclusion: AudioExclusion())
@@ -103,24 +102,15 @@ extension AppKitTests {
         value.state = .recording
         #expect(value.transcribingFile)
         #expect(!value.canSubmitTyped && !value.canSubmitAI && !value.canPauseOrResume)
-        // 保存後は録音の会議と同じく改名・コピーができる。
-        value.state = .idle
-        #expect(!value.transcribingFile && value.canShare)
+        // 保存後の仕上げでは、改名・コピーに加えてAIへ頼める。手入力はしない。
+        value.state = .idle; value.reviewingFile = true
+        #expect(!value.transcribingFile && value.canShare && value.canSubmitAI && !value.canSubmitTyped)
+        // 完了した後は録音の停止後と同じく、AIへ新しく頼めない。
+        value.reviewingFile = false
+        #expect(value.canShare && !value.canSubmitAI)
         var recording = SessionSnapshot()
         recording.markdownURL = value.markdownURL; recording.state = .recording
         #expect(recording.canSubmitTyped && recording.canSubmitAI && recording.canPauseOrResume)
-    }
-
-    @Test func 自動の段は完了時に送信の言葉で待ちを出す() throws {
-        var schedule = AIScheduleState(meetingID: UUID())
-        try schedule.startFinalOnly(options: .init(prompt: "議事録を作成"), runID: UUID())
-        #expect(AIScheduleViewState(schedule: schedule).text == "完了時に送信 · 書き起こしを待っています")
-        _ = schedule.finalSaveCompleted(succeeded: true)
-        #expect(AIScheduleViewState(schedule: schedule).text == "完了時に送信 · 返事を待っています")
-        var recording = AIScheduleState(meetingID: UUID())
-        try recording.start(options: .init(prompt: "更新"), now: Date(), runID: UUID())
-        recording.recordingStopped()
-        #expect(AIScheduleViewState(schedule: recording).text == "最後の1回 · 保存を待っています")
     }
 
     @Test func replayは指定したときだけ書き起こしの経路を通す() throws {
@@ -191,10 +181,21 @@ extension AppKitTests {
         #expect(!range.stringValue.hasPrefix(AudioFile.datePrefix(recordedAt)))
         try capture(content, "file-transcribing-\(Int(width))")
         // 保存後は当日とは限らない会議の日付を添える。
-        value.state = .idle; value.saved = true
+        // 保存後の仕上げは「仕上げ中」と「完了」。完了するまで「新しい録音」は出さない。
+        value.state = .idle; value.saved = true; value.reviewingFile = true
         controller.apply(value)
         content.layoutSubtreeIfNeeded()
         #expect(range.stringValue.hasPrefix(AudioFile.datePrefix(recordedAt)))
+        #expect(chip.accessibilityLabel() == "仕上げ中")
+        let reviewing = descendants(content).filter { !$0.isHiddenOrHasHiddenAncestor }.compactMap { $0 as? WashiActionButton }
+        #expect(reviewing.map(\.toolTip) == ["完了"])
+        try capture(content, "file-reviewing-\(Int(width))")
+        value.reviewingFile = false
+        controller.apply(value)
+        content.layoutSubtreeIfNeeded()
+        #expect(chip.accessibilityLabel() == "保存済み")
+        let saved = descendants(content).filter { !$0.isHiddenOrHasHiddenAncestor }.compactMap { $0 as? WashiActionButton }
+        #expect(saved.map(\.toolTip) == ["新しい録音"])
         try capture(content, "file-saved-\(Int(width))")
     }
     private func capture(_ content: NSView, _ name: String) throws {
@@ -227,6 +228,10 @@ extension AppKitTests {
         let markdown = try String(contentsOf: root.appendingPathComponent(name), encoding: .utf8)
         #expect(markdown.contains("- 音声: 定例.m4a"))
         #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).filter { $0.hasSuffix(".wav") }.isEmpty)
+        // 保存してから仕上げに入る。完了したら録音の停止後と同じになる。
+        #expect(session.snapshot.reviewingFile && session.snapshot.canSubmitAI)
+        session.completeFileReview()
+        #expect(!session.snapshot.reviewingFile && !session.snapshot.canSubmitAI)
 
         let long = FileSource(samples: Array(repeating: 0, count: 16000 * 600), paced: false)
         #expect(await session.start(source: long, audioFile: AudioFile(url: root.appendingPathComponent("長い.wav"), duration: 600,
@@ -234,7 +239,7 @@ extension AppKitTests {
         let reserved = try #require(session.snapshot.markdownURL)
         #expect(FileManager.default.fileExists(atPath: reserved.path))
         await session.cancelFileTranscription()
-        #expect(session.snapshot.state == .idle && !session.snapshot.saved)
+        #expect(session.snapshot.state == .idle && !session.snapshot.saved && !session.snapshot.reviewingFile)
         #expect(session.snapshot.message == "書き起こしを中止しました")
         #expect(!FileManager.default.fileExists(atPath: reserved.path))
 

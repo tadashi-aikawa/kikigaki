@@ -288,7 +288,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         session.onChange = { [weak self] snapshot in
             guard let self else { return }
-            self.statusItem?.update(state: snapshot.state, elapsed: snapshot.elapsed, transcribingFile: snapshot.transcribingFile)
+            self.statusItem?.update(state: snapshot.state, elapsed: snapshot.elapsed, transcribingFile: snapshot.transcribingFile,
+                                    reviewingFile: snapshot.reviewingFile)
             self.window?.apply(snapshot)
             #if DEBUG
             if self.replayURL != nil, let window = self.window,
@@ -365,7 +366,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func toggleRecording() {
         guard let session, !loadingAudioFile else { return }
-        if session.snapshot.state.canStart {
+        if session.snapshot.reviewingFile {
+            // 仕上げ中の開始・停止の位置は「完了」。新しい録音は完了してから始める
+            session.completeFileReview()
+        } else if session.snapshot.state.canStart {
             // replayと検証は開始シートを出さない。前回の値と環境変数の指定で同じ開始経路を通す。
             if replayURL != nil { Task { await startRecording(options: nil) } }
             else { presentStartSheet() }
@@ -629,7 +633,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             performReplayRename()
         }
         // 停止後は手動の依頼を送れない(ペインを後片付けで閉じるため)。HOLD中の送信はしない。
-        guard !replayHolding else { return }
+        // 音声ファイルの仕上げ中だけは送れるので、書き起こしの後に順に送る。
+        guard !replayHolding || snapshot.reviewingFile else { return }
         guard !replayDestinationPending, nextDebugQuestion < replayDebug.questions.count, let session else { return }
         if replayDebug.verifyMinutes == "main", !minutesVerification.canAsk(index: nextDebugQuestion) { return }
         let question = replayDebug.questions[nextDebugQuestion]
@@ -798,7 +803,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showScheduleSheet() {
         guard let session, let config = session.aiConfiguration, let parent = window?.window,
               session.snapshot.state == .recording || session.snapshot.state == .paused,
-              // 音声ファイルの書き起こし中は「完了時に送信」の1回だけ。周期の送信を後から足さない。
+              // 音声ファイルの書き起こし中は周期の送信を後から足さない。AIへは仕上げで頼む。
               !session.snapshot.transcribingFile,
               aiSheet == nil, scheduleSheet == nil else { return }
         let target = session.aiScheduleConfiguration ?? config

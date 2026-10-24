@@ -85,6 +85,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - 単数の `[ai]`。設定エラーにして `[[ai]]` を示す。[設定リファレンス](docs/config.md)
   - `[[ai]]` の `prompt` と `autoPrompt`。設定エラーにして `alwaysPrompt` と `initialPrompt` を示す。[設定リファレンス](docs/config.md)
 - 停止後は新しい依頼を送れない: フッターの「手動」「返答する」「再送」は停止で無効になり、後片付けの後にherdrのペインを閉じる。[AI参加者の設計](docs/ai-participant.md)
+  - 例外: 音声ファイルの書き起こしの仕上げ中は「完了」まで送れる。[音声ファイルの書き起こし](docs/audio-file.md)
 - 利用者のグローバル設定は書き換えない: CodexとClaudeの設定は、セッション限定の引数と専用の `--settings` JSONで渡す。[AI参加者の設計](docs/ai-participant.md)
 - manifestが欠損した会議登録は保持するが、対処できない警告は出さない。`AIRecordStore` の復元がこの扱い
 - 受け入れたリスク
@@ -139,7 +140,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | [小音量発話の計測](docs/audio-levels.md) | 音量トラックと診断表示、`.levels.json` | 音量の計測・保存を変える前 |
 | [手入力の設計](docs/typed-entry.md) | 手入力の投稿、画像添付、併合、AI文脈 | 手入力・`TranscriptEntries.merge` を変える前 |
 | [録音開始シート](docs/start-sheet.md) | 会議ごとの指定、次の会議の予約 | 開始経路・予約を変える前 |
-| [音声ファイルの書き起こし](docs/audio-file.md) | 入口、開始シートのファイル版、録音日時、流し方、書き起こし中に止める操作、中止 | 音声ファイルの経路・`FileSource` を変える前 |
+| [音声ファイルの書き起こし](docs/audio-file.md) | 入口、開始シートのファイル版、録音日時、流し方、書き起こし中に止める操作、中止、仕上げ | 音声ファイルの経路・`FileSource` を変える前 |
 | [書き起こしウィンドウ](docs/transcript-window.md) | 配色、行の構造、改名、話者での絞り込み、フッター、ピン留め、幅 | ウィンドウの見た目・操作を変える前 |
 | [議事録ペイン](docs/minutes-pane.md) | 右ペインの操作、履歴、幅と復元、ファイル監視 | 議事録ペインのUIを変える前 |
 | [議事録の描画と検索](docs/minutes-rendering.md) | 対応する記法、検索、Wikiリンク、描画資産の再生成 | 議事録の描画・`web/minutes` を変える前 |

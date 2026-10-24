@@ -219,24 +219,21 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         add(row("議事録", column([minutesRow, minutesHint], spacing: 4)), to: rows)
 
         // 自動送信。`[[ai]]` が無ければ区画ごと出さない。
-        if !profiles.isEmpty {
+        // 音声ファイルはAIの行を出さない。話者を決めてから頼めるよう、AIへは書き起こしの後の仕上げで頼む。
+        if !profiles.isEmpty, audioFile == nil {
             add(separator(), to: rows)
-            // 音声ファイルは書き起こしを終えた時点の1回だけ送る。録音の「最後の1回」と同じ送信。
-            let automaticRow = row(audioFile == nil ? "自動送信" : "完了時に送信", buildAISection())
+            let automaticRow = row("自動送信", buildAISection())
             add(automaticRow, to: rows)
             // 複数行の自動送信の末尾にも、次の区切り線まで10ptの余白を取る。
             rows.setCustomSpacing(10, after: automaticRow)
-            // 書き起こし中は手動で送らない。
-            if audioFile == nil {
-                manualDestination.font = .systemFont(ofSize: 13)
-                manualDestination.setAccessibilityLabel("手動送信の宛先")
-                manualDestination.target = self; manualDestination.action = #selector(manualDestinationChanged)
-                add(separator(), to: rows)
-                // 指示が無い宛先でも1行分を残し、選び直しても操作部の位置を変えない。
-                let manualChoices = column([manualDestination, manualAlwaysPromptHint], spacing: 6, detachesHiddenViews: false)
-                add(row("手動送信", manualChoices), to: rows)
-                rebuildDestinationMenu(manual: true)
-            }
+            manualDestination.font = .systemFont(ofSize: 13)
+            manualDestination.setAccessibilityLabel("手動送信の宛先")
+            manualDestination.target = self; manualDestination.action = #selector(manualDestinationChanged)
+            add(separator(), to: rows)
+            // 指示が無い宛先でも1行分を残し、選び直しても操作部の位置を変えない。
+            let manualChoices = column([manualDestination, manualAlwaysPromptHint], spacing: 6, detachesHiddenViews: false)
+            add(row("手動送信", manualChoices), to: rows)
+            rebuildDestinationMenu(manual: true)
         }
         stack.addArrangedSubview(Washi.label(audioFile == nil ? "録音を開始" : "音声ファイルを書き起こす", size: 17, weight: .semibold))
         stack.addArrangedSubview(rows)
@@ -496,9 +493,6 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         aiDetails.addArrangedSubview(intervalRow)
         aiDetails.addArrangedSubview(work)
         aiDetails.addArrangedSubview(final)
-        // 音声ファイルは完了時の1回だけなので、間隔と「最後の1回」の選択が無い。
-        intervalRow.isHidden = audioFile != nil
-        final.isHidden = audioFile != nil
         aiSection.orientation = .vertical; aiSection.alignment = .leading; aiSection.spacing = 6
         add(destination, to: aiSection); add(aiDetails, to: aiSection)
         rebuildDestinationMenu()
@@ -870,6 +864,9 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             result.systemAudioMode = selectedSystemAudioMode
             result.recordSystemAudio = selectedSystemAudioMode.includes(outputKind())
             result.manualSlot = selectedManualSlot
+        } else {
+            // 行は出さないが、仕上げの手動宛先は録音の開始シートで最後に選んだ宛先から始める。
+            result.manualSlot = defaultManualSlot
         }
         if let path = minutesInput {
             guard (try? MinutesPath.validate(path)) != nil else { return nil }
@@ -882,13 +879,13 @@ final class StartSheet: NSObject, NSTextViewDelegate {
            meeting.minutesPath == result.minutesPath {
             result.nextMeetingID = id
         }
-        if let slot = selectedSlot {
+        // 音声ファイルは自動送信の行を出さないので、預けない。
+        if let slot = selectedSlot, audioFile == nil {
             let draft = currentDraft
             if profiles.first(where: { $0.slot == slot })?.boardStartIssue(minutesPath: minutesInput) != nil { return nil }
             // 依頼が空・間隔が不正なら自動送信は始めない。録音そのものは始める。
-            // 音声ファイルは「最後の1回」の選択を出さず、完了時の1回を必ず送る。
             if let options = try? AIScheduleOptions(prompt: draft.prompt, interval: Double(draft.minutes) * 60,
-                                                   workAllowed: draft.workAllowed, sendFinal: audioFile != nil || draft.sendFinal) {
+                                                   workAllowed: draft.workAllowed, sendFinal: draft.sendFinal) {
                 result.scheduleSlot = slot
                 result.schedule = options
             }

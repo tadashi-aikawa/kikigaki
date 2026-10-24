@@ -147,10 +147,10 @@ extension AppKitTests {
         case "named": session.rename(slot: 0, to: "別名")
         case "merged": session.setSpeakerMapping(source: 0, target: 2)
         case "duplicate-name": session.rename(slot: 2, to: "タダシ")
-        case "not-detected": controller.speakerContext = { (session.snapshot.names, [2], [:], ["[14:05:10] 行"]) }
+        case "not-detected": controller.speakerContext = { (session.snapshot.names, [2], [:], ["[14:05:10] 行"], ["行"]) }
         case "undiarized": controller.speakerContext = {
             var names = session.snapshot.names; names.diarizationEnabled = false
-            return (names, [0, 2], [:], ["[14:05:10] 行"])
+            return (names, [0, 2], [:], ["[14:05:10] 行"], ["行"])
         }
         default: break
         }
@@ -656,7 +656,7 @@ extension AppKitTests {
         let recovered = try AIConversationController(meetingID: unrecovered.meetingID, outputDirectory: root,
             herdr: AIHerdr(run: { try await fake.run($0, $1) }), recovered: unrecovered, minutes: minutes)
         var notifications = 0
-        recovered.speakerContext = { (SpeakerNames(), [0, 2], [:], lines) }
+        recovered.speakerContext = { (SpeakerNames(), [0, 2], [:], lines, []) }
         recovered.onSpeakersIdentified = { _, _ in notifications += 1 }
         recovered.scan()
         #expect(recovered.conversation.speakerAssignments.count == 1)

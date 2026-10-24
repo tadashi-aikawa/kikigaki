@@ -77,10 +77,10 @@ final class StatusItem {
         update(state: .idle, elapsed: 0)
     }
 
-    func update(state: RecordingState, elapsed: Double, transcribingFile: Bool = false) {
-        let label = state.statusLabel(transcribingFile: transcribingFile)
+    func update(state: RecordingState, elapsed: Double, transcribingFile: Bool = false, reviewingFile: Bool = false) {
+        let label = state.statusLabel(transcribingFile: transcribingFile, reviewingFile: reviewingFile)
         statusMenuItem.title = state.canStop ? "\(label)  \(TranscriptRenderer.elapsed(elapsed))" : label
-        startStopItem.title = state.startStopTitle(transcribingFile: transcribingFile)
+        startStopItem.title = state.startStopTitle(transcribingFile: transcribingFile, reviewingFile: reviewingFile)
         startStopItem.isEnabled = state.canStart || state.canStop
         transcribeFileItem.isEnabled = state.canStart
         pauseResumeItem.title = state.pauseResumeTitle

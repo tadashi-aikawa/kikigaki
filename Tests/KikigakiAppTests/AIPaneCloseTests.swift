@@ -56,6 +56,41 @@ extension AppKitTests {
         #expect(controller.conversation.questions.last?.result?.body == "確認しました")
     }
 
+    /// 音声ファイルの仕上げは、保存後でも完了までは送れる。完了してから録音の停止後と同じ後片付けに入る。
+    @Test func 音声ファイルの仕上げ中は保存後も送れ完了してから返事を待って閉じる() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        let session = try session(root, herdr: { try await fake.run($0, $1) })
+        session.setAudioFileForTesting(AudioFile(url: root.appendingPathComponent("定例.m4a"), duration: 1, recordedAt: Date()))
+        await session.stop()
+        #expect(session.snapshot.saved && session.snapshot.reviewingFile && session.snapshot.canSubmitAI)
+        #expect(session.paneCleanupTaskForTesting == nil)
+        await submit(session)
+        let controller = try #require(session.aiRecord?.controller)
+        #expect(controller.conversation.questions.map(\.state) == [.submitted])
+        // 保存済みの会議への初回送信でも、会議の記録をAIの登録簿へ渡す。
+        #expect(session.aiRecord?.archive != nil)
+        try reply(session, root: root)
+        try await Task.sleep(for: .milliseconds(200))
+        // 返事が届いても、完了までは閉じない。続けて頼めるようにする。
+        #expect(await !closed(fake))
+        await submit(session)
+        #expect(controller.conversation.questions.count == 2)
+        session.completeFileReview()
+        session.completeFileReview()
+        #expect(!session.snapshot.reviewingFile && !session.snapshot.canSubmitAI)
+        // 返事待ちの2問目が片付くまで閉じない。
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(await !closed(fake))
+        try reply(session, root: root)
+        await session.paneCleanupTaskForTesting?.value
+        #expect(await closed(fake))
+        // 完了した後は録音の停止後と同じく、新しく頼めない。
+        await submit(session)
+        #expect(controller.conversation.questions.count == 2)
+        #expect(await fake.commands.filter { $0.prefix(2) == ["workspace", "close"] }.count == 1)
+    }
+
     @Test func 返事待ちがなければ停止と同時に閉じる() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr()

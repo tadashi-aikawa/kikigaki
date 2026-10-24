@@ -39,8 +39,14 @@ import KikigakiAIIO
                 .execute(input: { Data(evidence.utf8) }, environment: [:])
         }
     }
-    @Test(arguments: ["候補外", "tadashi", "", "タダシ\0"])
-    func 候補の完全一致と引数を検証する(_ name: String) throws {
+    /// 会話に出てきた人名も付けてよいので、候補外でもCLIは受ける。本文に出てきたかはアプリが取り込みで確かめる。
+    @Test func 候補外の名前も名前の形なら受ける() throws {
+        let f = try ReturnCommandTests.Fixture(identification: fixed)
+        _ = try ReturnCommand(f.args("speaker", ["--slot", "A", "--name", "山田"]))
+            .execute(input: { Data(evidence.utf8) }, environment: [:])
+    }
+    @Test(arguments: ["", "  ", "タダシ\0", "改\t行", String(repeating: "長", count: 65)])
+    func 名前の形と引数を検証する(_ name: String) throws {
         let f = try ReturnCommandTests.Fixture(identification: fixed)
         #expect(throws: (any Error).self) {
             try ReturnCommand(f.args("speaker", ["--slot", "A", "--name", name]))

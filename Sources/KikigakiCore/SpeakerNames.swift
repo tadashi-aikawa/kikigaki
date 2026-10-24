@@ -68,12 +68,16 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
         }.sorted()
     }
 
-    public mutating func identify(_ event: AISpeakerEvent, participant: String, detected: [Int],
-                                 mapping: [Int: Int], lines: [String]) throws {
+    /// 名前は固定した候補か、会話の本文に出てきた人名に限る。会話に出てこない名前をAIに作らせないため。
+    /// `texts` は発言の本文。整形した `lines` は根拠の時刻の照合に使う。
+    public mutating func identify(_ event: AISpeakerEvent, participant: String, candidates: [String], detected: [Int],
+                                 mapping: [Int: Int], lines: [String], texts: [String]) throws {
         guard let slot = Self.letters.firstIndex(of: event.slot),
               unresolvedSlots(detected: detected, mapping: mapping).contains(slot),
               otherSlot(using: event.name, excluding: slot) == nil,
-              event.name != Self.defaultName(for: slot), SpeakerEvidence.exists(event.evidence, in: lines) else {
+              !Self.letters.indices.contains(where: { Self.defaultName(for: $0) == event.name }),
+              candidates.contains(event.name) || SpeakerEvidence.mentions(event.name, in: texts),
+              SpeakerEvidence.exists(event.evidence, in: lines) else {
             throw AIError.invalid("speaker current state or evidence")
         }
         set(event.name, for: slot)

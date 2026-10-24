@@ -8,7 +8,7 @@ import KikigakiAIIO
         if CommandLine.arguments.dropFirst() == ["--help"] {
             print("kikigaki-cli accept|reply|notify --session <path> --token <token> [--request <UUID>] [--kind answered|needs_input|failed] [--reason <code>] [--provider codex|claude] [payload-json]")
             print("kikigaki-cli minutes --session <session_path> --request <request_id> --token <request_token> --path <absolute.md>")
-            print("kikigaki-cli speaker --session <session_path> --request <request_id> --token <request_token> --slot <A-H> --name <候補名> < evidence.txt")
+            print("kikigaki-cli speaker --session <session_path> --request <request_id> --token <request_token> --slot <A-H> --name <候補名か会話に出てきた人名> < evidence.txt")
             print("kikigaki-cli progress --session <session_path> --request <request_id> --token <request_token> --editing [--total <1-999>]")
             print("kikigaki-cli skill install|uninstall")
             print("kikigaki-cli resolve --session <session_path> --request <request_id> --token <request_token> --question <確認のrequest_id> --speaker <話者> --time <HH:mm:ss> < quote.txt")

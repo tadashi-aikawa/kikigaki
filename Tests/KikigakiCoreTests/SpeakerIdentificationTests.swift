@@ -98,12 +98,14 @@ import Testing
         let r = try request()
         let event = try AISpeakerEvent(request: r, slot: "A", name: "タダシ", evidence: "[14:05:10] タダシです", recordedAt: Date(timeIntervalSince1970: 100))
         var names = SpeakerNames()
-        try names.identify(event, participant: "迅雷", detected: [0], mapping: [:], lines: ["[14:05:10] 話者A: タダシです"])
+        try names.identify(event, participant: "迅雷", candidates: ["タダシ"], detected: [0], mapping: [:], lines: ["[14:05:10] 話者A: タダシです"], texts: ["タダシです"])
         #expect(names.attributions[0]?.tooltip == "迅雷の推定 · 14:05:10「タダシです」")
         #expect(names.unresolvedSlots(detected: [0], mapping: [:]).isEmpty)
         names.confirm(name, for: 0)
         #expect(names.humanTouched == [0] && names.attributions.isEmpty)
-        #expect(throws: (any Error).self) { try names.identify(event, participant: "迅雷", detected: [0], mapping: [:], lines: ["[14:05:10] 行"]) }
+        #expect(throws: (any Error).self) {
+            try names.identify(event, participant: "迅雷", candidates: ["タダシ"], detected: [0], mapping: [:], lines: ["[14:05:10] 行"], texts: ["行"])
+        }
         var conversation = AIConversation(meetingID: r.envelope.meetingID)
         try conversation.append(r); try conversation.recordSpeaker(event, names: names)
         let restored = try AIJSON.decode(AIConversation.self, from: AIJSON.encode(conversation))
@@ -116,7 +118,7 @@ import Testing
         let r = try request()
         let event = try AISpeakerEvent(request: r, slot: "A", name: "タダシ", evidence: "[14:05:10] タダシです", recordedAt: Date())
         var names = SpeakerNames()
-        try names.identify(event, participant: "迅雷", detected: [0], mapping: [:], lines: ["[14:05:10] 行"])
+        try names.identify(event, participant: "迅雷", candidates: ["タダシ"], detected: [0], mapping: [:], lines: ["[14:05:10] 行"], texts: ["行"])
         var conversation = AIConversation(meetingID: r.envelope.meetingID)
         try conversation.append(r); try conversation.recordSpeaker(event, names: names)
         let meeting = MeetingMarkdown.Meeting(startedAt: Date(), duration: 1,
@@ -126,6 +128,49 @@ import Testing
         #expect(speakerLine == "- 話者: A=タダシ")
         #expect(SpeakerSuggestions.names(inSpeakerLine: speakerLine) == ["タダシ"])
         #expect(markdown.contains("- 話者の割当: A → タダシ(根拠: [14:05:10] タダシです)"))
+    }
+    /// 実録 2026-09-26_0237 の冒頭。話者Bは名前で振られて応答し、名前は候補に無く会話の本文にだけ出てくる。
+    @Test func 候補に無くても会話の本文に出てきた人名なら付けられる() throws {
+        let lines = ["[02:37:56] 話者A: 山田さんからのおみをこさんにおいただきたいと思います。",
+                     "[02:38:02] 話者B: させていただいてもよろしいでしょうか。"]
+        let r = try request(fixed: .init(unresolved: ["A", "B"], candidates: ["タダシ"]))
+        let evidence = "[02:37:56] 山田さんからの…\n[02:38:02] させていただいても…\n名前で話を振られた直後に話し始めている"
+        let event = try AISpeakerEvent(request: r, slot: "B", name: "山田", evidence: evidence, recordedAt: Date())
+        var names = SpeakerNames()
+        try names.identify(event, participant: "迅雷", candidates: ["タダシ"], detected: [0, 1], mapping: [:], lines: lines,
+                           texts: ["山田さんからのおみをこさんにおいただきたいと思います。", "させていただいてもよろしいでしょうか。"])
+        #expect(names.name(for: 1) == "山田")
+    }
+    @Test(arguments: ["司会", "話者C", "話者B"])
+    func 会話に出てこない名前と既定名は付けない(_ name: String) throws {
+        let lines = ["[02:37:56] 話者A: 山田さんからお願いします。", "[02:38:02] 話者B: はい。"]
+        let r = try request(fixed: .init(unresolved: ["A", "B"], candidates: []))
+        let event = try AISpeakerEvent(request: r, slot: "A", name: name, evidence: "[02:37:56] 議題を振っている", recordedAt: Date())
+        var names = SpeakerNames()
+        #expect(throws: (any Error).self) {
+            try names.identify(event, participant: "迅雷", candidates: [], detected: [0, 1], mapping: [:], lines: lines,
+                               texts: ["山田さんからお願いします。", "はい。"])
+        }
+    }
+    /// 話者名に「:」が入ると、整形した行からは本文の始まりを決められない。本文そのもので確かめる。
+    @Test func 話者名の欄にだけ出る名前は本文に出てきた人名として数えない() throws {
+        var names = SpeakerNames([2: "所属: 山田"])
+        let lines = ["[14:05:10] 所属: 山田: はい。", "[14:05:12] 話者A: お願いします。"]
+        let r = try request(fixed: .init(unresolved: ["A"], candidates: []))
+        let event = try AISpeakerEvent(request: r, slot: "A", name: "山田", evidence: "[14:05:12] お願いします。", recordedAt: Date())
+        #expect(throws: (any Error).self) {
+            try names.identify(event, participant: "迅雷", candidates: [], detected: [0, 2], mapping: [:], lines: lines,
+                               texts: ["はい。", "お願いします。"])
+        }
+        #expect(SpeakerEvidence.mentions("山田", in: ["山田さんからお願いします。"]))
+        #expect(!SpeakerEvidence.mentions("山田", in: ["はい。", "お願いします。"]))
+    }
+    @Test(arguments: ["", "改\t行", String(repeating: "長", count: 65)])
+    func 名前として扱えない形は受けない(_ name: String) throws {
+        let r = try request()
+        #expect(throws: (any Error).self) {
+            try AISpeakerEvent(request: r, slot: "A", name: name, evidence: "[14:05:10] タダシです", recordedAt: Date())
+        }
     }
     @Test func キーの既定とmanifest互換と型を検証する() throws {
         let old = ResolvedAIConfig(config: AIConfig(), home: URL(fileURLWithPath: "/tmp"))

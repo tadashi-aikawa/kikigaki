@@ -32,11 +32,13 @@ public enum SpeakerIdentificationPrompt {
     public static let builtIn = """
     ## 話者名の割当
     participant.speaker_identification があるときだけ、通常の依頼に加えて話者名を割り当ててください。
-    新しく読んだ範囲に直接の根拠がある未確定の枠だけが対象です。直接の根拠は本人の名乗り、または名前で呼ばれて直後に応答した発言です。
-    役割・口調・消去法から名前を類推してはいけません。候補名の中で一意に対応するときだけ返し、確信が無ければ何も返さないでください。
+    未確定の枠だけが対象です。読んだ会話の流れから、その枠の話者が誰かを推定してください。
+    根拠には、本人の名乗り、名前で呼ばれて応答した発言、名前を挙げて話を振られた流れ、ほかの人の呼びかけや話題の受け答えを使えます。
+    名前は candidates か、会話の本文に出てきた人名から選びます。役割名や、会話に出てこない名前は付けないでください。
+    同じ名前を複数の枠へ付けないでください。確信が持てない枠は返さないでください。
     accept の後、progress --replying と reply の前に、該当する枠ごとに同梱CLIの speaker を呼んでください。作業許可が無効でも speaker は返せます。
-    --slot は unresolved の A〜H、--name は candidates の名前を使います。--session、--request、--token はこの依頼の固定値です。
-    根拠は新しく読んだ会話の行を [HH:MM:SS] 付きで引用し、stdin へ渡してください。根拠はUTF-8で2 KiB以内です。
+    --slot は unresolved の A〜H、--name は選んだ名前を使います。--session、--request、--token はこの依頼の固定値です。
+    根拠は会話の行を [HH:MM:SS] 付きで引用し、そう推定した理由を1文添えて stdin へ渡してください。根拠はUTF-8で2 KiB以内です。
     """
     public static func compose(question: String, identification: SpeakerIdentification?) -> String {
         guard identification != nil else { return question }
@@ -75,9 +77,14 @@ public struct AISpeakerEvent: Codable, Equatable, Sendable {
               sessionGeneration == request.envelope.participant.sessionGeneration,
               eventID == "\(requestID.uuidString)/speaker/\(slot)", recordedAt.timeIntervalSince1970.isFinite,
               let fixed = request.envelope.participant.speakerIdentification,
-              fixed.unresolved.contains(slot), fixed.candidates.contains(name),
-              name == SpeakerNames.normalized(name) else { throw AIError.mismatch }
+              fixed.unresolved.contains(slot), Self.validName(name) else { throw AIError.mismatch }
         try AIValidation.text(evidence, limit: Self.evidenceBytes, nonempty: true)
+    }
+    /// 候補名に加え、会話の本文に出てきた人名も付けてよい。本文に出てきたかは取り込み時に会話の行で確かめる。
+    /// ここでは名前として扱える形かだけを見る。
+    public static let nameLimit = 64
+    public static func validName(_ name: String) -> Bool {
+        name == SpeakerNames.normalized(name) && AIValidation.singleLine(name) && name.count <= nameLimit
     }
     public func sameContent(as other: Self) -> Bool {
         // 再送の時刻は同一性に含めず、最初のイベントを保持する。
@@ -115,6 +122,11 @@ public enum SpeakerEvidence {
         return regex.matches(in: evidence, range: NSRange(location: 0, length: source.length)).map {
             String(source.substring(with: $0.range).dropFirst().dropLast())
         }
+    }
+    /// 会話の本文に名前が出てきたか。発言の本文だけを見て、整形した行の時刻と話者名は見ない。
+    /// 話者名に「:」が入ると、整形した行からは本文の始まりを決められないため。
+    public static func mentions(_ name: String, in texts: [String]) -> Bool {
+        texts.contains { $0.contains(name) }
     }
     public static func exists(_ evidence: String, in lines: [String]) -> Bool {
         let stamps = timestamps(in: evidence)

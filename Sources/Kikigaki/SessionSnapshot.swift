@@ -60,6 +60,8 @@ struct SessionSnapshot {
     var audioFile: AudioFile?
     /// 書き起こし中は、録音の操作のうち時間の流れに依存するものを止める
     var transcribingFile: Bool { audioFile != nil && state != .idle }
+    /// 書き起こしを保存した後の仕上げ。「完了」までは話者を決めてAIへ頼める
+    var reviewingFile = false
 
     var canSubmitTyped: Bool { (state == .recording || state == .paused) && !transcribingFile }
     var canPauseOrResume: Bool { state.canPauseOrResume && !transcribingFile }
@@ -87,8 +89,9 @@ struct SessionSnapshot {
 
     /// AIへ新しく依頼を出せるのは録音中と一時停止中だけ。停止後はherdrのペインを閉じるので、
     /// 会議が終わった後の相談は送らない(自動の「最後の1回」はこの入口を通らない)。
+    /// 例外として、音声ファイルの仕上げ中は保存後でも送れる。「完了」でペインを閉じる。
     var canSubmitAI: Bool {
-        markdownURL != nil && (state == .recording || state == .paused) && !transcribingFile
+        markdownURL != nil && ((state == .recording || state == .paused) && !transcribingFile || reviewingFile)
     }
 
     /// 自動の段のメニューから即時送信する入口。

@@ -45,43 +45,13 @@ import Testing
         #expect(decoded.sourceAudio == nil)
     }
 
-    @Test func 書き起こし中のメニューの表題は中止() {
+    @Test func 書き起こし中のメニューの表題は中止で仕上げ中は完了() {
         #expect(RecordingState.recording.startStopTitle(transcribingFile: true) == "書き起こしを中止")
         #expect(RecordingState.recording.statusLabel(transcribingFile: true) == "書き起こし中")
         #expect(RecordingState.finishing.statusLabel(transcribingFile: true) == "保存中")
-        #expect(RecordingState.idle.startStopTitle(transcribingFile: true) == "録音を開始")
+        #expect(RecordingState.idle.startStopTitle(transcribingFile: false, reviewingFile: true) == "仕上げを完了")
+        #expect(RecordingState.idle.statusLabel(transcribingFile: false, reviewingFile: true) == "仕上げ中")
+        #expect(RecordingState.idle.startStopTitle(transcribingFile: false) == "録音を開始")
         #expect(RecordingState.recording.startStopTitle(transcribingFile: false) == "録音を停止")
-    }
-
-    @Test func 完了時に送信は周期を飛ばし保存後の1回だけを送る() throws {
-        let now = Date(timeIntervalSince1970: 1_000)
-        var state = AIScheduleState(meetingID: UUID())
-        try state.startFinalOnly(options: .init(prompt: "議事録を作成", interval: 180, workAllowed: false), runID: UUID())
-        #expect(state.finalOnly)
-        #expect(state.phase == .awaitingSave)
-        #expect(state.nextFire == nil)
-        #expect(state.fireNow(now: now, availability: .ready, hasChanges: true) == .none)
-        #expect(state.tick(now: now.addingTimeInterval(3600), availability: .ready, hasChanges: true) == .none)
-        // 書き起こしの終わりは録音の停止と同じ経路を通るが、周期が無いので状態を変えない。
-        state.recordingStopped()
-        #expect(state.phase == .awaitingSave)
-        #expect(state.finalSaveCompleted(succeeded: true) == .none)
-        #expect(state.finalDecision(availability: .ready, hasChanges: true) == .send(final: true))
-        #expect(state.phase == .stopped)
-        // 新しい会議で録音の自動送信を始めたら、完了時の扱いを持ち越さない。
-        try state.start(options: .init(prompt: "次"), now: now, runID: UUID())
-        #expect(!state.finalOnly)
-    }
-
-    @Test func 完了時に送信は保存に失敗したら送らない() throws {
-        var state = AIScheduleState(meetingID: UUID())
-        try state.startFinalOnly(options: .init(prompt: "議事録を作成"), runID: UUID())
-        #expect(state.finalSaveCompleted(succeeded: false) == .skipped(.saveFailed))
-        #expect(state.phase == .stopped)
-        #expect(throws: AIError.self) {
-            var running = AIScheduleState(meetingID: UUID())
-            try running.start(options: .init(prompt: "録音"), now: Date(), runID: UUID())
-            try running.startFinalOnly(options: .init(prompt: "二重"), runID: UUID())
-        }
     }
 }

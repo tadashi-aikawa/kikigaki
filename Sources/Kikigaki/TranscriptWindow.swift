@@ -420,12 +420,13 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         // 開始は前の会議の表示中も朱の塗りにし、同じ操作を状態で別物に見せない。
         startStopButton.emphasis = value.state.canStart ? .primary : .accentOutline
         pauseButton.emphasis = .goldOutline
-        // 音声ファイルの書き起こしの停止は中止で、保存しない。
+        // 音声ファイルの書き起こしの停止は中止で、保存しない。仕上げ中は「新しい録音」の代わりに「完了」を出す。
         let cancels = value.transcribingFile && value.state.canStop
-        let title = value.state == .idle && value.markdownURL != nil ? "新しい録音"
+        let title = value.reviewingFile ? "完了"
+            : value.state == .idle && value.markdownURL != nil ? "新しい録音"
             : value.state.canStart ? value.state.startStopTitle : cancels ? "中止" : "停止"
-        symbol(startStopButton, name: value.state.canStart ? "record.circle" : cancels ? "xmark" : "stop.fill",
-               title: title, showTitle: !compact)
+        let icon = value.reviewingFile ? "checkmark" : value.state.canStart ? "record.circle" : cancels ? "xmark" : "stop.fill"
+        symbol(startStopButton, name: icon, title: title, showTitle: !compact)
         symbol(pauseButton, name: value.state == .paused ? "play.fill" : "pause.fill",
                title: value.state.pauseResumeTitle, showTitle: !compact)
         // 最長ラベルでも左右に14pt以上を残し、開始/停止・一時停止/再開で幅を変えない。
