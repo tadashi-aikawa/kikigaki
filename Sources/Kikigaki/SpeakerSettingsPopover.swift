@@ -51,8 +51,9 @@ final class SpeakerSettingsPopover: NSObject, NSPopoverDelegate {
             label.lineBreakMode = .byTruncatingTail
             label.widthAnchor.constraint(equalToConstant: 113).isActive = true
             let dot = SpeakerAttributionDot()
-            dot.widthAnchor.constraint(equalToConstant: 5).isActive = true
-            dot.heightAnchor.constraint(equalToConstant: 5).isActive = true
+            // 確度の低い推定の「?」の札が入る大きさを常に取り、行ごとに選択欄の位置をずらさない。点は中央に描く。
+            dot.widthAnchor.constraint(equalToConstant: 14).isActive = true
+            dot.heightAnchor.constraint(equalToConstant: 14).isActive = true
             let choice = NSPopUpButton()
             choice.widthAnchor.constraint(equalToConstant: 248).isActive = true
             choice.target = self; choice.action = #selector(mappingChanged(_:))

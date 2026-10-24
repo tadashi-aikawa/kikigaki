@@ -91,7 +91,7 @@ acceptの後、続きの作業を始める前に返す。resolveは通常のrepl
 ```text
 <cli_path> accept --session <session_path> --request <request_id> --token <request_token>
 <cli_path> minutes --session <session_path> --request <request_id> --token <request_token> --path <絶対パス>
-<cli_path> speaker --session <session_path> --request <request_id> --token <request_token> --slot <A〜H> --name <候補名>
+<cli_path> speaker --session <session_path> --request <request_id> --token <request_token> --slot <A〜H> --name <候補名か会話に出てきた人名> [--confidence low]
 <cli_path> progress --session <session_path> --request <request_id> --token <request_token> --editing [--total <1〜999>]
 <cli_path> progress --session <session_path> --request <request_id> --token <request_token> --replying
 <cli_path> reply --session <session_path> --request <request_id> --token <request_token> --kind answered
@@ -111,7 +111,8 @@ progressはstdinを読まず、本文も進捗率も渡さない。進行表示�
 
 - 読んだ会話の流れから、未確定の枠の話者を推定して返す。
     - 根拠に使えるもの: 本人の名乗り、名前で呼ばれて応答した発言、名前を挙げて話を振られた流れ、ほかの人の呼びかけや受け答え。
-    - 返さない場合: 確信が持てない、同じ名前が別の枠にも当てはまる。
+    - 確信が低くても、いちばん可能性の高い名前を返す。そのときは `--confidence low` を付ける。人が確かめて直す。
+    - 返さない場合: 当てはまる名前が会話に出てこない。同じ名前を複数の枠へ付けない。
 - `--slot` は固定された `unresolved`、`--name` は `candidates` か会話の本文に出てきた人名から選ぶ。
     - 付けない名前: 役割名、会話に出てこない名前。アプリは候補にも本文にも無い名前を取り込まない。
     - 根拠: 会話の行を `[HH:MM:SS]` 付きで引用し、推定した理由を1文添えてstdinへ渡す。UTF-8で2 KiB以内、NULは不可。

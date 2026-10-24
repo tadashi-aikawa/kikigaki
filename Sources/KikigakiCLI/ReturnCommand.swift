@@ -19,7 +19,7 @@ struct ReturnCommand: Sendable {
                 guard action == "progress", options[name] == nil else { throw AIError.invalid("arguments") }
                 options[name] = "true"; index += 1
             } else if name.hasPrefix("--") {
-                guard ["--session", "--request", "--token", "--kind", "--reason", "--provider", "--path", "--total", "--slot", "--name", "--question", "--speaker", "--time", "--appendices"].contains(name),
+                guard ["--session", "--request", "--token", "--kind", "--reason", "--provider", "--path", "--total", "--slot", "--name", "--confidence", "--question", "--speaker", "--time", "--appendices"].contains(name),
                       options[name] == nil, index + 1 < arguments.count else { throw AIError.invalid("arguments") }
                 options[name] = arguments[index + 1]; index += 2
             } else {
@@ -32,7 +32,8 @@ struct ReturnCommand: Sendable {
         if action == "speaker" { required.formUnion(["--slot", "--name"]) }
         if action == "resolve" { required.formUnion(["--question", "--speaker", "--time"]) }
         let allowed = action == "reply" ? required.union(["--kind", "--reason", "--appendices"])
-            : action == "progress" ? required.union(["--editing", "--replying", "--total"]) : required
+            : action == "progress" ? required.union(["--editing", "--replying", "--total"])
+            : action == "speaker" ? required.union(["--confidence"]) : required
         // 段はどちらか1つ必須。総数は編集にしか添えられない。
         let editing = options["--editing"] != nil, replying = options["--replying"] != nil
         guard required.isSubset(of: Set(options.keys)), Set(options.keys).isSubset(of: allowed),
@@ -126,8 +127,13 @@ struct ReturnCommand: Sendable {
             let bytes = try input()
             guard bytes.count <= AISpeakerEvent.evidenceBytes else { throw AIError.tooLarge }
             guard let evidence = String(data: bytes, encoding: .utf8) else { throw AIError.invalid("UTF-8") }
+            // 確度は low と high だけ。省略は確かな推定。
+            let confidence = try options["--confidence"].map {
+                guard let value = AISpeakerEvent.Confidence(rawValue: $0) else { throw AIError.invalid("confidence") }
+                return value
+            }
             let event = try AISpeakerEvent(request: request, slot: options["--slot"]!, name: options["--name"]!,
-                                           evidence: evidence, recordedAt: now)
+                                           evidence: evidence, recordedAt: now, confidence: confidence)
             let encoded = try AIJSON.encode(event)
             guard encoded.count <= AILimits.eventBytes else { throw AIError.tooLarge }
             try saveIdentity(session: session, environment: environment, files: files, sessions: sessions, generation: generation)

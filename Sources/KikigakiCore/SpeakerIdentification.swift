@@ -35,7 +35,9 @@ public enum SpeakerIdentificationPrompt {
     未確定の枠だけが対象です。読んだ会話の流れから、その枠の話者が誰かを推定してください。
     根拠には、本人の名乗り、名前で呼ばれて応答した発言、名前を挙げて話を振られた流れ、ほかの人の呼びかけや話題の受け答えを使えます。
     名前は candidates か、会話の本文に出てきた人名から選びます。役割名や、会話に出てこない名前は付けないでください。
-    同じ名前を複数の枠へ付けないでください。確信が持てない枠は返さないでください。
+    同じ名前を複数の枠へ付けないでください。
+    確信が低くても、いちばん可能性の高い名前を返してください。そのときは speaker に --confidence low を付けます。人が確かめて直します。
+    返さないのは、当てはまる名前が会話に出てこない枠だけです。
     accept の後、progress --replying と reply の前に、該当する枠ごとに同梱CLIの speaker を呼んでください。作業許可が無効でも speaker は返せます。
     --slot は unresolved の A〜H、--name は選んだ名前を使います。--session、--request、--token はこの依頼の固定値です。
     根拠は会話の行を [HH:MM:SS] 付きで引用し、そう推定した理由を1文添えて stdin へ渡してください。根拠はUTF-8で2 KiB以内です。
@@ -60,11 +62,16 @@ public struct AISpeakerEvent: Codable, Equatable, Sendable {
     public let slot: String
     public let name: String
     public let evidence: String
+    /// AIの申告する確度。欠損は確かな推定で、旧イベントもそう読む。
+    public let confidence: Confidence?
+    public enum Confidence: String, Codable, Sendable { case high, low }
+    public var isLowConfidence: Bool { confidence == .low }
     public var filename: String { "\(requestID.uuidString).speaker.\(slot).json" }
 
-    public init(request: AIRequest, slot: String, name: String, evidence: String, recordedAt: Date) throws {
+    public init(request: AIRequest, slot: String, name: String, evidence: String, recordedAt: Date,
+                confidence: Confidence? = nil) throws {
         schemaVersion = 1; kind = "speaker"; self.slot = slot; self.name = SpeakerNames.normalized(name)
-        self.evidence = evidence; self.recordedAt = recordedAt
+        self.evidence = evidence; self.recordedAt = recordedAt; self.confidence = confidence
         requestID = request.id; meetingID = request.envelope.meetingID; snapshotID = request.envelope.snapshotID
         sessionGeneration = request.envelope.participant.sessionGeneration
         eventID = "\(requestID.uuidString)/speaker/\(slot)"
@@ -91,11 +98,12 @@ public struct AISpeakerEvent: Codable, Equatable, Sendable {
         schemaVersion == other.schemaVersion && eventID == other.eventID && kind == other.kind
             && meetingID == other.meetingID && requestID == other.requestID && snapshotID == other.snapshotID
             && sessionGeneration == other.sessionGeneration && slot == other.slot && name == other.name && evidence == other.evidence
+            && isLowConfidence == other.isLowConfidence
     }
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version", eventID = "event_id", kind, meetingID = "meeting_id"
         case requestID = "request_id", snapshotID = "snapshot_id", sessionGeneration = "session_generation"
-        case recordedAt = "recorded_at", slot, name, evidence
+        case recordedAt = "recorded_at", slot, name, evidence, confidence
     }
 }
 
@@ -109,8 +117,9 @@ public struct SpeakerAttribution: Codable, Equatable, Sendable {
         let quote = evidenceLine[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
         return "\(stamp)「\(quote)」"
     }
-    public var tooltip: String { "\(participant)の推定 · \(citation)" }
-    public var detail: String { "\(participant) \(citation)" }
+    private var confidenceNote: String { event.isLowConfidence ? "(確度: 低)" : "" }
+    public var tooltip: String { "\(participant)の推定\(confidenceNote) · \(citation)" }
+    public var detail: String { "\(participant)\(confidenceNote) \(citation)" }
     public init(event: AISpeakerEvent, participant: String) { self.event = event; self.participant = participant }
 }
 

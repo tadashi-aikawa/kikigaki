@@ -79,9 +79,18 @@ final class SpeakerButton: HoverButton {
     override var drawsHoverBackground: Bool { false }
 }
 
-/// 名前の由来だけを示す。文字も時間による消去も置かず、人の確認状態をそのまま描く。
+/// 名前の由来だけを示す。時間による消去は置かず、人の確認状態をそのまま描く。
+/// 確度の低い推定は、点の代わりに紫の丸に白抜きの「?」を描く。人が先に確かめる名前を見つけやすくするため。
 final class SpeakerAttributionDot: NSView {
-    override var intrinsicContentSize: NSSize { NSSize(width: 5, height: 5) }
+    private(set) var lowConfidence = false
+    /// 点は5pt。「?」の札は名前の文字に合わせて倍率を掛ける
+    static func side(for attribution: SpeakerAttribution?, scale: CGFloat = 1) -> CGFloat {
+        attribution?.event.isLowConfidence == true ? 14 * scale : 5
+    }
+    override var intrinsicContentSize: NSSize {
+        let side = lowConfidence ? 14 : 5
+        return NSSize(width: side, height: side)
+    }
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         isHidden = true
@@ -93,11 +102,22 @@ final class SpeakerAttributionDot: NSView {
         isHidden = attribution == nil
         toolTip = attribution?.tooltip
         setAccessibilityLabel(attribution?.tooltip)
+        if lowConfidence != (attribution?.event.isLowConfidence == true) {
+            lowConfidence.toggle()
+            invalidateIntrinsicContentSize()
+        }
         needsDisplay = true
     }
     override func draw(_ dirtyRect: NSRect) {
         Washi.ai.background.setFill()
-        NSBezierPath(ovalIn: bounds).fill()
+        // 枠が札の大きさでも、点は5ptで中央に描く。
+        let side = lowConfidence ? min(bounds.width, bounds.height) : min(5, bounds.width, bounds.height)
+        NSBezierPath(ovalIn: NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side)).fill()
+        guard lowConfidence else { return }
+        let mark = NSAttributedString(string: "?", attributes: [
+            .font: NSFont.systemFont(ofSize: bounds.height * 0.72, weight: .heavy), .foregroundColor: Washi.paper])
+        let size = mark.size()
+        mark.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2))
     }
 }
 
@@ -376,8 +396,10 @@ final class TranscriptRow: NSView, DocumentRow {
         previousNameLabel.frame = nameLabel.frame
         speakerRevealCoin.frame = avatar.frame
         speakerButton.frame = NSRect(x: 18, y: 5, width: nameWidth + bodyX - 14, height: max(29, 29 * textScale))
-        attributionDot.frame = NSRect(x: bodyX + nameWidth + 5, y: 8 + 9 * textScale - 2.5, width: 5, height: 5)
-        timeLabel.frame = NSRect(x: bodyX + nameWidth + (attributionDot.isHidden ? 12 : 18), y: 8, width: 62 * textScale, height: 18 * textScale)
+        // 点は5pt、確度の低い推定の「?」は名前の行の高さに合わせた札。どちらも名前の行の中心にそろえる。
+        let mark: CGFloat = attributionDot.lowConfidence ? 14 * textScale : 5
+        attributionDot.frame = NSRect(x: bodyX + nameWidth + 5, y: 8 + 9 * textScale - mark / 2, width: mark, height: mark)
+        timeLabel.frame = NSRect(x: bodyX + nameWidth + (attributionDot.isHidden ? 12 : 13 + mark), y: 8, width: 62 * textScale, height: 18 * textScale)
         let levelHeight: CGFloat = hasLevelNote ? 20 * textScale : 0
         body.frame = NSRect(x: bodyX, y: 31 * textScale, width: bodyWidth(bounds.width), height: max(20 * textScale, bounds.height - 31 * textScale - 5 - levelHeight - imagesHeight))
         typedBody.frame = body.frame

@@ -50,14 +50,15 @@ extension AppKitTests {
         return try #require(session.aiRecord?.controller.conversation.questions.last?.request)
     }
     private func deliver(_ session: MeetingSession, request: AIRequest, slot: String = "A", name: String = "タダシ",
-                         evidence: String? = nil, at: Date = Date()) throws -> AISpeakerEvent {
+                         evidence: String? = nil, at: Date = Date(), lowConfidence: Bool = false) throws -> AISpeakerEvent {
         let lines = TranscriptRenderer.lines(session.snapshot.utterances, names: session.snapshot.names,
                                               timeline: session.snapshot.timeline)
         let line = try #require(evidence ?? lines.first)
-        let event = try AISpeakerEvent(request: request, slot: slot, name: name, evidence: line, recordedAt: at)
+        let event = try AISpeakerEvent(request: request, slot: slot, name: name, evidence: line, recordedAt: at,
+                                       confidence: lowConfidence ? .low : nil)
         let p = request.envelope.participant
         _ = try ReturnCommand(["speaker", "--session", p.sessionPath, "--request", request.id.uuidString,
-            "--token", p.requestToken, "--slot", slot, "--name", name])
+            "--token", p.requestToken, "--slot", slot, "--name", name] + (lowConfidence ? ["--confidence", "low"] : []))
             .execute(input: { Data(line.utf8) }, environment: [:], now: at)
         return event
     }
@@ -306,6 +307,45 @@ extension AppKitTests {
         #expect(descendants(settings.contentView).compactMap { $0 as? SpeakerAttributionDot }.allSatisfy { $0.isHidden })
         let confirmed = window.makeSpeakerPopover(slot: 0)
         #expect(confirmed.evidenceLabel.isHidden)
+    }
+
+    /// 確度の低い推定は、点の代わりに紫の丸に白抜きの「?」を出す。人が先に確かめる名前を見つけやすくするため。
+    @Test(arguments: [1.0, 2.0])
+    func 確度の低い推定は点の代わりに紫の札で示し人が確かめると消える(scale: Double) async throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(root), request = try await submit(session)
+        let lines = TranscriptRenderer.lines(session.snapshot.utterances, names: session.snapshot.names, timeline: session.snapshot.timeline)
+        _ = try deliver(session, request: request)
+        _ = try deliver(session, request: request, slot: "C", name: "田中", evidence: lines.last, lowConfidence: true)
+        session.aiRecord?.controller.scan()
+        let names = session.snapshot.names
+        #expect(names.attributions[0]?.event.isLowConfidence == false)
+        #expect(names.attributions[2]?.event.isLowConfidence == true)
+        #expect(names.attributions[2]?.tooltip.hasPrefix("迅雷の推定(確度: 低) · ") == true)
+        let defaults = MinutesTestDefaults()
+        let textDefaults = try #require(UserDefaults(suiteName: UUID().uuidString))
+        textDefaults.set(Int(scale * 100), forKey: TranscriptWindowController.textScaleDefaultsKey)
+        let window = TranscriptWindowController(shouldReduceMotion: { true }, minutesDefaults: defaults.value, textDefaults: textDefaults)
+        window.window?.setFrameAutosaveName("")
+        window.window?.setContentSize(NSSize(width: 600, height: 460))
+        window.apply(session.snapshot); window.show()
+        defer { window.window?.close() }
+        let content = try #require(window.window?.contentView)
+        content.layoutSubtreeIfNeeded()
+        let marks = descendants(content).compactMap { $0 as? SpeakerAttributionDot }.filter { !$0.isHidden }
+        #expect(marks.filter(\.lowConfidence).count == 1 && marks.filter { !$0.lowConfidence }.count == 1)
+        for mark in marks where mark.lowConfidence { #expect(abs(mark.frame.height - 14 * scale) < 0.5) }
+        try capture("speaker-ai-low-confidence-\(Int(scale * 100))", view: content)
+        let settings = SpeakerSettingsPopover(snapshot: session.snapshot)
+        settings.contentView.layoutSubtreeIfNeeded()
+        #expect(descendants(settings.contentView).compactMap { $0 as? SpeakerAttributionDot }.filter { !$0.isHidden && $0.lowConfidence }.count == 1)
+        if scale == 1 { try capture("speaker-ai-low-confidence-settings", view: settings.contentView) }
+        // 人が確かめた枠は、確度によらず印を消す。
+        session.rename(slot: 2, to: "田中")
+        window.apply(session.snapshot)
+        content.layoutSubtreeIfNeeded()
+        #expect(descendants(content).compactMap { $0 as? SpeakerAttributionDot }.filter { !$0.isHidden && $0.lowConfidence }.isEmpty)
     }
 
     @Test(arguments: ["recording", "paused", "human", "stopped", "next-meeting"])

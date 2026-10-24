@@ -45,6 +45,18 @@ import KikigakiAIIO
         _ = try ReturnCommand(f.args("speaker", ["--slot", "A", "--name", "山田"]))
             .execute(input: { Data(evidence.utf8) }, environment: [:])
     }
+    @Test func 確度は低いときだけ指定でき値と使える命令を検証する() throws {
+        let f = try ReturnCommandTests.Fixture(identification: fixed)
+        _ = try ReturnCommand(f.args("speaker", ["--slot", "A", "--name", "タダシ", "--confidence", "low"]))
+            .execute(input: { Data(evidence.utf8) }, environment: [:])
+        for value in ["medium", "LOW", ""] {
+            #expect(throws: (any Error).self) {
+                try ReturnCommand(f.args("speaker", ["--slot", "C", "--name", "田中", "--confidence", value]))
+                    .execute(input: { Data(evidence.utf8) }, environment: [:])
+            }
+        }
+        #expect(throws: (any Error).self) { try ReturnCommand(f.args("accept", ["--confidence", "low"])) }
+    }
     @Test(arguments: ["", "  ", "タダシ\0", "改\t行", String(repeating: "長", count: 65)])
     func 名前の形と引数を検証する(_ name: String) throws {
         let f = try ReturnCommandTests.Fixture(identification: fixed)

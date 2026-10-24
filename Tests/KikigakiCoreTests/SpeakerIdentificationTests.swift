@@ -165,6 +165,36 @@ import Testing
         #expect(SpeakerEvidence.mentions("山田", in: ["山田さんからお願いします。"]))
         #expect(!SpeakerEvidence.mentions("山田", in: ["はい。", "お願いします。"]))
     }
+    @Test func 確度の低い推定はイベントに残し根拠とAI節に確度を添える() throws {
+        let r = try request()
+        let low = try AISpeakerEvent(request: r, slot: "A", name: "タダシ", evidence: "[14:05:10] タダシです",
+                                     recordedAt: Date(timeIntervalSince1970: 100), confidence: .low)
+        let json = try #require(JSONSerialization.jsonObject(with: AIJSON.encode(low)) as? [String: Any])
+        #expect(json["confidence"] as? String == "low")
+        #expect(try AIInbox.decodeSpeaker(AIJSON.encode(low), filename: low.filename, for: r) == low)
+        // 旧イベントは確度を持たない。確かな推定として読む。
+        let plain = try AISpeakerEvent(request: r, slot: "A", name: "タダシ", evidence: "[14:05:10] タダシです",
+                                       recordedAt: Date(timeIntervalSince1970: 100))
+        #expect(!String(decoding: try AIJSON.encode(plain), as: UTF8.self).contains("confidence"))
+        #expect(!plain.isLowConfidence && !plain.sameContent(as: low))
+        var bad = json; bad["confidence"] = "medium"
+        #expect(throws: (any Error).self) {
+            try AIInbox.decodeSpeaker(JSONSerialization.data(withJSONObject: bad), filename: low.filename, for: r)
+        }
+        let attribution = SpeakerAttribution(event: low, participant: "迅雷")
+        #expect(attribution.tooltip == "迅雷の推定(確度: 低) · 14:05:10「タダシです」")
+        #expect(attribution.detail == "迅雷(確度: 低) 14:05:10「タダシです」")
+        var names = SpeakerNames()
+        try names.identify(low, participant: "迅雷", candidates: ["タダシ"], detected: [0], mapping: [:],
+                           lines: ["[14:05:10] 話者A: タダシです"], texts: ["タダシです"])
+        var conversation = AIConversation(meetingID: r.envelope.meetingID)
+        try conversation.append(r); try conversation.recordSpeaker(low, names: names)
+        let meeting = MeetingMarkdown.Meeting(startedAt: Date(), duration: 1,
+            utterances: [.init(speaker: 0, start: 0, end: 1, text: "タダシです")], names: names, ai: conversation)
+        let markdown = MeetingMarkdown.render(meeting)
+        #expect(markdown.contains("- 話者: A=タダシ\n"))
+        #expect(markdown.contains("- 話者の割当: A → タダシ(確度: 低、根拠: [14:05:10] タダシです)"))
+    }
     @Test(arguments: ["", "改\t行", String(repeating: "長", count: 65)])
     func 名前として扱えない形は受けない(_ name: String) throws {
         let r = try request()

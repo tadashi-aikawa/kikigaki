@@ -166,8 +166,11 @@ final class SpeakerPopover: NSObject, NSTextFieldDelegate {
             label.lineBreakMode = .byTruncatingTail
             list.addSubview(label)
             if let used = row.candidate?.usedBySlot, let attribution = names.attributions[used] {
-                let dot = SpeakerAttributionDot(frame: NSRect(x: min(label.frame.maxX - 8,
-                    label.frame.minX + ceil(label.intrinsicContentSize.width) + 5), y: y + 11.5, width: 5, height: 5))
+                // 印の幅と余白を名前の欄から差し引き、長い名前の末尾や省略記号に重ねない。
+                let side = SpeakerAttributionDot.side(for: attribution)
+                label.frame.size.width -= side + 5
+                let dot = SpeakerAttributionDot(frame: NSRect(x: min(label.frame.maxX + 5,
+                    label.frame.minX + ceil(label.intrinsicContentSize.width) + 5), y: y + 14 - side / 2, width: side, height: side))
                 dot.update(attribution)
                 list.addSubview(dot)
             }
