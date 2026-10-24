@@ -15,6 +15,8 @@ public enum MeetingMarkdown {
         public var audioLevels: AudioLevelTrack?
         public var audioExclusion: AudioExclusion?
         public var showAudioLevels: Bool?
+        /// 音声ファイルの書き起こしで音源にしたファイル名。録音の会議と旧archiveはnil
+        public var sourceAudio: String?
         public var displaysAudioLevels: Bool { showAudioLevels ?? (audioLevels != nil) }
         public var timeline: MeetingTimeline { MeetingTimeline(startedAt: startedAt, pauses: pauses) }
 
@@ -39,6 +41,10 @@ public enum MeetingMarkdown {
         lines.append("")
         lines.append("- 開始: \(stamp)")
         lines.append("- 長さ: \(TranscriptRenderer.elapsed(meeting.duration))")
+        if let sourceAudio = meeting.sourceAudio {
+            // 改行を含むファイル名でもメタ行の外へ書き出さない。
+            lines.append("- 音声: " + sourceAudio.split(whereSeparator: \.isNewline).joined(separator: " "))
+        }
         if let interimSavedAt {
             let clock = formatter(timeZone: timeZone, format: "HH:mm:ss").string(from: interimSavedAt)
             lines.append("- 状態: 録音中の途中保存 (\(clock))")

@@ -8,6 +8,8 @@ final class StatusItem {
     private let statusMenuItem: NSMenuItem
     private let startStopItem: NSMenuItem
     private let pauseResumeItem: NSMenuItem
+    let transcribeFileItem = NSMenuItem(title: "音声ファイルから書き起こす…", action: nil, keyEquivalent: "")
+    var onTranscribeFile: (() -> Void)?
     let minutesItem = NSMenuItem(title: "議事録を表示", action: nil, keyEquivalent: "")
     var onToggleMinutes: (() -> Void)?
 
@@ -56,6 +58,8 @@ final class StatusItem {
         menu.addItem(showItem)
         menu.addItem(.separator())
         menu.addItem(startStopItem)
+        transcribeFileItem.target = self; transcribeFileItem.action = #selector(transcribeFile)
+        menu.addItem(transcribeFileItem)
         menu.addItem(pauseResumeItem)
         menu.addItem(.separator())
         minutesItem.target = self; minutesItem.action = #selector(toggleMinutes)
@@ -73,17 +77,20 @@ final class StatusItem {
         update(state: .idle, elapsed: 0)
     }
 
-    func update(state: RecordingState, elapsed: Double) {
-        statusMenuItem.title = state.canStop ? "\(state.statusLabel)  \(TranscriptRenderer.elapsed(elapsed))" : state.statusLabel
-        startStopItem.title = state.startStopTitle
+    func update(state: RecordingState, elapsed: Double, transcribingFile: Bool = false) {
+        let label = state.statusLabel(transcribingFile: transcribingFile)
+        statusMenuItem.title = state.canStop ? "\(label)  \(TranscriptRenderer.elapsed(elapsed))" : label
+        startStopItem.title = state.startStopTitle(transcribingFile: transcribingFile)
         startStopItem.isEnabled = state.canStart || state.canStop
+        transcribeFileItem.isEnabled = state.canStart
         pauseResumeItem.title = state.pauseResumeTitle
-        pauseResumeItem.isEnabled = state.canPauseOrResume
+        pauseResumeItem.isEnabled = state.canPauseOrResume && !transcribingFile
         item.button?.image = Self.icon(for: state)
-        item.button?.toolTip = "KIKIGAKI \(state.statusLabel)"
+        item.button?.toolTip = "KIKIGAKI \(label)"
     }
 
     @objc private func startStop() { onStartStop?() }
+    @objc private func transcribeFile() { onTranscribeFile?() }
     @objc private func pauseResume() { onPauseResume?() }
     @objc private func showWindow() { onShowWindow?() }
     @objc func toggleMinutes() { onToggleMinutes?() }

@@ -30,6 +30,15 @@ public enum RecordingState: Equatable, Sendable {
     public var canStop: Bool { self == .recording || self == .paused }
     public var canPauseOrResume: Bool { canStop }
 
+    /// 音声ファイルの書き起こし中の表題。停止は中止で、保存しない。仕様は docs/audio-file.md
+    public func startStopTitle(transcribingFile: Bool) -> String {
+        transcribingFile && canStop ? "書き起こしを中止" : startStopTitle
+    }
+
+    public func statusLabel(transcribingFile: Bool) -> String {
+        transcribingFile && self == .recording ? "書き起こし中" : statusLabel
+    }
+
     /// メニューバーに出す短い状態表示
     public var statusLabel: String {
         switch self {

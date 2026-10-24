@@ -26,6 +26,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `RecordingState.swift`: 録音状態とメニュー表題
   - `GlobalHotkey.swift`: 手動宛先へ送るグローバルキーの書式と表記。登録はアプリ側の `GlobalHotkeyRegistration.swift`
   - `SystemAudioMix.swift`: システム音声の3択、出力の3値判定、16kHzの加算とピーク保護
+  - `AudioFile.swift`: 音声ファイルの書き起こしの音源。録音日時の選び方と、開始シート・ヘッダーの表記。仕様は [音声ファイルの書き起こし](docs/audio-file.md)
   - AI設定、独立stream履歴、envelope、質問と受信イベント、AIの返事のMarkdownもここに置く。契約は [AI参加者の設計](docs/ai-participant.md)
 - `Sources/KikigakiAIIO/`: アプリと返送CLIが共有するfd検証、原子的な保存、sessionとフック観測の型
 - `Sources/KikigakiCLI/`: 同梱CLI `kikigaki-cli`。配置は `.app/Contents/Helpers/kikigaki-cli`
@@ -34,7 +35,8 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `skill install|uninstall` は利用者が端末で打つ配布Skillの導入口。モデルの返送では使わない
 - `Sources/Kikigaki/`: 実行ターゲット (AppKit + Speech + FluidAudio)。Swift 5 言語モード (非 Sendable な型を音声スレッドと MainActor で受け渡すため)
   - `MeetingSession.swift`: 音源→WAV(任意)+話者判別+文字起こし→突き合わせ→表示、停止で保存、の流れ
-  - `AudioSource.swift`: `MicSource` / `FileSource` (`--replay` 用) / `WavWriter`
+  - `AudioSource.swift`: `MicSource` / `FileSource` (音声ファイルの書き起こしと `--replay`) / `WavWriter`
+  - `AudioFileProbe.swift` / `AudioFileDropView.swift`: 音声ファイルの長さと録音日時の読み取り、書き起こし窓へのドロップ
   - `SystemAudioHardware.swift` / `SystemAudioCapture.swift` / `MicAndSystemSource.swift`: 出力の判定、プロセスタップとマイクの同時取り込み、継続的な変換、失敗時のマイクへの切替
   - `AppleTranscriber.swift` / `SpeakerDiarizer.swift`: エンジンのラッパー
   - `StartSheet.swift`: 録音開始シート。会議ごとの話者判別・議事録・自動送信を `session.start` の前に決める
@@ -109,7 +111,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | `site/` のページ | 元になる正本 |
 | --- | --- |
 | `getting-started.md` | `site/` が正本。モデル取得は [Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md) |
-| `recording.md` | [録音開始シート](docs/start-sheet.md)、[発話の確定表示](docs/utterance-progress.md)、[話者判別の切替](docs/diarization-toggle.md)、[話者の手動統合](docs/speaker-mapping.md)、[小音量発話の除外](docs/audio-exclusion.md)、[手入力の設計](docs/typed-entry.md)、[書き起こしウィンドウ](docs/transcript-window.md) |
+| `recording.md` | [録音開始シート](docs/start-sheet.md)、[音声ファイルの書き起こし](docs/audio-file.md)、[発話の確定表示](docs/utterance-progress.md)、[話者判別の切替](docs/diarization-toggle.md)、[話者の手動統合](docs/speaker-mapping.md)、[小音量発話の除外](docs/audio-exclusion.md)、[手入力の設計](docs/typed-entry.md)、[書き起こしウィンドウ](docs/transcript-window.md) |
 | `online-meetings.md` | [システム音声の取り込み](docs/system-audio.md) |
 | `ai-participant.md` | [AI参加者の設計](docs/ai-participant.md)、[AI設定の複数プロファイル](docs/ai-profiles.md)、[AIへの定期自動送信](docs/ai-scheduled.md)、[AIを会話の参加者として並べる](docs/ai-timeline.md)、[AIへの受け渡し](docs/ai-handoff.md) |
 | `minutes-and-board.md` | [議事録ペイン](docs/minutes-pane.md)、[議事録の描画と検索](docs/minutes-rendering.md)、[議事録プレビューの設計](docs/minutes-preview.md)、[議論のボード](docs/board.md) |
@@ -137,6 +139,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | [小音量発話の計測](docs/audio-levels.md) | 音量トラックと診断表示、`.levels.json` | 音量の計測・保存を変える前 |
 | [手入力の設計](docs/typed-entry.md) | 手入力の投稿、画像添付、併合、AI文脈 | 手入力・`TranscriptEntries.merge` を変える前 |
 | [録音開始シート](docs/start-sheet.md) | 会議ごとの指定、次の会議の予約 | 開始経路・予約を変える前 |
+| [音声ファイルの書き起こし](docs/audio-file.md) | 入口、開始シートのファイル版、録音日時、流し方、書き起こし中に止める操作、中止 | 音声ファイルの経路・`FileSource` を変える前 |
 | [書き起こしウィンドウ](docs/transcript-window.md) | 配色、行の構造、改名、話者での絞り込み、フッター、ピン留め、幅 | ウィンドウの見た目・操作を変える前 |
 | [議事録ペイン](docs/minutes-pane.md) | 右ペインの操作、履歴、幅と復元、ファイル監視 | 議事録ペインのUIを変える前 |
 | [議事録の描画と検索](docs/minutes-rendering.md) | 対応する記法、検索、Wikiリンク、描画資産の再生成 | 議事録の描画・`web/minutes` を変える前 |
@@ -163,6 +166,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 - [被りの島の補正を段階的に強める試験](docs/records/speaker-overlap-islands.md)
 - [Nemotron fast128 への切替の検証記録](docs/records/nemotron-verification.md)
 - [システム音声取り込みの実現性試作の検証記録](docs/records/system-audio-spike.md)
+- [音声ファイルの書き起こしの試作記録](docs/records/audio-file-spike.md)
 - [議事録プレビューの実装記録](docs/records/minutes-preview-implementation.md)
 - [会議参加モードの検証項目と段1〜5の実装記録](docs/records/ai-participant-implementation.md)
 - [AI参加者の通信境界: 段2の実測](docs/records/ai-participant-spike.md)

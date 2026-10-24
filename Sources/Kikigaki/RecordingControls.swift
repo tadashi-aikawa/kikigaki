@@ -126,20 +126,23 @@ final class RecordingStatusChip: NSStackView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
-        let recording = value.state == .recording
+        // 音声ファイルの書き起こしは録音ではない。朱の面と録音の印は録音中に限る。
+        let file = value.transcribingFile && value.state == .recording
+        let recording = value.state == .recording && !file
         let paused = value.state == .paused
-        let outlined = value.state == .preparing || value.state == .finishing
-        let foreground = recording ? Washi.white : paused ? Washi.ink : Washi.muted
+        let outlined = value.state == .preparing || value.state == .finishing || file
+        let foreground = recording ? Washi.white : paused || file ? Washi.ink : Washi.muted
         layer?.backgroundColor = (recording ? Washi.red : paused ? Washi.gold : .clear).cgColor
-        layer?.borderColor = Washi.muted.cgColor
+        layer?.borderColor = (file ? Washi.rule : Washi.muted).cgColor
         layer?.borderWidth = outlined ? 1 : 0
         mark.stringValue = paused ? "‖" : "●"
         mark.isHidden = !recording && !paused
         label.stringValue = value.state == .idle && value.saved ? "保存済み"
-            : value.state.statusLabel
-        elapsed.stringValue = TranscriptRenderer.elapsed(value.elapsed)
+            : value.state.statusLabel(transcribingFile: value.transcribingFile)
+        // 書き起こし中は処理した位置と全体の長さ。録音の経過時間と同じ読み方にする
+        elapsed.stringValue = file ? value.audioFile?.progress(at: value.elapsed) ?? "" : TranscriptRenderer.elapsed(value.elapsed)
         // 録音の長さは進んでいる間だけ見せる。保存後は隣の時刻帯と数字が並んで紛らわしく、長さは時刻帯のツールチップで読める。
-        elapsed.isHidden = !recording && !paused
+        elapsed.isHidden = !recording && !paused && !file
         for view in [mark, label, elapsed] { view.textColor = foreground }
         // 毎秒届く経過時間でだけ明暗を切り替え、連続的な再合成を発生させない。
         // 同じ秒に音声更新が複数届いても位相は変えない。

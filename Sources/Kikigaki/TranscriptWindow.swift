@@ -7,6 +7,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onSubmitTyped: ((String, [TypedImageDraft]) -> Bool)?
     let typedEntry = TypedEntryField()
     var onStartStop: (() -> Void)?
+    /// 録音していないときに音声ファイルを落とした。仕様は docs/audio-file.md
+    var onDropAudioFile: ((URL) -> Void)?
+    private(set) var audioFileDrop: AudioFileDropView?
     var onPauseResume: (() -> Void)?
     var onCopy: (() -> Void)?
     var onOpenMarkdown: (() -> Void)?
@@ -230,7 +233,10 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             for speaker in value.speakers { _ = avatars.image(for: speaker.avatar) }
         }
         compactFooter.update(value, reduceMotion: shouldReduceMotion())
-        recordingRange.stringValue = value.markdownURL == nil ? "" : value.timeline.clock(at: 0) + "〜"
+        // 音声ファイルの会議は当日とは限らないので、保存後は日付を添える。
+        // 書き起こし中は状態の札が位置と長さで伸びるので添えない。添えると狭い幅で札が押し縮められた。
+        let date = value.state == .idle ? value.audioFile.map { _ in AudioFile.datePrefix(value.timeline.startedAt) } ?? "" : ""
+        recordingRange.stringValue = value.markdownURL == nil ? "" : date + value.timeline.clock(at: 0) + "〜"
             + (value.state == .idle ? value.timeline.clock(at: value.elapsed) : "")
         typedEntry.update(enabled: value.canSubmitTyped,
                           resetDraft: value.state == .preparing && previous.state != .preparing)
@@ -260,8 +266,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             resetFilter()
         }
         startStopButton.isEnabled = value.state.canStart || value.state.canStop
-        pauseButton.isEnabled = value.state.canPauseOrResume
-        pauseButton.isHidden = value.state == .idle
+        pauseButton.isEnabled = value.canPauseOrResume
+        // 音声ファイルの書き起こしは止めて待つものがないので、一時停止を出さない。
+        pauseButton.isHidden = value.state == .idle || value.transcribingFile
         openButton.isHidden = !(value.state == .idle && value.saved)
         statusChip.update(value, reduceMotion: shouldReduceMotion())
         let message = value.headerMessage
@@ -413,9 +420,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         // 開始は前の会議の表示中も朱の塗りにし、同じ操作を状態で別物に見せない。
         startStopButton.emphasis = value.state.canStart ? .primary : .accentOutline
         pauseButton.emphasis = .goldOutline
+        // 音声ファイルの書き起こしの停止は中止で、保存しない。
+        let cancels = value.transcribingFile && value.state.canStop
         let title = value.state == .idle && value.markdownURL != nil ? "新しい録音"
-            : value.state.canStart ? value.state.startStopTitle : "停止"
-        symbol(startStopButton, name: value.state.canStart ? "record.circle" : "stop.fill",
+            : value.state.canStart ? value.state.startStopTitle : cancels ? "中止" : "停止"
+        symbol(startStopButton, name: value.state.canStart ? "record.circle" : cancels ? "xmark" : "stop.fill",
                title: title, showTitle: !compact)
         symbol(pauseButton, name: value.state == .paused ? "play.fill" : "pause.fill",
                title: value.state.pauseResumeTitle, showTitle: !compact)
@@ -653,7 +662,13 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         let entryArea = column([typedEntry, typedEntry.attachmentsView, typedEntry.attachmentError], spacing: 4, inset: 12)
         Washi.surface(entryArea, color: Washi.paper)
-        return column([header, filterBar, searchBar, speakerRevealBanner, separator(), body, entryArea, separator(), footer], spacing: 0, inset: 0)
+        let drop = column([header, filterBar, searchBar, speakerRevealBanner, separator(), body, entryArea, separator(), footer],
+                          spacing: 0, inset: 0, stack: AudioFileDropView())
+        drop.installOverlay()
+        drop.accepts = { [weak self] in self?.snapshot.state.canStart == true }
+        drop.onDrop = { [weak self] in self?.onDropAudioFile?($0) }
+        audioFileDrop = drop
+        return drop
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -694,7 +709,10 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         return stack
     }
     private func column(_ views: [NSView], spacing: CGFloat, inset: CGFloat) -> NSStackView {
-        let stack = NSStackView(views: views)
+        column(views, spacing: spacing, inset: inset, stack: NSStackView())
+    }
+    private func column<Stack: NSStackView>(_ views: [NSView], spacing: CGFloat, inset: CGFloat, stack: Stack) -> Stack {
+        views.forEach(stack.addArrangedSubview)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = spacing
@@ -795,8 +813,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             add("今すぐ送る", #selector(fireAutomaticPressed), enabled: canFireAutomatic)
             add("自動実行解除", #selector(stopAutomaticPressed), enabled: snapshot.ai != nil)
         } else {
+            // 音声ファイルの書き起こし中は周期の送信を後から足さない。
             add("自動実行…", #selector(configureAutomaticPressed),
-                enabled: snapshot.ai != nil && (snapshot.state == .recording || snapshot.state == .paused))
+                enabled: snapshot.ai != nil && (snapshot.state == .recording || snapshot.state == .paused) && !snapshot.transcribingFile)
         }
         return menu
     }

@@ -101,7 +101,7 @@ autoSendPhrases = ["アバンティ", "アヴァンティ"]
 | キー | 既定 | 説明 |
 | --- | --- | --- |
 | `outputDir` | `~/Documents/KIKIGAKI` | Markdown (と録音WAV) の保存先。絶対パスか `~` 始まりだけを受け付ける。相対パスと空文字は設定エラー |
-| `saveRecording` | `false` | 録音WAVを Markdown と並べて残す |
+| `saveRecording` | `false` | 録音WAVを Markdown と並べて残す。音声ファイルの書き起こしには効かない。詳細は [音声ファイルの書き起こし](audio-file.md) |
 | `measureAudioLevels` | `false` | 発話ごとの音量と小音量候補の診断表示と保存。除外の設定とは独立。次の会議から効く。詳細は [小音量発話の計測](audio-levels.md) |
 | `participantsKey` | `participants` | 話者名の候補の「参加者」を読む、議事録のfrontmatterのキー。空白・`:`・`#`・引用符・`[]{},` を含む値、空文字、`-` 始まりは設定エラー。読み方は [書き起こしウィンドウ](transcript-window.md) の「候補の出どころ」 |
 | `autoSendPhrases` | `["アバンティ", "アヴァンティ"]` | プロファイルで未指定の場合に使う共通の声の合図。空配列は無効。最大20要素、各64文字まで。文字列以外、正規化後の空要素・重複は設定エラー。次の会議から効く。詳細は [声の合図](ai-scheduled.md#声の合図) |
@@ -114,7 +114,8 @@ autoSendPhrases = ["アバンティ", "アヴァンティ"]
 
 保存先には 1会議1ファイルで `2026-09-05_1240.md` の形の名前を書く。
 
-- `.wav`: `saveRecording = true` のとき、同名で並べる
+- `.wav`: `saveRecording = true` のとき、同名で並べる。音声ファイルの書き起こしでは書かない
+- 音声ファイルの書き起こしは、会議名を録音した日時で付ける。詳細は [音声ファイルの書き起こし](audio-file.md)
 - `.levels.json`: `measureAudioLevels = true` のとき、音量の記録を同名で残す
 - `<会議名>.attachments/`: 手入力へ貼り付けた画像。詳細は [手入力の設計](typed-entry.md)
 - 同じ分に録音を始め直した場合は、既存の保存物があれば `_2`、`_3` と連番を付ける

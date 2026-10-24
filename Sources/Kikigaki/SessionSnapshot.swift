@@ -56,7 +56,13 @@ struct SessionSnapshot {
     }
     var canChangeDiarization: Bool { state == .idle }
 
-    var canSubmitTyped: Bool { state == .recording || state == .paused }
+    /// 音声ファイルの書き起こしの音源。書き起こし中と、その結果を表示している間だけ持つ。仕様は docs/audio-file.md
+    var audioFile: AudioFile?
+    /// 書き起こし中は、録音の操作のうち時間の流れに依存するものを止める
+    var transcribingFile: Bool { audioFile != nil && state != .idle }
+
+    var canSubmitTyped: Bool { (state == .recording || state == .paused) && !transcribingFile }
+    var canPauseOrResume: Bool { state.canPauseOrResume && !transcribingFile }
     var voiceQuestionPlaceholder: String {
         let last = utterances.lastIndex(where: { $0.kind == .voice })
         if tentativeExcluded || (tentativeText == nil && last.map { excludedRows.contains($0) } == true) {
@@ -82,7 +88,7 @@ struct SessionSnapshot {
     /// AIへ新しく依頼を出せるのは録音中と一時停止中だけ。停止後はherdrのペインを閉じるので、
     /// 会議が終わった後の相談は送らない(自動の「最後の1回」はこの入口を通らない)。
     var canSubmitAI: Bool {
-        markdownURL != nil && (state == .recording || state == .paused)
+        markdownURL != nil && (state == .recording || state == .paused) && !transcribingFile
     }
 
     /// 自動の段のメニューから即時送信する入口。

@@ -37,15 +37,17 @@ struct AIScheduleViewState {
         case .disconnected: skipReason = "接続できないためスキップ中"
         case .ready: if !hasChanges { skipReason = "差分なしでスキップ中" }
         }
-        if schedule.phase != .running { skipReason = "最後の1回を待っています" }
+        // 音声ファイルの書き起こしは開始シートの「完了時に送信」と同じ言葉で出す。
+        let final = schedule.finalOnly ? "完了時に送信" : "最後の1回"
+        if schedule.phase != .running { skipReason = final + "を待っています" }
         toolTip = schedule.options?.prompt ?? ""
         switch schedule.phase {
         case .running:
             let seconds = schedule.options?.interval ?? 180
             let interval = seconds < 60 ? "\(Int(seconds))秒" : "\(Int(seconds / 60))分"
             text = "自動送信 \(interval) · 次 " + (schedule.nextFire.map(Self.clock.string) ?? "—") + target
-        case .awaitingSave: text = "最後の1回 · 保存を待っています" + target
-        case .awaitingFinal: text = "最後の1回 · 返事を待っています" + target
+        case .awaitingSave: text = final + (schedule.finalOnly ? " · 書き起こしを待っています" : " · 保存を待っています") + target
+        case .awaitingFinal: text = final + " · 返事を待っています" + target
         case .stopped: break
         }
     }

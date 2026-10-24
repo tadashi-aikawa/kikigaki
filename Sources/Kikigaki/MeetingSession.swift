@@ -81,6 +81,8 @@ final class MeetingSession {
     private var interimSave = InterimSave()
     private var interimSaveTask: Task<Void, Never>?
     private var interimSaveIntervalSeconds = ResolvedConfig.defaultAutoSaveIntervalSeconds
+    /// 音声ファイルの書き起こしの間だけApp Napを止める
+    private var fileActivity: NSObjectProtocol?
     private var audioLevelMeter: AudioLevelMeter?
     static let audioExclusionDefaultsKey = "KikigakiAudioExclusion"
     private var audioExclusion = AudioExclusion()
@@ -344,8 +346,11 @@ final class MeetingSession {
     }
 
     /// 録音を始める。準備に失敗したら false(理由は snapshot.message とログ)
+    ///
+    /// `audioFile` を渡すと音声ファイルの書き起こしになる。速報を止め、時間の流れに依存する操作を持ち込まない。
+    /// 仕様は docs/audio-file.md
     @discardableResult
-    func start(source: AudioSource) async -> Bool {
+    func start(source: AudioSource, audioFile: AudioFile? = nil) async -> Bool {
         guard snapshot.state.canStart else { return false }
         cancelAIPreparation()
         stopAISchedule()
@@ -356,6 +361,8 @@ final class MeetingSession {
         // 準備中や録音中の再読込で、同じ会議の保存方針を途中から切り替えない。
         let meetingConfig = config
         let diarizationEnabled = nextDiarizationEnabled
+        // 書き起こし中は手動で送らない。宛先が無ければ声の合図も送らない。
+        if audioFile != nil { pendingManualDestination = .init(slot: nil) }
         resetMeetingAIState(meetingConfig)
         consumedAudioTime = 0
         audioLevelMeter = AudioLevelMeter()
@@ -363,6 +370,7 @@ final class MeetingSession {
         showAudioLevels = meetingConfig.measureAudioLevels
         // 開始・停止の進捗は状態チップに任せ、短時間のメッセージでヘッダーを伸縮させない。
         snapshot = SessionSnapshot(state: .preparing, speakers: config.speakers, participantsKey: config.participantsKey)
+        snapshot.audioFile = audioFile
         // 開始シートの指定はここで待機指定へ移す。前の会議のMarkdownはもう snapshot にない。
         if let pendingMinutes { waitingMinutesPath = pendingMinutes.path }
         pendingMinutes = nil
@@ -387,18 +395,22 @@ final class MeetingSession {
             let onResult: ((TranscriptMerge.Snapshot) async -> Void)? = diarizationEnabled ? nil : { @MainActor [weak self] value in
                 self?.publishUndiarized(value, generation: preparation)
             }
-            let transcriber = try await AppleTranscriber(log: log, usesFastResults: true, onResult: onResult)
+            // 音声ファイルは速報を並走させない。表示を急ぐ必要がなく、並走は高精度側の認識結果も変えるため。
+            // 速報なしなら流す速さによらず等倍と同じ結果になる(試作で実測)
+            let transcriber = try await AppleTranscriber(log: log, usesFastResults: audioFile == nil, onResult: onResult)
             let diarizer = loaded.map { SpeakerDiarizer(models: $0) }
             guard snapshot.state == .preparing, preparationID == preparation else { return false }
 
-            startedAt = Date()
+            // 音声ファイルは録った日時を会議の開始にする。ファイル名・行の時刻・保存先の並びを実際の会議と揃える
+            startedAt = audioFile?.recordedAt ?? Date()
             pause.reset(startedAt: startedAt)
             snapshot.timeline = pause.timeline
             handoff = HandoffHistory(startedAt: startedAt)
             try PrivateFileIO.createDirectory(at: meetingConfig.outputDir)
             let markdownURL = try MeetingFiles.reserveMarkdownURL(in: meetingConfig.outputDir, startedAt: startedAt)
             reservation = markdownURL
-            if meetingConfig.saveRecording {
+            // 音声ファイルは元のファイルが残るので、同じ音声を書き出さない。
+            if meetingConfig.saveRecording, audioFile == nil {
                 wav = try WavWriter(url: MeetingFiles.wavURL(for: markdownURL))
             }
             self.transcriber = transcriber
@@ -410,7 +422,8 @@ final class MeetingSession {
             // 実時間の約350倍、SpeechTranscriber も実時間に十分追いつく。試作で実測)
             let (stream, continuation) = AsyncStream<[Float]>.makeStream()
             samplesIn = continuation
-            consumer = makeConsumer(stream: stream, transcriber: transcriber, diarizer: diarizer, wav: wav, generation: preparation)
+            consumer = makeConsumer(stream: stream, transcriber: transcriber, diarizer: diarizer, wav: wav,
+                                    feedGate: (source as? FileSource)?.feedGate, generation: preparation)
             let pause = self.pause
             if let microphone = source as? MicSource {
                 configureMicrophone(microphone, generation: preparation)
@@ -448,8 +461,15 @@ final class MeetingSession {
             snapshot.message = (source as? MicAndSystemSource)?.warning
             do { _ = try previewMinutesStore() }
             catch { snapshot.message = "議事録の設定を引き継げません。パスを指定し直してください" }
-            startAutomaticSchedule()
-            startInterimSaves(intervalSeconds: meetingConfig.autoSaveIntervalSeconds)
+            if audioFile != nil {
+                // 中止では保存しないので途中保存もしない。数十秒で終わる処理でもある。
+                // 窓を隠されてもApp Napで供給の待ちを間引かれないよう、書き起こしの間だけ止める
+                fileActivity = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "音声ファイルの書き起こし")
+                startAutomaticSchedule(finalOnly: true)
+            } else {
+                startAutomaticSchedule()
+                startInterimSaves(intervalSeconds: meetingConfig.autoSaveIntervalSeconds)
+            }
             emit()
             return true
         } catch {
@@ -533,9 +553,11 @@ final class MeetingSession {
                                               audioLevels: audioLevelMeter?.track(includingPartial: true))
         meeting.audioExclusion = audioExclusion
         meeting.showAudioLevels = showAudioLevels
+        meeting.sourceAudio = snapshot.audioFile?.name
         if let url = snapshot.markdownURL {
             archive = MeetingArchive(original: meeting, markdownURL: url)
         }
+        endFileActivity()
 
         snapshot.state = .idle
         snapshot.utterances = merged
@@ -553,6 +575,55 @@ final class MeetingSession {
         startAIPaneCleanup()
         if let note { snapshot.message = note + " / " + (snapshot.message ?? "") }
         emit()
+    }
+
+    /// 待機中のヘッダーへ1行出す。音声ファイルを読めなかったときのように、会議を始めずに断る場面で使う
+    func showMessage(_ text: String) {
+        guard snapshot.state == .idle else { return }
+        snapshot.message = text
+        emit()
+    }
+
+    /// 音声ファイルを流し終えた。消費が終端まで追いつくのを待ってから、録音の停止と同じ保存へ進む。
+    /// 待たずに停止すると、残りを処理する間の進み具合が「保存中」に隠れる。
+    ///
+    /// 流し終えた音源が今の会議のものかを確かめる。中止の後に届いた古い通知で、次の会議を止めないため。
+    func finishFileInput(from finished: FileSource) async {
+        guard snapshot.transcribingFile, snapshot.state == .recording, source === finished else { return }
+        let generation = preparationID
+        samplesIn?.finish()
+        samplesIn = nil
+        _ = await consumer?.value
+        // 待っている間に中止されたり、次の会議が始まったりしていれば止めない。
+        guard preparationID == generation, source === finished else { return }
+        await stop()
+    }
+
+    /// 音声ファイルの書き起こしの中止。保存せず、予約した会議Markdownも消す。仕様は docs/audio-file.md
+    func cancelFileTranscription() async {
+        guard snapshot.transcribingFile, snapshot.state == .recording else { return }
+        stopAISchedule()
+        aiSchedule = nil
+        snapshot.state = .finishing
+        emit()
+        let reservation = snapshot.markdownURL
+        let transcriber = self.transcriber
+        await tearDown()
+        await transcriber?.cancel()
+        endFileActivity()
+        // 途中保存はしないので空のはず。空でなければ利用者の書いたものとして残す。
+        if let reservation, (try? Data(contentsOf: reservation)) == Data() {
+            do { try FileManager.default.removeItem(at: reservation) } catch { log("予約ファイルの片付けに失敗: \(error)") }
+        }
+        snapshot = SessionSnapshot(state: .idle, message: "書き起こしを中止しました")
+        snapshot.speakers = config.speakers
+        snapshot.participantsKey = config.participantsKey
+        emit()
+    }
+
+    private func endFileActivity() {
+        if let fileActivity { ProcessInfo.processInfo.endActivity(fileActivity) }
+        fileActivity = nil
     }
 
     /// 停止後の後片付け。最後の1回と返事待ちの依頼が片付いたら、この会議のAIのペインを閉じる。
@@ -595,6 +666,7 @@ final class MeetingSession {
     }
 
     func togglePause() {
+        guard !snapshot.transcribingFile else { return }
         switch snapshot.state {
         case .recording:
             pause.pause()
@@ -1259,7 +1331,8 @@ final class MeetingSession {
     /// 音声を1本の消費タスクで処理する。WAV書き出し→話者判別→文字起こしの順に同じチャンクを流し、
     /// 0.5秒ごとに突き合わせて表示へ渡す。話者判定は `SpeakerFreeze` の猶予を過ぎた分から凍結する
     private func makeConsumer(
-        stream: AsyncStream<[Float]>, transcriber: AppleTranscriber, diarizer: SpeakerDiarizer?, wav: WavWriter?, generation: UUID
+        stream: AsyncStream<[Float]>, transcriber: AppleTranscriber, diarizer: SpeakerDiarizer?, wav: WavWriter?,
+        feedGate: FileFeedGate? = nil, generation: UUID
     ) -> Task<PipelineResult, Never> {
         let log = self.log
         let trialDump = trialDump
@@ -1274,6 +1347,7 @@ final class MeetingSession {
                 do { try wav?.write(chunk) } catch { log("WAV書き出しに失敗: \(error)") }
                 do { try diarizer?.process(chunk) } catch { log("話者判別に失敗。以後は判定済みの区間だけを使う: \(error)") }
                 do { try transcriber.feed(chunk) } catch { log("文字起こしへの入力に失敗: \(error)") }
+                feedGate?.consume(chunk.count)
                 let consumed = Double(result.fedSamples) / 16000
                 // 区間は判定が進んだときだけ変わる。描画の間引きとは独立に、消費位置と同じ更新で渡す。
                 // AI送信が別々の時点の区間と消費位置を組み合わせないようにするため
@@ -1421,7 +1495,8 @@ extension MeetingSession {
     /// 開始シートを出した会議は**シートの値だけ**を使う。「送らない」を選んだ会議では、
     /// 設定に `autoStart` があっても始めない。シートを出さないreplayと検証だけが設定を使う。
     /// 設定だけで決まる非対話の開始なので、接続先を解決できなければ理由を出して開始しない。
-    func startAutomaticSchedule(now: Date = Date()) {
+    /// `finalOnly` は音声ファイルの書き起こしの「完了時に送信」で、保存後の1回だけを送る。
+    func startAutomaticSchedule(now: Date = Date(), finalOnly: Bool = false) {
         let pending = pendingAutomaticSchedule
         pendingAutomaticSchedule = nil
         guard let helper = automaticHelper else { return }
@@ -1441,8 +1516,8 @@ extension MeetingSession {
         do {
             // replayの秒指定は分の指定より優先する。実行時間に収めるための上書きのため。
             let options = try AIScheduleOptions(prompt: prompt, interval: automaticIntervalOverride ?? interval,
-                                                workAllowed: workAllowed, sendFinal: sendFinal)
-            try startAISchedule(options: options, helper: helper, now: now, profile: profile)
+                                                workAllowed: workAllowed, sendFinal: finalOnly || sendFinal)
+            try startAISchedule(options: options, helper: helper, now: now, profile: profile, finalOnly: finalOnly)
         } catch {
             if case AIError.invalid(let reason) = error { aiScheduleWarning = reason }
             else { aiScheduleWarning = "自動送信を開始できません。宛先と依頼を確認してください" }
@@ -1450,10 +1525,13 @@ extension MeetingSession {
         }
     }
 
-    func startAISchedule(options: AIScheduleOptions, helper: URL, now: Date = Date(), profile: ResolvedAIConfig? = nil) throws {
+    func startAISchedule(options: AIScheduleOptions, helper: URL, now: Date = Date(), profile: ResolvedAIConfig? = nil,
+                         finalOnly: Bool = false) throws {
         guard snapshot.state == .recording || snapshot.state == .paused, meetingAI != nil else {
             throw AIError.invalid("schedule recording state")
         }
+        // 音声ファイルの書き起こし中は「完了時に送信」の1回だけ。周期の送信は時間の流れに依存するので持ち込まない。
+        guard finalOnly || !snapshot.transcribingFile else { throw AIError.invalid("音声ファイルの書き起こし中は自動送信を始められません") }
         if let profile { scheduleAI = profile }
         var options = options
         if let profile = aiScheduleConfiguration, let heading = profile.board {
@@ -1466,7 +1544,8 @@ extension MeetingSession {
                                             workAllowed: options.workAllowed, sendFinal: options.sendFinal)
         }
         var next = aiSchedule ?? AIScheduleState(meetingID: aiMeetingID)
-        try next.start(options: options, now: now, runID: UUID())
+        if finalOnly { try next.startFinalOnly(options: options, runID: UUID()) }
+        else { try next.start(options: options, now: now, runID: UUID()) }
         if let record = aiRecord, let slot = aiScheduleConfiguration?.slot { aiStore?.setAutomaticSlot(slot, for: record) }
         aiSchedule = next
         rangeAutomaticSlot = aiScheduleConfiguration?.slot
@@ -1542,6 +1621,8 @@ extension MeetingSession {
     }
 
     private func observeAutoSendPhrases(now: Date = Date()) {
+        // 音声ファイルの中の合図は、いまの利用者の指示ではない。
+        guard !snapshot.transcribingFile else { return }
         // 通常行はfinalCountの範囲。手入力と暫定末尾はCoreへ渡さない。
         for row in snapshot.utterances where row.kind == .voice {
             guard let event = autoSendPhraseState.observe(row, now: now.timeIntervalSince1970,
@@ -1614,6 +1695,7 @@ extension MeetingSession {
     }
     var manualDraftSendState: ManualDraftSendState {
         guard !meetingAIProfiles.isEmpty else { return .unavailable("AI設定がありません") }
+        guard !snapshot.transcribingFile else { return .unavailable("音声ファイルの書き起こし中は送れません") }
         guard let profile = meetingManualAI else { return .unavailable("手動宛先を指定してください") }
         guard snapshot.state == .recording || snapshot.state == .paused else { return .unavailable("録音中・一時停止中だけ送れます") }
         guard snapshot.markdownURL != nil else { return .unavailable("会議の保存先がありません") }

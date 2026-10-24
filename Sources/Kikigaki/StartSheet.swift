@@ -26,6 +26,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         var manualSlot: Int?
         /// 宛先があるときの自動送信の指定
         var schedule: AIScheduleOptions?
+        /// 音声ファイルの書き起こしの音源。録音ではnil
+        var audioFile: AudioFile?
     }
 
     let window: NSWindow
@@ -91,8 +93,12 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     let aiDetails = NSStackView()
     /// 開始は録音ボタンと同じ朱の面にする。取消と並べても「始めるもの」が一目で分かる。
     let startButton = WashiActionButton()
+    /// 音声ファイルの書き起こしの形で開いたときの音源。録音ではnil。仕様は docs/audio-file.md
+    private(set) var audioFile: AudioFile?
+    let audioFileName = Washi.label(size: 13, weight: .semibold)
+    let audioFileSummary = Washi.label(size: 13, color: Washi.muted)
 
-    init(profiles: [ResolvedAIConfig], diarizationEnabled: Bool, exclusion: AudioExclusion,
+    init(profiles: [ResolvedAIConfig], audioFile: AudioFile? = nil, diarizationEnabled: Bool, exclusion: AudioExclusion,
          minutesPath: String? = nil, minutesHistory: [String] = [],
          nextMeetings: [NextMeeting] = [],
          defaults: UserDefaults = .standard,
@@ -100,10 +106,12 @@ final class StartSheet: NSObject, NSTextViewDelegate {
          outputKind: @escaping () -> AudioOutputKind = { .unknown },
          microphoneName: @escaping () -> String = { MicrophoneDevice.currentName }) {
         self.profiles = profiles
+        self.audioFile = audioFile
         if let remembered = defaults.string(forKey: Self.manualDefaultsKey) {
             defaultManualSlot = remembered.isEmpty ? nil : profiles.first(where: { $0.name == remembered })?.slot ?? profiles.first?.slot
         } else { defaultManualSlot = profiles.first?.slot }
-        self.nextMeetings = NextMeetings(nextMeetings).candidates
+        // 予約は録音の会議のもの。過去の音声へ使うと消費してしまう。
+        self.nextMeetings = audioFile == nil ? NextMeetings(nextMeetings).candidates : []
         self.outputKind = outputKind
         self.microphoneName = microphoneName
         window = StartSheetWindow(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 400),
@@ -135,22 +143,28 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             add(separator(), to: rows)
         }
 
-        // 前回値の保存は開始確定側だけが行う。シート内の選び直しと取消は記憶しない。
-        let audioRadios = [systemAudioAutomatic, systemAudioInclude, systemAudioExclude]
-        for radio in audioRadios { radio.target = self; radio.action = #selector(systemAudioChanged) }
-        selectSystemAudio(systemAudioMode)
-        refreshSystemAudioOutput()
-        let audioChoices = NSStackView(views: audioRadios)
-        audioChoices.orientation = .horizontal; audioChoices.spacing = 14
-        add(row("システム音声", audioChoices), to: rows)
-        add(separator(), to: rows)
-        microphoneLabel.usesSingleLineMode = true
-        microphoneLabel.lineBreakMode = .byTruncatingTail
-        microphoneLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        microphoneLabel.setAccessibilityLabel("マイク")
-        refreshMicrophone()
-        add(row("マイク", microphoneLabel), to: rows)
-        add(separator(), to: rows)
+        if audioFile != nil {
+            // 音声ファイルはシステム音声とマイクを使わない。押せない行を並べず、ファイルの行に置き換える。
+            add(row("音声ファイル", buildAudioFileRow()), to: rows)
+            add(separator(), to: rows)
+        } else {
+            // 前回値の保存は開始確定側だけが行う。シート内の選び直しと取消は記憶しない。
+            let audioRadios = [systemAudioAutomatic, systemAudioInclude, systemAudioExclude]
+            for radio in audioRadios { radio.target = self; radio.action = #selector(systemAudioChanged) }
+            selectSystemAudio(systemAudioMode)
+            refreshSystemAudioOutput()
+            let audioChoices = NSStackView(views: audioRadios)
+            audioChoices.orientation = .horizontal; audioChoices.spacing = 14
+            add(row("システム音声", audioChoices), to: rows)
+            add(separator(), to: rows)
+            microphoneLabel.usesSingleLineMode = true
+            microphoneLabel.lineBreakMode = .byTruncatingTail
+            microphoneLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            microphoneLabel.setAccessibilityLabel("マイク")
+            refreshMicrophone()
+            add(row("マイク", microphoneLabel), to: rows)
+            add(separator(), to: rows)
+        }
 
         // 話者判別。録音開始で会議へ固定するので、始めてからは変えられない。
         for radio in [diarizeOn, diarizeOff] { radio.target = self; radio.action = #selector(diarizationChanged) }
@@ -207,20 +221,24 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         // 自動送信。`[[ai]]` が無ければ区画ごと出さない。
         if !profiles.isEmpty {
             add(separator(), to: rows)
-            let automaticRow = row("自動送信", buildAISection())
+            // 音声ファイルは書き起こしを終えた時点の1回だけ送る。録音の「最後の1回」と同じ送信。
+            let automaticRow = row(audioFile == nil ? "自動送信" : "完了時に送信", buildAISection())
             add(automaticRow, to: rows)
             // 複数行の自動送信の末尾にも、次の区切り線まで10ptの余白を取る。
             rows.setCustomSpacing(10, after: automaticRow)
-            manualDestination.font = .systemFont(ofSize: 13)
-            manualDestination.setAccessibilityLabel("手動送信の宛先")
-            manualDestination.target = self; manualDestination.action = #selector(manualDestinationChanged)
-            add(separator(), to: rows)
-            // 指示が無い宛先でも1行分を残し、選び直しても操作部の位置を変えない。
-            let manualChoices = column([manualDestination, manualAlwaysPromptHint], spacing: 6, detachesHiddenViews: false)
-            add(row("手動送信", manualChoices), to: rows)
-            rebuildDestinationMenu(manual: true)
+            // 書き起こし中は手動で送らない。
+            if audioFile == nil {
+                manualDestination.font = .systemFont(ofSize: 13)
+                manualDestination.setAccessibilityLabel("手動送信の宛先")
+                manualDestination.target = self; manualDestination.action = #selector(manualDestinationChanged)
+                add(separator(), to: rows)
+                // 指示が無い宛先でも1行分を残し、選び直しても操作部の位置を変えない。
+                let manualChoices = column([manualDestination, manualAlwaysPromptHint], spacing: 6, detachesHiddenViews: false)
+                add(row("手動送信", manualChoices), to: rows)
+                rebuildDestinationMenu(manual: true)
+            }
         }
-        stack.addArrangedSubview(Washi.label("録音を開始", size: 17, weight: .semibold))
+        stack.addArrangedSubview(Washi.label(audioFile == nil ? "録音を開始" : "音声ファイルを書き起こす", size: 17, weight: .semibold))
         stack.addArrangedSubview(rows)
 
         let cancel = NSButton(title: "取消", target: self, action: #selector(cancelPressed))
@@ -229,7 +247,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         startButton.target = self; startButton.action = #selector(startPressed)
         startButton.keyEquivalent = "\r"
         startButton.focusRingType = .none
-        startButton.setAccessibilityLabel("録音を開始")
+        startButton.setAccessibilityLabel(audioFile == nil ? "録音を開始" : "書き起こしを開始")
         startButton.refreshStyle()
         startButton.heightAnchor.constraint(equalToConstant: 28).isActive = true
         startButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 96).isActive = true
@@ -478,6 +496,9 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         aiDetails.addArrangedSubview(intervalRow)
         aiDetails.addArrangedSubview(work)
         aiDetails.addArrangedSubview(final)
+        // 音声ファイルは完了時の1回だけなので、間隔と「最後の1回」の選択が無い。
+        intervalRow.isHidden = audioFile != nil
+        final.isHidden = audioFile != nil
         aiSection.orientation = .vertical; aiSection.alignment = .leading; aiSection.spacing = 6
         add(destination, to: aiSection); add(aiDetails, to: aiSection)
         rebuildDestinationMenu()
@@ -485,6 +506,62 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     }
     /// プロンプト欄の高さ。12ptの文字で6行ほど見える。
     static let promptHeight: CGFloat = 100
+
+    /// 「定例.m4a  32:15 · 10/20 10:00 録音  [選び直す…]」
+    private func buildAudioFileRow() -> NSView {
+        audioFileName.lineBreakMode = .byTruncatingMiddle
+        audioFileName.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        audioFileSummary.setContentCompressionResistancePriority(.required, for: .horizontal)
+        refreshAudioFile()
+        let choose = NSButton(title: "選び直す…", target: self, action: #selector(chooseAudioFile))
+        choose.bezelStyle = .rounded
+        choose.setContentHuggingPriority(.required, for: .horizontal)
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let line = NSStackView(views: [audioFileName, audioFileSummary, spacer, choose])
+        line.orientation = .horizontal; line.spacing = 10; line.alignment = .centerY
+        return line
+    }
+    private func refreshAudioFile() {
+        audioFileName.stringValue = audioFile?.name ?? ""
+        audioFileName.toolTip = audioFile?.url.path
+        audioFileSummary.stringValue = audioFile?.summary() ?? ""
+    }
+    @objc private func chooseAudioFile() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false; panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.audio]
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.probeAudioFile(url)
+        }
+    }
+    /// 選び直したファイルを確かめる間は開始させない。前のファイルのまま始めてしまうため。
+    /// 続けて選び直したら、最後に選んだものだけを使う。
+    func probeAudioFile(_ url: URL, load: @escaping (URL) async throws -> AudioFile = AudioFileProbe.load) {
+        let probe = UUID()
+        audioFileProbe = probe
+        startButton.isEnabled = false; startButton.refreshStyle()
+        Task { @MainActor in
+            defer {
+                if audioFileProbe == probe { audioFileProbe = nil; startButton.isEnabled = true; startButton.refreshStyle() }
+            }
+            do {
+                let value = try await load(url)
+                if audioFileProbe == probe { setAudioFile(value) }
+            } catch {
+                if audioFileProbe == probe { showMinutesHint(error.localizedDescription) }
+            }
+        }
+    }
+    private(set) var audioFileProbe: UUID?
+    /// 選び直したファイル。録音の形のシートでは替えない。
+    func setAudioFile(_ value: AudioFile) {
+        guard audioFile != nil else { return }
+        audioFile = value
+        refreshAudioFile()
+        showMinutesHint(nil)
+    }
 
     // MARK: - 宛先
 
@@ -756,11 +833,13 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         let visibleFrame = (parent.screen ?? NSScreen.main)?.visibleFrame ?? parent.frame
         fixedContentHeight = min(reservedBodyHeight, max(1, floor(visibleFrame.height - Self.screenMargin * 2)))
         fit()
-        // 開いているシートだけ追従する。開始後の会議の音源モードは固定する。
-        outputTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.refreshSystemAudioOutput()
-                self?.refreshMicrophone()
+        // 開いているシートだけ追従する。開始後の会議の音源モードは固定する。音声ファイルは追従するものが無い。
+        if audioFile == nil {
+            outputTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.refreshSystemAudioOutput()
+                    self?.refreshMicrophone()
+                }
             }
         }
         parent.beginSheet(window)
@@ -786,9 +865,12 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     /// 画面の値。開始できない入力があれば nil。
     var options: Options? {
         var result = Options(diarizationEnabled: diarizeOn.state == .on, exclusionEnabled: exclusionSwitch.state == .on)
-        result.systemAudioMode = selectedSystemAudioMode
-        result.recordSystemAudio = selectedSystemAudioMode.includes(outputKind())
-        result.manualSlot = selectedManualSlot
+        result.audioFile = audioFile
+        if audioFile == nil {
+            result.systemAudioMode = selectedSystemAudioMode
+            result.recordSystemAudio = selectedSystemAudioMode.includes(outputKind())
+            result.manualSlot = selectedManualSlot
+        }
         if let path = minutesInput {
             guard (try? MinutesPath.validate(path)) != nil else { return nil }
             result.minutesPath = path
@@ -804,8 +886,9 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             let draft = currentDraft
             if profiles.first(where: { $0.slot == slot })?.boardStartIssue(minutesPath: minutesInput) != nil { return nil }
             // 依頼が空・間隔が不正なら自動送信は始めない。録音そのものは始める。
+            // 音声ファイルは「最後の1回」の選択を出さず、完了時の1回を必ず送る。
             if let options = try? AIScheduleOptions(prompt: draft.prompt, interval: Double(draft.minutes) * 60,
-                                                   workAllowed: draft.workAllowed, sendFinal: draft.sendFinal) {
+                                                   workAllowed: draft.workAllowed, sendFinal: audioFile != nil || draft.sendFinal) {
                 result.scheduleSlot = slot
                 result.schedule = options
             }
@@ -814,7 +897,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     }
 
     @objc func startPressed() {
-        guard !editor.hasMarkedText(), !minutesBox.hasMarkedTextForStart else { return }
+        guard !editor.hasMarkedText(), !minutesBox.hasMarkedTextForStart, audioFileProbe == nil else { return }
         guard let value = options else {
             showMinutesHint(minutesInput == nil && selectedSlot.flatMap { slot in profiles.first { $0.slot == slot } }?.board != nil
                 ? BoardPrompt.missingLocation : "絶対パスの.mdファイルを指定してください")

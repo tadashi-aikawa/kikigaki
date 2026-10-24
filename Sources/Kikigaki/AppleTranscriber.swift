@@ -190,6 +190,15 @@ final class AppleTranscriber {
         await store.snapshot()
     }
 
+    /// 結果を待たずに止める。音声ファイルの書き起こしの中止で使い、何も保存しない
+    func cancel() async {
+        for engine in [accurate, fast].compactMap({ $0 }) {
+            engine.inputIn.finish()
+            await engine.analyzer.cancelAndFinishNow()
+            engine.resultsTask?.cancel()
+        }
+    }
+
     /// 入力を閉じて最後の確定結果まで待つ。速報側は結果を捨てて止める
     func finish() async throws -> [TimedToken] {
         if let fast {

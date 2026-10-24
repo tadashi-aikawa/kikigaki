@@ -63,15 +63,34 @@ final class EngineMicrophoneCapture: MicrophoneCapturing {
     deinit { stop() }
 }
 
-/// 音声ファイルをマイクの代わりに流す(開発用の `--replay <file>`)。実時間を待たずに流し、
-/// 流し終えたら `onEnd` を呼ぶ。マイク無しでパイプラインの端から端まで検証するための口
+/// 音声ファイルを流す。流し終えたら `onEnd` を呼ぶ。
+///
+/// 音声ファイルの書き起こし(`paced: false`)は間を置かず、消費に追いつかれるまで流す。
+/// 開発用の `--replay <file>` は録音の模擬なので間を置く(`paced: true`)。
 final class FileSource: AudioSource {
     private let samples: [Float]
     private var task: Task<Void, Never>?
     var onEnd: (() -> Void)?
+    /// 間を置かずに流すときだけ持つ。消費側が読んだ分を数える
+    let feedGate: FileFeedGate?
+    var duration: Double { Double(samples.count) / 16000 }
 
-    init(url: URL, systemAudioURL: URL? = nil) throws {
+    /// 長いファイルの変換は数秒かかるので、MainActorの外で行う。
+    static func load(url: URL, systemAudioURL: URL? = nil, paced: Bool) async throws -> FileSource {
+        let samples = try await Task.detached(priority: .userInitiated) {
+            try decode(url: url, systemAudioURL: systemAudioURL)
+        }.value
+        return FileSource(samples: samples, paced: paced)
+    }
+
+    init(samples: [Float], paced: Bool) {
+        self.samples = samples
+        feedGate = paced ? nil : FileFeedGate()
+    }
+
+    private static func decode(url: URL, systemAudioURL: URL?) throws -> [Float] {
         let microphone = try AudioConverter().resampleAudioFile(url)
+        let samples: [Float]
         if let systemAudioURL {
             let system = try AudioConverter().resampleAudioFile(systemAudioURL)
             // 実録の同時刻WAVを使う検証口。短い方の末尾は無音で延長し、時間を詰めない。
@@ -85,11 +104,13 @@ final class FileSource: AudioSource {
         guard !samples.isEmpty else {
             throw NSError(domain: "kikigaki", code: 1, userInfo: [NSLocalizedDescriptionKey: "音声を読めない: \(url.path)"])
         }
+        return samples
     }
 
     func start(onSamples: @escaping ([Float]) -> Void) throws {
         let samples = self.samples
         let onEnd = self.onEnd
+        let gate = feedGate
         #if DEBUG
         let realtime = ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_REPLAY_REALTIME"] == "1"
         #else
@@ -99,9 +120,12 @@ final class FileSource: AudioSource {
             let step = 8000  // 0.5秒
             var i = 0
             while i < samples.count, !Task.isCancelled {
+                if let gate { await gate.waitUntilCaughtUp(fed: i) }
+                guard !Task.isCancelled else { break }
                 onSamples(Array(samples[i..<min(i + step, samples.count)]))
                 i += step
-                // 消費側(話者判別 + SpeechTranscriber)に追いつかれないよう軽く間を置く。
+                guard gate == nil else { continue }
+                // replayは消費側(話者判別 + SpeechTranscriber)に追いつかれないよう軽く間を置く。
                 // 実時間の 1/10 程度で、10分の音声なら1分で流し終える
                 try? await Task.sleep(for: .milliseconds(realtime ? 500 : 50))
             }
@@ -112,6 +136,26 @@ final class FileSource: AudioSource {
     func stop() {
         task?.cancel()
         task = nil
+    }
+}
+
+/// 音声ファイルの書き起こしで、供給が消費より先へ行きすぎないよう止める。
+/// 先行を抑えないと、ファイル全体が未処理のまま待ち行列へ二重に載る。仕様は docs/audio-file.md
+final class FileFeedGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var consumed = 0
+    /// 先行を許す音声の長さ(16kHzのサンプル数)
+    let limit: Int
+
+    init(limit: Int = 16000 * 30) { self.limit = limit }
+
+    /// 消費側が処理し終えたサンプル数を足す
+    func consume(_ count: Int) { lock.withLock { consumed += count } }
+
+    func waitUntilCaughtUp(fed: Int) async {
+        while !Task.isCancelled, fed - lock.withLock({ consumed }) > limit {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
     }
 }
 

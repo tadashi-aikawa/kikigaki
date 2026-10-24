@@ -22,6 +22,8 @@ struct ReplayDebugOptions {
     var askProfile: String?
     var automaticProfile: String?
     var minutesPath: String?
+    /// 録音の模擬ではなく、音声ファイルの書き起こしの経路を通す
+    var fileTranscription = false
     @MainActor static func recoverForNextQuestion(_ controller: AIConversationController?, preparing: Bool) throws {
         guard !preparing, let controller, !controller.canSend,
               let previous = controller.conversation.questions.last,
@@ -45,6 +47,10 @@ struct ReplayDebugOptions {
         }
         if let input = env["KIKIGAKI_DEBUG_MINUTES_PATH"] {
             try MinutesPath.validate(input); result.minutesPath = input
+        }
+        if let input = env["KIKIGAKI_DEBUG_REPLAY_FILE"] {
+            guard ["0", "1"].contains(input) else { throw AIError.invalid("KIKIGAKI_DEBUG_REPLAY_FILE") }
+            result.fileTranscription = input == "1"
         }
         if let mode = env["KIKIGAKI_DEBUG_DIARIZATION"] {
             guard ["on", "off"].contains(mode) else { throw AIError.invalid("KIKIGAKI_DEBUG_DIARIZATION") }
@@ -158,6 +164,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 宛先の指定を当て終えるまでデバッグ送信を保留する。0秒指定の質問は start 内の
     /// 通知から呼ばれるため、保留しないと先頭宛で飛んでしまう
     private var replayDestinationPending = false
+    /// 開始シートを閉じてから音声ファイルの変換が終わるまで。会議はまだ待機中なので、ほかの開始操作を止める
+    private var loadingAudioFile = false
     init(replayDebug: ReplayDebugOptions = .init()) { self.replayDebug = replayDebug; super.init() }
 
     private var aiHelper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/kikigaki-cli")
@@ -240,6 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onSpeakerMappingChange = { session.setSpeakerMapping(source: $0, target: $1) }
         window.onAudioExclusionChange = { value in session.setAudioExclusion(value) }
         window.onStartStop = { [weak self] in self?.toggleRecording() }
+        window.onDropAudioFile = { [weak self] in self?.openAudioFile($0) }
         window.onPauseResume = { session.togglePause() }
         window.onCopy = { session.copyContext(writeClipboard: Self.writeClipboard) }
         window.onAskAI = { [weak self] in self?.showAISheet(parent: $0) }
@@ -267,6 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let statusItem = StatusItem()
         statusItem.onStartStop = { [weak self] in self?.toggleRecording() }
+        statusItem.onTranscribeFile = { [weak self] in self?.presentAudioFilePicker() }
         statusItem.onPauseResume = { session.togglePause() }
         statusItem.onShowWindow = { window.show() }
         statusItem.onToggleMinutes = { window.show(); window.toggleMinutes() }
@@ -278,7 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         session.onChange = { [weak self] snapshot in
             guard let self else { return }
-            self.statusItem?.update(state: snapshot.state, elapsed: snapshot.elapsed)
+            self.statusItem?.update(state: snapshot.state, elapsed: snapshot.elapsed, transcribingFile: snapshot.transcribingFile)
             self.window?.apply(snapshot)
             #if DEBUG
             if self.replayURL != nil, let window = self.window,
@@ -326,6 +336,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let session else { return .terminateNow }
         session.stopAISchedule()
+        // 音声ファイルの書き起こしは中止と同じ扱いにし、途中までの結果を保存しない。
+        if session.snapshot.transcribingFile, session.snapshot.state == .recording {
+            Task {
+                await session.cancelFileTranscription()
+                // 中止より先に流し終えて保存が始まっていたら、保存が終わるのを待ってから終了する。
+                if session.snapshot.state == .idle { NSApp.reply(toApplicationShouldTerminate: true) }
+                else { terminateWhenIdle = true }
+            }
+            return .terminateLater
+        }
         switch session.snapshot.state {
         case .recording, .paused:
             Task {
@@ -344,29 +364,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 操作
 
     private func toggleRecording() {
-        guard let session else { return }
+        guard let session, !loadingAudioFile else { return }
         if session.snapshot.state.canStart {
             // replayと検証は開始シートを出さない。前回の値と環境変数の指定で同じ開始経路を通す。
             if replayURL != nil { Task { await startRecording(options: nil) } }
             else { presentStartSheet() }
+        } else if session.snapshot.transcribingFile {
+            // 音声ファイルの停止は中止。途中で止めた書き起こしは保存しない
+            Task { await session.cancelFileTranscription() }
         } else if session.snapshot.state.canStop {
             Task { await session.stop() }
         }
     }
 
+    /// メニューバーの「音声ファイルから書き起こす…」。仕様は docs/audio-file.md
+    func presentAudioFilePicker() {
+        guard let session, session.snapshot.state.canStart, replayURL == nil, startSheet == nil, !loadingAudioFile else { return }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false; panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.audio]
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        openAudioFile(url)
+    }
+
+    /// メニューとドロップの共通の入口。読めるファイルなら開始シートをファイルの形で開く。
+    func openAudioFile(_ url: URL) {
+        guard let session, session.snapshot.state.canStart, replayURL == nil, startSheet == nil, !loadingAudioFile else { return }
+        window?.show()
+        Task {
+            do { presentStartSheet(audioFile: try await AudioFileProbe.load(url)) }
+            catch {
+                Self.log("音声ファイルを読めない: \(error)")
+                session.showMessage(error.localizedDescription)
+            }
+        }
+    }
+
     /// 録音を始める前に、その会議だけの指定を決めるシートを出す。
-    func presentStartSheet() {
-        guard let session, let config, session.snapshot.state.canStart, replayURL == nil else { return }
+    /// `audioFile` を渡すと音声ファイルの書き起こしの形で開く。予約は録音の会議のものなので出さない。
+    func presentStartSheet(audioFile: AudioFile? = nil) {
+        guard let session, let config, session.snapshot.state.canStart, replayURL == nil, !loadingAudioFile else { return }
         if let startSheet {
             startSheet.focus()
             return
         }
         window?.show()
         guard let parent = window?.window else { return }
-        let nextMeetings: [NextMeeting]
-        do { nextMeetings = try nextMeetingStore?.expire().candidates ?? [] }
-        catch { Self.log("次の会議を読み込めません: \(error)"); nextMeetings = [] }
-        let sheet = StartSheet(profiles: config.aiProfiles,
+        var nextMeetings: [NextMeeting] = []
+        if audioFile == nil {
+            do { nextMeetings = try nextMeetingStore?.expire().candidates ?? [] }
+            catch { Self.log("次の会議を読み込めません: \(error)") }
+        }
+        let sheet = StartSheet(profiles: config.aiProfiles, audioFile: audioFile,
                                diarizationEnabled: session.snapshot.nextDiarizationEnabled,
                                exclusion: session.snapshot.audioExclusion,
                                minutesPath: session.waitingMinutesPath,
@@ -379,7 +429,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sheet.onRemoveNextMeeting = { [weak self] id in self?.removeNextMeeting(id: id) }
         sheet.onCancel = { [weak self] in self?.startSheet = nil }
         sheet.onStart = { [weak self] options in
-            UserDefaults.standard.set(options.systemAudioMode.rawValue, forKey: StartSheet.systemAudioDefaultsKey)
+            // 音声ファイルのシートはシステム音声を出さないので、録音の前回値を書き換えない。
+            if options.audioFile == nil {
+                UserDefaults.standard.set(options.systemAudioMode.rawValue, forKey: StartSheet.systemAudioDefaultsKey)
+            }
             self?.startSheet = nil
             Task { await self?.startRecording(options: options) }
         }
@@ -390,12 +443,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startRecording(options: StartSheet.Options?) async {
         guard let session else { return }
         let source: AudioSource
+        var audioFile: AudioFile?
         if let replayURL {
             do {
-                let file = try FileSource(url: replayURL, systemAudioURL: replayDebug.systemAudioPath.map { URL(fileURLWithPath: $0) })
-                file.onEnd = { [weak self] in
+                // 既定は録音の模擬で、間を置いて流す。指定があれば音声ファイルの書き起こしの経路を通す
+                let fileMode = replayDebug.fileTranscription
+                if fileMode { audioFile = try await AudioFileProbe.load(replayURL) }
+                let file = try await FileSource.load(url: replayURL, systemAudioURL: replayDebug.systemAudioPath.map { URL(fileURLWithPath: $0) },
+                                                     paced: !fileMode)
+                file.onEnd = { [weak self, weak file] in
                     Task { @MainActor in
-                        await self?.session?.stop()
+                        if fileMode { if let file { await self?.session?.finishFileInput(from: file) } }
+                        else { await self?.session?.stop() }
                         Self.log("replay 完了: \(self?.session?.snapshot.markdownURL?.path ?? "-")")
                         if let self, self.replayDebug.verifyTyped, let session = self.session {
                             do { try ReplayTypedVerification.finish(session, rename: self.replayDebug.rename, window: self.window?.window); self.debugRenamed = true }
@@ -416,6 +475,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch {
                 Self.log("replay の音声を読めない: \(error)")
                 NSApp.terminate(nil)
+                return
+            }
+        } else if let file = options?.audioFile {
+            // 変換の間は待機中のまま。別の開始操作を受けると、預けた指定が混ざる
+            loadingAudioFile = true
+            defer { loadingAudioFile = false }
+            do {
+                let loaded = try await FileSource.load(url: file.url, paced: false)
+                loaded.onEnd = { [weak self, weak loaded] in
+                    Task { @MainActor in if let loaded { await self?.session?.finishFileInput(from: loaded) } }
+                }
+                source = loaded
+                audioFile = file
+            } catch {
+                Self.log("音声ファイルを読めない: \(error)")
+                session.showMessage("音声として読めません: \(file.name)")
                 return
             }
         } else {
@@ -450,8 +525,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             } catch { Self.log("replay 自動送信の指定が不正: \(error)"); exit(1) }
         }
-        let started = await session.start(source: source)
-        if started, let options, !session.meetingAIProfiles.isEmpty {
+        let started = await session.start(source: source, audioFile: audioFile)
+        // 音声ファイルのシートは手動送信を出さないので、録音の前回値を書き換えない。
+        if started, let options, options.audioFile == nil, !session.meetingAIProfiles.isEmpty {
             let name = session.meetingAIProfiles.first { $0.slot == options.manualSlot }?.name ?? ""
             UserDefaults.standard.set(name, forKey: StartSheet.manualDefaultsKey)
         }
@@ -722,6 +798,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showScheduleSheet() {
         guard let session, let config = session.aiConfiguration, let parent = window?.window,
               session.snapshot.state == .recording || session.snapshot.state == .paused,
+              // 音声ファイルの書き起こし中は「完了時に送信」の1回だけ。周期の送信を後から足さない。
+              !session.snapshot.transcribingFile,
               aiSheet == nil, scheduleSheet == nil else { return }
         let target = session.aiScheduleConfiguration ?? config
         let helper = aiHelper
