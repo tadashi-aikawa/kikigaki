@@ -50,8 +50,9 @@ enum SpeakerEstimationChip {
         NSSize(width: ceil((text as NSString).size(withAttributes: [.font: font]).width) + 12, height: 18)
     }
 
-    static func draw(in rect: NSRect, highlighted: Bool = false) {
-        let color = highlighted ? NSColor.selectedMenuItemTextColor : Washi.ai.background
+    /// `color` は地の色に合わせて文字と輪郭を差し替えるとき。フッターの朱の塗りでは白にする。
+    static func draw(in rect: NSRect, highlighted: Bool = false, color override: NSColor? = nil) {
+        let color = override ?? (highlighted ? NSColor.selectedMenuItemTextColor : Washi.ai.background)
         let outline = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
         color.setStroke()
         outline.lineWidth = 1

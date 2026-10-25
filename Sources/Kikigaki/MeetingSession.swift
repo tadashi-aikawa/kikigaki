@@ -272,7 +272,7 @@ final class MeetingSession {
 
     /// 宛先ポップアップへ並べる項目
     var aiDestinationItems: [AIDestinationPicker.Item] {
-        meetingAIProfiles.map { .init(slot: $0.slot, name: $0.name, avatar: $0.avatar) }
+        meetingAIProfiles.map(AIDestinationPicker.Item.init(profile:))
     }
 
     /// その枠を会議側が使っている(送信中)。
@@ -872,9 +872,9 @@ final class MeetingSession {
         refreshAudioSnapshot()
         snapshot.timeline = pause.timeline
         snapshot.aiRecoveryWarning = aiStore?.warnings.first
-        snapshot.manualDestination = meetingManualAI.map { .init(slot: $0.slot, name: $0.name, avatar: $0.avatar) }
+        snapshot.manualDestination = meetingManualAI.map(AIDestinationPicker.Item.init(profile:))
         snapshot.manualDraftSendState = manualDraftSendState
-        snapshot.automaticDestination = aiScheduleConfiguration.map { .init(slot: $0.slot, name: $0.name, avatar: $0.avatar) }
+        snapshot.automaticDestination = aiScheduleConfiguration.map(AIDestinationPicker.Item.init(profile:))
         snapshot.aiSchedule = AIScheduleViewState(schedule: aiSchedule, warning: aiScheduleWarning,
             destination: meetingAIProfiles.count > 1 ? aiScheduleConfiguration?.name : nil,
             availability: scheduleAvailability, hasChanges: scheduleHasChanges)

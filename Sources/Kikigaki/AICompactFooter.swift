@@ -85,10 +85,30 @@ final class AIFooterDestination: HoverButton {
         filled ? Washi.red.withAlphaComponent(isEnabled ? 1 : 0.55) : Washi.paper.withAlphaComponent(0.6)
     }
     var statusWidth: CGFloat { (displayText as NSString).size(withAttributes: [.font: statusFont]).width }
+    /// 推定付きの宛先に添える札。段の高さ20ptに収め、幅が足りないときは宛先名を先に省く。
+    var showsSpeakerEstimation: Bool { destination?.identifySpeakers == true }
+    static let chipSize = NSSize(width: SpeakerEstimationChip.size.width, height: 14)
+    /// 札を入れても宛先名に残す幅。これを切るほど狭い段では札を省き、読み上げとツールチップに残す。
+    static let minimumNameWidth: CGFloat = 36
+    private var nameStart: CGFloat { destination == nil ? 32 : 53 }
+    private var nameEndWithoutChip: CGFloat {
+        bounds.width - 7 - (automatic ? 13 : 0) - (displayText.isEmpty ? 0 : statusWidth + 6)
+    }
+    /// 実際に札を描くか。通知のアイコンが並ぶ狭い窓では段が細くなり、状態の文字と重なるため。
+    var drawsSpeakerEstimation: Bool {
+        showsSpeakerEstimation && nameEndWithoutChip - nameStart - Self.chipSize.width - 6 >= Self.minimumNameWidth
+    }
     var nameFrame: NSRect {
-        let start: CGFloat = destination == nil ? 32 : 53
-        let end = bounds.width - 7 - (automatic ? 13 : 0) - (displayText.isEmpty ? 0 : statusWidth + 6)
-        return NSRect(x: start, y: bounds.midY - 7, width: max(0, end - start), height: 15)
+        let end = nameEndWithoutChip - (drawsSpeakerEstimation ? Self.chipSize.width + 6 : 0)
+        return NSRect(x: nameStart, y: bounds.midY - 7, width: max(0, end - nameStart), height: 15)
+    }
+    /// 名前の直後。名前が省かれるときは欄の右端の直後
+    var chipFrame: NSRect? {
+        guard drawsSpeakerEstimation else { return nil }
+        let name = nameFrame
+        let width = min(name.width, ceil((destinationName as NSString).size(withAttributes: [.font: nameFont]).width))
+        return NSRect(x: name.minX + width + 6, y: bounds.midY - Self.chipSize.height / 2,
+                      width: Self.chipSize.width, height: Self.chipSize.height)
     }
     init(automatic: Bool) {
         self.automatic = automatic
@@ -103,7 +123,9 @@ final class AIFooterDestination: HoverButton {
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { false }
     override var intrinsicContentSize: NSSize {
-        NSSize(width: min(320, (destinationName as NSString).size(withAttributes: [.font: nameFont]).width + 110), height: 20)
+        let chip = showsSpeakerEstimation ? Self.chipSize.width + 6 : 0
+        return NSSize(width: min(320 + chip, (destinationName as NSString).size(withAttributes: [.font: nameFont]).width + 110 + chip),
+                      height: 20)
     }
     @objc private func pressed() { guard isEnabled else { return }; callback?() }
     func update(_ item: AIDestinationPicker.Item?, schedule: AIScheduleViewState,
@@ -125,7 +147,7 @@ final class AIFooterDestination: HoverButton {
                waiting ? schedule.skipReason : nil].compactMap { $0 }.joined(separator: " · ")
             : ["手動: " + destinationName, status].joined(separator: " · ")
         if toolTip != tooltip { toolTip = tooltip }
-        setAccessibilityLabel((automatic ? "自動、" : "手動、") + destinationName + "、" + tooltip)
+        setAccessibilityLabel((automatic ? "自動、" : "手動、") + destinationName + (showsSpeakerEstimation ? " 話者名を推定" : "") + "、" + tooltip)
         if previousDestination != destination || previousStatusWidth != statusWidth { invalidateIntrinsicContentSize() }
         needsDisplay = true
     }
@@ -151,6 +173,10 @@ final class AIFooterDestination: HoverButton {
         (destinationName as NSString).draw(in: nameFrame, withAttributes: [
             .font: nameFont, .foregroundColor: destination == nil && !filled ? Washi.muted : foreground,
             .paragraphStyle: paragraph])
+        // 朱の塗りの段では、札の文字と輪郭を白にする。無効時は薄墨。
+        if let chipFrame {
+            SpeakerEstimationChip.draw(in: chipFrame, color: !isEnabled ? Washi.muted : filled ? .white : nil)
+        }
         let statusX = bounds.width - 7 - (automatic ? 13 : 0) - statusWidth
         (displayText as NSString).draw(at: NSPoint(x: statusX, y: bounds.midY - 6),
             withAttributes: [.font: statusFont, .foregroundColor: filled ? .white : Washi.muted])

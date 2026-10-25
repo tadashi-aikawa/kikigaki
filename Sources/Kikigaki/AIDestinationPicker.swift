@@ -9,6 +9,14 @@ final class AIDestinationPicker: NSStackView {
         let slot: Int
         let name: String
         var avatar: String?
+        /// `identifySpeakers = true` の宛先。開始シートと同じ紫の札「話者を推定」を添える
+        var identifySpeakers = false
+        init(slot: Int, name: String, avatar: String? = nil, identifySpeakers: Bool = false) {
+            self.slot = slot; self.name = name; self.avatar = avatar; self.identifySpeakers = identifySpeakers
+        }
+        init(profile: ResolvedAIConfig) {
+            self.init(slot: profile.slot, name: profile.name, avatar: profile.avatar, identifySpeakers: profile.identifySpeakers)
+        }
     }
     var onChange: ((Int) -> Void)?
     private let popup = NSPopUpButton()
@@ -34,6 +42,15 @@ final class AIDestinationPicker: NSStackView {
         for item in items {
             popup.addItem(withTitle: item.name)
             popup.lastItem?.representedObject = item.slot
+            // 開始シートの一覧と同じく、名前の右に札を添える。選び直すときに推定付きの宛先を見分けられる。
+            if item.identifySpeakers, let entry = popup.lastItem {
+                let title = NSMutableAttributedString(string: item.name, attributes: [.font: NSFont.menuFont(ofSize: 13)])
+                title.append(NSAttributedString(string: "  "))
+                title.append(SpeakerEstimationChip.attachment(for: entry))
+                entry.attributedTitle = title
+                entry.setAccessibilityLabel(item.name + " 話者名を推定")
+                entry.toolTip = item.name + " 話者名を推定"
+            }
         }
         let index = popup.itemArray.firstIndex { ($0.representedObject as? Int) == selected }
         popup.selectItem(at: index ?? 0)
