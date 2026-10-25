@@ -69,9 +69,11 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
     }
 
     /// 名前は固定した候補か、会話の本文に出てきた人名に限る。会話に出てこない名前をAIに作らせないため。
+    /// 確度の低い推定は、会議にいたとは限らない台帳とよく使う名前を候補として使えない。消去法で外れやすいため。
     /// `texts` は発言の本文。整形した `lines` は根拠の時刻の照合に使う。
-    public mutating func identify(_ event: AISpeakerEvent, participant: String, candidates: [String], detected: [Int],
+    public mutating func identify(_ event: AISpeakerEvent, participant: String, fixed: SpeakerIdentification?, detected: [Int],
                                  mapping: [Int: Int], lines: [String], texts: [String]) throws {
+        let candidates = event.isLowConfidence ? fixed?.lowConfidenceCandidates ?? [] : fixed?.candidates ?? []
         guard let slot = Self.letters.firstIndex(of: event.slot),
               unresolvedSlots(detected: detected, mapping: mapping).contains(slot),
               otherSlot(using: event.name, excluding: slot) == nil,

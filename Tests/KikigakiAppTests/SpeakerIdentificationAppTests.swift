@@ -93,7 +93,7 @@ extension AppKitTests {
         try Data("---\nparticipants: [タダシ]\n---\n".utf8).write(to: minutes)
         try session.selectMinutes(minutes.path)
         let request = try await submit(session, trigger: trigger)
-        #expect(request.envelope.participant.speakerIdentification == .init(unresolved: ["A", "C"], candidates: ["タダシ"]))
+        #expect(request.envelope.participant.speakerIdentification == .init(unresolved: ["A", "C"], candidates: ["タダシ"], origin: .participants))
         #expect(request.envelope.participant.question.hasSuffix(SpeakerIdentificationPrompt.builtIn))
         #expect(request.displayQuestion == (trigger == nil ? "田中です。" : "議事録を更新"))
     }

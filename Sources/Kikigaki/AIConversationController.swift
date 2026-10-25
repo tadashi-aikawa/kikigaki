@@ -548,7 +548,7 @@ final class AIConversationController {
                     throw AIError.invalid("not the current meeting")
                 }
                 try current.identify(event, participant: request.envelope.participant.participantName,
-                                     candidates: request.envelope.participant.speakerIdentification?.candidates ?? [],
+                                     fixed: request.envelope.participant.speakerIdentification,
                                      detected: context.detected, mapping: context.mapping, lines: context.lines, texts: context.texts)
                 accepted = current; names = current
             } catch { speakerDiagnostic("話者の割当を破棄: \(event.eventID): \(error)") }

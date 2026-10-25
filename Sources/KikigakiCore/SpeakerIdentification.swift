@@ -4,9 +4,15 @@ import Foundation
 public struct SpeakerIdentification: Codable, Equatable, Sendable {
     public let unresolved: [String]
     public let candidates: [String]
-    public init(unresolved: [String], candidates: [String]) {
-        self.unresolved = unresolved; self.candidates = candidates
+    /// 候補名の出どころ。議事録の参加者はその会議にいた人、台帳とよく使う名前はいたとは限らない。
+    /// 確度の低い推定に候補名を使えるのは参加者のときだけ。欠損の旧envelopeは使えない側に倒す。
+    public let origin: Origin?
+    public enum Origin: String, Codable, Sendable { case participants, ledger }
+    public init(unresolved: [String], candidates: [String], origin: Origin? = nil) {
+        self.unresolved = unresolved; self.candidates = candidates; self.origin = origin
     }
+    /// 確度の低い推定に使ってよい候補名
+    public var lowConfidenceCandidates: [String] { origin == .participants ? candidates : [] }
     public static func make(names: SpeakerNames, detected: [Int], mapping: [Int: Int],
                             participants: [String], speakers: [KikigakiConfig.Speaker], frequent: [String]) -> Self? {
         let slots = names.unresolvedSlots(detected: detected, mapping: mapping)
@@ -16,7 +22,8 @@ public struct SpeakerIdentification: Codable, Equatable, Sendable {
         let candidates = source.map(SpeakerNames.normalized).filter {
             AIValidation.singleLine($0) && seen.insert($0).inserted
         }
-        return .init(unresolved: slots.map(SpeakerNames.letter), candidates: candidates)
+        return .init(unresolved: slots.map(SpeakerNames.letter), candidates: candidates,
+                     origin: participants.isEmpty ? .ledger : .participants)
     }
     public func validate() throws {
         guard !unresolved.isEmpty, Set(unresolved).count == unresolved.count,
@@ -37,7 +44,9 @@ public enum SpeakerIdentificationPrompt {
     名前は candidates か、会話の本文に出てきた人名から選びます。役割名や、会話に出てこない名前は付けないでください。
     同じ名前を複数の枠へ付けないでください。
     確信が低くても、いちばん可能性の高い名前を返してください。そのときは speaker に --confidence low を付けます。人が確かめて直します。
-    返さないのは、当てはまる名前が会話に出てこない枠だけです。
+    確信が低いときに使える名前は、会話の本文に出てきた人名と、origin が participants のときの candidates だけです。
+    origin が ledger の candidates のうち会話の本文に出てこない名前は、名乗りや名前で呼ばれた応答のような確かな根拠があるときだけ使います。
+    返さないのは、使える名前の中に当てはまるものが無い枠だけです。
     accept の後、progress --replying と reply の前に、該当する枠ごとに同梱CLIの speaker を呼んでください。作業許可が無効でも speaker は返せます。
     --slot は unresolved の A〜H、--name は選んだ名前を使います。--session、--request、--token はこの依頼の固定値です。
     根拠は会話の行を [HH:MM:SS] 付きで引用し、そう推定した理由を1文添えて stdin へ渡してください。根拠はUTF-8で2 KiB以内です。
