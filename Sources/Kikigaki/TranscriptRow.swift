@@ -136,6 +136,8 @@ final class TranscriptRow: NSView, DocumentRow {
     private let flash = NSView()
     private let avatar = AvatarView()
     private let nameLabel = Washi.label(size: 12, weight: .semibold)
+    /// 確度の低い推定の名前が紫になっているかを確かめるため
+    var displayedNameColor: NSColor? { nameLabel.textColor }
     private let previousNameLabel = Washi.label(size: 12, weight: .semibold)
     let speakerRevealCoin = SpeakerRevealCoin()
     private var speakerRevealTimer: Timer?
@@ -271,10 +273,17 @@ final class TranscriptRow: NSView, DocumentRow {
         // 同じ名前での確認は本文も名前も変わらない。早期returnより前に由来を更新する。
         attributionDot.update(value.kind == .voice ? value.speaker.flatMap { names.attributions[$0] } : nil)
         needsLayout = true
+        // 確度の低い推定の名前は札と同じ紫にする。人が確かめると名前は変わらず色だけ戻るので、早期returnより前に当てる。
+        let nameColor = value.kind == .voice && !names.diarizationEnabled ? Washi.muted
+            : value.kind == .voice && value.speaker.map(names.isTentative) == true ? Washi.ai.background : Washi.ink
+        let oldNameColor = nameLabel.textColor
+        if nameLabel.textColor != nameColor { nameLabel.textColor = nameColor }
         let name = names.displayName(for: value)
         if displayedName != name || utterance?.speaker != value.speaker {
             stopSpeakerReveal()
             previousAvatar = (avatar.initial, avatar.image)
+            // 確度の低い推定から推定し直すと、回転中に見せる旧名も紫のまま出す。
+            previousNameLabel.textColor = oldNameColor ?? Washi.ink
         }
         guard utterance != value || displayedName != name || displayedTimeline != timeline else { return false }
         let changed = utterance != nil && (utterance?.text != value.text || utterance?.speaker != value.speaker || displayedName != name)
@@ -283,7 +292,7 @@ final class TranscriptRow: NSView, DocumentRow {
         displayedTimeline = timeline
         searchStyle = nil
         nameLabel.stringValue = name
-        nameLabel.textColor = value.kind == .voice && !names.diarizationEnabled ? Washi.muted : Washi.ink
+        nameLabel.textColor = nameColor
         timeLabel.stringValue = TranscriptRenderer.clock(for: value, timeline: timeline)
         timeLabel.toolTip = value.kind == .typed
             ? "会話の位置 \(TranscriptRenderer.elapsed(value.start)) · 投稿 \(TranscriptRenderer.clock(for: value, timeline: timeline, seconds: true))"

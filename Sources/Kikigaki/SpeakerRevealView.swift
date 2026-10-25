@@ -228,6 +228,11 @@ final class SpeakerRevealBanner: NSView {
         let height = max(44, ceil(size.height) + 30)
         if heightConstraint.constant != height { heightConstraint.constant = height }
     }
+    /// 推定し直しや人の確認で由来が消えた帯を、待ち行列と表示中から外す。
+    func prune(keeping isValid: (SpeakerReveal) -> Bool) {
+        queue.removeAll { !isValid($0) }
+        if let current, !isValid(current) { showNext() }
+    }
     func stopAnimations() {
         reduceMotion = true
         bubble.layer?.removeAllAnimations()

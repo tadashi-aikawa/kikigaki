@@ -7,8 +7,9 @@ import KikigakiAIIO
 
 extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct AIAppendixTests {
-    private func setup(_ root: URL, fake: FakeHerdr, scheduled: Bool = false) async throws -> (AIConversationController, ResolvedAIConfig, AIRequest) {
-        let config = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path), home: root)
+    private func setup(_ root: URL, fake: FakeHerdr, scheduled: Bool = false,
+                       identifySpeakers: Bool = false) async throws -> (AIConversationController, ResolvedAIConfig, AIRequest) {
+        let config = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path, identifySpeakers: identifySpeakers), home: root)
         let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
         let request = try controller.prepare(lines: ["[12:00:00] A: 最初の会話"], question: "作業して", voiceQuestion: "",
             capturedAt: Date(), cutoff: 1, tail: nil, config: config, helper: URL(fileURLWithPath: "/bin/echo"),
@@ -83,6 +84,23 @@ extension AppKitTests {
         #expect(controller.conversation.questions[0].appendices[0].forwardedRequestID == controller.conversation.questions[1].request.id)
     }
 
+    /// 送り直しは新しい依頼なので、話者名の割当はその時点の名前で作り直す。元の依頼の固定情報は後に付いた名前を知らない。
+    @Test(arguments: [true, false]) func 話者を推定する宛先の送り直しにはいまの割当を同梱する(identifySpeakers: Bool) async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), (controller, config, request) = try await setup(root, fake: fake, identifySpeakers: identifySpeakers)
+        defer { controller.stopWatching() }
+        let current = SpeakerIdentification(unresolved: ["A", "B"], candidates: [], origin: .participants,
+                                            tentative: ["B": "中村"], tentativeEvents: ["B": "\(request.id.uuidString)/speaker/B"])
+        controller.speakerIdentification = { current }
+        try await controller.append(to: request.id, lines: ["[12:00:00] A: 後の指示"], question: "推定し直して", capturedAt: Date(), cutoff: 2, tail: nil, config: config)
+        try result(controller, root: root, request: request)
+        try await waitForRetry(controller)
+        let forwarded = try #require(controller.conversation.questions.last?.request)
+        #expect(forwarded.id != request.id)
+        #expect(forwarded.envelope.participant.speakerIdentification == (identifySpeakers ? current : nil))
+        #expect(forwarded.envelope.participant.question.contains(SpeakerIdentificationPrompt.builtIn) == identifySpeakers)
+    }
+
     @Test func 確定待ち中に返事が届いた追記も新しい依頼へ引き継ぐ() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr(), (controller, config, request) = try await setup(root, fake: fake)
@@ -147,10 +165,13 @@ extension AppKitTests {
         #expect(controller.conversation.questions[0].appendices[0].forwardedRequestID == forwarded.request.id)
     }
 
-    @Test func 上限近くの追記も切り詰めず依頼を分けて送り直す() async throws {
+    /// 話者を推定する宛先では内蔵節の分も差し引いて分け、単独で上限近くの追記は割当を外して本文を届ける。
+    @Test(arguments: [false, true]) func 上限近くの追記も切り詰めず依頼を分けて送り直す(identifySpeakers: Bool) async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
-        let fake = FakeHerdr(), (controller, config, request) = try await setup(root, fake: fake)
+        let fake = FakeHerdr(), (controller, config, request) = try await setup(root, fake: fake, identifySpeakers: identifySpeakers)
         defer { controller.stopWatching() }
+        let identification = SpeakerIdentification(unresolved: ["A"], candidates: [])
+        controller.speakerIdentification = { identification }
         let text = String(repeating: "字", count: AILimits.questionBytes / 3)
         try await controller.append(to: request.id, lines: ["会話"], question: text, capturedAt: Date(), cutoff: 2, tail: nil, config: config)
         try await controller.append(to: request.id, lines: ["会話", "続き"], question: "残りの指示", capturedAt: Date(), cutoff: 3, tail: nil, config: config)
@@ -162,10 +183,13 @@ extension AppKitTests {
         #expect(controller.conversation.questions.count == 2)
         let first = try #require(controller.conversation.questions.last?.request)
         #expect(first.displayQuestion == text)
+        #expect(first.envelope.participant.speakerIdentification == nil)
         try result(controller, root: root, request: first)
         try await waitForRetry(controller)
         #expect(controller.conversation.questions.count == 3)
-        #expect(controller.conversation.questions.last?.request.displayQuestion.contains("残りの指示") == true)
+        let rest = try #require(controller.conversation.questions.last?.request)
+        #expect(rest.displayQuestion.contains("残りの指示"))
+        #expect(rest.envelope.participant.speakerIdentification == (identifySpeakers ? identification : nil))
     }
 }
 }

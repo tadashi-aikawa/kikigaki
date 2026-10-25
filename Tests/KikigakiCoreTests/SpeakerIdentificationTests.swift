@@ -28,6 +28,96 @@ import Testing
                                texts: texts + ["タダシさん、どうですか。"])
         #expect(mentioned.name(for: 2) == "タダシ")
     }
+    /// 1回目に聞き手2人が逆に付き、後の会話で入れ替えられる。
+    @Test func 確度の低い推定は次の依頼で推定し直せ入れ替えもできる() throws {
+        let people = ["佐藤花子", "田中太郎", "鈴木一郎", "伊藤健太"]
+        let lines = ["[10:00:00] 話者C: 伊藤さん、どう思います?", "[10:05:00] 話者D: 鈴木さんの言う通りですね。"]
+        let texts = ["伊藤さん、どう思います?", "鈴木さんの言う通りですね。"]
+        var names = SpeakerNames()
+        let first = try request(fixed: .init(unresolved: ["C", "D"], candidates: people, origin: .participants))
+        for (slot, name) in [("C", "鈴木一郎"), ("D", "伊藤健太")] {
+            let event = try AISpeakerEvent(request: first, slot: slot, name: name, evidence: "[10:00:00] 推定", recordedAt: Date(), confidence: .low)
+            try names.identify(event, participant: "迅雷", fixed: first.envelope.participant.speakerIdentification,
+                               detected: [2, 3], mapping: [:], lines: lines, texts: texts)
+        }
+        // 次の依頼では、確度の低い推定の枠も今の名前付きでAIへ渡す。
+        let fixed = try #require(SpeakerIdentification.make(names: names, detected: [2, 3], mapping: [:],
+            participants: people, speakers: [], frequent: []))
+        #expect(fixed.unresolved == ["C", "D"] && fixed.tentative == ["C": "鈴木一郎", "D": "伊藤健太"])
+        let second = try request(fixed: fixed)
+        for (slot, name) in [("C", "伊藤健太"), ("D", "鈴木一郎")] {
+            let event = try AISpeakerEvent(request: second, slot: slot, name: name, evidence: "[10:05:00] 後半の呼びかけ",
+                                           recordedAt: Date(), confidence: .low)
+            try names.identify(event, participant: "迅雷", fixed: fixed, detected: [2, 3], mapping: [:], lines: lines, texts: texts)
+        }
+        #expect(names.name(for: 2) == "伊藤健太" && names.name(for: 3) == "鈴木一郎")
+        // 送った後に名前が変わって元へ戻ったら、その前に送った依頼は枠の名前も同名の枠も変えられない。
+        let stale = try #require(SpeakerIdentification.make(names: names, detected: [2, 3], mapping: [:],
+            participants: people, speakers: [], frequent: []))
+        let staleRequest = try request(fixed: stale)
+        for name in ["田中太郎", "伊藤健太"] {
+            let fixed = try #require(SpeakerIdentification.make(names: names, detected: [2, 3], mapping: [:],
+                participants: people, speakers: [], frequent: []))
+            let event = try AISpeakerEvent(request: try request(fixed: fixed), slot: "C", name: name, evidence: "[10:05:00] 推定",
+                                           recordedAt: Date(), confidence: .low)
+            try names.identify(event, participant: "迅雷", fixed: fixed, detected: [2, 3], mapping: [:], lines: lines, texts: texts)
+        }
+        #expect(names.name(for: 2) == "伊藤健太" && stale.tentative?["C"] == "伊藤健太")
+        for (slot, name) in [("C", "佐藤花子"), ("D", "伊藤健太")] {
+            let event = try AISpeakerEvent(request: staleRequest, slot: slot, name: name, evidence: "[10:05:00] 推定",
+                                           recordedAt: Date(), confidence: .low)
+            #expect(throws: (any Error).self) {
+                try names.identify(event, participant: "迅雷", fixed: stale, detected: [2, 3], mapping: [:], lines: lines, texts: texts)
+            }
+        }
+        #expect(names.name(for: 2) == "伊藤健太" && names.name(for: 3) == "鈴木一郎")
+        // 確かな推定へ上げた枠と、人が確かめた枠は、以後は推定し直さない。
+        let again = try #require(SpeakerIdentification.make(names: names, detected: [2, 3], mapping: [:],
+            participants: people, speakers: [], frequent: []))
+        let third = try request(fixed: again)
+        let sure = try AISpeakerEvent(request: third, slot: "C", name: "伊藤健太", evidence: "[10:00:00] 名前で呼ばれて応答",
+                                      recordedAt: Date())
+        try names.identify(sure, participant: "迅雷", fixed: again, detected: [2, 3], mapping: [:], lines: lines, texts: texts)
+        names.confirm("鈴木一郎", for: 3)
+        #expect(!names.isTentative(2) && !names.isTentative(3))
+        #expect(names.revisableSlots(detected: [2, 3], mapping: [:]).isEmpty)
+    }
+    @Test func 確かな推定と人が確かめた名前は確度の低い推定で奪えない() throws {
+        let people = ["鈴木一郎", "伊藤健太"]
+        let lines = ["[10:00:00] 話者C: 伊藤です。"], texts = ["伊藤です。"]
+        let fixed = SpeakerIdentification(unresolved: ["C", "D"], candidates: people, origin: .participants, tentative: ["D": "鈴木一郎"])
+        let r = try request(fixed: fixed)
+        var names = SpeakerNames()
+        let sure = try AISpeakerEvent(request: r, slot: "C", name: "伊藤健太", evidence: "[10:00:00] 名乗り", recordedAt: Date())
+        try names.identify(sure, participant: "迅雷", fixed: fixed, detected: [2, 3], mapping: [:], lines: lines, texts: texts)
+        let steal = try AISpeakerEvent(request: r, slot: "D", name: "伊藤健太", evidence: "[10:00:00] 推定", recordedAt: Date(), confidence: .low)
+        #expect(throws: (any Error).self) {
+            try names.identify(steal, participant: "迅雷", fixed: fixed, detected: [2, 3], mapping: [:], lines: lines, texts: texts)
+        }
+        #expect(names.name(for: 2) == "伊藤健太")
+        // 同じ依頼で確度の低い推定が同名を2枠へ返したら、先に取り込んだ枠が勝つ。
+        let pair = SpeakerIdentification(unresolved: ["A", "B"], candidates: people, origin: .participants)
+        let both = try request(fixed: pair)
+        let lowFirst = try AISpeakerEvent(request: both, slot: "A", name: "鈴木一郎", evidence: "[10:00:00] 推定", recordedAt: Date(), confidence: .low)
+        let lowSecond = try AISpeakerEvent(request: both, slot: "B", name: "鈴木一郎", evidence: "[10:00:00] 推定", recordedAt: Date(), confidence: .low)
+        try names.identify(lowFirst, participant: "迅雷", fixed: pair, detected: [0, 1], mapping: [:], lines: lines, texts: texts)
+        #expect(throws: (any Error).self) {
+            try names.identify(lowSecond, participant: "迅雷", fixed: pair, detected: [0, 1], mapping: [:], lines: lines, texts: texts)
+        }
+        #expect(names.name(for: 0) == "鈴木一郎" && names.customName(for: 1) == nil)
+        // 並行して送った別の依頼は、送った後に付いた名前を知らないので、枠の名前も同名の枠も奪えない。
+        let parallel = try request(fixed: pair)
+        for (slot, name) in [("A", "伊藤健太"), ("B", "鈴木一郎")] {
+            let event = try AISpeakerEvent(request: parallel, slot: slot, name: name, evidence: "[10:00:00] 推定", recordedAt: Date(), confidence: .low)
+            #expect(throws: (any Error).self) {
+                try names.identify(event, participant: "迅雷", fixed: pair, detected: [0, 1], mapping: [:], lines: lines, texts: texts)
+            }
+        }
+        #expect(names.name(for: 0) == "鈴木一郎" && names.customName(for: 1) == nil)
+        #expect(throws: (any Error).self) {
+            try SpeakerIdentification(unresolved: ["C"], candidates: [], tentative: ["D": "鈴木一郎"]).validate()
+        }
+    }
     @Test func 確度の低い推定でも議事録の参加者と会話の本文の人名は使える() throws {
         let fixed = participants(["次郎"])
         let r = try request(fixed: fixed)

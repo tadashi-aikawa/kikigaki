@@ -335,6 +335,9 @@ extension AppKitTests {
         content.layoutSubtreeIfNeeded()
         let marks = descendants(content).compactMap { $0 as? SpeakerAttributionDot }.filter { !$0.isHidden }
         #expect(marks.filter(\.lowConfidence).count == 1 && marks.filter { !$0.lowConfidence }.count == 1)
+        // 確度の低い推定の名前は札と同じ紫、確かな推定の名前は墨のまま。
+        let rowColors = descendants(content).compactMap { $0 as? TranscriptRow }.compactMap(\.displayedNameColor)
+        #expect(rowColors.contains(Washi.ai.background) && rowColors.contains(Washi.ink))
         for mark in marks where mark.lowConfidence { #expect(abs(mark.frame.height - 14 * scale) < 0.5) }
         try capture("speaker-ai-low-confidence-\(Int(scale * 100))", view: content)
         let settings = SpeakerSettingsPopover(snapshot: session.snapshot)
@@ -346,6 +349,7 @@ extension AppKitTests {
         window.apply(session.snapshot)
         content.layoutSubtreeIfNeeded()
         #expect(descendants(content).compactMap { $0 as? SpeakerAttributionDot }.filter { !$0.isHidden && $0.lowConfidence }.isEmpty)
+        #expect(!descendants(content).compactMap { $0 as? TranscriptRow }.compactMap(\.displayedNameColor).contains(Washi.ai.background))
     }
 
     @Test(arguments: ["recording", "paused", "human", "stopped", "next-meeting"])
@@ -644,6 +648,28 @@ extension AppKitTests {
             try await Task.sleep(for: .milliseconds(600))
             try await captureCoin("speaker-coin-avatar-stopped", window: window)
         }
+    }
+
+    /// 推定し直しや人の確認で由来が消えた帯は、表示中でも待ち行列でも後から出さない。
+    @Test func 由来の消えた帯は表示中も待ち行列からも外す() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let session = session(root), request = try await submit(session)
+        let defaults = MinutesTestDefaults()
+        let window = TranscriptWindowController(shouldReduceMotion: { true },
+            minutesDefaults: defaults.value, textDefaults: defaults.value)
+        window.window?.setFrameAutosaveName("")
+        window.apply(session.snapshot); window.show()
+        defer { window.window?.close() }
+        _ = try deliver(session, request: request)
+        session.aiRecord?.controller.scan()
+        let reveal = try #require(session.snapshot.speakerReveals.first)
+        let stale = SpeakerReveal(id: "stale", slot: 2, oldName: "話者C", name: "田中", participant: "迅雷", receivedAt: Date())
+        window.speakerRevealBanner.enqueue([reveal, stale], reduceMotion: true)
+        window.apply(session.snapshot)
+        #expect(window.speakerRevealBanner.current == reveal)
+        session.rename(slot: 0, to: "タダシ")
+        window.apply(session.snapshot)
+        #expect(window.speakerRevealBanner.isHidden && window.speakerRevealBanner.current == nil)
     }
 
     @Test func 画面外の話者も帯で知らせ初回の旧会議表示と回収では再演しない() async throws {

@@ -8,28 +8,46 @@ public struct SpeakerIdentification: Codable, Equatable, Sendable {
     /// 確度の低い推定に候補名を使えるのは参加者のときだけ。欠損の旧envelopeは使えない側に倒す。
     public let origin: Origin?
     public enum Origin: String, Codable, Sendable { case participants, ledger }
-    public init(unresolved: [String], candidates: [String], origin: Origin? = nil) {
-        self.unresolved = unresolved; self.candidates = candidates; self.origin = origin
+    /// `unresolved` のうち、確度の低い推定で付いている枠と今の名前。AIはこれを見て推定し直す。
+    public let tentative: [String: String]?
+    /// `tentative` の枠ごとの、送った時点の割当元のイベントID。名前が変わって元へ戻った後に、古い依頼から上書きさせないため。
+    /// AIは読まなくてよい。欠損の旧envelopeは、名前の付いた枠を推定し直せない側に倒す。
+    public let tentativeEvents: [String: String]?
+    private enum CodingKeys: String, CodingKey {
+        case unresolved, candidates, origin, tentative, tentativeEvents = "tentative_events"
+    }
+    public init(unresolved: [String], candidates: [String], origin: Origin? = nil, tentative: [String: String]? = nil,
+                tentativeEvents: [String: String]? = nil) {
+        self.unresolved = unresolved; self.candidates = candidates; self.origin = origin; self.tentative = tentative
+        self.tentativeEvents = tentativeEvents
     }
     /// 確度の低い推定に使ってよい候補名
     public var lowConfidenceCandidates: [String] { origin == .participants ? candidates : [] }
     public static func make(names: SpeakerNames, detected: [Int], mapping: [Int: Int],
                             participants: [String], speakers: [KikigakiConfig.Speaker], frequent: [String]) -> Self? {
-        let slots = names.unresolvedSlots(detected: detected, mapping: mapping)
+        let slots = names.revisableSlots(detected: detected, mapping: mapping)
         guard !slots.isEmpty else { return nil }
         var seen = Set<String>()
         let source = participants.isEmpty ? speakers.map(\.name) + frequent : participants
         let candidates = source.map(SpeakerNames.normalized).filter {
             AIValidation.singleLine($0) && seen.insert($0).inserted
         }
+        let held = slots.filter(names.isTentative)
+        let tentative = Dictionary(uniqueKeysWithValues: held.map { (SpeakerNames.letter(for: $0), names.name(for: $0)) })
+        let events = Dictionary(uniqueKeysWithValues: held.compactMap { slot in
+            names.attributions[slot].map { (SpeakerNames.letter(for: slot), $0.event.eventID) }
+        })
         return .init(unresolved: slots.map(SpeakerNames.letter), candidates: candidates,
-                     origin: participants.isEmpty ? .ledger : .participants)
+                     origin: participants.isEmpty ? .ledger : .participants, tentative: tentative.isEmpty ? nil : tentative,
+                     tentativeEvents: events.isEmpty ? nil : events)
     }
     public func validate() throws {
         guard !unresolved.isEmpty, Set(unresolved).count == unresolved.count,
               unresolved.allSatisfy(SpeakerNames.letters.contains),
               Set(candidates).count == candidates.count,
-              candidates.allSatisfy({ AIValidation.singleLine($0) && SpeakerNames.normalized($0) == $0 }) else {
+              candidates.allSatisfy({ AIValidation.singleLine($0) && SpeakerNames.normalized($0) == $0 }),
+              (tentative ?? [:]).allSatisfy({ unresolved.contains($0.key) && AISpeakerEvent.validName($0.value) }),
+              Set((tentativeEvents ?? [:]).keys).isSubset(of: Set((tentative ?? [:]).keys)) else {
             throw AIError.invalid("speaker identification")
         }
     }
@@ -39,14 +57,24 @@ public enum SpeakerIdentificationPrompt {
     public static let builtIn = """
     ## 話者名の割当
     participant.speaker_identification があるときだけ、通常の依頼に加えて話者名を割り当ててください。
-    未確定の枠だけが対象です。読んだ会話の流れから、その枠の話者が誰かを推定してください。
+    unresolved の枠が対象です。読んだ会話の流れから、その枠の話者が誰かを推定してください。
     根拠には、本人の名乗り、名前で呼ばれて応答した発言、名前を挙げて話を振られた流れ、ほかの人の呼びかけや話題の受け答えを使えます。
     名前は candidates か、会話の本文に出てきた人名から選びます。役割名や、会話に出てこない名前は付けないでください。
     同じ名前を複数の枠へ付けないでください。
-    確信が低くても、いちばん可能性の高い名前を返してください。そのときは speaker に --confidence low を付けます。人が確かめて直します。
+    決め手があれば、--confidence を付けずに返してください。初めて付ける枠でも同じです。決め手は、その枠の話者が本人として応じたと会話から判断できることです。
+    例は、自分で名乗った、名前で呼ばれて返事をした、その人自身の発言や仕事を問われて自分のこととして答えた、です。呼びかけの直後に話した、名前を含む行がある、という順番や名前の有無だけでは決め手になりません。
+    決め手が無くても、ほかの名前より当てはまる根拠がある名前は返してください。そのときは speaker に --confidence low を付けます。人が確かめて直します。
+    会話の中で立場や役割が1人だけの枠は、その立場の人の名前を確度低で付けてかまいません。例は、ほかの人と違って解説や司会を続けている枠です。
+    ただし、その名前の人がこの会話に参加し、その立場を担っていると読めるときに限ります。話題に出ただけの人の名前は付けません。
     確信が低いときに使える名前は、会話の本文に出てきた人名と、origin が participants のときの candidates だけです。
     origin が ledger の candidates のうち会話の本文に出てこない名前は、名乗りや名前で呼ばれた応答のような確かな根拠があるときだけ使います。
-    返さないのは、使える名前の中に当てはまるものが無い枠だけです。
+    同じ役割や立場の人が複数いて、どの枠が誰かを区別する根拠が無いときは、その枠に名前を付けないでください。五分五分の決め打ちはしません。
+    返さないのは、使える名前の中に当てはまるものが無い枠と、どの名前か区別できない枠です。
+    tentative にある枠は、前に確度の低い推定で付けた名前です。依頼のたびに見直し、枠ごとに確定・変更・据え置きのどれかを決めてください。
+    確定は決め手が見つかったときで、--confidence を付けずに同じ名前を返します。変更は別の名前の決め手が見つかったときで、その名前を返します。据え置きは speaker を呼びません。
+    決めた結果は、reply の本文に枠ごとに1行で書いてください。元の依頼に、短くまとめる、報告は「完了」だけ、のような指定があっても、この1行は省きません。例は「話者B 田中: 確定([14:05:10] 自分の担当を問われて答えた)」「話者A 佐藤: 据え置き」です。
+    この見直しに限り、transcript_path の read_start_line より前の行も読み直してかまいません。指定範囲を越えて読まない決まりの例外です。
+    2つの枠の名前を入れ替えるときは、両方の枠を返してください。
     accept の後、progress --replying と reply の前に、該当する枠ごとに同梱CLIの speaker を呼んでください。作業許可が無効でも speaker は返せます。
     --slot は unresolved の A〜H、--name は選んだ名前を使います。--session、--request、--token はこの依頼の固定値です。
     根拠は会話の行を [HH:MM:SS] 付きで引用し、そう推定した理由を1文添えて stdin へ渡してください。根拠はUTF-8で2 KiB以内です。

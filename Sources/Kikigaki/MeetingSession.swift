@@ -1080,11 +1080,7 @@ final class MeetingSession {
         // 開始時のプロンプトを使い回すと初版の作成指示が残る。毎回、固定したパスに合わせる。
         let question = trigger == .scheduled && config.board != nil
             ? config.scheduledPrompt(minutesPath: minutesPath) : question
-        let identification = config.identifySpeakers ? SpeakerIdentification.make(
-            names: snapshot.names, detected: snapshot.detectedSpeakerSlots, mapping: snapshot.speakerMapping,
-            participants: participantNames,
-            speakers: snapshot.speakers,
-            frequent: SpeakerSuggestions.frequentNames(in: url.deletingLastPathComponent(), excluding: url)) : nil
+        let identification = config.identifySpeakers ? speakerIdentification(participants: participantNames, url: url) : nil
         let names = snapshot.names, timeline = snapshot.timeline, typed = typedEntries
         let exclusion = audioExclusion
         let workAllowed = suppliedWorkAllowed ?? aiWorkAllowed
@@ -1246,6 +1242,22 @@ final class MeetingSession {
                 TranscriptRenderer.lines(self.snapshot.utterances, names: self.snapshot.names, timeline: self.snapshot.timeline),
                 self.snapshot.utterances.map(\.text))
         }
+        // 追記の送り直しは新しい依頼なので、元の依頼の固定情報ではなく、いまの名前で作り直す。
+        controller.speakerIdentification = { [weak self] in
+            guard let self, self.handoff.meetingID == meetingID, let url = self.snapshot.markdownURL, let aiStore = self.aiStore,
+                  let state = try? aiStore.minutesStores.store(meetingID: meetingID, markdownURL: url).state else { return nil }
+            let participants = SpeakerSuggestions.participants(at: state.minutesPath.map { URL(fileURLWithPath: $0) },
+                                                               key: self.snapshot.participantsKey)
+            return self.speakerIdentification(participants: participants, url: url)
+        }
+    }
+
+    private func speakerIdentification(participants: [String], url: URL) -> SpeakerIdentification? {
+        SpeakerIdentification.make(
+            names: snapshot.names, detected: snapshot.detectedSpeakerSlots, mapping: snapshot.speakerMapping,
+            participants: participants,
+            speakers: snapshot.speakers,
+            frequent: SpeakerSuggestions.frequentNames(in: url.deletingLastPathComponent(), excluding: url))
     }
 
 #if DEBUG

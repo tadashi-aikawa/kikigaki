@@ -28,6 +28,7 @@ KIKIGAKIのコピー文にある `KIKIGAKI_CONTEXT` のJSONを読み、会話デ
 
 1. `schema_version` が1であること、`sequence` が1以上の整数であること、ファイルパスが絶対パスであること、行番号・行数が整数で妥当であることを確認する。同じ会議の最新番号以下なら、下記の再受領判定を先に行う
 2. `kind: update` では、同じ `meeting_id` の最新の受領済みIDと `previous_snapshot_id` が一致するか確認する。指定範囲を越えて全文を読んだり、前回のファイルを探したりしない
+    - 例外: 会議参加モードで話者名の割当の `tentative` を見直すときだけ、同じ `transcript_path` の `read_start_line` より前の行を読める。[会議参加モード](references/meeting.md) の「話者名の割当」を参照
     - 会議参加モードの履歴は `meeting_id + participant.stream_id` で区別し、不足は同梱CLIでcontext_missingとして返す
     - 手動コピーは常に `full` で渡る。手動コピーで `update` を受け取ったら解釈せず、KIKIGAKIでもう一度コピーしてもらう
 3. `transcript_path` の1ファイルから `read_start_line` を起点に `read_line_count` 行だけ読む。1行目は1。終了行は開始行＋行数−1。行数0ならファイルの本文を読む必要はない

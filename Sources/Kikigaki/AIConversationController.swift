@@ -48,6 +48,8 @@ final class AIConversationController {
     var onChange: (() -> Void)?
     /// 現在表示している会議だけが返す。旧会議・再起動回収では割当を適用しない。
     var speakerContext: (() -> (names: SpeakerNames, detected: [Int], mapping: [Int: Int], lines: [String], texts: [String])?)?
+    /// 追記の送り直しに同梱する話者名の割当。現在表示している会議だけが返す。
+    var speakerIdentification: (() -> SpeakerIdentification?)?
     /// 保存に成功した新しい割当だけを渡す。再起動回収のcontrollerでは呼ばない。
     var onSpeakersIdentified: ((SpeakerNames, SpeakerNames) -> Void)?
     var speakerDiagnostic: (String) -> Void = { NSLog("%@", $0) }
@@ -258,12 +260,17 @@ final class AIConversationController {
                     defer { preparingAppendixRetry = nil }
                     guard !discarded, !closedSlots.contains(slot), canSend(slot: slot),
                           let latest = conversation.questions.first(where: { $0.request.id == question.request.id }) else { return }
+                    // 話者名の割当を同梱すると内蔵節が問いの末尾に付く。分ける大きさはその分を差し引いて決める。
+                    let identification = config.identifySpeakers ? speakerIdentification?() : nil
+                    let limit = AILimits.questionBytes - (identification.map {
+                        SpeakerIdentificationPrompt.compose(question: "_", identification: $0).utf8.count - 1
+                    } ?? 0)
                     var pending: [AIAppendix] = [], text = ""
                     for appendix in latest.unreflectedAppendices {
                         let body = appendix.question.isEmpty ? "会話末尾の指示を反映してください" : appendix.question
                         let added = "追記 \(appendix.number):\n" + body
                         let combined = text.isEmpty ? added : text + "\n\n" + added
-                        if combined.utf8.count > AILimits.questionBytes {
+                        if combined.utf8.count > limit {
                             // 単独の文面が上限ちょうどなら、番号の前置きを省いて本文を保つ。
                             if pending.isEmpty { pending = [appendix]; text = body }
                             break
@@ -275,7 +282,9 @@ final class AIConversationController {
                     let request = try prepare(lines: last.snapshot.lines, question: text, voiceQuestion: "",
                         capturedAt: last.capturedAt, cutoff: last.audioCutoffSeconds, tail: last.tentativeTail,
                         config: config, helper: URL(fileURLWithPath: p.cliPath), full: true, workAllowed: p.workAllowed,
-                        trigger: p.trigger, minutesPath: p.minutesPath, boardHeading: p.boardHeading)
+                        trigger: p.trigger, minutesPath: p.minutesPath, boardHeading: p.boardHeading,
+                        // 単独で上限近くの追記は、割当を外して本文を届ける。割当は次の送信で渡せる。
+                        speakerIdentification: text.utf8.count <= limit ? identification : nil)
                     // 送信開始の保存と一緒に引継先を記録し、再走査で二重送信しない。
                     do {
                         // 明示的に接続を作り直した後も、保存済みの追記を新しい世代へ引き継ぐ。

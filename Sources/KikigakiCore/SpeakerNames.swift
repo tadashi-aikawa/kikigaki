@@ -68,20 +68,49 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
         }.sorted()
     }
 
+    /// AIの確度の低い推定で付いた名前。人が確かめるまでは、後の会話で推定し直してよい。
+    public func isTentative(_ slot: Int) -> Bool {
+        attributions[slot]?.event.isLowConfidence == true && !humanTouched.contains(slot)
+    }
+
+    /// AIへ渡して推定させる枠。未確定の枠に、確度の低い推定のまま人が確かめていない枠を足す。
+    /// 確かな推定と人が触った枠は固定する。直した手間を消さないため。
+    public func revisableSlots(detected: [Int], mapping: [Int: Int]) -> [Int] {
+        guard diarizationEnabled else { return [] }
+        let tentative = Set(detected).filter {
+            Self.letters.indices.contains($0) && isTentative($0) && (mapping[$0] ?? $0) == $0
+        }
+        return Set(unresolvedSlots(detected: detected, mapping: mapping)).union(tentative).sorted()
+    }
+
     /// 名前は固定した候補か、会話の本文に出てきた人名に限る。会話に出てこない名前をAIに作らせないため。
     /// 確度の低い推定は、会議にいたとは限らない台帳とよく使う名前を候補として使えない。消去法で外れやすいため。
+    /// 確度の低い推定の枠は、その名前を `tentative` で渡した依頼から推定し直せる。
+    /// 別の枠がそうして渡した確度の低い推定で同じ名前を持っていれば、その枠を未確定へ戻す。
+    /// 同じ依頼で付いた名前と、送った後に別の依頼で付いた名前は奪わない。同名が2枠へ返った場合の先勝ちを保つため。
+    /// 入れ替えでは、もう一方の枠への割当が続けて届き、戻した枠を埋める。
     /// `texts` は発言の本文。整形した `lines` は根拠の時刻の照合に使う。
     public mutating func identify(_ event: AISpeakerEvent, participant: String, fixed: SpeakerIdentification?, detected: [Int],
                                  mapping: [Int: Int], lines: [String], texts: [String]) throws {
         let candidates = event.isLowConfidence ? fixed?.lowConfidenceCandidates ?? [] : fixed?.candidates ?? []
+        let holder = Self.letters.firstIndex(of: event.slot).flatMap { otherSlot(using: event.name, excluding: $0) }
+        // 付いた名前を変えてよいのは、その割当を推定し直す対象として送った依頼だけ。並行した依頼と古い返送の先勝ちを保つため。
+        // 名前ではなく割当元のイベントで照らす。名前が変わって元へ戻った後も、古い依頼から上書きさせない。
+        let sent = fixed?.tentativeEvents ?? [:]
+        let current = self
+        let revisable = { (slot: Int) in
+            current.isTentative(slot) && sent[Self.letter(for: slot)] == current.attributions[slot]?.event.eventID
+        }
         guard let slot = Self.letters.firstIndex(of: event.slot),
-              unresolvedSlots(detected: detected, mapping: mapping).contains(slot),
-              otherSlot(using: event.name, excluding: slot) == nil,
+              revisableSlots(detected: detected, mapping: mapping).contains(slot),
+              names[slot] == nil || revisable(slot),
+              holder.map(revisable) ?? true,
               !Self.letters.indices.contains(where: { Self.defaultName(for: $0) == event.name }),
               candidates.contains(event.name) || SpeakerEvidence.mentions(event.name, in: texts),
               SpeakerEvidence.exists(event.evidence, in: lines) else {
             throw AIError.invalid("speaker current state or evidence")
         }
+        if let holder { names[holder] = nil; attributions[holder] = nil }
         set(event.name, for: slot)
         attributions[slot] = SpeakerAttribution(event: event, participant: participant)
     }

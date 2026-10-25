@@ -361,13 +361,15 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             speakerRevealBanner.clear()
             return
         }
-        // 人の確認・改名・統合で由来が消えた枠は、古い答えを後から出さない。
-        for index in pendingSpeakerReveals.indices {
-            pendingSpeakerReveals[index].reveals.removeAll { reveal in
-                snapshot.names.name(for: reveal.slot) != reveal.name
-                    || snapshot.names.attributions[reveal.slot]?.event.eventID != reveal.id
-            }
+        // 人の確認・改名・統合・推定し直しで由来が消えた枠は、古い答えを後から出さない。
+        let names = snapshot.names
+        let isValid = { (reveal: SpeakerReveal) in
+            names.name(for: reveal.slot) == reveal.name && names.attributions[reveal.slot]?.event.eventID == reveal.id
         }
+        for index in pendingSpeakerReveals.indices {
+            pendingSpeakerReveals[index].reveals.removeAll { !isValid($0) }
+        }
+        speakerRevealBanner.prune(keeping: isValid)
         let ids = Set(pendingSpeakerReveals.flatMap { $0.reveals.map(\.id) })
         for row in rows.values where row.activeSpeakerRevealID.map({ !ids.contains($0) }) == true {
             row.stopSpeakerReveal()
