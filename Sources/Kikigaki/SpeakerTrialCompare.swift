@@ -7,7 +7,7 @@ import KikigakiCore
 enum SpeakerTrialCompare {
     static let usage = """
         usage: Kikigaki --align-compare <dumpDir> [--out <dir>] [--source <名前>]
-               [--expect <開始秒>-<終了秒>=<枠>]... [--names 0=司会,1=堀田] [--no-live]
+               [--expect <開始秒>-<終了秒>=<枠>]... [--names 0=司会,1=山田] [--no-live]
         """
 
     static func run(arguments: [String]) -> Int32 {

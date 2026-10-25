@@ -67,10 +67,10 @@ DEBUG の `Kikigaki --align-compare` で行う。UIもモデルも起動しな�
 
 ```sh
 .build/debug/Kikigaki --align-compare <作業用ディレクトリ>/dump/<会議名> --out <作業用ディレクトリ>/compare \
-  --expect <開始秒>-<終了秒>=<枠> --names 0=司会,1=堀田,2=イチロー
+  --expect <開始秒>-<終了秒>=<枠> --names 0=司会,1=山田,2=次郎
 ```
 
-- 引数: `[--out <dir>] [--source <名前>] [--expect <開始秒>-<終了秒>=<枠>]... [--names 0=司会,1=堀田] [--no-live]`
+- 引数: `[--out <dir>] [--source <名前>] [--expect <開始秒>-<終了秒>=<枠>]... [--names 0=司会,1=山田] [--no-live]`
 - 最終判定: 本番の判定を `final.json` へ当てる
 - 録音中: 本番のフレーズ固定を、録音中の突き合わせループとして `live.jsonl` の上で再生する。`--no-live` で省く
     - 疑似試験との違い: 最終トークンを時刻順に流し直すのではなく、実際の録音中の速報・未確定を含む列を使う
