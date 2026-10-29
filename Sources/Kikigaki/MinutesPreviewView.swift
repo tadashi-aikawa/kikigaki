@@ -183,8 +183,12 @@ final class MinutesClearButton: HoverButton {
         headerBar.addSubview(top); top.translatesAutoresizingMaskIntoConstraints = false
         let trailing = top.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor, constant: -24)
         headerRowTrailing = trailing
+        // 高さは会話ヘッダーと揃え、通知の行が出れば伸ばす。固定にすると、会話ヘッダーの通知の行が0pt近くまで潰れる。
+        let preferred = headerBar.heightAnchor.constraint(equalToConstant: 56)
+        preferred.priority = .defaultLow
         NSLayoutConstraint.activate([
-            headerBar.heightAnchor.constraint(equalToConstant: 56),
+            preferred,
+            headerBar.heightAnchor.constraint(greaterThanOrEqualToConstant: 56),
             top.leadingAnchor.constraint(equalTo: headerBar.leadingAnchor, constant: 24),
             trailing,
             top.topAnchor.constraint(equalTo: headerBar.topAnchor, constant: 12),

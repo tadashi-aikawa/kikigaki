@@ -57,7 +57,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let latestButton = HoverButton(title: "最新の発言へ ↓", target: nil, action: nil)
     private var transcriptBottom: NSLayoutConstraint?
     private let statusChip = RecordingStatusChip()
-    private let messageLabel = NSTextField(wrappingLabelWithString: "")
+    let messageLabel = NSTextField(wrappingLabelWithString: "")
     private var handoffNotice: (text: String, failed: Bool)?
     private var noticeDismissal: DispatchWorkItem?
     private var copyRequested = false
@@ -130,7 +130,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             setFilter(filterSelection.subtracting([subject]))
         }
         if let minutesHeader {
-            minutesSplit.preview.headerBar.heightAnchor.constraint(equalTo: minutesHeader.heightAnchor).isActive = true
+            // 閉じている間の議事録ペインは高さ0になる。通知の行の圧縮抵抗(750)より強く縛ると、
+            // 会話ヘッダーまで引きずられて通知の行が潰れる。
+            let height = minutesSplit.preview.headerBar.heightAnchor.constraint(equalTo: minutesHeader.heightAnchor)
+            height.priority = .defaultHigh - 1
+            height.isActive = true
         }
         minutesSplit.onLayout = { [weak self] in
             guard let self else { return }; self.updateHeader(width: self.minutesSplit.left.frame.width)
@@ -566,6 +570,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         configure(latestButton, #selector(latestPressed))
         configure(speakerButton, #selector(speakerPressed))
         speakerButton.setAccessibilityLabel("話者")
+        // 固有の高さ38ptのままだとヘッダーが通知の無いときも56ptを超える。ほかのボタンと同じ32ptに揃える。
+        speakerButton.heightAnchor.constraint(equalToConstant: 32).isActive = true
         configure(filterButton, #selector(filterPressed))
         filterButton.isBordered = false
         filterButton.widthAnchor.constraint(equalToConstant: 32).isActive = true

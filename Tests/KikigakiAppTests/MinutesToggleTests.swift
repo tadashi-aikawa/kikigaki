@@ -69,6 +69,28 @@ extension AppKitTests {
         #expect(abs(back.right - closed.right) < 0.5 && abs(back.midY - closed.midY) < 0.5)
     }
 
+    @Test func ヘッダーの通知は議事録の上部バーに潰されず開閉しても全文の高さで出る() throws {
+        let (controller, defaults, suite) = try controller(width: 420)
+        defer { defaults.removePersistentDomain(forName: suite); controller.minutesSplit.preview.stop() }
+        let content = try #require(controller.window?.contentView)
+        let label = controller.messageLabel, bar = controller.minutesSplit.preview.headerBar
+        let header = try #require(label.superview)
+        controller.showNotice("システム音声を取り込めないためマイクのみで続けます: マイクとシステム音声のchannel構成が変わりました")
+        func check(_ name: String) throws {
+            content.layoutSubtreeIfNeeded()
+            try capture("notice-\(name)", controller)
+            let line = label.font!.ascender - label.font!.descender
+            // 420ptでは1行に収まらない長さ。折り返した2行目まで読める高さを持つ。
+            #expect(label.frame.height >= line * 2 - 0.5, "\(name): \(label.frame)")
+            // 閉じている間の議事録ペインは高さ0なので、揃えるのは開いている間だけ。
+            guard name == "open" else { return }
+            #expect(abs(bar.frame.height - header.frame.height) < 0.5, "\(name): \(bar.frame)")
+        }
+        try check("closed")
+        controller.toggleMinutes()
+        try check("open")
+    }
+
     @Test func 伸ばせるウィンドウは会話の幅を保って右へ伸び閉じると元へ戻る() throws {
         let (controller, defaults, suite) = try controller(width: 600)
         defer { defaults.removePersistentDomain(forName: suite); controller.minutesSplit.preview.stop() }
