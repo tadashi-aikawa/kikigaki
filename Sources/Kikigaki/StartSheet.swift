@@ -66,7 +66,12 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     let systemAudioAutomatic = NSButton(radioButtonWithTitle: "自動(いまは取り込まない)", target: nil, action: nil)
     let systemAudioInclude = NSButton(radioButtonWithTitle: "取り込む", target: nil, action: nil)
     let systemAudioExclude = NSButton(radioButtonWithTitle: "取り込まない", target: nil, action: nil)
+    /// 「取り込む」を選べない理由。マイクモードが「声を分離」の間だけ選択肢の下に出す。
+    /// コントロールセンターのマイクモードにKIKIGAKIが出るのはマイクを使っている間だけなので、録音中の切替を案内する。
+    let systemAudioNote = Washi.label("マイクモードが「声を分離」だと取り込めません。\n録音中にコントロールセンターで「標準」に戻すと、次の録音から取り込めます",
+                                      size: 11, color: Washi.red)
     private let outputKind: () -> AudioOutputKind
+    private let voiceIsolation: () -> Bool
     private let microphoneName: () -> String
     let microphoneLabel = Washi.label(size: 13)
     private var outputTimer: Timer?
@@ -104,6 +109,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
          defaults: UserDefaults = .standard,
          systemAudioMode: SystemAudioMode = .automatic,
          outputKind: @escaping () -> AudioOutputKind = { .unknown },
+         voiceIsolation: @escaping () -> Bool = { false },
          microphoneName: @escaping () -> String = { MicrophoneDevice.currentName }) {
         self.profiles = profiles
         self.audioFile = audioFile
@@ -113,6 +119,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         // 予約は録音の会議のもの。過去の音声へ使うと消費してしまう。
         self.nextMeetings = audioFile == nil ? NextMeetings(nextMeetings).candidates : []
         self.outputKind = outputKind
+        self.voiceIsolation = voiceIsolation
         self.microphoneName = microphoneName
         window = StartSheetWindow(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 400),
                                   styleMask: [.titled], backing: .buffered, defer: false)
@@ -155,7 +162,13 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             refreshSystemAudioOutput()
             let audioChoices = NSStackView(views: audioRadios)
             audioChoices.orientation = .horizontal; audioChoices.spacing = 14
-            add(row("システム音声", audioChoices), to: rows)
+            systemAudioNote.lineBreakMode = .byWordWrapping; systemAudioNote.maximumNumberOfLines = 0
+            systemAudioNote.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let audioValue = column([audioChoices, systemAudioNote], spacing: 4)
+            let audioRow = row("システム音声", audioValue)
+            // 理由の行が出ても仕切り線まで伸びないよう、上下10ptを高さでも保証する。
+            audioRow.heightAnchor.constraint(greaterThanOrEqualTo: audioValue.heightAnchor, constant: 20).isActive = true
+            add(audioRow, to: rows)
             add(separator(), to: rows)
             microphoneLabel.usesSingleLineMode = true
             microphoneLabel.lineBreakMode = .byTruncatingTail
@@ -787,8 +800,11 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         let savedDrafts = drafts
         let hint = minutesHint.stringValue
         let hidden = minutesHint.isHidden
+        let noteHidden = systemAudioNote.isHidden
         minutesHint.stringValue = "議事録は絶対パスの.mdを指定してください"
         minutesHint.isHidden = false
+        // 開いている間にマイクモードを変えても、シートの高さを変えずに済むよう測っておく。
+        systemAudioNote.isHidden = audioFile != nil
         reservedBodyHeight = 0
         for slot in [Int?](profiles.map { $0.slot }) + [nil] {
             selectDestination(slot)
@@ -800,6 +816,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         selectDestination(selected)
         minutesHint.stringValue = hint
         minutesHint.isHidden = hidden
+        systemAudioNote.isHidden = noteHidden
     }
 
     /// 本文だけを再配置する。表示中のシート高は変えず、超過分をスクロールする。
@@ -862,7 +879,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         result.audioFile = audioFile
         if audioFile == nil {
             result.systemAudioMode = selectedSystemAudioMode
-            result.recordSystemAudio = selectedSystemAudioMode.includes(outputKind())
+            result.recordSystemAudio = selectedSystemAudioMode.includes(outputKind(), voiceIsolation: voiceIsolation())
             result.manualSlot = selectedManualSlot
         } else {
             // 行は出さないが、仕上げの手動宛先は録音の開始シートで最後に選んだ宛先から始める。
@@ -895,6 +912,12 @@ final class StartSheet: NSObject, NSTextViewDelegate {
 
     @objc func startPressed() {
         guard !editor.hasMarkedText(), !minutesBox.hasMarkedTextForStart, audioFileProbe == nil else { return }
+        // 追従の周期より先に押されても、取り込むはずだった会議は理由を見せてから止める。黙ってマイクだけで始めない。
+        if audioFile == nil, systemAudioNote.isHidden, voiceIsolation() {
+            let wouldRecord = selectedSystemAudioMode.includes(outputKind())
+            refreshSystemAudioOutput()
+            if wouldRecord { return }
+        }
         guard let value = options else {
             showMinutesHint(minutesInput == nil && selectedSlot.flatMap { slot in profiles.first { $0.slot == slot } }?.board != nil
                 ? BoardPrompt.missingLocation : "絶対パスの.mdファイルを指定してください")
@@ -921,7 +944,15 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         selectSystemAudio(sender === systemAudioInclude ? .include : sender === systemAudioExclude ? .exclude : .automatic)
     }
     func refreshSystemAudioOutput() {
-        systemAudioAutomatic.title = SystemAudioMode.automatic.includes(outputKind())
+        // 「声を分離」では取り込めないので、「取り込む」を選ばせない。選んであれば自動へ移す。
+        let blocked = voiceIsolation()
+        systemAudioInclude.isEnabled = !blocked
+        if blocked, systemAudioInclude.state == .on { selectSystemAudio(.automatic) }
+        if systemAudioNote.isHidden == blocked {
+            systemAudioNote.isHidden = !blocked
+            if window.sheetParent != nil { fit() }
+        }
+        systemAudioAutomatic.title = SystemAudioMode.automatic.includes(outputKind(), voiceIsolation: blocked)
             ? "自動(いまは取り込む)" : "自動(いまは取り込まない)"
     }
     func refreshMicrophone() {

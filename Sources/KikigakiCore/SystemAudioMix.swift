@@ -1,8 +1,9 @@
 /// 選択と3値判定はHALから独立させる。unknownで取り込まないのは対面会議を優先するため。
 public enum SystemAudioMode: String, CaseIterable, Sendable {
     case automatic, include, exclude
-    public func includes(_ output: AudioOutputKind) -> Bool {
-        self == .include || (self == .automatic && output == .headphones)
+    /// マイクモードが「声を分離」なら、どの選択でも取り込まない。タップのstreamがaggregateに入らないため。
+    public func includes(_ output: AudioOutputKind, voiceIsolation: Bool = false) -> Bool {
+        !voiceIsolation && (self == .include || (self == .automatic && output == .headphones))
     }
 }
 public enum AudioOutputKind: Sendable { case headphones, builtInSpeaker, unknown }

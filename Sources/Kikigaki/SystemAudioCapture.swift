@@ -203,7 +203,9 @@ final class SystemAudioCapture: SystemAudioCapturing {
             guard rate >= 8000 && rate <= 192000 else { throw SystemAudioError(reason: "対応できない音声レートです") }
             channelCount = try inputChannels()
             guard channelCount == micChannels + Int(format.mChannelsPerFrame), format.mChannelsPerFrame > 0 else {
-                throw SystemAudioError(reason: "マイクとシステム音声のchannel構成が変わりました")
+                // 開始シートで止めても、開いた後にマイクモードを変えればここへ来る。
+                throw SystemAudioError(reason: MicrophoneMode.isVoiceIsolation
+                    ? MicrophoneMode.voiceIsolationReason : "マイクとシステム音声のchannel構成が変わりました")
             }
             let ring = SystemAudioRing(capacity: Int(rate * 2), micChannels: micChannels, tapChannels: Int(format.mChannelsPerFrame))
             self.ring = ring

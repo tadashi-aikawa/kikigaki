@@ -29,6 +29,36 @@ extension AppKitTests {
         sheet.cancelPressed()
         #expect(cancelled)
     }
+    @Test func 声を分離の間は取り込むを選べず理由を出し戻すと選べる() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        var isolation = true
+        let sheet = StartSheet(profiles: [], diarizationEnabled: true, exclusion: AudioExclusion(),
+                               systemAudioMode: .include, outputKind: { .headphones }, voiceIsolation: { isolation })
+        // 前回値が「取り込む」でも自動へ移し、自動も取り込まない。
+        #expect(!sheet.systemAudioInclude.isEnabled && sheet.selectedSystemAudioMode == .automatic)
+        #expect(sheet.systemAudioAutomatic.title == "自動(いまは取り込まない)")
+        #expect(!sheet.systemAudioNote.isHidden && sheet.options?.recordSystemAudio == false)
+        try capture("system-voice-isolation", sheet)
+        isolation = false
+        sheet.refreshSystemAudioOutput()
+        #expect(sheet.systemAudioInclude.isEnabled && sheet.systemAudioNote.isHidden)
+        #expect(sheet.systemAudioAutomatic.title == "自動(いまは取り込む)" && sheet.options?.recordSystemAudio == true)
+        sheet.cancelPressed()
+    }
+    @Test func 追従より先に開始を押しても声を分離なら理由を見せて止まる() throws {
+        NSApplication.shared.setActivationPolicy(.prohibited)
+        var isolation = false
+        let sheet = StartSheet(profiles: [], diarizationEnabled: true, exclusion: AudioExclusion(),
+                               systemAudioMode: .include, outputKind: { .headphones }, voiceIsolation: { isolation })
+        var started: [StartSheet.Options] = []
+        sheet.onStart = { started.append($0) }
+        isolation = true
+        sheet.startPressed()
+        #expect(started.isEmpty && !sheet.systemAudioNote.isHidden && sheet.selectedSystemAudioMode == .automatic)
+        // 理由を見たうえで押し直せば、マイクだけで始める。
+        sheet.startPressed()
+        #expect(started.count == 1 && started.first?.recordSystemAudio == false && started.first?.systemAudioMode == .automatic)
+    }
     private func profiles(_ root: URL, toml: String) throws -> [ResolvedAIConfig] {
         ResolvedConfig(config: try ConfigLoader.parse(toml: toml), home: root).aiProfiles
     }

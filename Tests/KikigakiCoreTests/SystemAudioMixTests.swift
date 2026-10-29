@@ -9,6 +9,11 @@ struct SystemAudioMixTests {
         #expect(SystemAudioMode.include.includes(.unknown))
         #expect(!SystemAudioMode.exclude.includes(.headphones))
     }
+    @Test func 声を分離ではどの選択でも取り込まない() {
+        #expect(!SystemAudioMode.include.includes(.headphones, voiceIsolation: true))
+        #expect(!SystemAudioMode.automatic.includes(.headphones, voiceIsolation: true))
+        #expect(SystemAudioMode.include.includes(.headphones, voiceIsolation: false))
+    }
     @Test func 両系統をゲイン1で足して短い入力も即座に返す() {
         #expect(SystemAudioMixer.process(microphone: [0.125], systemAudio: [0.25]) == [0.375])
         #expect(SystemAudioMixer.process(microphone: [0.25, -0.25], systemAudio: [-0.125, 0.125]) == [0.125, -0.125])

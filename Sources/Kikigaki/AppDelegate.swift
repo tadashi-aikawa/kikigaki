@@ -428,7 +428,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                nextMeetings: nextMeetings,
                                systemAudioMode: UserDefaults.standard.string(forKey: StartSheet.systemAudioDefaultsKey)
                                     .flatMap(SystemAudioMode.init(rawValue:)) ?? .automatic,
-                               outputKind: SystemAudioOutput.current)
+                               outputKind: SystemAudioOutput.current,
+                               voiceIsolation: { MicrophoneMode.isVoiceIsolation })
         sheet.onDiarizationPreload = { [weak self] in self?.preloadModels() }
         sheet.onRemoveNextMeeting = { [weak self] id in self?.removeNextMeeting(id: id) }
         sheet.onCancel = { [weak self] in self?.startSheet = nil }

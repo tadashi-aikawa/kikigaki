@@ -1,7 +1,18 @@
+import AVFoundation
 import CoreAudio
 import Foundation
 import IOKit.audio
 import KikigakiCore
+
+/// コントロールセンターでKIKIGAKIに選んだマイクモード。
+/// 「声を分離」ではタップのstreamがaggregateに入らず、3秒待っても加わらなかった。「標準」なら入る。
+/// 「標準」へ戻しても実際の切替が遅れることがあるので、選んだモードと実際のモードの両方を見る。
+enum MicrophoneMode {
+    static var isVoiceIsolation: Bool {
+        AVCaptureDevice.preferredMicrophoneMode == .voiceIsolation || AVCaptureDevice.activeMicrophoneMode == .voiceIsolation
+    }
+    static let voiceIsolationReason = "マイクモードが「声を分離」です。コントロールセンターで「標準」にしてから録音し直してください"
+}
 
 struct MicrophoneDevice: Equatable {
     let id: AudioObjectID
