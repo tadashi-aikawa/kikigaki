@@ -37,16 +37,16 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
   </head>
   <body>
     <header class="nav">
-      <a class="brand" href={`${base}/`}>
+      <a class="brand" href={`${base}/`} aria-label="KIKIGAKI ホーム">
         <Image src={logo} alt="" width={24} height={24} />
         <b>KIKIGAKI</b><i>聞書</i>
       </a>
       <nav aria-label="サイト">
         <a href="#features">機能</a>
-        <a href="#install">導入</a>
-        <a href={docs}>ドキュメント</a>
+        <a href="#install">インストール</a>
+        <a href={docs}><span class="label-full">ドキュメント</span><span class="label-short">Docs</span></a>
         <a href={repo}>GitHub</a>
-        <a href={blog} target="_blank" rel="noopener noreferrer">ブログ</a>
+        <a class="nav-blog" href={blog} target="_blank" rel="noopener noreferrer">ブログ</a>
       </nav>
     </header>
 
@@ -67,11 +67,11 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
             <div class="cta">
               <a class="button primary" href="#features">
                 <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
-                機能を見る
+                <span class="label-full">機能を見る</span><span class="label-short">機能</span>
               </a>
               <a class="button" href={docs}>
                 <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
-                ドキュメント
+                <span class="label-full">ドキュメント</span><span class="label-short">Docs</span>
               </a>
               <a class="button" href={repo}>
                 <svg aria-hidden="true" viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8"/></svg>
@@ -168,7 +168,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
             <p>プレゼンの練習やアイデアの壁打ちに。<br />話した言葉をAIエージェントが拾って、構成やメモにまとめます。</p>
           </div>
         </div>
-        <p class="ai-need">裏で動くのはAIエージェント(Claude Code か Codex のCLI)です。聞書とつなぐには <a href="https://herdr.dev/" target="_blank" rel="noopener noreferrer">herdr</a> を入れておきます</p>
+        <p class="ai-need">裏で動くのはAIエージェント(Claude Code か Codex のCLI)です。KIKIGAKIとつなぐには <a href="https://herdr.dev/" target="_blank" rel="noopener noreferrer">herdr</a> を入れておきます</p>
       </section>
 
       <section class="movie" id="movie">
@@ -176,12 +176,12 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
         <p class="section-lead">3人の会議を録音しているところ</p>
         <div class="movie-frame">
           <div class="media-clip">
-            <Media src="demos/transcription.mp4" alt="対面の会議を録音中の書き起こしウィンドウ">
+            <Media src="demos/transcription.mp4" alt="対面の会議を録音中の画面。左に書き起こし、右にAIエージェントが更新するボード">
               <div class="ph ph-movie">
                 <div class="what">
                   <div class="play"></div>
-                  <b>動画 15〜20秒・無音ループ</b>
-                  対面の会議を録音中の書き起こしウィンドウ。<br />3人の発話が話者色つきで薄く出て、濃く決まっていく。<br />途中でAIエージェントの返事が1つ、発話の間に入る。
+                  <b>動画 25秒・無音ループ</b>
+                  対面の会議を録音中のウィンドウ。左に書き起こし、右にボード。<br />AIエージェントが話者に名前を付け、途中で返事が1つ、発話の間に入る。
                 </div>
                 <small>動画仮置き</small>
               </div>
@@ -194,22 +194,40 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
         <div class="pt">
           <div class="shot">
             <div class="sheet media-clip">
-              <Media src="captures/speakers.webp" alt="3人の会議の書き起こし。最後の行が半透明">
+              <Media src="captures/speakers.webp" alt="3人の会議の書き起こし。行が話者A、話者B、話者Cに分かれ、最後の行が半透明">
                 <div class="ph ph-shot">
-                  <div class="what"><b>キャプチャ</b>3人の会議の書き起こし。<br />上の行は濃く、最後の1〜2行が半透明。<br />話者名は付け直した名前で。</div>
+                  <div class="what"><b>キャプチャ</b>3人の会議の書き起こし。<br />行が話者A・話者B・話者Cに分かれ、最後の1〜2行が半透明。</div>
                   <small>画面仮置き</small>
                 </div>
               </Media>
             </div>
           </div>
           <div class="text">
-            <div class="tag t">話す人ごとに</div>
-            <h3>誰の声かを分けて書く</h3>
-            <p>まだ変わるかもしれない行は薄く、<br />決まると濃くなります。<br />名前はあとから付け直せます。</p>
+            <div class="tag t">話者の聞き分け</div>
+            <h3>声の違いで、話す人を分ける</h3>
+            <p>最大8人まで聞き分けて、行を分けます。<br />この時点では話者A、話者Bのままです。<br />まだ変わるかもしれない行は薄く、決まると濃くなります。</p>
           </div>
         </div>
 
         <div class="pt r">
+          <div class="shot">
+            <div class="sheet media-clip">
+              <Media src="demos/speaker-names.mp4" alt="話者Aや話者Bの名前が、AIエージェントの推定で青木や森に変わるところ">
+                <div class="ph ph-shot">
+                  <div class="what"><b>動画</b>話者Aの名前が、AIエージェントの推定で本人の名前に変わるところ。</div>
+                  <small>動画仮置き</small>
+                </div>
+              </Media>
+            </div>
+          </div>
+          <div class="text">
+            <div class="tag g">話者の推定</div>
+            <h3>誰なのかは、AIが推定する</h3>
+            <p>名乗りや呼びかけに限らず、会話の文脈からも、<br />AIエージェントが話者の名前を推定します。<br />自分で付けることも、推定を直すこともできます。</p>
+          </div>
+        </div>
+
+        <div class="pt">
           <div class="shot">
             <div class="sheet media-clip">
               <Media src="captures/ai-reply.webp" alt="発話の行の間に並ぶAIエージェントの返事">
@@ -227,12 +245,12 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
           </div>
         </div>
 
-        <div class="pt">
+        <div class="pt r">
           <div class="shot">
             <div class="sheet media-clip">
-              <Media src="captures/minutes.webp" alt="書き起こしの右に議事録ペインを開いた画面">
+              <Media src="captures/minutes.webp" alt="AIエージェントが書いた議事録を開いた議事録ペイン">
                 <div class="ph ph-shot">
-                  <div class="what"><b>キャプチャ</b>書き起こしの右に議事録ペインを開いた全体。<br />左に会話、右にAIエージェントが書いた議事録。</div>
+                  <div class="what"><b>キャプチャ</b>AIエージェントが書いた議事録を開いた議事録ペイン。</div>
                   <small>画面仮置き</small>
                 </div>
               </Media>
@@ -245,7 +263,7 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
           </div>
         </div>
 
-        <div class="pt r">
+        <div class="pt">
           <div class="shot">
             <div class="sheet media-clip">
               <Media src="captures/board.webp" alt="議事録ペインのボードタブに、論点と決まったことが並ぶ画面">
@@ -259,11 +277,11 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
           <div class="text">
             <div class="tag s">ボード</div>
             <h3>いま何の話かを、一枚で</h3>
-            <p>議事録は、あとで読むもの。会議の途中で見るのはボード。論点と決まったことを、AIエージェントが一枚に更新し続けます。</p>
+            <p>論点と決まったことを、<br />AIエージェントが一枚の図に更新し続けます。<br />話が進むと、いまの論点の印も動きます。</p>
           </div>
         </div>
 
-        <div class="pt">
+        <div class="pt r">
           <div class="shot">
             <div class="sheet media-clip">
               <Media src="captures/earphones.webp" alt="録音開始シートでシステム音声を取り込む設定">
@@ -275,22 +293,21 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
             </div>
           </div>
           <div class="text">
-            <div class="tag t">イヤホンでも</div>
-            <h3>相手の声も聞き取る</h3>
-            <p>オンライン会議では、Macで流れる相手の声も<br />マイクと一緒に取り込みます。</p>
+            <div class="tag t">システム音声</div>
+            <h3>Macで鳴る音も書き起こす</h3>
+            <p>イヤホンで聞いているオンライン会議の相手の声も、<br />マイクの声と一緒に取り込めます。</p>
           </div>
         </div>
       </section>
 
-      <p class="more"><span>URLや画像の手入力</span><span>会話をコピーしてほかのAIエージェントへ</span><span>会議ごとにMarkdownで保存</span></p>
 
       <section class="install" id="install">
-        <h3>入れる</h3>
+        <h3>インストール</h3>
         <div class="cmd">
           <span><i>$</i> <code id="install-command">{installCommand}</code></span>
           <button type="button" data-copy="install-command">コピー</button>
         </div>
-        <p>macOS 26以降。<br />初めて使うときに、話者判別モデル(Nemotron 3 Diarization)を取得します。</p>
+        <p>対応環境: macOS 26以降</p>
       </section>
     </main>
 
@@ -751,6 +768,11 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     flex: none;
   }
 
+  /* スマホ幅では短い表記へ切り替えて、ボタンを1行に収める */
+  .label-short {
+    display: none;
+  }
+
   .hero-visual svg {
     width: 100%;
     height: auto;
@@ -1010,25 +1032,6 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     color: var(--washi-body);
   }
 
-  .more {
-    margin-top: 96px;
-    padding: 0 16px;
-    text-align: center;
-    font-size: 14px;
-    line-height: 2;
-    color: var(--washi-muted);
-  }
-
-  .more span {
-    display: inline-block;
-  }
-
-  .more span + span::before {
-    content: "・";
-    margin: 0 14px;
-    color: var(--washi-placeholder);
-  }
-
   /* 導入 */
   .install {
     padding: 136px 16px 0;
@@ -1135,6 +1138,8 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
       min-height: 48px;
     }
 
+    /* スクロール中はロゴだけにして、リンクを横スクロールなしで収める */
+    .nav.is-stuck .brand b,
     .nav.is-stuck .brand i {
       display: none;
     }
@@ -1146,13 +1151,25 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     .nav.is-stuck nav {
       min-width: 0;
       flex-wrap: nowrap;
-      gap: 0 16px;
-      overflow-x: auto;
+      gap: 0 14px;
       white-space: nowrap;
     }
 
     .nav.is-stuck nav a {
       flex: none;
+    }
+
+    @media (max-width: 400px) {
+      .nav.is-stuck nav {
+        gap: 0 10px;
+      }
+    }
+
+    /* 幅が足りない端末では、フッターにもあるブログをナビから外して1行に収める */
+    @media (max-width: 359px) {
+      .nav.is-stuck .nav-blog {
+        display: none;
+      }
     }
 
     main section[id] {
@@ -1210,12 +1227,21 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     }
 
     .cta {
+      flex-wrap: nowrap;
       gap: 8px;
     }
 
     .button {
       padding: 10px 14px;
       font-size: 14px;
+    }
+
+    .label-full {
+      display: none;
+    }
+
+    .label-short {
+      display: inline;
     }
 
     .first,
@@ -1267,14 +1293,6 @@ const installCommand = "brew install --cask tadashi-aikawa/tap/kikigaki";
     .pl p br,
     .pt p br {
       display: none;
-    }
-
-    .more {
-      margin-top: 72px;
-    }
-
-    .more span + span::before {
-      margin: 0 8px;
     }
 
     .install {

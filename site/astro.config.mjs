@@ -4,6 +4,40 @@ import starlight from "@astrojs/starlight";
 import { satteri } from "@astrojs/markdown-satteri";
 import { joinJa } from "./src/mdast/join-ja.mjs";
 
+// ドキュメントの本文の画像を押すと、ブラウザ標準のdialogで元の大きさに拡大する。依存は足さない
+const imageZoomScript = `
+const zoomable = ".sl-markdown-content img:not(a img)";
+function openImageZoom(source) {
+  const dialog = document.createElement("dialog");
+  dialog.className = "image-zoom";
+  const image = document.createElement("img");
+  image.src = source.currentSrc || source.src;
+  image.alt = source.alt;
+  dialog.append(image);
+  dialog.addEventListener("click", () => dialog.close());
+  dialog.addEventListener("close", () => { dialog.remove(); source.focus(); });
+  document.body.append(dialog);
+  dialog.showModal();
+}
+document.addEventListener("DOMContentLoaded", () => {
+  for (const image of document.querySelectorAll(zoomable)) {
+    image.tabIndex = 0;
+    image.role = "button";
+  }
+});
+document.addEventListener("click", (event) => {
+  const image = event.target.closest?.(zoomable);
+  if (image) openImageZoom(image);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const image = event.target.closest?.(zoomable);
+  if (!image) return;
+  event.preventDefault();
+  openImageZoom(image);
+});
+`;
+
 // トップ (/kikigaki/) は src/pages/index.astro のティザー。
 // ドキュメントは src/content/docs/docs/ に置き、/kikigaki/docs/<slug>/ で配信する
 export default defineConfig({
@@ -44,6 +78,7 @@ export default defineConfig({
         },
         { tag: "meta", attrs: { property: "og:image:width", content: "1200" } },
         { tag: "meta", attrs: { property: "og:image:height", content: "630" } },
+        { tag: "script", content: imageZoomScript },
       ],
       social: [
         {

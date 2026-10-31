@@ -136,6 +136,92 @@
   background: var(--sl-color-gray-6);
 }
 
+/* 本文の画面キャプチャと動画: 背景の色が本文と同じなので枠で区切る。
+   素材は2倍で撮っているので、幅をその半分にすると文字が本文と同じくらいになる */
+.sl-markdown-content :is(img[src*="/captures/"], video[src*="/demos/"]) {
+  --shot-width: 480px;
+  --shot-pad: 0px;
+  --shot-bg: #f5ead9;
+  display: block;
+  max-width: min(100%, calc(var(--shot-width) + 2 * var(--shot-pad)));
+  height: auto;
+  margin-inline: auto;
+  padding: var(--shot-pad);
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 6px;
+  background: var(--shot-bg);
+}
+
+/* 余白は素材ごとに決める。端まで内容が詰まった切り抜きほど広くする。背景は素材の端の色に揃える */
+.sl-markdown-content img[src$="/start-sheet.webp"],
+.sl-markdown-content img[src$="/earphones.webp"] {
+  --shot-width: 600px;
+  --shot-pad: 14px;
+}
+
+.sl-markdown-content img[src$="/minutes.webp"] {
+  --shot-width: 600px;
+  --shot-pad: 10px;
+}
+
+.sl-markdown-content img[src$="/board.webp"] {
+  --shot-width: 600px;
+  --shot-pad: 6px;
+}
+
+.sl-markdown-content img[src$="/speakers.webp"],
+.sl-markdown-content img[src$="/ai-reply.webp"],
+.sl-markdown-content img[src$="/ai-progress.webp"] {
+  --shot-pad: 10px;
+}
+
+.sl-markdown-content img[src$="/footer.webp"] {
+  --shot-pad: 8px;
+  --shot-bg: #ecdfcd;
+}
+
+/* リンクの中の画像は押すとリンク先へ移るので、拡大の対象にしない */
+/* zoom-in は実機で出ないときがあったので、毎回出る pointer にする */
+.sl-markdown-content img:not(a img) {
+  cursor: pointer;
+  transition:
+    filter 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.sl-markdown-content img:not(a img):is(:hover, :focus-visible) {
+  filter: brightness(0.97);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sl-markdown-content img:not(a img) {
+    transition: none;
+  }
+}
+
+/* 拡大表示。astro.config.mjs の imageZoomScript が開く */
+.image-zoom {
+  max-width: none;
+  max-height: none;
+  margin: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.image-zoom::backdrop {
+  background: rgb(0 0 0 / 0.72);
+}
+
+.image-zoom img {
+  display: block;
+  max-width: 96vw;
+  max-height: 96vh;
+  border-radius: 6px;
+}
+
 /* 右の目次: 本文より目立たせない */
 starlight-toc h2,
 .right-sidebar-panel h2 {
