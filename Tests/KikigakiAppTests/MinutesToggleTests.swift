@@ -238,5 +238,55 @@ extension AppKitTests {
         controller.toggleMinutes()
         #expect(!controller.minutesSplit.isTransitioning && controller.minutesSplit.preview.isHidden)
     }
+
+    /// 1倍の画面では半端な位置のWKWebViewが隣の画素へ割れ、本文全体がぼやける。
+    private func expectWholePoints(_ split: MinutesSplitView, _ label: String) {
+        #expect(split.left.frame.width == split.left.frame.width.rounded(), "\(label): \(split.left.frame)")
+        #expect(split.preview.frame.minX == split.preview.frame.minX.rounded(), "\(label): \(split.preview.frame)")
+    }
+
+    @Test func 半端な保存幅でも議事録ペインの左端を整数ptに置く() throws {
+        let suite = "minutes-toggle-" + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(try JSONEncoder().encode(MinutesLayout(visible: true, leftWidth: 666.5, rightWidth: 900)), forKey: MinutesLayout.key)
+        let split = MinutesSplitView(left: NSView(), defaults: defaults)
+        split.frame = NSRect(x: 0, y: 0, width: 1800, height: 800)
+        split.restore()
+        expectWholePoints(split, "復元")
+        #expect(split.left.frame.width == 667)
+    }
+
+    @Test func 狭いウィンドウの比率で決まる幅も整数ptに丸める() {
+        // 区切り線を除いた701ptの57%は399.57pt。切り上げると右ペインの43%を割るので切り捨てる。
+        #expect(MinutesLayout.leftWidth(total: 702, divider: 1, preferred: 0) == 399)
+        #expect(MinutesLayout.leftWidth(total: 702, divider: 1, preferred: 700) == 399)
+        // 希望幅の丸めは最近接のまま。
+        #expect(MinutesLayout.leftWidth(total: 1800, divider: 1, preferred: 666.5) == 667)
+        #expect(MinutesLayout.leftWidth(total: 1800, divider: 1, preferred: 666.4) == 666)
+    }
+
+    @Test func 丸めても右ペインの最小幅を割らない() {
+        // Retinaの全幅1000.5ptで、左の上限は679.5pt。切り上げると右が319.5ptになる。
+        let width = MinutesLayout.leftWidth(total: 1000.5, divider: 1, preferred: 700)
+        #expect(width == 679)
+        #expect(1000.5 - 1 - width >= MinutesLayout.minimumRight)
+    }
+
+    @Test func ドラッグの上下限も整数ptにする() throws {
+        let suite = "minutes-toggle-" + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let split = MinutesSplitView(left: NSView(), defaults: defaults)
+        split.frame = NSRect(x: 0, y: 0, width: 1000.5, height: 800)
+        #expect(split.splitView(split, constrainMaxCoordinate: 0, ofSubviewAt: 0) == 679)
+        #expect(split.splitView(split, constrainMinCoordinate: 0, ofSubviewAt: 0) == 420)
+        #expect(split.splitView(split, constrainSplitPosition: 750.5, ofSubviewAt: 0) == 751)
+        // 狭い全幅では比率で決まる。上下限が逆転せず、配置の計算と同じ位置になる。
+        split.frame = NSRect(x: 0, y: 0, width: 702, height: 800)
+        #expect(split.splitView(split, constrainMinCoordinate: 0, ofSubviewAt: 0) == 399)
+        #expect(split.splitView(split, constrainMaxCoordinate: 0, ofSubviewAt: 0) == 399)
+    }
+
 }
 }

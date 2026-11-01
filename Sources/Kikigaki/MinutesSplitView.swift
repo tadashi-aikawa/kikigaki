@@ -36,9 +36,19 @@ struct MinutesLayout: Codable, Equatable {
         return result
     }
     /// 議事録を表示しているときの会話側の幅。分割の全幅と希望幅から決め、両ペインの最小幅を守る。
+    /// 整数ptへ丸める。半端な位置のWKWebViewは1倍の画面で隣の画素へ割れ、本文全体がぼやける。
     static func leftWidth(total: CGFloat, divider: CGFloat, preferred: CGFloat) -> CGFloat {
+        min(max(leftLowerBound(total: total, divider: divider), preferred.rounded()), leftUpperBound(total: total, divider: divider))
+    }
+    /// 会話側の幅の上限。切り捨てて、丸めで右ペインの最小幅を割らない。
+    static func leftUpperBound(total: CGFloat, divider: CGFloat) -> CGFloat {
         let available = max(0, total - divider)
-        return min(max(min(minimumLeft, available * 0.57), preferred), max(0, available - min(minimumRight, available * 0.43)))
+        return max(0, available - min(minimumRight, available * 0.43)).rounded(.down)
+    }
+    /// 会話側の幅の下限。狭いウィンドウでは比率で決まり、上限を超えない。
+    static func leftLowerBound(total: CGFloat, divider: CGFloat) -> CGFloat {
+        let available = max(0, total - divider)
+        return min(min(minimumLeft, available * 0.57).rounded(.up), leftUpperBound(total: total, divider: divider))
     }
 }
 
@@ -239,8 +249,15 @@ final class MinutesToggleButton: HoverButton {
         if preference.visible { preference.rightWidth = max(MinutesLayout.minimumRight, preview.frame.width) }
         persist()
     }
-    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { min(420, bounds.width * 0.57) }
-    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { max(0, bounds.width - dividerThickness - min(320, bounds.width * 0.43)) }
+    // ドラッグの両端は配置と同じ計算にする。AppKitが上下限と丸めをどちらの順で適用しても、位置は整数のまま範囲に収まる。
+    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        MinutesLayout.leftLowerBound(total: bounds.width, divider: dividerThickness)
+    }
+    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
+        MinutesLayout.leftUpperBound(total: bounds.width, divider: dividerThickness)
+    }
+    /// Retinaのドラッグは0.5pt単位で届く。そのまま置くと、1倍の画面へ移したときに議事録ペインがぼやける。
+    func splitView(_ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { proposedPosition.rounded() }
     func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool { false }
     func splitViewDidResizeSubviews(_ notification: Notification) {
         guard !adjusting, preference.visible, NSApp.currentEvent?.type == .leftMouseDragged else { onLayout?(); return }
