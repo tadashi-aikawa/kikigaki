@@ -23,6 +23,61 @@ private actor CoinAvatarLoadGate {
     }
 }
 
+/// コイン演出の行の状態を、ある瞬間に丸ごと写したもの。
+@MainActor private struct CoinState {
+    let draws: (row: Int, layout: Int, avatar: Int)
+    /// 読んだ時点のrotorのCA時刻。角度の変化は、この時刻が進んだ読み取りの間でしか起きない。
+    let time: CFTimeInterval
+    let transform: CATransform3D?
+    let hidden: Bool
+    let animating: Bool
+    let bannerHidden: Bool
+    let bannerName: String?
+    let activeRevealID: String?
+    let backSnapshots: Int
+    let names: (oldHidden: Bool, old: Float?, new: Float?)?
+    init(_ row: TranscriptRow, _ controller: TranscriptWindowController, old: NSTextField? = nil, new: NSTextField? = nil) {
+        let coin = row.speakerRevealCoin
+        draws = (row.drawCount, row.layoutCount, row.avatarDrawCount)
+        time = coin.rotor.convertTime(CACurrentMediaTime(), from: nil)
+        transform = coin.rotor.presentation()?.transform
+        hidden = coin.isHidden
+        animating = !(coin.rotor.animationKeys()?.isEmpty ?? true)
+        bannerHidden = controller.speakerRevealBanner.isHidden
+        bannerName = controller.speakerRevealBanner.current?.name
+        activeRevealID = row.activeSpeakerRevealID
+        backSnapshots = coin.backSnapshotCount
+        names = old.map { old in (old.isHidden, old.layer?.opacity, new?.layer?.opacity) }
+    }
+}
+
+/// 演出を止めるウィンドウのタイマーと同じRunLoopのタイマーで、指定の時刻に状態を読む。
+/// RunLoopは期限の来たタイマーを発火時刻の順に呼ぶ。遅いランナーで停止の期限まで過ぎても、
+/// 停止より早い時刻の読み取りは停止より先に走る。実時間のsleepで寄せると、起床の遅れで停止の後を読む。
+@MainActor private final class TimedReads<Value> {
+    private let read: () -> Value
+    private var values: [Value?]
+    private var waiters: [Int: CheckedContinuation<Value, Never>] = [:]
+    init(at dates: [Date], read: @escaping () -> Value) {
+        self.read = read
+        values = Array(repeating: nil, count: dates.count)
+        for (index, date) in dates.enumerated() {
+            RunLoop.main.add(Timer(fire: date, interval: 0, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated { self?.fire(index) }
+            }, forMode: .common)
+        }
+    }
+    private func fire(_ index: Int) {
+        let value = read()
+        if let waiter = waiters.removeValue(forKey: index) { waiter.resume(returning: value) }
+        else { values[index] = value }
+    }
+    func value(_ index: Int) async -> Value {
+        if let value = values[index] { return value }
+        return await withCheckedContinuation { waiters[index] = $0 }
+    }
+}
+
 extension AppKitTests {
 @Suite(.serialized) @MainActor struct SpeakerIdentificationAppTests {
     private func session(_ root: URL, enabled: Bool = true, diarization: Bool = true, avatar: String? = nil) -> MeetingSession {
@@ -71,6 +126,21 @@ extension AppKitTests {
         let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: bitmap)
         try #require(bitmap.representation(using: .png, properties: [:])).write(to: directory.appendingPathComponent(name + ".png"))
+    }
+    /// 溜まったレイアウトと描画をその場で済ませ、CAへ送る。
+    private func settle(_ window: NSWindow) {
+        window.layoutIfNeeded(); window.displayIfNeeded()
+        CATransaction.flush()
+    }
+    /// レイヤーのCA時刻を今の位置で止める。再開は `resume` で、止めていた間を飛ばさずに続ける。
+    private func pause(_ layer: CALayer) {
+        let now = layer.convertTime(CACurrentMediaTime(), from: nil)
+        layer.speed = 0; layer.timeOffset = now
+    }
+    private func resume(_ layer: CALayer) {
+        let paused = layer.timeOffset
+        layer.speed = 1; layer.timeOffset = 0; layer.beginTime = 0
+        layer.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil) - paused
     }
     private func captureCoin(_ name: String, window: NSWindow) async throws {
         guard let output = ProcessInfo.processInfo.environment["KIKIGAKI_SPEAKER_CAPTURE"] else { return }
@@ -473,9 +543,15 @@ extension AppKitTests {
         window.setContentSize(NSSize(width: 600, height: 460))
         controller.apply(session.snapshot); controller.show()
         defer { window.close() }
+        // 表示の直後はAppKitが次の周期で行を描き直す。演出を始める前に済ませ、計時の区間へ持ち込まない。
+        try await Task.sleep(for: .milliseconds(150))
+        settle(window)
         _ = try deliver(session, request: request)
         session.aiRecord?.controller.scan()
+        // 停止タイマーはこのapplyの中で作られる。観測の時刻は前から数え、停止の確認は後から数える。
+        let startedAt = Date()
         controller.apply(session.snapshot)
+        let appliedAt = Date()
         let row = try #require(controller.rows.first { $0.key.start == 0 }?.value)
         #expect(!row.speakerRevealCoin.isHidden)
         let spin = try #require(row.speakerRevealCoin.rotor.animation(forKey: "speakerCoin") as? CAKeyframeAnimation)
@@ -487,28 +563,37 @@ extension AppKitTests {
         let newName = try #require(labels.first { $0.stringValue == "タダシ" })
         #expect(!oldName.isHidden && oldName.layer?.opacity == 1)
         #expect(newName.layer?.opacity == 0)
-        let startedAt = CACurrentMediaTime()
-        try await Task.sleep(for: .milliseconds(150))
-        let before = (row.drawCount, row.layoutCount, row.avatarDrawCount)
-        let firstTransform = try #require(row.speakerRevealCoin.rotor.presentation()?.transform)
+        // 演出の開始で溜まった描画とレイアウトをここで済ませ、以降の増分を回転中のものだけにする。
+        settle(window)
+        let settled = CoinState(row, controller)
+        // 停止タイマーより先に読む時刻は、最初のawaitより前に全部登録する。
+        // 0.15秒の読み取りは回転の基準。4.9秒は停止の直前でも先に読み、停止後は停止タイマーより後の時刻で読む。
+        let points = [("0.5s", 0.5), ("2.5s", 2.5), ("4.5s", 4.5), ("4.9s", 4.9)]
+        let reads = TimedReads(at: ([0.15] + points.map(\.1)).map { startedAt.addingTimeInterval($0) }
+                               + [appliedAt.addingTimeInterval(SpeakerRevealCoin.duration + 0.05)]) {
+            CoinState(row, controller, old: oldName, new: newName)
+        }
+        let before = await reads.value(0)
+        #expect(before.draws == settled.draws)
+        let firstTransform = try #require(before.transform)
         // 5秒の全区間を実時間で観測。撮影もCAのpresentation layerを合成した画面で行う。
-        for (name, time) in [("0.5s", 0.5), ("2.5s", 2.5), ("4.5s", 4.5), ("4.9s", 4.9)] {
-            let remaining = time - (CACurrentMediaTime() - startedAt)
-            if remaining > 0 { try await Task.sleep(for: .seconds(remaining)) }
-            let after = (row.drawCount, row.layoutCount, row.avatarDrawCount)
-            let transform = try #require(row.speakerRevealCoin.rotor.presentation()?.transform)
-            #expect(!CATransform3DEqualToTransform(firstTransform, transform))
-            #expect(before.0 == after.0 && before.1 == after.1 && before.2 == after.2)
-            #expect(!row.speakerRevealCoin.isHidden && controller.speakerRevealBanner.isHidden)
-            #expect(!oldName.isHidden && oldName.layer?.opacity == 1 && newName.layer?.opacity == 0)
-            print("speaker-coin \(name): row.draw=\(after.0 - before.0), row.layout=\(after.1 - before.1), avatar.draw=\(after.2 - before.2)")
+        for (index, (name, time)) in points.enumerated() {
+            let state = await reads.value(index + 1)
+            let transform = try #require(state.transform)
+            // メインが塞がれて読み取りが同じ瞬間に重なると、CA時刻が進まず角度も変わらない。
+            if state.time - before.time > 0.05 { #expect(!CATransform3DEqualToTransform(firstTransform, transform)) }
+            #expect(state.draws == before.draws)
+            #expect(!state.hidden && state.bannerHidden)
+            #expect(state.names?.oldHidden == false && state.names?.old == 1 && state.names?.new == 0)
+            print("speaker-coin \(name): row.draw=\(state.draws.row - before.draws.row), row.layout=\(state.draws.layout - before.draws.layout), avatar.draw=\(state.draws.avatar - before.draws.avatar)")
             if time < 4.9 { try await captureCoin("speaker-coin-" + name, window: window) }
         }
-        try await Task.sleep(for: .milliseconds(250))
-        #expect(row.speakerRevealCoin.isHidden)
-        #expect(row.speakerRevealCoin.rotor.animationKeys()?.isEmpty ?? true)
-        #expect(newName.layer?.opacity == 1)
-        #expect(controller.speakerRevealBanner.current?.name == "タダシ")
+        let stopped = await reads.value(points.count + 1)
+        #expect(stopped.hidden && !stopped.animating)
+        #expect(stopped.names?.new == 1)
+        #expect(stopped.bannerName == "タダシ")
+        // 撮影は従来どおり、名前の切替が進んだ画面で行う。
+        try await Task.sleep(for: .milliseconds(200))
         try await captureCoin("speaker-coin-stopped", window: window)
         // CAが実際に合成した角度も確認する。等速区間と減速区間の代表点を読む。
         row.revealSpeaker(try #require(session.snapshot.speakerReveals.first), animated: true)
@@ -576,7 +661,9 @@ extension AppKitTests {
         if !late { try await waitForImage() }
         _ = try deliver(session, request: request)
         session.aiRecord?.controller.scan()
+        let startedAt = Date()
         controller.apply(session.snapshot)
+        let appliedAt = Date()
         let row = try #require(controller.rows.first { $0.key.start == 0 }?.value)
         let coin = row.speakerRevealCoin
         func backIsImage() throws -> Bool {
@@ -586,47 +673,54 @@ extension AppKitTests {
         }
         #expect(try backIsImage() == !late)
         let initialSnapshots = coin.backSnapshotCount
-        let startedAt = CACurrentMediaTime()
-        try await Task.sleep(for: .milliseconds(150))
-        let before = (row.drawCount, row.layoutCount, row.avatarDrawCount)
+        settle(window)
+        let settled = CoinState(row, controller)
         let originalSpin = try #require(coin.rotor.animation(forKey: "speakerCoin") as? CAKeyframeAnimation)
-        for (name, time) in [("0.5s", 0.5), ("2.5s", 2.5), ("4.5s", 4.5), ("4.9s", 4.9)] {
-            let remaining = time - (CACurrentMediaTime() - startedAt)
-            if remaining > 0 { try await Task.sleep(for: .seconds(remaining)) }
-            if late && time == 0.5 {
-                let oldTransform = try #require(coin.rotor.presentation()?.transform)
-                let arrivalStart = CACurrentMediaTime()
-                await gate.open()
-                try await waitForImage()
-                #expect(try backIsImage())
-                #expect(coin.backSnapshotCount == initialSnapshots + 1)
-                let spin = try #require(coin.rotor.animation(forKey: "speakerCoin") as? CAKeyframeAnimation)
-                #expect(spin.beginTime == originalSpin.beginTime && spin.duration == originalSpin.duration)
-                #expect(spin.values as? [Double] == originalSpin.values as? [Double])
-                CATransaction.flush()
-                try await Task.sleep(for: .milliseconds(30))
-                let newTransform = try #require(coin.rotor.presentation()?.transform)
-                #expect(!CATransform3DEqualToTransform(oldTransform, newTransform))
-                // beginTimeが既定値0のままでも、等速区間の角度の連続性で再始動を検出する。
-                let phaseBefore = atan2(Double(-oldTransform.m13), Double(oldTransform.m11))
-                let phaseAfter = atan2(Double(-newTransform.m13), Double(newTransform.m11))
-                let expectedAdvance = (CACurrentMediaTime() - arrivalStart) * 2.5 * 2 * Double.pi
-                let phaseError = phaseAfter - phaseBefore - expectedAdvance
-                #expect(abs(atan2(sin(phaseError), cos(phaseError))) < 0.35)
-                // 無関係な画像の通知で同じ画像を描き直さない。
-                store.onChange?(); store.onChange?()
-                #expect(coin.backSnapshotCount == initialSnapshots + 1)
-            }
-            let after = (row.drawCount, row.layoutCount, row.avatarDrawCount)
-            #expect(after.0 == before.0 && after.1 == before.1)
-            #expect(after.2 - before.2 == (late ? 1 : 0))
-            #expect(!coin.isHidden && controller.speakerRevealBanner.isHidden)
-            print("speaker-coin-avatar late=\(late) \(name): row.draw=\(after.0 - before.0), row.layout=\(after.1 - before.1), avatar.draw=\(after.2 - before.2)")
+        let points = [("0.5s", 0.5), ("2.5s", 2.5), ("4.5s", 4.5), ("4.9s", 4.9)]
+        let reads = TimedReads(at: ([0.15] + points.map(\.1)).map { startedAt.addingTimeInterval($0) }
+                               + [appliedAt.addingTimeInterval(SpeakerRevealCoin.duration + 0.05)]) {
+            CoinState(row, controller)
         }
-        try await Task.sleep(for: .milliseconds(250))
-        #expect(coin.isHidden && controller.speakerRevealBanner.current?.name == "タダシ")
-        #expect(coin.backSnapshotCount == initialSnapshots + (late ? 1 : 0))
-        #expect(row.activeSpeakerRevealID == nil)
+        let before = await reads.value(0)
+        #expect(before.draws == settled.draws)
+        var states = [(points[0].0, await reads.value(1))]
+        if late {
+            // 差し替えの前後でrotorのCA時刻を止める。再始動も角度の飛びも、実時間の経過に依らず同じ角度との差で出る。
+            // 差し替えは回転中に届く場面なので、0.5秒の読み取りから停止までの間に行う。
+            pause(coin.rotor)
+            CATransaction.flush()
+            let oldTransform = try #require(coin.rotor.presentation()?.transform)
+            try await Task.sleep(for: .milliseconds(30))
+            let pausedTransform = try #require(coin.rotor.presentation()?.transform)
+            #expect(CATransform3DEqualToTransform(oldTransform, pausedTransform), "止めた角度が動いている")
+            await gate.open()
+            try await waitForImage()
+            #expect(try backIsImage())
+            #expect(coin.backSnapshotCount == initialSnapshots + 1)
+            let spin = try #require(coin.rotor.animation(forKey: "speakerCoin") as? CAKeyframeAnimation)
+            #expect(spin.beginTime == originalSpin.beginTime && spin.duration == originalSpin.duration)
+            #expect(spin.values as? [Double] == originalSpin.values as? [Double])
+            CATransaction.flush()
+            try await Task.sleep(for: .milliseconds(30))
+            let newTransform = try #require(coin.rotor.presentation()?.transform)
+            #expect(abs(newTransform.m11 - oldTransform.m11) < 0.02 && abs(newTransform.m13 - oldTransform.m13) < 0.02)
+            resume(coin.rotor)
+            // 無関係な画像の通知で同じ画像を描き直さない。
+            store.onChange?(); store.onChange?()
+            #expect(coin.backSnapshotCount == initialSnapshots + 1)
+        }
+        for (index, (name, _)) in points.enumerated().dropFirst() { states.append((name, await reads.value(index + 1))) }
+        for (name, state) in states {
+            #expect(state.draws.row == before.draws.row && state.draws.layout == before.draws.layout)
+            // 通常のアバターを描くのは、遅着した画像を裏面へ写す1回だけ。読んだ時点で届いていたかは裏面の撮り直しで分かる。
+            #expect(state.draws.avatar - before.draws.avatar == state.backSnapshots - initialSnapshots)
+            #expect(!state.hidden && state.bannerHidden)
+            print("speaker-coin-avatar late=\(late) \(name): row.draw=\(state.draws.row - before.draws.row), row.layout=\(state.draws.layout - before.draws.layout), avatar.draw=\(state.draws.avatar - before.draws.avatar)")
+        }
+        let stopped = await reads.value(points.count + 1)
+        #expect(stopped.hidden && stopped.bannerName == "タダシ")
+        #expect(stopped.backSnapshots == initialSnapshots + (late ? 1 : 0))
+        #expect(stopped.activeRevealID == nil)
         if !late && ProcessInfo.processInfo.environment["KIKIGAKI_SPEAKER_CAPTURE"] != nil {
             // 負荷は上で実時間計測した。撮影だけはCAの時刻を固定し、指定した秒の面を正確に写す。
             let reveal = try #require(session.snapshot.speakerReveals.first)
