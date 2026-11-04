@@ -23,6 +23,9 @@ AIエージェントへ送るのは、手動か自動で送信したときだけ
 いま対応しているCLIは、Claude CodeとCodexの2つです。
 
 - herdr
+    - 使うCLIのherdr連携も入れてください。Claude Codeでは必須です
+    - 理由: 連携が無いと、Claude Codeが入力を受け付けられるかをKIKIGAKIが確かめられず、送信が止まります
+    - 入れ方: [herdrのIntegrations](https://herdr.dev/docs/integrations/)
 - CodexかClaude Code
 - `kikigaki-cli`
     - 入れ方: Homebrewで入れたKIKIGAKIに付属し、端末から呼び出せます
@@ -166,6 +169,8 @@ KIKIGAKIに「初回設定をherdrで確認してください」と出たら、h
     - 動き: 同じ場所を使うので、会議ごとに確認は出ません
 - CLIの種類や作業ディレクトリ `cwd` を変えると、もう一度確認が出ることがあります
 - KIKIGAKIは確認ダイアログへ代わりに答えません
+- herdrのペインに承認するものが無いのに「入力前に停止しました」で止まるときは、herdr連携が入っているか確かめてください
+    - 詳細: [用意するもの](#用意するもの)
 
 ## 手動で頼む
 

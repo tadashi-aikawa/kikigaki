@@ -349,6 +349,8 @@ Codexの起動では `-c sandbox_workspace_write.writable_roots=[...]` に保存
 
 設定commandの絶対パスを守る起動には `herdr pane run <pane> <厳密に引用した起動コマンド>` を使う。段2ではworkspace作成時のPATH差替がペイン内の解決先に反映されず、canonical executableによる起動では指定パスを保証できなかった。pane runで絶対パスを指定すると両CLIが起動した。Codexはagent getがunknownを抜けてidle/doneになるまで、Claudeは新しいagent_sessionが立ちidle/doneになるまで待つ。旧session値やblockedをreadyとしない。起動コマンドにはパスと引数だけを引用して置き、会話本文を含めない。KIKIGAKI自身はherdrを引数配列で起動するが、この起動コマンドは受信先シェルで解釈される。
 
+Claudeのagent_sessionは、herdrのClaude連携のSessionStartフックだけが報告する (実測: herdr 0.9.5)。連携が無いとidleでもreadyにならず、準備待ちの30秒が切れて「入力前に停止しました」になる。
+
 既定cwdは固定の `~/Library/Application Support/KIKIGAKI/ai-work/`。会議ごとの新規ディレクトリで毎回信頼確認を発生させない。固定cwdでも選択したCLIの初回には利用者の信頼確認が必要である。最初の送信時に「初回設定をherdrで確認」とペインを開く操作を表示し、利用者が内容を見て一度承認する。入力準備完了を再確認してから送信し、ダイアログ中へenvelopeを入力しない。CLI切替・cwd変更時にも必要となり得る。自動承認や信頼設定の自動書き換えはしない。
 
 段2では初回に両CLIがagent_not_readyとなり、信頼ダイアログを表示した。承認後、Codexはconfig.tomlのprojectsへtrust_level、Claudeは.claude.jsonのprojectsへhasTrustDialogAcceptedを保存した。これらはCLIが保存する利用者設定であり、KIKIGAKIは編集・削除しない。段2の返送成功は試験cwd配下への保存であり、任意の保存先への権限を保証しない。outputDirへの許可は上記の `writable_roots` で渡す。
