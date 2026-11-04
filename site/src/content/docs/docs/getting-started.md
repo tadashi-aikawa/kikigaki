@@ -9,10 +9,7 @@ KIKIGAKIを入れて、会議やひとりの声を録音する準備をします
 ## 動作環境
 
 - macOS 26以降
-- マイクへのアクセス許可
-- 初回のネットワーク接続
-    - 話者判別モデル(Nemotron 3 Diarization)をダウンロードします
-    - Apple Speechの日本語アセットがまだ無ければ、それもダウンロードします
+- 初回のネットワーク接続。話者判別と文字起こしのモデルをダウンロードします
 
 ## インストール
 
@@ -22,71 +19,27 @@ Homebrewで入れます。
 brew install --cask tadashi-aikawa/tap/kikigaki
 ```
 
-更新は次のコマンドです。
+AIエージェント(Claude Code か Codex のCLI)の参加に使う `kikigaki-cli` も一緒に入ります[^cli]。
+更新は `brew upgrade --cask kikigaki` です。
 
-```bash
-brew upgrade --cask kikigaki
-```
+## 初回起動
 
-Homebrewで入れると、AIエージェント(Claude Code か Codex のCLI)の参加に使う `kikigaki-cli` も端末から呼び出せます。
-使い方は [AIエージェントを会議に参加させる](../ai-participant/) で説明します。
+1. KIKIGAKIを起動します
+2. メニューバーにKIKIGAKIのロゴが出ます。Dockには出ません
 
-## 初回起動の許可
-
-KIKIGAKIは自己署名のアプリです。
-初回起動がブロックされた場合は、システム設定 → プライバシーとセキュリティ → 「このまま開く」で許可してください。
-
-起動するとメニューバーにKIKIGAKIのロゴが出ます。
-Dockには出ません。
-
-### マイク
-
-初めて録音を始めるときに、macOSがマイクの使用を確認します。
-ここで許可してください。
-
-許可しなかった場合は録音を始められません。
-システム設定 → プライバシーとセキュリティ → マイク で、KIKIGAKIを許可してください。
-
-### システム音声
-
-オンライン会議の相手の声を取り込む会議では、初回にmacOSが「システムオーディオ録音」の許可を求めます。
-画面収録の許可は要りません。
-詳しくは [オンライン会議で使う](../online-meetings/) を参照してください。
-
-## モデルの取得
-
-KIKIGAKIは2つのモデルを使います。
-初回にダウンロードした後は、Macの中にあるものを使います。
-
-| モデル | 用途 | 取得元 |
-| --- | --- | --- |
-| Nemotron 3 Diarization | 話者判別 | Hugging Face |
-| Apple Speechの日本語アセット | 文字起こし | Apple |
-
-モデルの置き場は次のとおりです。
-
-- Nemotron 3 Diarization
-    - 置き場: `~/Library/Application Support/FluidAudio/Models/nemotron-3-diarization`
-- Apple Speechの日本語アセット
-    - 置き場: macOSが管理
-
-- 話者判別を使う設定なら、アプリの起動時からモデルを読み込みます
-- ダウンロードが終わる前に録音を始めると、「準備中」のまま待ちます
-- 話者判別を「区別しない」で使う会議では、話者判別モデル(Nemotron 3 Diarization)を読み込みません
-- ダウンロードのために、音声や書き起こしを送ることはありません
-
-話者判別モデルは [Nemotron 3 Diarization](https://huggingface.co/FluidInference/nemotron-3-diarization-coreml) です。
+初回は、話者判別と文字起こしのモデルをダウンロードします[^model]。
+終わる前に録音を始めると、「準備中」のまま待ちます。
 
 ## 最初の録音
 
 1. メニューバーのKIKIGAKIのロゴをクリックして「開く」を選びます
 2. 「録音を開始」を押し、シートの設定を確かめて「開始」を押します
-    - 操作: 何も変えずにReturnでも始められます
-3. 話すと、話した言葉が話者付きで順に出ます
-    - 表示: 半透明の行は、文字や話者が後から変わることがあります
-4. 停止すると、`~/Documents/KIKIGAKI` にMarkdownを保存します
+3. 初回だけ、macOSがマイクの使用を確認するので、許可します
+4. 話すと、話した言葉が話者付きで順に出ます
+5. 停止すると、`~/Documents/KIKIGAKI` にMarkdownを保存します
 
-録音の開始・停止・一時停止は、メニューバーのメニューからも操作できます。
+<video src="/kikigaki/demos/transcription.mp4" aria-label="対面の会議を録音中の画面。左に書き起こし、右にAIエージェントが更新するボード" autoplay loop muted playsinline controls preload="metadata"></video>
+
 画面の見方と直し方は [録音と書き起こし](../recording/) で説明します。
 
 ## 設定ファイル
@@ -101,3 +54,17 @@ saveRecording = false # trueで録音WAVも残す
 
 書き換えたら、メニューバーのメニューの「設定を再読込」で読み直します。
 全キーは [設定リファレンス](../configuration/) を参照してください。
+
+## 困ったとき
+
+### 初回起動がブロックされる
+
+KIKIGAKIは自己署名のアプリです。
+システム設定 → プライバシーとセキュリティ → 「このまま開く」で許可してください。
+
+### マイクを許可しなかった
+
+システム設定 → プライバシーとセキュリティ → マイク で、KIKIGAKIを許可してください。
+
+[^cli]: 使い方は [AIエージェントを会議に参加させる](../ai-participant/) で説明します。
+[^model]: 話者判別は [Nemotron 3 Diarization](https://huggingface.co/FluidInference/nemotron-3-diarization-coreml) をHugging Faceから、文字起こしはApple Speechの日本語アセットをAppleから取得します。その後はMacの中にあるものを使い、ダウンロードのために音声や書き起こしを送ることはありません。話者判別のモデルは `~/Library/Application Support/FluidAudio/Models/nemotron-3-diarization` に置きます。

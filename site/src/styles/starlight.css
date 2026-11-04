@@ -103,9 +103,70 @@
   border-bottom: 1px solid var(--sl-color-hairline);
 }
 
-/* 注意書き: 地の塗りをやめ、左の罫だけにする */
+/* 注意書き: 和紙の上に一枚の紙片を置く。題は出さず、小さなアイコンを1行目の左に下げる。
+   引用に見える左の太い罫と、大きな題をやめる。色はStarlight既定の青と橙でなく和紙の色にする */
+:root {
+  --aside-note: #8fbfb9;
+  --aside-tip: #d9a556;
+  --aside-caution: #ec8a78;
+  --aside-slip: #2f2a26;
+}
+
+:root[data-theme="light"] {
+  --aside-note: var(--washi-teal);
+  --aside-tip: #96600f;
+  --aside-caution: var(--washi-red);
+  --aside-slip: var(--washi-sheet);
+}
+
+.starlight-aside--note {
+  --aside-accent: var(--aside-note);
+}
+
+.starlight-aside--tip {
+  --aside-accent: var(--aside-tip);
+}
+
+.starlight-aside--caution {
+  --aside-accent: var(--aside-caution);
+}
+
 .starlight-aside {
-  background: transparent;
+  --sl-color-asides-text-accent: var(--aside-accent);
+  --sl-color-asides-border: color-mix(in srgb, var(--aside-accent) 28%, transparent);
+  position: relative;
+  margin-block: 1.5rem;
+  padding: 0.7rem 1rem 0.75rem 2.5rem;
+  border: 1px solid color-mix(in srgb, var(--aside-accent) 26%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--aside-accent) 7%, var(--aside-slip));
+  font-size: 15px;
+}
+
+/* 題は読み上げから外れているので、文字を隠してアイコンだけを1行目の高さに置く。
+   読み上げはasideのaria-label(「注意」など)が担う */
+.starlight-aside__title {
+  position: absolute;
+  top: calc(0.7rem + 6px);
+  left: 0.95rem;
+  margin: 0;
+  font-size: 0;
+  line-height: 0;
+  color: var(--aside-accent);
+}
+
+.starlight-aside__icon {
+  width: 15px;
+  height: 15px;
+  font-size: 15px;
+}
+
+.sl-markdown-content .starlight-aside__title + .starlight-aside__content {
+  margin-top: 0;
+}
+
+.sl-markdown-content .starlight-aside__content > :is(ul, ol) {
+  padding-inline-start: 1.1rem;
 }
 
 /* コードブロックの地。Starlightがテーマごとに付ける枠の変数を、枠の要素で上書きする */
@@ -115,6 +176,13 @@
   --ec-frm-edTabBarBg: var(--washi-code-bg);
   --ec-frm-trmBg: var(--washi-code-bg);
   --ec-frm-trmTtbBg: var(--washi-code-bg);
+}
+
+/* コードブロックの長い行は、横スクロールさせず折り返す。
+   expressiveCode の defaultProps の wrap は、このサイトのMarkdownの処理では効かなかった */
+.expressive-code .ec-line .code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* 表の見出しに和紙の影 */
@@ -136,9 +204,9 @@
   background: var(--sl-color-gray-6);
 }
 
-/* 本文の画面キャプチャと動画: 背景の色が本文と同じなので枠で区切る。
+/* 本文の画面キャプチャと動画と図: 背景の色が本文と同じなので枠で区切る。
    素材は2倍で撮っているので、幅をその半分にすると文字が本文と同じくらいになる */
-.sl-markdown-content :is(img[src*="/captures/"], video[src*="/demos/"]) {
+.sl-markdown-content :is(img[src*="/captures/"], img[src*="/diagrams/"], video[src*="/demos/"]) {
   --shot-width: 480px;
   --shot-pad: 0px;
   --shot-bg: #f5ead9;
@@ -173,6 +241,18 @@
 .sl-markdown-content img[src$="/ai-reply.webp"],
 .sl-markdown-content img[src$="/ai-progress.webp"] {
   --shot-pad: 10px;
+}
+
+/* 図はSVGを等倍で描いている。背景はSVGの中で塗らず、ここで和紙の明るい色を敷く。
+   ダークテーマでもキャプチャと同じく明るい背景のまま見せる */
+.sl-markdown-content img[src*="/diagrams/"] {
+  --shot-width: 640px;
+  --shot-pad: 12px;
+  --shot-bg: #fbf5ea;
+}
+
+.sl-markdown-content video[src$="/transcription.mp4"] {
+  --shot-width: 600px;
 }
 
 .sl-markdown-content img[src$="/footer.webp"] {
@@ -237,4 +317,145 @@ starlight-toc a {
 starlight-toc a[aria-current="true"],
 starlight-toc a:hover {
   color: var(--sl-color-text-accent);
+}
+
+/* 脚注は本文の節ではないので、目次の一覧に出さない */
+:is(starlight-toc, mobile-starlight-toc) li:has(> a[href="#footnote-label"]) {
+  display: none;
+}
+
+/* 本文の脚注番号: 文の流れを切らないよう小さくする */
+.sl-markdown-content sup:has(> a[data-footnote-ref]) {
+  font-size: 10px;
+  line-height: 0;
+}
+
+/* 脚注: 本文の続きの箇条に見えないよう、罫と「脚注」の題で区切り、小さく淡くする。
+   番号は本文の左端に揃え、リストの字下げを付けない */
+.sl-markdown-content .footnotes {
+  margin-top: 3rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--sl-color-hairline);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--sl-color-gray-3);
+}
+
+/* 見出し「脚注」は読み上げ用に隠されているので、同じ語を小さく見せる。h2の罫とアンカーは出さない */
+.sl-markdown-content .footnotes::before {
+  content: "脚注";
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.sl-markdown-content .footnotes .sl-heading-wrapper {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sl-markdown-content .footnotes .sl-anchor-link {
+  display: none;
+}
+
+.sl-markdown-content .footnotes ol {
+  margin-top: 0.5rem;
+  padding-inline-start: 0;
+  list-style: none;
+  counter-reset: footnote;
+}
+
+.sl-markdown-content .footnotes li {
+  display: grid;
+  grid-template-columns: 1.5em 1fr;
+  margin-top: 0.4rem;
+  counter-increment: footnote;
+}
+
+.sl-markdown-content .footnotes li::before {
+  content: counter(footnote);
+  color: var(--sl-color-text-accent);
+}
+
+.sl-markdown-content .footnotes li > p {
+  margin: 0;
+}
+
+/* 戻るリンク: 「↩」は絵文字で描かれるので、文字を隠して線のアイコンを出す */
+.sl-markdown-content .data-footnote-backref {
+  display: inline-block;
+  margin-inline-start: 0.3em;
+  font-size: 0;
+  color: var(--sl-color-gray-3);
+  text-decoration: none;
+  vertical-align: -0.1em;
+}
+
+.sl-markdown-content .data-footnote-backref::after {
+  content: "";
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 14 4 9l5-5'/%3E%3Cpath d='M4 9h10.5a5.5 5.5 0 0 1 0 11H11'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+.sl-markdown-content .data-footnote-backref:is(:hover, :focus-visible) {
+  color: var(--sl-color-text-accent);
+}
+
+/* 脚注の番号に載せると中身を出す吹き出し。astro.config.mjs の footnotePopupScript が開く */
+.footnote-popup {
+  position: absolute;
+  z-index: 100;
+  box-sizing: border-box;
+  max-width: min(26rem, calc(100vw - 32px));
+  /* 上下どちらにも収まらない画面では、中でスクロールさせる */
+  max-height: calc(50vh - 24px);
+  overflow-y: auto;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 6px;
+  background: var(--sl-color-black);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--sl-color-gray-2);
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.footnote-popup.is-open {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .footnote-popup {
+    transform: none;
+    transition: none;
+  }
+}
+
+.footnote-popup p {
+  margin: 0;
+}
+
+.footnote-popup a {
+  color: var(--sl-color-text-accent);
+}
+
+/* 吹き出しは本文の外に置くので、本文のインラインコードの見た目をここで当て直す */
+.footnote-popup code {
+  padding: 0.0625rem 0.3rem;
+  background-color: var(--sl-color-bg-inline-code);
+  font-family: var(--__sl-font-mono);
+  font-size: 0.9375em;
+  overflow-wrap: anywhere;
 }

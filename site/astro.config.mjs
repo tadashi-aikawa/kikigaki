@@ -38,6 +38,79 @@ document.addEventListener("keydown", (event) => {
 });
 `;
 
+// 脚注の番号にマウスを載せるかフォーカスすると、脚注の中身を吹き出しで出す。
+// 吹き出しへマウスを移しても閉じないので、中のリンクも押せる。押したときの移動はそのまま残す
+const footnotePopupScript = `
+let popup = null;
+let hideTimer = 0;
+let showTimer = 0;
+function hideFootnote() {
+  clearTimeout(hideTimer);
+  clearTimeout(showTimer);
+  popup?.remove();
+  popup = null;
+}
+function scheduleHide() {
+  clearTimeout(showTimer);
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(hideFootnote, 150);
+}
+// マウスは通りすがりで開かないよう、少し留まってから出す
+function scheduleShow(ref) {
+  clearTimeout(showTimer);
+  clearTimeout(hideTimer);
+  showTimer = setTimeout(() => showFootnote(ref), 350);
+}
+function showFootnote(ref) {
+  const note = document.getElementById(decodeURIComponent(ref.hash.slice(1)));
+  if (!note) return;
+  hideFootnote();
+  popup = document.createElement("div");
+  popup.className = "footnote-popup";
+  popup.role = "tooltip";
+  for (const child of note.children) popup.append(child.cloneNode(true));
+  popup.querySelectorAll("[data-footnote-backref]").forEach((link) => link.remove());
+  popup.addEventListener("pointerenter", () => clearTimeout(hideTimer));
+  popup.addEventListener("pointerleave", scheduleHide);
+  document.body.append(popup);
+  const rect = ref.getBoundingClientRect();
+  const gutter = 16;
+  const left = Math.min(Math.max(gutter, rect.left - 24), innerWidth - popup.offsetWidth - gutter);
+  // 下に収まれば下、収まらなければ上と下の広いほうへ出す
+  const below = rect.bottom + 6;
+  const above = rect.top - popup.offsetHeight - 6;
+  const fitsBelow = below + popup.offsetHeight <= innerHeight - gutter;
+  const top = !fitsBelow && rect.top > innerHeight - rect.bottom ? Math.max(gutter, above) : below;
+  popup.style.left = left + scrollX + "px";
+  popup.style.top = top + scrollY + "px";
+  const shown = popup;
+  requestAnimationFrame(() => shown.classList.add("is-open"));
+}
+const footnoteRef = "a[data-footnote-ref]";
+document.addEventListener("pointerover", (event) => {
+  const ref = event.target.closest?.(footnoteRef);
+  if (ref) scheduleShow(ref);
+});
+document.addEventListener("pointerout", (event) => {
+  const ref = event.target.closest?.(footnoteRef);
+  // キーボードで番号を選んでいる間は、マウスが離れても閉じない
+  if (ref && !ref.matches(":focus-visible")) scheduleHide();
+});
+// 開くのはキーボードで選んだときだけ。脚注の戻るリンクを押すと番号へフォーカスが移るが、そこでは開かない
+document.addEventListener("focusin", (event) => {
+  const ref = event.target.closest?.(footnoteRef);
+  if (ref?.matches(":focus-visible")) showFootnote(ref);
+  else if (!popup?.contains(event.target)) hideFootnote();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") hideFootnote();
+});
+// 押して脚注へ移ったら、元の位置に残った吹き出しを閉じる
+document.addEventListener("click", (event) => {
+  if (event.target.closest?.(footnoteRef)) hideFootnote();
+});
+`;
+
 // トップ (/kikigaki/) は src/pages/index.astro のティザー。
 // ドキュメントは src/content/docs/docs/ に置き、/kikigaki/docs/<slug>/ で配信する
 export default defineConfig({
@@ -45,7 +118,15 @@ export default defineConfig({
   base: "/kikigaki",
   // Astroの既定の4321はnocturneが使う。devとpreviewを別の固定ポートにして衝突させない
   server: { port: 4330 },
-  markdown: { processor: satteri({ mdastPlugins: [joinJa] }) },
+  // 脚注の見出しは目次と狭い画面の現在位置にも出るので、日本語にする
+  markdown: {
+    processor: satteri({
+      mdastPlugins: [joinJa],
+      features: {
+        gfm: { footnotes: { label: "脚注", backLabel: "本文の脚注{reference}へ戻る" } },
+      },
+    }),
+  },
   // ドキュメントの入口 /kikigaki/docs/ にはページを置かないので、最初のページへ送る
   redirects: {
     "/docs": "/kikigaki/docs/getting-started/",
@@ -79,6 +160,7 @@ export default defineConfig({
         { tag: "meta", attrs: { property: "og:image:width", content: "1200" } },
         { tag: "meta", attrs: { property: "og:image:height", content: "630" } },
         { tag: "script", content: imageZoomScript },
+        { tag: "script", content: footnotePopupScript },
       ],
       social: [
         {

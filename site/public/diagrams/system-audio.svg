@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="310" viewBox="0 0 640 310" role="img" aria-label="イヤホンでマイクだけのときは自分の声だけが文字になる。システム音声も取り込むと、相手の声と自分の声を混ぜて両方が文字になる">
+  <style>
+    text { font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; fill: #221f1c; }
+    .title { font-size: 13px; font-weight: 600; fill: #6b6157; }
+    .label { font-size: 14px; text-anchor: middle; }
+    .note { font-size: 13px; fill: #6b6157; }
+    .result { font-size: 13px; font-weight: 600; text-anchor: middle; }
+    .box { fill: #fbf5ea; stroke: #a99c8c; stroke-width: 1.2; }
+    .key { stroke: #aa1405; stroke-width: 1.8; }
+    .line { stroke: #6b6157; stroke-width: 1.5; fill: none; }
+    .line.key { stroke: #aa1405; }
+    .rule { stroke: #d5c6b1; stroke-dasharray: 4 4; }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#6b6157"/>
+    </marker>
+    <marker id="ak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#aa1405"/>
+    </marker>
+  </defs>
+
+  <text class="title" x="20" y="26">イヤホンで、マイクだけのとき</text>
+
+  <rect class="box" x="20" y="40" width="100" height="36" rx="6"/>
+  <text class="label" x="70" y="63">相手の声</text>
+  <path class="line" d="M120 58 H166" marker-end="url(#a)"/>
+  <rect class="box" x="170" y="40" width="100" height="36" rx="6"/>
+  <text class="label" x="220" y="63">イヤホン</text>
+  <text class="note" x="286" y="63">耳に届くが、マイクには届かない</text>
+
+  <rect class="box" x="20" y="92" width="100" height="36" rx="6"/>
+  <text class="label" x="70" y="115">自分の声</text>
+  <path class="line" d="M120 110 H166" marker-end="url(#a)"/>
+  <rect class="box" x="170" y="92" width="100" height="36" rx="6"/>
+  <text class="label" x="220" y="115">マイク</text>
+  <path class="line" d="M270 110 H426" marker-end="url(#a)"/>
+  <rect class="box" x="430" y="92" width="110" height="36" rx="6"/>
+  <text class="label" x="485" y="115">KIKIGAKI</text>
+  <text class="result" x="485" y="150">自分の声だけ</text>
+
+  <line class="rule" x1="20" y1="168" x2="620" y2="168"/>
+
+  <text class="title" x="20" y="194">システム音声も取り込むとき</text>
+
+  <rect class="box" x="20" y="208" width="100" height="36" rx="6"/>
+  <text class="label" x="70" y="231">相手の声</text>
+  <path class="line key" d="M120 226 H166" marker-end="url(#ak)"/>
+  <rect class="box key" x="170" y="208" width="100" height="36" rx="6"/>
+  <text class="label" x="220" y="231">システム音声</text>
+  <path class="line key" d="M270 226 C292 226 296 244 316 246" marker-end="url(#ak)"/>
+
+  <rect class="box" x="20" y="260" width="100" height="36" rx="6"/>
+  <text class="label" x="70" y="283">自分の声</text>
+  <path class="line" d="M120 278 H166" marker-end="url(#a)"/>
+  <rect class="box" x="170" y="260" width="100" height="36" rx="6"/>
+  <text class="label" x="220" y="283">マイク</text>
+  <path class="line" d="M270 278 C292 278 296 260 316 258" marker-end="url(#a)"/>
+
+  <rect class="box key" x="320" y="234" width="76" height="36" rx="6"/>
+  <text class="label" x="358" y="257">混ぜる</text>
+  <path class="line" d="M396 252 H426" marker-end="url(#a)"/>
+  <rect class="box" x="430" y="234" width="110" height="36" rx="6"/>
+  <text class="label" x="485" y="257">KIKIGAKI</text>
+  <text class="result" x="485" y="292">両方の声</text>
+</svg>

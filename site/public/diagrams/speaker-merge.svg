@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="200" viewBox="0 0 640 200" role="img" aria-label="同じ人が話者Aと話者Cに分かれている。話者Cの統合先を話者Aにすると、話者Cの発言が話者Aになる">
+  <style>
+    text { font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; fill: #221f1c; }
+    .title { font-size: 13px; font-weight: 600; fill: #6b6157; }
+    .name { font-size: 13px; font-weight: 600; }
+    .body { font-size: 13px; fill: #3b3530; }
+    .ini { font-size: 12px; font-weight: 600; fill: #fbf5ea; text-anchor: middle; }
+    .a { fill: #3e706c; }
+    .b { fill: #c4801f; }
+    .c { fill: #7d7166; }
+    .hit { fill: none; stroke: #aa1405; stroke-width: 1.8; }
+    .line { stroke: #6b6157; stroke-width: 1.5; fill: none; }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#6b6157"/>
+    </marker>
+  </defs>
+
+  <text class="title" x="20" y="26">統合する前</text>
+  <g transform="translate(20 44)">
+    <circle class="a" cx="11" cy="11" r="11"/><text class="ini" x="11" y="15">A</text>
+    <text class="name" x="30" y="16">話者A</text><text class="body" x="80" y="16">では始めます</text>
+  </g>
+  <g transform="translate(20 80)">
+    <circle class="c" cx="11" cy="11" r="11"/><text class="ini" x="11" y="15">C</text>
+    <text class="name" x="30" y="16">話者C</text><text class="body" x="80" y="16">資料を共有します</text>
+  </g>
+  <g transform="translate(20 116)">
+    <circle class="b" cx="11" cy="11" r="11"/><text class="ini" x="11" y="15">B</text>
+    <text class="name" x="30" y="16">話者B</text><text class="body" x="80" y="16">お願いします</text>
+  </g>
+  <g transform="translate(20 152)">
+    <circle class="c" cx="11" cy="11" r="11"/><text class="ini" x="11" y="15">C</text>
+    <text class="name" x="30" y="16">話者C</text><text class="body" x="80" y="16">次の議題です</text>
+  </g>
+
+  <path class="line" d="M262 110 H330" marker-end="url(#a)"/>
+  <text class="body" x="296" y="98" text-anchor="middle">C → A</text>
+
+  <text class="title" x="360" y="26">話者Cの統合先を話者Aにした後</text>
+  <g transform="translate(360 44)">
+    <circle class="a" cx="11" cy="11" r="11"/><text class="ini" x="11" y="15">A</text>
+    <text class="name" x="30" y="16">話者A</text><text class="body" x="80" y="16">では始めます</text>
+  </g>
+  <g transform="translate(360 80)">
+    <rect class="hit" x="-6" y="-6" width="210" height="34" rx="6"/>
+    <circle class="a" cx="11" cy="11" r="11"/><text class="ini" x="11" y="15">A</text>
+    <text class="name" x="30" y="16">話者A</text><text class="body" x="80" y="16">資料を共有します</text>
+  </g>
+  <g transform="translate(360 116)">
+    <circle class="b" cx="11" cy="11" r="11"/><text class="ini" x="11" y="15">B</text>
+    <text class="name" x="30" y="16">話者B</text><text class="body" x="80" y="16">お願いします</text>
+  </g>
+  <g transform="translate(360 152)">
+    <rect class="hit" x="-6" y="-6" width="210" height="34" rx="6"/>
+    <circle class="a" cx="11" cy="11" r="11"/><text class="ini" x="11" y="15">A</text>
+    <text class="name" x="30" y="16">話者A</text><text class="body" x="80" y="16">次の議題です</text>
+  </g>
+</svg>

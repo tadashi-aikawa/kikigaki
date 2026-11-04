@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="190" viewBox="0 0 640 190" role="img" aria-label="KIKIGAKIが会話と問いをherdrのペインのAIエージェントへ送る。返事は書き起こしに発言と並んで出て、会議のMarkdownにも残る">
+  <style>
+    text { font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; fill: #221f1c; }
+    .label { font-size: 15px; font-weight: 600; text-anchor: middle; }
+    .sub { font-size: 12px; fill: #6b6157; text-anchor: middle; }
+    .edge { font-size: 13px; fill: #3b3530; text-anchor: middle; }
+    .box { fill: #fbf5ea; stroke: #a99c8c; stroke-width: 1.2; }
+    .line { stroke: #6b6157; stroke-width: 1.5; fill: none; }
+    .line.key { stroke: #aa1405; stroke-width: 1.8; }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#6b6157"/>
+    </marker>
+    <marker id="ak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#aa1405"/>
+    </marker>
+  </defs>
+
+  <rect class="box" x="20" y="20" width="180" height="84" rx="8"/>
+  <text class="label" x="110" y="56">KIKIGAKI</text>
+  <text class="sub" x="110" y="78">書き起こしウィンドウ</text>
+
+  <rect class="box" x="440" y="20" width="180" height="84" rx="8"/>
+  <text class="label" x="530" y="56">AIエージェント</text>
+  <text class="sub" x="530" y="78">herdrのペインで動く</text>
+
+  <path class="line" d="M200 44 H436" marker-end="url(#a)"/>
+  <text class="edge" x="318" y="36">送信: 会話と問い</text>
+
+  <path class="line key" d="M440 82 H204" marker-end="url(#ak)"/>
+  <text class="edge" x="322" y="100">返事: 発言と並んで出る</text>
+
+  <path class="line" d="M110 104 V140" marker-end="url(#a)"/>
+  <rect class="box" x="20" y="144" width="180" height="36" rx="6"/>
+  <text class="edge" x="110" y="167">会議のMarkdownに残る</text>
+</svg>

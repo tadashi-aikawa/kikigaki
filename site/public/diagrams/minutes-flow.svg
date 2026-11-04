@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="120" viewBox="0 0 640 120" role="img" aria-label="KIKIGAKIが会議の会話をAIエージェントへ送る。AIエージェントが議事録のファイルを書く。KIKIGAKIの議事録ペインがそのファイルを表示する">
+  <style>
+    text { font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; fill: #221f1c; }
+    .label { font-size: 14px; text-anchor: middle; }
+    .edge { font-size: 12px; fill: #6b6157; text-anchor: middle; }
+    .where { font-size: 12px; fill: #6b6157; text-anchor: middle; }
+    .box { fill: #fbf5ea; stroke: #a99c8c; stroke-width: 1.2; }
+    .key { stroke: #aa1405; stroke-width: 1.8; }
+    .line { stroke: #6b6157; stroke-width: 1.5; fill: none; }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#6b6157"/>
+    </marker>
+  </defs>
+
+  <rect class="box" x="4" y="30" width="116" height="40" rx="6"/>
+  <text class="label" x="62" y="55">会議の会話</text>
+  <text class="where" x="62" y="92">KIKIGAKI</text>
+
+  <path class="line" d="M120 50 H170" marker-end="url(#a)"/>
+  <text class="edge" x="145" y="42">送る</text>
+
+  <rect class="box" x="174" y="30" width="116" height="40" rx="6"/>
+  <text class="label" x="232" y="55">AIエージェント</text>
+  <text class="where" x="232" y="92">herdrのペイン</text>
+
+  <path class="line" d="M290 50 H340" marker-end="url(#a)"/>
+  <text class="edge" x="315" y="42">書く</text>
+
+  <rect class="box key" x="344" y="30" width="116" height="40" rx="6"/>
+  <text class="label" x="402" y="55">議事録.md</text>
+  <text class="where" x="402" y="92">ファイル</text>
+
+  <path class="line" d="M460 50 H510" marker-end="url(#a)"/>
+  <text class="edge" x="485" y="42">表示</text>
+
+  <rect class="box" x="514" y="30" width="116" height="40" rx="6"/>
+  <text class="label" x="572" y="55">議事録ペイン</text>
+  <text class="where" x="572" y="92">KIKIGAKI</text>
+</svg>
