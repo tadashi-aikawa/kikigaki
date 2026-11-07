@@ -44,6 +44,8 @@ final class PauseFlag: @unchecked Sendable {
 private struct PipelineResult {
     var fedSamples = 0
     var frozen: [Int?] = []
+    /// 1回でも書けなかったWAVは行の時刻と位置がずれうる。発言の再生の音源にしない
+    var wavWriteFailed = false
 }
 
 private struct SpeakerTranscript {
@@ -510,6 +512,8 @@ final class MeetingSession {
         samplesIn = nil
         let result = await consumer?.value ?? PipelineResult()
         consumer = nil
+        // 閉じてヘッダのデータ長を書き戻した後でないと、再生側から読むと0サンプルに見える。
+        let recordedWAV = wav != nil && !result.wavWriteFailed
         wav?.close()
         wav = nil
 
@@ -561,6 +565,10 @@ final class MeetingSession {
         endFileActivity()
         // 音声ファイルは保存してから仕上げに入る。話者を決めてからAIへ頼めるよう、完了までペインを閉じない。
         snapshot.reviewingFile = snapshot.audioFile != nil
+        // 行の時刻は、録音WAVにも元の音声ファイルにもそのまま位置として当たる。
+        // 録音中は渡さない。鳴らした声をマイクが拾い、書き込み中のWAVはデータ長がまだ無いため
+        snapshot.playbackAudioURL = snapshot.audioFile?.url
+            ?? (recordedWAV ? snapshot.markdownURL.map(MeetingFiles.wavURL(for:)) : nil)
 
         snapshot.state = .idle
         snapshot.utterances = merged
@@ -577,6 +585,9 @@ final class MeetingSession {
         evaluateAISchedule()
         if !snapshot.reviewingFile { startAIPaneCleanup() }
         if let note { snapshot.message = note + " / " + (snapshot.message ?? "") }
+        if result.wavWriteFailed {
+            snapshot.message = "録音WAVの書き出しに失敗したため、発言の音声は再生できない / " + (snapshot.message ?? "")
+        }
         emit()
     }
 
@@ -1371,7 +1382,7 @@ final class MeetingSession {
             var judgedUntil = 0.0
             for await chunk in stream {
                 result.fedSamples += chunk.count
-                do { try wav?.write(chunk) } catch { log("WAV書き出しに失敗: \(error)") }
+                do { try wav?.write(chunk) } catch { result.wavWriteFailed = true; log("WAV書き出しに失敗: \(error)") }
                 do { try diarizer?.process(chunk) } catch { log("話者判別に失敗。以後は判定済みの区間だけを使う: \(error)") }
                 do { try transcriber.feed(chunk) } catch { log("文字起こしへの入力に失敗: \(error)") }
                 feedGate?.consume(chunk.count)

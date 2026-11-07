@@ -250,6 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onStartStop = { [weak self] in self?.toggleRecording() }
         window.onDropAudioFile = { [weak self] in self?.openAudioFile($0) }
         window.onPauseResume = { session.togglePause() }
+        window.onPlaybackFailure = { session.showMessage($0) }
         window.onCopy = { session.copyContext(writeClipboard: Self.writeClipboard) }
         window.onAskAI = { [weak self] in self?.showAISheet(parent: $0) }
         window.onResolveAI = { [weak self] in self?.session?.resolveAI($0) }

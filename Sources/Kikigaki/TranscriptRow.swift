@@ -165,6 +165,14 @@ final class TranscriptRow: NSView, DocumentRow {
     private func bodyWidth(_ width: CGFloat) -> CGFloat { max(44, width - bodyX - 20) }
     private let speakerButton = SpeakerButton()
     var onRename: ((Int, NSView) -> Void)?
+    /// 元の音声のこの行の区間を流す・止める。仕様は docs/utterance-playback.md
+    let playButton = HoverButton()
+    var onPlay: (() -> Void)?
+    private(set) var playbackAvailable = false
+    private(set) var playing = false
+    /// ▶はマウスを載せた行と再生中の行だけに出す。全行に出すと1画面に数十個並んで騒がしい
+    private(set) var pointerInside = false
+    private var rowTrackingArea: NSTrackingArea?
     private(set) var utterance: Utterance?
     private var displayedName = ""
     private var displayedTimeline: MeetingTimeline?
@@ -197,6 +205,7 @@ final class TranscriptRow: NSView, DocumentRow {
         }
         typedBody.selectedRanges = selection
         imageStrip.setTextScale(scale)
+        refreshPlayButton()
         measuredWidth = -1
         needsLayout = true
     }
@@ -238,6 +247,14 @@ final class TranscriptRow: NSView, DocumentRow {
         speakerButton.action = #selector(renamePressed)
         speakerButton.isHidden = true
         content.addSubview(speakerButton)
+        playButton.isBordered = false
+        playButton.title = ""
+        playButton.imagePosition = .imageOnly
+        playButton.imageScaling = .scaleProportionallyDown
+        playButton.target = self
+        playButton.action = #selector(playPressed)
+        playButton.isHidden = true
+        content.addSubview(playButton)
         applyOpacity()
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -256,6 +273,54 @@ final class TranscriptRow: NSView, DocumentRow {
     }
     @objc private func renamePressed() {
         if let slot = utterance?.speaker { onRename?(slot, speakerButton) }
+    }
+    @objc private func playPressed() { onPlay?() }
+    /// `available` は元の音声があり、この行が声の行であること。再生中は載せたマウスが離れても■を残す
+    func updatePlayback(available: Bool, playing: Bool) {
+        guard playbackAvailable != available || self.playing != playing else { return }
+        playbackAvailable = available
+        self.playing = playing
+        refreshPlayButton()
+    }
+    private func refreshPlayButton() {
+        let shown = !tentative && playbackAvailable && (playing || pointerInside)
+        playButton.isHidden = !shown
+        guard shown else { return }
+        let label = playing ? "再生を止める" : "この発言の音声を再生"
+        playButton.image = NSImage(systemSymbolName: playing ? "stop.fill" : "play.fill", accessibilityDescription: label)?
+            .withSymbolConfiguration(.init(pointSize: 9 * textScale, weight: .semibold))
+        playButton.contentTintColor = playing ? Washi.ink : Washi.muted
+        playButton.toolTip = label
+        playButton.setAccessibilityLabel(label)
+    }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let rowTrackingArea { removeTrackingArea(rowTrackingArea) }
+        // .inVisibleRectは使わない。clipsToBoundsが既定でfalseのため、visibleRectが行の外まで広がり、
+        // 隣の行にいても入ったと届く。HoverButtonと同じく行の矩形で絞る
+        let area = NSTrackingArea(rect: bounds.intersection(visibleRect),
+                                  options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self)
+        addTrackingArea(area)
+        rowTrackingArea = area
+        syncPointer()
+    }
+    // 子のビューが処理しなかった出入りは応答チェーンでここへ上がってくる。行の出入りでなければ位置から取り直す
+    override func mouseEntered(with event: NSEvent) {
+        if event.trackingArea === rowTrackingArea { setPointerInside(true) } else { syncPointer() }
+    }
+    override func mouseExited(with event: NSEvent) {
+        if event.trackingArea === rowTrackingArea { setPointerInside(false) } else { syncPointer() }
+    }
+    /// スクロールや再配置で行がマウスの下へ来た場合も、次のマウス移動を待たず揃える
+    private func syncPointer() {
+        guard let window else { return setPointerInside(false) }
+        let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        setPointerInside(window.isKeyWindow && bounds.intersection(visibleRect).contains(point))
+    }
+    private func setPointerInside(_ value: Bool) {
+        guard pointerInside != value else { return }
+        pointerInside = value
+        refreshPlayButton()
     }
     func updateAvatar(speakers: [KikigakiConfig.Speaker], store: AvatarStore, editable: Bool) {
         let source = utterance?.kind == .typed || utterance?.speaker == nil ? nil : speakers.first { $0.name == displayedName }?.avatar
@@ -409,6 +474,12 @@ final class TranscriptRow: NSView, DocumentRow {
         let mark: CGFloat = attributionDot.lowConfidence ? 14 * textScale : 5
         attributionDot.frame = NSRect(x: bodyX + nameWidth + 5, y: 8 + 9 * textScale - mark / 2, width: mark, height: mark)
         timeLabel.frame = NSRect(x: bodyX + nameWidth + (attributionDot.isHidden ? 12 : 13 + mark), y: 8, width: 62 * textScale, height: 18 * textScale)
+        // 時刻の文字の直後に置く。時刻の枠は文字より広いので、枠の右端では離れて見える
+        let timeWidth = min(timeLabel.frame.width, ceil(timeLabel.intrinsicContentSize.width))
+        let playSide = 18 * textScale
+        playButton.frame = NSRect(x: timeLabel.frame.minX + timeWidth + 4, y: 8 + 9 * textScale - playSide / 2,
+                                  width: playSide, height: playSide)
+        syncPointer()
         let levelHeight: CGFloat = hasLevelNote ? 20 * textScale : 0
         body.frame = NSRect(x: bodyX, y: 31 * textScale, width: bodyWidth(bounds.width), height: max(20 * textScale, bounds.height - 31 * textScale - 5 - levelHeight - imagesHeight))
         typedBody.frame = body.frame

@@ -101,7 +101,7 @@ autoSendPhrases = ["アバンティ", "アヴァンティ"]
 | キー | 既定 | 説明 |
 | --- | --- | --- |
 | `outputDir` | `~/Documents/KIKIGAKI` | Markdown (と録音WAV) の保存先。絶対パスか `~` 始まりだけを受け付ける。相対パスと空文字は設定エラー |
-| `saveRecording` | `false` | 録音WAVを Markdown と並べて残す。音声ファイルの書き起こしには効かない。詳細は [音声ファイルの書き起こし](audio-file.md) |
+| `saveRecording` | `false` | 録音WAVを Markdown と並べて残す。停止後に発言ごとの再生の音源になる。音声ファイルの書き起こしには効かない。詳細は [音声ファイルの書き起こし](audio-file.md)、[発言ごとの音声再生](utterance-playback.md) |
 | `measureAudioLevels` | `false` | 発話ごとの音量と小音量候補の診断表示と保存。除外の設定とは独立。次の会議から効く。詳細は [小音量発話の計測](audio-levels.md) |
 | `participantsKey` | `participants` | 話者名の候補の「参加者」を読む、議事録のfrontmatterのキー。空白・`:`・`#`・引用符・`[]{},` を含む値、空文字、`-` 始まりは設定エラー。読み方は [書き起こしウィンドウ](transcript-window.md) の「候補の出どころ」 |
 | `autoSendPhrases` | `["アバンティ", "アヴァンティ"]` | プロファイルで未指定の場合に使う共通の声の合図。空配列は無効。最大20要素、各64文字まで。文字列以外、正規化後の空要素・重複は設定エラー。次の会議から効く。詳細は [声の合図](ai-scheduled.md#声の合図) |

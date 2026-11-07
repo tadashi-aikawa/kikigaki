@@ -20,6 +20,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var onStopScheduleAI: (() -> Void)?
     var onFireScheduleAI: (() -> Void)?
     var onSendManualDraft: (() -> Void)?
+    /// 発言の行の再生。元の音声を開けなかった理由をヘッダーへ1行出す
+    let player = UtterancePlayer()
+    var onPlaybackFailure: ((String) -> Void)?
     let compactFooter = AICompactFooter()
     let speakerRevealBanner = SpeakerRevealBanner()
     private struct PendingSpeakerReveals {
@@ -150,6 +153,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         tentativeRow.setTextScale(CGFloat(textScale.multiplier))
         minutesSplit.preview.setTextScale(CGFloat(textScale.multiplier))
         updateHeader(width: minutesSplit.left.frame.width)
+        player.onChange = { [weak self] in self?.refreshPlayback() }
         self.avatars.onChange = { [weak self] in
             guard let self else { return }
             for row in rows.values { row.updateAvatar(speakers: snapshot.speakers, store: self.avatars, editable: snapshot.canShare) }
@@ -232,6 +236,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     func apply(_ value: SessionSnapshot) {
         let previous = snapshot
         snapshot = value
+        // 新しい録音を始めたら止める。鳴らした声をマイクが拾わないようにするため
+        if previous.playbackAudioURL != value.playbackAudioURL { player.stop() }
         // 仮の話者名の行しか無くても台帳画像を先読みし、割当時に共有ストアから使えるようにする。
         if previous.speakers != value.speakers {
             for speaker in value.speakers { _ = avatars.image(for: speaker.avatar) }
@@ -462,6 +468,20 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
     }
 
+    /// 再生中の行をもう一度押すと止め、別の行を押すとその行へ切り替える。仕様は docs/utterance-playback.md
+    private func togglePlayback(id: RowID, utterance: Utterance) {
+        if player.playingID == AnyHashable(id) { return player.stop() }
+        guard let url = snapshot.playbackAudioURL, let range = UtterancePlayback.range(for: utterance) else { return }
+        do {
+            try player.play(url: url, range: range, id: id)
+        } catch {
+            onPlaybackFailure?("音声を再生できません: \(url.lastPathComponent) (\(error.localizedDescription))")
+        }
+    }
+    private func refreshPlayback() {
+        for (id, row) in rows { row.updatePlayback(available: row.playbackAvailable, playing: player.playingID == AnyHashable(id)) }
+    }
+
     /// 絞り込みの変更や区間を開いた時の並べ直し。行の内容は変わらないので点灯させない。
     func refreshRows(anchor: TranscriptDocument.Anchor? = nil) { updateRows(previous: snapshot, anchor: anchor) }
 
@@ -533,6 +553,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             row.updateExclusion(snapshot.excludedRows.contains(index))
             row.updateAvatar(speakers: snapshot.speakers, store: avatars, editable: snapshot.canShare)
             row.onRename = { [weak self] slot, view in self?.showRename(slot: slot, relativeTo: view) }
+            row.updatePlayback(available: snapshot.playbackAudioURL != nil && UtterancePlayback.isPlayable(utterance),
+                               playing: player.playingID == AnyHashable(id))
+            row.onPlay = { [weak self] in self?.togglePlayback(id: id, utterance: utterance) }
             next[id] = row
             ordered.append(FilterEntry(row: row, key: .utterance(id), subject: TranscriptFilter.subject(for: utterance)))
             for item in attached[index, default: []] { appendAI(item) }

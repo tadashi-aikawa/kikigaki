@@ -62,6 +62,8 @@ struct SessionSnapshot {
     var transcribingFile: Bool { audioFile != nil && state != .idle }
     /// 書き起こしを保存した後の仕上げ。「完了」までは話者を決めてAIへ頼める
     var reviewingFile = false
+    /// 発言の行を流す元の音声。停止して保存した後だけ持つ。録音中は持たない。仕様は docs/utterance-playback.md
+    var playbackAudioURL: URL?
 
     var canSubmitTyped: Bool { (state == .recording || state == .paused) && !transcribingFile }
     var canPauseOrResume: Bool { state.canPauseOrResume && !transcribingFile }

@@ -220,6 +220,8 @@ extension AppKitTests {
         let audio = AudioFile(url: root.appendingPathComponent("定例.m4a"), duration: 2, recordedAt: recordedAt)
         #expect(await session.start(source: source, audioFile: audio))
         #expect(session.snapshot.transcribingFile)
+        // 書き起こし中は行を再生しない。仕様は docs/utterance-playback.md
+        #expect(session.snapshot.playbackAudioURL == nil)
         let deadline = Date().addingTimeInterval(30)
         while session.snapshot.state != .idle, Date() < deadline { try await Task.sleep(for: .milliseconds(50)) }
         #expect(session.snapshot.saved)
@@ -230,8 +232,11 @@ extension AppKitTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).filter { $0.hasSuffix(".wav") }.isEmpty)
         // 保存してから仕上げに入る。完了したら録音の停止後と同じになる。
         #expect(session.snapshot.reviewingFile && session.snapshot.canSubmitAI)
+        // 仕上げ中も完了後も、元のファイルから行を再生できる。
+        #expect(session.snapshot.playbackAudioURL == audio.url)
         session.completeFileReview()
         #expect(!session.snapshot.reviewingFile && !session.snapshot.canSubmitAI)
+        #expect(session.snapshot.playbackAudioURL == audio.url)
 
         let long = FileSource(samples: Array(repeating: 0, count: 16000 * 600), paced: false)
         #expect(await session.start(source: long, audioFile: AudioFile(url: root.appendingPathComponent("長い.wav"), duration: 600,
