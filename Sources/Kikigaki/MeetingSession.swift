@@ -1216,15 +1216,25 @@ final class MeetingSession {
             } catch is CancellationError {
                 if let request { try? aiStore.records[meetingID]?.controller.cancel(request.id) }
             } catch {
+                let messages = Self.aiSendFailureMessages(error)
                 if let request, aiStore.records[meetingID]?.controller.conversation.questions.first(where: { $0.request.id == request.id })?.state == .prepared {
-                    try? aiStore.records[meetingID]?.controller.fail(request.id, reason: "入力前に停止しました。接続先と設定を確認してください")
+                    try? aiStore.records[meetingID]?.controller.fail(request.id, reason: messages.request)
                 }
                 log("AI送信に失敗(slot \(slot)): \(error)")
-                failureReason = "送信を完了できません。herdrのペインと設定を確認してください"
+                failureReason = messages.footer
                 if meetingID == handoff.meetingID { aiWarning = failureReason }
             }
         }
         emit()
+    }
+
+    /// 送信の失敗を、依頼の行の理由とフッターの警告へ分ける。
+    /// 信頼確認の待ちと見分けられるのは、Claudeの連携が無くて準備待ちが切れたときだけ。他の理由は従来の文言のまま。
+    static func aiSendFailureMessages(_ error: Error) -> (request: String, footer: String) {
+        if error as? AIHerdrError == .claudeIntegrationMissing {
+            return ("入力前に停止しました。herdrのClaude連携を確認してください", "送信を完了できません。herdrのClaude連携を確認してください")
+        }
+        return ("入力前に停止しました。接続先と設定を確認してください", "送信を完了できません。herdrのペインと設定を確認してください")
     }
 
     private func aiChanged() {

@@ -349,7 +349,11 @@ Codexの起動では `-c sandbox_workspace_write.writable_roots=[...]` に保存
 
 設定commandの絶対パスを守る起動には `herdr pane run <pane> <厳密に引用した起動コマンド>` を使う。段2ではworkspace作成時のPATH差替がペイン内の解決先に反映されず、canonical executableによる起動では指定パスを保証できなかった。pane runで絶対パスを指定すると両CLIが起動した。Codexはagent getがunknownを抜けてidle/doneになるまで、Claudeは新しいagent_sessionが立ちidle/doneになるまで待つ。旧session値やblockedをreadyとしない。起動コマンドにはパスと引数だけを引用して置き、会話本文を含めない。KIKIGAKI自身はherdrを引数配列で起動するが、この起動コマンドは受信先シェルで解釈される。
 
-Claudeのagent_sessionは、herdrのClaude連携のSessionStartフックだけが報告する (実測: herdr 0.9.5)。連携が無いとidleでもreadyにならず、準備待ちの30秒が切れて「入力前に停止しました」になる。
+Claudeのagent_sessionは、herdrのClaude連携のSessionStartフックだけが報告する (実測: herdr 0.9.5)。連携が無いとidleでもreadyにならず、準備待ちの30秒が切れて止まる。
+
+- 連携が無いと見分ける条件: 準備待ちが切れた時点の最後の観測で、Claudeが `idle` のまま `agent_session` が無いこと。途中で一度そうなっただけでは言わない。判定はKIKIGAKIが既に読んでいる `agent get` の結果だけで行う
+- 連携が無いときの表示: 依頼の理由は「入力前に停止しました。herdrのClaude連携を確認してください」、フッターの警告は「送信を完了できません。herdrのClaude連携を確認してください」
+- それ以外の表示: 信頼確認のダイアログ中は `blocked` で `agent_session` が無い (実測: herdr 0.9.5)。待たずに止め、依頼の理由は「入力前に停止しました。接続先と設定を確認してください」、フッターは「送信を完了できません。herdrのペインと設定を確認してください」のまま。Codexと、状態が `unknown` のまま切れた場合も同じ
 
 既定cwdは固定の `~/Library/Application Support/KIKIGAKI/ai-work/`。会議ごとの新規ディレクトリで毎回信頼確認を発生させない。固定cwdでも選択したCLIの初回には利用者の信頼確認が必要である。最初の送信時に「初回設定をherdrで確認」とペインを開く操作を表示し、利用者が内容を見て一度承認する。入力準備完了を再確認してから送信し、ダイアログ中へenvelopeを入力しない。CLI切替・cwd変更時にも必要となり得る。自動承認や信頼設定の自動書き換えはしない。
 

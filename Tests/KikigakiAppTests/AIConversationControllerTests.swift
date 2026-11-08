@@ -191,6 +191,44 @@ extension AppKitTests {
         try await controller.send(request, config: config)
         #expect(controller.conversation.questions[0].state == .submitted)
     }
+    @Test func Claudeがidleのままsessionを報告せずに待ちが切れたら連携の確認を促す() async throws {
+        // 実測(herdr 0.9.5): Claude連携が無いと agent_status は idle、agent_session は無い
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), config = ResolvedAIConfig(config: AIConfig(cli: .claude), home: root)
+        await fake.setProvider("claude")
+        await fake.setStatuses(["idle"])
+        let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
+        _ = try prepare(controller, config)
+        await #expect(throws: AIHerdrError.claudeIntegrationMissing) {
+            try await controller.connect(config: config, label: "会議", executable: URL(fileURLWithPath: "/tmp/claude"), arguments: [], readinessTimeout: 0.05)
+        }
+        #expect(controller.warning == "Claudeの準備を確認できません。herdrのClaude連携を確認してください")
+        #expect(MeetingSession.aiSendFailureMessages(AIHerdrError.claudeIntegrationMissing) == (
+            "入力前に停止しました。herdrのClaude連携を確認してください", "送信を完了できません。herdrのClaude連携を確認してください"))
+        // 連携を入れてsessionが報告されれば、同じ接続のまま送れる
+        await fake.setSession("s1")
+        try await controller.connect(config: config, label: "会議", executable: URL(fileURLWithPath: "/tmp/claude"), arguments: [])
+        #expect(controller.connectionStatus == .idle)
+        #expect(await fake.commands.filter { $0.prefix(2) == ["workspace", "create"] }.count == 1)
+    }
+    @Test(arguments: ["blocked", "unknown"]) func Claudeの信頼確認や未確定の状態では連携の確認を促さない(status: String) async throws {
+        // 信頼確認のダイアログ中は blocked で、agent_session は無い(実測: herdr 0.9.5)。従来の文言のまま止める
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), config = ResolvedAIConfig(config: AIConfig(cli: .claude), home: root)
+        await fake.setProvider("claude")
+        await fake.setStatuses([status])
+        let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
+        _ = try prepare(controller, config)
+        do {
+            try await controller.connect(config: config, label: "会議", executable: URL(fileURLWithPath: "/tmp/claude"), arguments: [], readinessTimeout: 0.05)
+            Issue.record("準備できていないのに接続できた")
+        } catch {
+            #expect(error as? AIHerdrError != .claudeIntegrationMissing)
+            #expect(MeetingSession.aiSendFailureMessages(error) == (
+                "入力前に停止しました。接続先と設定を確認してください", "送信を完了できません。herdrのペインと設定を確認してください"))
+        }
+        #expect(controller.warning?.contains("Claude連携") != true)
+    }
     @Test func 期限後の再確認は同じ接続を使い再起動しない() async throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let fake = FakeHerdr(), config = ResolvedAIConfig(config: AIConfig(), home: root)

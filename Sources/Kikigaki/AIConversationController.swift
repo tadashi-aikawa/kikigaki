@@ -25,6 +25,8 @@ final class AIConversationController {
         var inputAttempted = false
         var isSending = false
         var idleSince: Date?
+        /// 最後の観測で、Claudeがidleなのにagent_sessionが無かったか。状態は `unknown` へ丸めるので別に持つ
+        var idleWithoutClaudeSession = false
         var hookBackgroundRunning = false
         /// 最後に観測した編集系ツールの呼び出し時刻。補助の観測で、受領・返答の根拠にしない
         var hookEditingAt: Date?
@@ -243,6 +245,8 @@ final class AIConversationController {
     var hasPendingAppendices: Bool {
         !appendixRetries.isEmpty || conversation.questions.contains { !$0.unreflectedAppendices.isEmpty }
     }
+    /// 追記の送り直しで入力準備を待つ上限。テストだけが縮める
+    var appendixReadinessTimeout: TimeInterval = 30
     /// resultとpromptのawaitが前後しても、送信終了後に保存済みの未反映一覧を確認する。
     private func resendAppendices() {
         guard allowsSending, !discarded else { return }
@@ -255,7 +259,7 @@ final class AIConversationController {
                 guard let self else { return }
                 defer { appendixRetries.remove(slot); onChange?() }
                 do {
-                    if channel.connection != nil { try await waitUntilReady(channel, timeout: 30) }
+                    if channel.connection != nil { try await waitUntilReady(channel, timeout: appendixReadinessTimeout) }
                     preparingAppendixRetry = slot
                     defer { preparingAppendixRetry = nil }
                     guard !discarded, !closedSlots.contains(slot), canSend(slot: slot),
@@ -291,17 +295,22 @@ final class AIConversationController {
                         if channel.connection == nil {
                             let settings = try AILaunchConfiguration(config: config, helper: URL(fileURLWithPath: p.cliPath), controller: self)
                             try await connect(config: config, label: "KIKIGAKI \(config.participantName)",
-                                executable: settings.executable, arguments: settings.arguments)
+                                executable: settings.executable, arguments: settings.arguments, readinessTimeout: appendixReadinessTimeout)
                         }
                         try await send(request, config: config, forwarding: (latest.request.id, pending.map(\.number)))
                     }
                     catch {
                         if conversation.questions.first(where: { $0.request.id == request.id })?.state == .prepared {
-                            try fail(request.id, reason: "追記の送り直しを開始できません")
+                            try fail(request.id, reason: error as? AIHerdrError == .claudeIntegrationMissing
+                                ? "追記の送り直しを開始できません。herdrのClaude連携を確認してください"
+                                : "追記の送り直しを開始できません")
                         }
                         throw error
                     }
-                } catch { channel.warning = "未反映の追記を送り直せません。ペインを確認してください" }
+                }
+                // 連携の案内は準備待ちが警告へ書いてある。汎用の文言で上書きしない。
+                catch AIHerdrError.claudeIntegrationMissing {}
+                catch { channel.warning = "未反映の追記を送り直せません。ペインを確認してください" }
             }
         }
     }
@@ -417,7 +426,14 @@ final class AIConversationController {
             if channel.connectionStatus == .idle { return }
             if channel.connectionStatus == .blocked { throw AIHerdrError.notReady }
             let remaining = deadline - ProcessInfo.processInfo.systemUptime
-            if remaining <= 0 { channel.warning = "入力準備を確認できません。herdrで確認してください"; throw AIProcessError.timeout }
+            if remaining <= 0 {
+                // 判定は待ちの最後の観測だけで行う。途中で一度idleだっただけでは連携が無いと言わない。
+                if channel.idleWithoutClaudeSession {
+                    channel.warning = "Claudeの準備を確認できません。herdrのClaude連携を確認してください"
+                    throw AIHerdrError.claudeIntegrationMissing
+                }
+                channel.warning = "入力準備を確認できません。herdrで確認してください"; throw AIProcessError.timeout
+            }
             try await Task.sleep(for: .seconds(min(0.1, remaining)))
         } while true
     }
@@ -433,7 +449,7 @@ final class AIConversationController {
             try apply(channel, observed)
         } catch {
             guard !discarded, revision == channel.generation, target.paneID == channel.connection?.paneID else { return }
-            channel.idleSince = nil
+            channel.idleSince = nil; channel.idleWithoutClaudeSession = false
             if error as? AIHerdrError == .replaced || error as? AIHerdrError == .missing { channel.connectionStatus = .disconnected }
             else { channel.connectionStatus = .unknown }
             throw error
@@ -514,7 +530,7 @@ final class AIConversationController {
         try files.write(AIJSON.encode(next.sessionGeneration), to: base + ["sessions", "\(target)", "generation.json"])
         channel.history = next; channel.connection = nil; channel.session = nil; channel.snapshots = []
         channel.launchingAttempted = false; channel.inputAttempted = false
-        channel.connectionStatus = .unknown; channel.idleSince = nil; channel.warning = nil
+        channel.connectionStatus = .unknown; channel.idleSince = nil; channel.idleWithoutClaudeSession = false; channel.warning = nil
         channel.hookBackgroundRunning = false
         resendAppendices()
         onChange?()
@@ -792,6 +808,8 @@ final class AIConversationController {
         target.terminalID = target.terminalID ?? observed.terminalID
         if target != channel.connection { try saveConnection(channel, target) }
         channel.connectionStatus = observed.ready || observed.status != .idle ? observed.status : .unknown
+        channel.idleWithoutClaudeSession = target.provider == .claude && observed.status == .idle && !observed.ready
+            && (observed.sessionID ?? "").isEmpty
         channel.idleSince = channel.connectionStatus == .idle ? (channel.idleSince ?? Date()) : nil
     }
 

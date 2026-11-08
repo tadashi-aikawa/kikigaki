@@ -7,7 +7,10 @@ struct AIHerdrObservation: Equatable, Sendable {
     let sessionID: String?
     var terminalID: String?
 }
-enum AIHerdrError: Error, Equatable { case notReady, replaced, missing, server(String) }
+/// `claudeIntegrationMissing` は、Claudeがidleのままagent_sessionを報告せずに準備待ちが切れたこと。
+/// agent_sessionを報告するのはherdrのClaude連携のSessionStartフックだけなので、連携が無いと見る(実測: herdr 0.9.5)。
+/// 信頼確認のダイアログ中はblockedで、この形にならない。
+enum AIHerdrError: Error, Equatable { case notReady, replaced, missing, claudeIntegrationMissing, server(String) }
 
 /// 同じ操作の同じ失敗を連続して記録しない。成功したら次の失敗はまた記録する。
 actor AIHerdrLogGate {

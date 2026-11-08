@@ -7,9 +7,9 @@ import KikigakiAIIO
 
 extension AppKitTests {
 @Suite(.timeLimit(.minutes(1))) @MainActor struct AIAppendixTests {
-    private func setup(_ root: URL, fake: FakeHerdr, scheduled: Bool = false,
-                       identifySpeakers: Bool = false) async throws -> (AIConversationController, ResolvedAIConfig, AIRequest) {
-        let config = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path, identifySpeakers: identifySpeakers), home: root)
+    private func setup(_ root: URL, fake: FakeHerdr, scheduled: Bool = false, identifySpeakers: Bool = false,
+                       cli: AIProvider = .codex) async throws -> (AIConversationController, ResolvedAIConfig, AIRequest) {
+        let config = ResolvedAIConfig(config: AIConfig(cli: cli, command: "/bin/echo", cwd: root.path, identifySpeakers: identifySpeakers), home: root)
         let controller = try testAIController(meetingID: UUID(), outputDirectory: root, herdr: AIHerdr(run: { try await fake.run($0, $1) }))
         let request = try controller.prepare(lines: ["[12:00:00] A: 最初の会話"], question: "作業して", voiceQuestion: "",
             capturedAt: Date(), cutoff: 1, tail: nil, config: config, helper: URL(fileURLWithPath: "/bin/echo"),
@@ -163,6 +163,34 @@ extension AppKitTests {
         #expect(controller.conversation.questions.count == 2 && forwarded.state == .submitted)
         #expect(forwarded.request.envelope.participant.sessionGeneration == 2)
         #expect(controller.conversation.questions[0].appendices[0].forwardedRequestID == forwarded.request.id)
+    }
+
+    @Test func 作り直した接続でClaude連携が無く追記を送り直せないときも連携の確認を促す() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr()
+        await fake.setProvider("claude"); await fake.setSession("s1")
+        let (controller, config, request) = try await setup(root, fake: fake, cli: .claude)
+        defer { controller.stopWatching() }
+        try await controller.append(to: request.id, lines: ["会話", "追加の指示"], question: "続けて", capturedAt: Date(), cutoff: 2, tail: nil, config: config)
+        await fake.setStatuses(["missing"])
+        try result(controller, root: root, request: request)
+        for _ in 0..<200 {
+            if controller.warning?.contains("未反映の追記を送り直せません") == true { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(controller.hasPendingAppendices)
+        // 作り直した先のClaudeは、連携が無いのでidleのままsessionを報告しない
+        await fake.setStatuses(["idle"]); await fake.setSession(nil)
+        controller.appendixReadinessTimeout = 0.05
+        try controller.newGeneration()
+        for _ in 0..<200 {
+            if controller.conversation.questions.count == 2, controller.conversation.questions[1].state == .failed { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let forwarded = try #require(controller.conversation.questions.last)
+        #expect(controller.conversation.questions.count == 2 && forwarded.state == .failed)
+        #expect(forwarded.failure == "追記の送り直しを開始できません。herdrのClaude連携を確認してください")
+        #expect(controller.warning == "Claudeの準備を確認できません。herdrのClaude連携を確認してください")
     }
 
     /// 話者を推定する宛先では内蔵節の分も差し引いて分け、単独で上限近くの追記は割当を外して本文を届ける。
