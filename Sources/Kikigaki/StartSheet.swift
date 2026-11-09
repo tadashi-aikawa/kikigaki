@@ -28,6 +28,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         var schedule: AIScheduleOptions?
         /// 音声ファイルの書き起こしの音源。録音ではnil
         var audioFile: AudioFile?
+        /// 画面を記録するディスプレイ。nilは「撮らない」。仕様は docs/screen-capture.md
+        var screenDisplay: ScreenDisplay?
     }
 
     let window: NSWindow
@@ -63,6 +65,11 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     private var fixedContentHeight: CGFloat?
     private var detailsSlot: Int?
     static let systemAudioDefaultsKey = "KikigakiSystemAudioMode"
+    /// 画面を記録するディスプレイの名前。空文字は「撮らない」。番号は再起動で変わりうるので名前で覚える。
+    static let screenDefaultsKey = "KikigakiScreenCaptureDisplay"
+    private let screenDisplays: [ScreenDisplay]
+    let screenNone = NSButton(radioButtonWithTitle: "撮らない", target: nil, action: nil)
+    private(set) var screenRadios: [NSButton] = []
     let systemAudioAutomatic = NSButton(radioButtonWithTitle: "自動(いまは取り込まない)", target: nil, action: nil)
     let systemAudioInclude = NSButton(radioButtonWithTitle: "取り込む", target: nil, action: nil)
     let systemAudioExclude = NSButton(radioButtonWithTitle: "取り込まない", target: nil, action: nil)
@@ -108,6 +115,8 @@ final class StartSheet: NSObject, NSTextViewDelegate {
          nextMeetings: [NextMeeting] = [],
          defaults: UserDefaults = .standard,
          systemAudioMode: SystemAudioMode = .automatic,
+         screenDisplays: [ScreenDisplay] = [],
+         screenDisplayName: String? = nil,
          outputKind: @escaping () -> AudioOutputKind = { .unknown },
          voiceIsolation: @escaping () -> Bool = { false },
          microphoneName: @escaping () -> String = { MicrophoneDevice.currentName }) {
@@ -121,6 +130,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         self.outputKind = outputKind
         self.voiceIsolation = voiceIsolation
         self.microphoneName = microphoneName
+        self.screenDisplays = screenDisplays
         window = StartSheetWindow(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 400),
                                   styleMask: [.titled], backing: .buffered, defer: false)
         super.init()
@@ -176,6 +186,16 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             microphoneLabel.setAccessibilityLabel("マイク")
             refreshMicrophone()
             add(row("マイク", microphoneLabel), to: rows)
+            add(separator(), to: rows)
+            // 画面の記録。既定は撮らない。前回選んだディスプレイがつながっていれば、それを選んでおく。
+            // 音の行の並びを分けないよう、システム音声とマイクの後に置く。
+            screenRadios = [screenNone] + screenDisplays.map { NSButton(radioButtonWithTitle: $0.name, target: nil, action: nil) }
+            for radio in screenRadios { radio.target = self; radio.action = #selector(screenChanged(_:)) }
+            let remembered = screenDisplays.firstIndex { $0.name == screenDisplayName }
+            screenRadios[remembered.map { $0 + 1 } ?? 0].state = .on
+            let screenChoices = NSStackView(views: screenRadios)
+            screenChoices.orientation = .horizontal; screenChoices.spacing = 14
+            add(row("画面", screenChoices), to: rows)
             add(separator(), to: rows)
         }
 
@@ -881,6 +901,7 @@ final class StartSheet: NSObject, NSTextViewDelegate {
             result.systemAudioMode = selectedSystemAudioMode
             result.recordSystemAudio = selectedSystemAudioMode.includes(outputKind(), voiceIsolation: voiceIsolation())
             result.manualSlot = selectedManualSlot
+            result.screenDisplay = screenRadios.dropFirst().firstIndex { $0.state == .on }.map { screenDisplays[$0 - 1] }
         } else {
             // 行は出さないが、仕上げの手動宛先は録音の開始シートで最後に選んだ宛先から始める。
             result.manualSlot = defaultManualSlot
@@ -939,6 +960,9 @@ final class StartSheet: NSObject, NSTextViewDelegate {
         systemAudioAutomatic.state = mode == .automatic ? .on : .off
         systemAudioInclude.state = mode == .include ? .on : .off
         systemAudioExclude.state = mode == .exclude ? .on : .off
+    }
+    @objc private func screenChanged(_ sender: NSButton) {
+        for radio in screenRadios { radio.state = radio === sender ? .on : .off }
     }
     @objc private func systemAudioChanged(_ sender: NSButton) {
         selectSystemAudio(sender === systemAudioInclude ? .include : sender === systemAudioExclude ? .exclude : .automatic)

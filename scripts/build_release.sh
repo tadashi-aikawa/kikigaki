@@ -44,7 +44,7 @@ unzip -Z1 "$ARCHIVE" | grep -x "KIKIGAKI.app/Contents/Helpers/kikigaki-cli" >/de
 unzip -Z1 "$ARCHIVE" | grep -x "KIKIGAKI.app/Contents/Resources/skills/kikigaki/SKILL.md" >/dev/null
 unzip -Z1 "$ARCHIVE" | grep -x "KIKIGAKI.app/Contents/Resources/skills/kikigaki/references/meeting.md" >/dev/null
 # 配布物に含む第三者のライセンスは、本文の同梱が利用条件になっている
-for license in LICENSE THIRD-PARTY-NOTICES.md FluidAudio/LICENSE TOMLKit/LICENSE; do
+for license in LICENSE THIRD-PARTY-NOTICES.md FluidAudio/LICENSE TOMLKit/LICENSE libwebp/COPYING libwebp/PATENTS; do
   unzip -Z1 "$ARCHIVE" | grep -x "KIKIGAKI.app/Contents/Resources/licenses/$license" >/dev/null
 done
 

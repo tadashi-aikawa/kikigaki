@@ -1,5 +1,5 @@
 {
-  "originHash" : "f6a89318430c26b8ae82d8ffc8805581b662e595892eb08ad909308ecb184df4",
+  "originHash" : "fbfd7e1109a9469e8a96f430e1262067d027075b9414dc321cb4b95ae827205e",
   "pins" : [
     {
       "identity" : "fluidaudio",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "21493f8dac5a97e65742e6ff26f42f164c2fda0f",
         "version" : "0.17.4"
+      }
+    },
+    {
+      "identity" : "libwebp-xcode",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/SDWebImage/libwebp-Xcode.git",
+      "state" : {
+        "revision" : "2b5256c29ff4e20f2a0d5ee863b62b1a22144434",
+        "version" : "1.6.0"
       }
     },
     {

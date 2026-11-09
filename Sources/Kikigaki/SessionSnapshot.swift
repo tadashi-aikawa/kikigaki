@@ -35,14 +35,18 @@ struct SessionSnapshot {
     var saved = false
     /// 録音中の途中保存の失敗。成功した途中保存はヘッダーに出さない。次の成功と停止で消す
     var interimSaveWarning: String?
-    /// ヘッダーの1行と赤で出すか。保存成功の通知は出さず、途中保存の失敗はほかの通知より先に置く
+    /// 画面の記録の取得不能と、保存の3回連続の失敗。次に1枚保存できたら保存の失敗だけ消す。仕様は docs/screen-capture.md
+    var screenCaptureWarning: String?
+    /// フッターの「いま撮る」を押せるか。画面を撮る会議の録音中だけ
+    var canCaptureScreenNow = false
+    /// ヘッダーの1行と赤で出すか。保存成功の通知は出さず、途中保存と画面の記録の失敗はほかの通知より先に置く
     var headerMessage: (text: String, isError: Bool) {
         var message = self.message ?? ""
         if saved, message.hasPrefix("保存:") {
             message = message.components(separatedBy: " / ").dropFirst().joined(separator: " / ")
         }
-        let text = [interimSaveWarning, message.isEmpty ? nil : message].compactMap { $0 }.joined(separator: " / ")
-        return (text, interimSaveWarning != nil || (state == .idle && !saved && !message.isEmpty))
+        let text = [interimSaveWarning, screenCaptureWarning, message.isEmpty ? nil : message].compactMap { $0 }.joined(separator: " / ")
+        return (text, interimSaveWarning != nil || screenCaptureWarning != nil || (state == .idle && !saved && !message.isEmpty))
     }
     var handoffMessage: String?
     var handoffFailed = false

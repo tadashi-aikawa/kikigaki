@@ -9,6 +9,7 @@ bundled in `KIKIGAKI.app/Contents/Resources/licenses/`.
 | Third-party code included in FluidAudio | See each file | `licenses/FluidAudio/ThirdPartyLicenses/` |
 | [TOMLKit](https://github.com/LebJe/TOMLKit) | MIT | `licenses/TOMLKit/LICENSE` |
 | [toml++](https://github.com/marzer/tomlplusplus), included in TOMLKit | MIT | This file, below |
+| [libwebp](https://chromium.googlesource.com/webm/libwebp), built from [libwebp-Xcode](https://github.com/SDWebImage/libwebp-Xcode) | BSD-3-Clause, with an additional patent grant | `licenses/libwebp/COPYING`, `licenses/libwebp/PATENTS` |
 | JavaScript libraries and fonts for the minutes preview | MIT, ISC, Apache-2.0, OFL and others | `Kikigaki_Kikigaki.bundle/MinutesAssets/THIRD-PARTY-NOTICES.txt` and `preview.js.LEGAL.txt` |
 | Editor icons for the minutes preview | See the file | `Kikigaki_Kikigaki.bundle/MinutesAssets/EDITOR-ICONS.txt` |
 

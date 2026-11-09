@@ -261,6 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onSendManualDraft = { [weak session] in session?.sendManualDraft() }
         window.onCancelAI = { session.cancelAI($0) }
         window.onOpenAIPane = { session.showAIPane() }
+        window.onCaptureScreen = { session.captureScreenNow() }
         window.onRecreateAI = { session.recreateAI() }
         window.onRetryAISave = { session.retryAISaves() }
         window.onOpenMarkdown = {
@@ -429,6 +430,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                nextMeetings: nextMeetings,
                                systemAudioMode: UserDefaults.standard.string(forKey: StartSheet.systemAudioDefaultsKey)
                                     .flatMap(SystemAudioMode.init(rawValue:)) ?? .automatic,
+                               screenDisplays: ScreenDisplay.connected(),
+                               screenDisplayName: UserDefaults.standard.string(forKey: StartSheet.screenDefaultsKey),
                                outputKind: SystemAudioOutput.current,
                                voiceIsolation: { MicrophoneMode.isVoiceIsolation })
         sheet.onDiarizationPreload = { [weak self] in self?.preloadModels() }
@@ -438,6 +441,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // 音声ファイルのシートはシステム音声を出さないので、録音の前回値を書き換えない。
             if options.audioFile == nil {
                 UserDefaults.standard.set(options.systemAudioMode.rawValue, forKey: StartSheet.systemAudioDefaultsKey)
+                UserDefaults.standard.set(options.screenDisplay?.name ?? "", forKey: StartSheet.screenDefaultsKey)
             }
             self?.startSheet = nil
             Task { await self?.startRecording(options: options) }
@@ -513,6 +517,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             catch { Self.log("議事録の指定を引き継げません: \(error)") }
             session.pendingAutomaticSchedule = .init(slot: options.scheduleSlot, options: options.schedule)
             session.pendingManualDestination = .init(slot: options.manualSlot)
+            // replayと音声ファイルでは撮らない。過去の音声に画面は無い。
+            session.pendingScreenDisplay = replayURL == nil && options.audioFile == nil ? options.screenDisplay : nil
         }
         window?.show()
         if replayURL != nil {

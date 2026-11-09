@@ -15,6 +15,9 @@ let package = Package(
         // TTS・逆テキスト正規化用のバイナリ依存 NemoTextProcessing は使わないので trait で外す。
         // FluidAudio でこのバイナリ依存を外すには tools 6.2 以上が要る(6.2 未満では常にリンクされる)
         .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.17.4", traits: []),
+        // 画面の記録を非可逆WebPで保存するためだけに使う。macOSのImageIOはWebPを書けない。
+        // SDWebImage管理のBSD-3-Clauseパッケージで、Cソースから静的に同梱する(UTSUSHIEと同じ)。
+        .package(url: "https://github.com/SDWebImage/libwebp-Xcode.git", exact: "1.6.0"),
     ],
     targets: [
         .target(name: "KikigakiAIIO", dependencies: ["KikigakiCore"]),
@@ -36,6 +39,7 @@ let package = Package(
                 "KikigakiCore",
                 "KikigakiAIIO",
                 .product(name: "FluidAudio", package: "FluidAudio"),
+                .product(name: "libwebp", package: "libwebp-Xcode"),
             ],
             path: "Sources/Kikigaki",
             resources: [.copy("MinutesAssets")],

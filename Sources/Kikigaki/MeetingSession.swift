@@ -101,7 +101,15 @@ final class MeetingSession {
     private var lastUndiarizedDraw = -Double.infinity
     private var lastUndiarizedFinalCount = 0
     private var pendingUndiarizedDraw: Task<Void, Never>?
+    /// 声以外の行。手入力と、公開済みの画面の記録の行。投稿・公開の順に持つ。
     private var typedEntries: [Utterance] = []
+    /// 開始シートで選んだディスプレイ。次の録音の開始で使い、開始と同時に消す。音声ファイルとreplayでは撮らない。
+    var pendingScreenDisplay: ScreenDisplay?
+    /// この会議の画面の記録。撮らない会議はnil。仕様は docs/screen-capture.md
+    private var screenRecorder: ScreenRecorder?
+    private var screenHealth = ScreenCaptureHealth()
+    /// 画面の記録の開始・一時停止・停止を、操作した順に1本で流す。素早い一時停止と再開で、後の開始を先の停止が止めないため。
+    private var screenOperation: Task<Void, Never>?
     private var finalTokens: [TimedToken] = []
     /// 話者区間。録音中は消費タスクが判定を進めたときに `consumedAudioTime` と同じ更新で受け取り、
     /// 停止後は最終判定を持つ。MainActor から話者判別のエンジンへ直接触れないための置き場
@@ -382,6 +390,8 @@ final class MeetingSession {
         pendingUndiarizedDraw?.cancel(); pendingUndiarizedDraw = nil
         lastUndiarizedDraw = -Double.infinity; lastUndiarizedFinalCount = 0
         typedEntries = []
+        screenRecorder?.invalidate(); screenRecorder = nil
+        screenHealth = ScreenCaptureHealth()
         finalTokens = []
         speakerSegments = []
         handoff = HandoffHistory()
@@ -472,6 +482,7 @@ final class MeetingSession {
             } else {
                 startAutomaticSchedule()
                 startInterimSaves(intervalSeconds: meetingConfig.autoSaveIntervalSeconds)
+                startScreenCapture(markdownURL: markdownURL)
             }
             emit()
             return true
@@ -496,6 +507,8 @@ final class MeetingSession {
         // 最終保存と同じファイルを書くので、停止の操作より後に途中保存を走らせない。
         interimSaveTask?.cancel(); interimSaveTask = nil
         snapshot.interimSaveWarning = nil
+        // 撮れなかった期間は取得不能の行として本文に残る。停止後のヘッダーには出し続けない。
+        snapshot.screenCaptureWarning = nil
         aiSchedule?.recordingStopped()
         var finalizationSucceeded = true
         // 録音の停止で破棄するのは、まだ会話を確定していない問いだけ。
@@ -505,6 +518,13 @@ final class MeetingSession {
         pendingUndiarizedDraw?.cancel(); pendingUndiarizedDraw = nil
         snapshot.message = nil
         emit()
+        // 停止の操作の時点で画面の新しい保存を受け付けない。受付済みの保存は最終保存の直前まで公開を待つ。
+        // ストリームの片付けは待たずに後から流す。開始待ちの間も音源の停止を遅らせない。
+        let screen = screenRecorder
+        if let screen {
+            screen.stopAccepting()
+            enqueueScreen { await screen.closeStream() }
+        }
 
         source?.stop()
         source = nil
@@ -552,6 +572,10 @@ final class MeetingSession {
         }
         trialDump = nil
         snapshot.timeline = pause.timeline
+        // 受付済みの画面の保存を、公開まで最大3秒待つ。超えた分は無効にし、最終保存の後から公開しない。
+        await screen?.drain(timeout: .seconds(3))
+        if screenRecorder === screen { screenRecorder = nil }
+        snapshot.screenCaptureWarning = nil
         let merged = TranscriptEntries.merge(voice: final.utterances, typed: typedEntries, timeline: snapshot.timeline).utterances
         var meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: duration, utterances: merged,
                                               names: snapshot.names, pauses: snapshot.timeline.pauses,
@@ -694,9 +718,20 @@ final class MeetingSession {
         case .recording:
             pause.pause()
             snapshot.state = .paused
+            // 一時停止中は撮らず、ストリームも止める。音声位置が進まない間の画面は会議の一部ではない。
+            // 撮影は操作の時点で止め、ストリームの片付けは後から順に流す。
+            if let screenRecorder {
+                screenRecorder.pauseCapturing()
+                enqueueScreen { await screenRecorder.closeStream() }
+            }
         case .paused:
             pause.resume()
             snapshot.state = .recording
+            // 再開の直後に1枚撮る。一時停止の間に変わった画面を取りこぼさない。
+            if let screenRecorder, !screenRecorder.isUnavailable {
+                let epoch = screenRecorder.resumeCapturing()
+                enqueueScreen { await screenRecorder.start(epoch: epoch) }
+            }
         default:
             return
         }
@@ -790,6 +825,88 @@ final class MeetingSession {
         return true
     }
 
+    // MARK: - 画面の記録
+
+    @discardableResult
+    private func enqueueScreen(_ operation: @escaping () async -> Void) -> Task<Void, Never> {
+        let previous = screenOperation
+        let task = Task { @MainActor in
+            await previous?.value
+            await operation()
+        }
+        screenOperation = task
+        return task
+    }
+
+    private func startScreenCapture(markdownURL: URL) {
+        defer { pendingScreenDisplay = nil }
+        guard let display = pendingScreenDisplay else { return }
+        let recorder = makeScreenRecorder(display: display, markdownURL: markdownURL)
+        screenRecorder = recorder
+        let epoch = recorder.resumeCapturing()
+        enqueueScreen { await recorder.start(epoch: epoch) }
+    }
+
+    private func makeScreenRecorder(display: ScreenDisplay, markdownURL: URL) -> ScreenRecorder {
+        let pause = self.pause
+        return ScreenRecorder(display: display, markdownURL: markdownURL, acceptedAudioTime: { pause.audioTime },
+            publish: { [weak self] recorder, shot, url in self?.publishScreen(recorder, shot, url) ?? .rejected },
+            failed: { [weak self] recorder, reason in self?.screenSaveFailed(recorder, reason) },
+            becameUnavailable: { [weak self] recorder, reason in self?.screenBecameUnavailable(recorder, reason) })
+    }
+
+    /// 保存を終えた1枚を、公開する前に一体で確かめる。会議が同じで、無効にされておらず、受け付ける状態か。
+    /// 停止処理中も、停止前に受け付けて無効にされていない処理は公開できる。最終保存を始めた後は `drain` が無効にしている。
+    private func publishScreen(_ recorder: ScreenRecorder, _ shot: ScreenShot, _ url: URL) -> ScreenRecorder.PublishResult {
+        guard recorder === screenRecorder, !recorder.isInvalidated,
+              snapshot.state == .recording || snapshot.state == .paused || snapshot.state == .finishing,
+              let entry = try? Utterance(screenLabel: shot.label, imagePath: url.path, at: shot.audioTime, postedAt: shot.observedAt)
+        else { return .rejected }
+        typedEntries.append(entry)
+        screenHealth.saved()
+        if snapshot.state != .finishing {
+            snapshot.screenCaptureWarning = screenHealth.warning
+            refreshLive()
+        }
+        emit()
+        return .published
+    }
+
+    private func screenSaveFailed(_ recorder: ScreenRecorder, _ reason: String) {
+        log("画面の記録を保存できません: \(reason)")
+        // 停止処理中の失敗はヘッダーへ出さない。停止後のヘッダーに警告を残さないため。
+        guard recorder === screenRecorder, snapshot.state == .recording || snapshot.state == .paused else { return }
+        screenHealth.failed(reason)
+        snapshot.screenCaptureWarning = screenHealth.warning
+        emit()
+    }
+
+    /// 撮れなくなった。以後は撮らず、ヘッダーに1行を出し、取得不能のイベントの行を残す。再接続しても追わない。
+    private func screenBecameUnavailable(_ recorder: ScreenRecorder, _ reason: String) {
+        guard recorder === screenRecorder, snapshot.state == .recording || snapshot.state == .paused else { return }
+        log("画面を記録できません: \(reason)")
+        screenHealth.becameUnavailable(reason)
+        snapshot.screenCaptureWarning = screenHealth.warning
+        if let event = try? Utterance(screenEvent: .unavailable(reason), at: pause.audioTime, postedAt: Date()) {
+            typedEntries.append(event)
+        }
+        // 撮影は知らせる前に止まっている。ストリームの片付けだけを流す。
+        enqueueScreen { await recorder.closeStream() }
+        refreshLive()
+        emit()
+    }
+
+    /// フッターの「…」の「いま撮る」。録音中だけ。押した時点で1枚取り、しきい値によらず保存する。
+    func captureScreenNow() {
+        // 時刻・音声位置・受付は押した処理の中で確定する。撮影だけを後から流す。
+        guard snapshot.state == .recording, let screenRecorder, let request = screenRecorder.beginCapture() else { return }
+        Task { await screenRecorder.capture(request) }
+    }
+
+    var canCaptureScreenNow: Bool {
+        snapshot.state == .recording && screenRecorder.map { !$0.isUnavailable } == true
+    }
+
     /// 枡に名前を付ける。停止後なら Markdown を保存し直す
     func rename(slot: Int, to name: String) {
         guard snapshot.canShare, snapshot.names.diarizationEnabled, (0..<SpeakerNames.slotCount).contains(slot) else { return }
@@ -880,6 +997,7 @@ final class MeetingSession {
 
     private func emit() {
         snapshot.nextDiarizationEnabled = nextDiarizationEnabled
+        snapshot.canCaptureScreenNow = canCaptureScreenNow
         refreshAudioSnapshot()
         snapshot.timeline = pause.timeline
         snapshot.aiRecoveryWarning = aiStore?.warnings.first
@@ -1361,6 +1479,11 @@ final class MeetingSession {
     }
 
     private func tearDown() async {
+        if let screenRecorder {
+            screenRecorder.invalidate()
+            await enqueueScreen { await screenRecorder.closeStream() }.value
+            self.screenRecorder = nil
+        }
         interimSaveTask?.cancel(); interimSaveTask = nil
         pendingUndiarizedDraw?.cancel(); pendingUndiarizedDraw = nil
         source?.stop()
@@ -1794,6 +1917,16 @@ extension MeetingSession {
     }
 
 #if DEBUG
+    /// ストリームを開かずに、この会議の画面の記録を据える。フレームは `observeForTesting` で渡す。
+    func installScreenRecorderForTesting(display: ScreenDisplay, markdownURL: URL) -> ScreenRecorder {
+        let recorder = makeScreenRecorder(display: display, markdownURL: markdownURL)
+        screenRecorder = recorder
+        _ = recorder.resumeCapturing()
+        emit()
+        return recorder
+    }
+    var screenEntriesForTesting: [Utterance] { typedEntries.filter { $0.kind == .screen } }
+
     func setAudioTranscriptForTesting(_ utterances: [Utterance], meter: AudioLevelMeter, url: URL) {
         snapshot.state = .recording; snapshot.markdownURL = url
         snapshot.utterances = utterances; audioLevelMeter = meter

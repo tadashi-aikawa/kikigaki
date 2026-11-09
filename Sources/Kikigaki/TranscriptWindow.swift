@@ -33,6 +33,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private var pendingSpeakerReveals: [PendingSpeakerReveals] = []
     private let recordingRange = Washi.label(size: 11, color: Washi.muted)
     var onOpenAIPane: (() -> Void)?
+    var onCaptureScreen: (() -> Void)?
     var onCancelAI: ((UUID) -> Void)?
     /// 失敗した依頼を送り直す。元requestを渡し、送信文・宛先・親・作業許可を戻したシートを開く。
     var onResendAI: ((UUID) -> Void)?
@@ -815,6 +816,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         add("会話をコピー", #selector(copyPressed), enabled: snapshot.canCopy)
         menu.items.last?.toolTip = snapshot.handoffMessage
+        // 画面を撮る会議の録音中だけ出す。自動の判定が拾わない瞬間(動画の一場面など)を残す。
+        if snapshot.canCaptureScreenNow { add("いま撮る", #selector(captureScreenPressed)) }
         // AIの項目は使える時だけ出す。停止後などに押せない項目を並べて読み飛ばさせない。
         let panes = snapshot.ai?.canOpenPane == true, saveFailed = snapshot.ai?.saveFailed == true
         let recreate = snapshot.canSubmitAI && snapshot.ai?.canRecreate == true
@@ -864,6 +867,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         guard canFireAutomatic else { return }
         onFireScheduleAI?()
     }
+    @objc private func captureScreenPressed() { onCaptureScreen?() }
     @objc private func panePressed() { onOpenAIPane?() }
     @objc private func recreatePressed() { onRecreateAI?() }
     @objc private func retrySavePressed() { onRetryAISave?() }
