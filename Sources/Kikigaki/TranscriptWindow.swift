@@ -97,6 +97,15 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     struct RowKey: Hashable { let kind: Utterance.Kind; let start: Double }
     struct RowID: Hashable { let kind: Utterance.Kind; let start: Double; let occurrence: Int }
     var rows: [RowID: TranscriptRow] = [:]
+    // 画像レーン。TranscriptWindowScreenLane.swift も読む。割り当ては毎回導き、ここには表示の状態だけを持つ
+    /// 「+N枚」を押して開いた画像のパス。会議が変わると閉じる。
+    var screenLaneExpanded: Set<String> = []
+    /// 後ろに発言がまだ無い画面を、聞き取り中の行が無いときに出す末尾の行。
+    let screenLaneTrailing = ScreenLaneRow()
+    /// Quick Lookへ渡す会議の全画像。パネルのデータ源とデリゲートはこのオブジェクトで、コントローラー自身は渡さない。
+    let screenPreview = ScreenPreviewSource()
+    /// Quick Lookのパネルを出す。テストはパネルを出さずに差し替える。
+    var presentScreenPreview: () -> Void = { QLPreviewPanelPresenter.present() }
     static let textScaleDefaultsKey = "KikigakiTranscriptTextPercent"
     private let textDefaults: UserDefaults
     private(set) var textScale: TranscriptTextScale
@@ -493,7 +502,14 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             // 別の会議へ移る行に、前の会議の返答到着の点灯を持ち越さない。
             for row in aiRows.values { (row as? AIReplyRow)?.stopArrival() }
             rows.removeAll(); aiRows.removeAll(); aiProgress.removeAll(); microphoneRows.removeAll(); gapRows.removeAll()
+            screenLaneExpanded.removeAll()
             anchor = .init(candidates: [], y: 0, atBottom: true)
+        }
+        let lane = screenLane()
+        if lane.width != transcriptDocument.laneWidth {
+            transcriptDocument.laneWidth = lane.width
+            minutesSplit.setLaneWidth(lane.width)
+            window?.contentView?.layoutSubtreeIfNeeded()
         }
         // AIの追加・状態変化も発話と同じ追従規則にする。上へスクロール中はanchor、
         // 検索中はfollowsBottomが末尾移動を抑え、読んでいる位置を保つ。
@@ -540,7 +556,15 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         for item in attached[-1, default: []] { appendAI(item) }
         for (index, utterance) in snapshot.utterances.enumerated() {
+            // 画面の行の位置までのマイク切替を先に置く。画面の行の後ろに付くAIの行より前に出すため。
             appendMicrophoneEvents(through: utterance.start)
+            guard utterance.kind != .screen else {
+                // 画面の行は発言の列に出さず、レーンへ回す。AIの行と範囲の印は行の並びの添字で引くので、
+                // 添字の対応だけを保つ。範囲の印は画面の行を候補にしないので、ここの行には付かない。
+                for item in attached[index, default: []] { appendAI(item) }
+                rangeRows.append(ordered.last?.row ?? screenLaneTrailing)
+                continue
+            }
             let key = RowKey(kind: utterance.kind, start: utterance.start)
             let occurrence = occurrences[key, default: 0]
             occurrences[key] = occurrence + 1
@@ -557,6 +581,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             row.updatePlayback(available: snapshot.playbackAudioURL != nil && UtterancePlayback.isPlayable(utterance),
                                playing: player.playingID == AnyHashable(id))
             row.onPlay = { [weak self] in self?.togglePlayback(id: id, utterance: utterance) }
+            configureLane(row.lane, row: row)
+            row.updateLane(utterance.kind == .voice ? lane.items(lane.assignment.beside[index] ?? []) : [], width: lane.width)
             next[id] = row
             ordered.append(FilterEntry(row: row, key: .utterance(id), subject: TranscriptFilter.subject(for: utterance)))
             for item in attached[index, default: []] { appendAI(item) }
@@ -567,10 +593,22 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         microphoneRows = microphoneRows.filter { microphoneIDs.contains($0.key) }
         var displayed = arrangeFiltered(ordered)
         // 聞き取り中の行には話者が無いので、絞り込み中は出さない。
+        let trailing = lane.items(lane.assignment.trailing)
+        configureLane(tentativeRow.lane, row: tentativeRow)
         if let tentative = snapshot.tentativeText, filterSelection.isEmpty {
             tentativeRow.updateTentative(tentative)
             tentativeRow.updateExclusion(snapshot.tentativeExcluded)
+            // 後ろに発言がまだ無い画面は、いま話している発言の横に置く。確定すればその行へ移る。
+            tentativeRow.updateLane(trailing, width: lane.width)
             displayed.append(tentativeRow)
+        } else if !trailing.isEmpty {
+            // 次の発言がまだ無い。発言の列は空けたまま、末尾にレーンだけを出す。
+            // 割り当て先の発言が無いので、絞り込み中も出す。
+            tentativeRow.updateLane([], width: lane.width)
+            configureLane(screenLaneTrailing.lane, row: screenLaneTrailing)
+            screenLaneTrailing.lane.setTextScale(CGFloat(textScale.multiplier))
+            screenLaneTrailing.lane.update(trailing)
+            displayed.append(screenLaneTrailing)
         }
         rows = next
         let rowIDs = Set(items.map(\.rowID))
@@ -915,6 +953,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         let scale = CGFloat(value.multiplier)
         for row in rows.values { row.setTextScale(scale) }
         tentativeRow.setTextScale(scale)
+        screenLaneTrailing.lane.setTextScale(scale)
         for row in aiRows.values { row.setTextScale(scale) }
         minutesSplit.preview.setTextScale(scale)
         window?.contentView?.layoutSubtreeIfNeeded()

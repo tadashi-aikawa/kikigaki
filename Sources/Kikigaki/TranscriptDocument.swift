@@ -23,7 +23,12 @@ final class AIRangeBoundaryView: NSView {
     }
 }
 
-protocol DocumentRow: NSView { func height(for width: CGFloat) -> CGFloat }
+protocol DocumentRow: NSView {
+    func height(for width: CGFloat) -> CGFloat
+    /// 画像レーンの幅まで含めて置く行。発言の行と末尾のレーンの行だけが真で、ほかの行は発言の列の幅に収める。
+    var spansLane: Bool { get }
+}
+extension DocumentRow { var spansLane: Bool { false } }
 
 /// 行ビューを再利用する。再配置は高さの加算だけで、本文の計測は変更行だけに限る。
 ///
@@ -34,6 +39,8 @@ final class TranscriptDocument: NSView {
     override var isFlipped: Bool { true }
     var followsBottom = true
     var rows: [any DocumentRow] = []
+    /// 右端の画像レーンの幅。0ならレーンを出さない。仕様は docs/screen-capture.md の「表示」
+    var laneWidth: CGFloat = 0
     private(set) var rangeMarkers: [(row: NSView, view: AIRangeBoundaryView)] = []
     func setRangeBoundaries(_ boundaries: AIRangeBoundaries, utteranceRows: [NSView]) {
         // 絞り込みで畳んだ行は枠が古いまま残るので、その行の印は出さない。
@@ -56,7 +63,7 @@ final class TranscriptDocument: NSView {
     private func positionRangeMarkers() {
         for marker in rangeMarkers {
             addSubview(marker.view, positioned: .above, relativeTo: nil)
-            marker.view.frame = NSRect(x: 0, y: marker.row.frame.maxY - 5, width: bounds.width, height: 12)
+            marker.view.frame = NSRect(x: 0, y: marker.row.frame.maxY - 5, width: max(0, bounds.width - laneWidth), height: 12)
             marker.view.needsDisplay = true
         }
     }
@@ -116,10 +123,12 @@ final class TranscriptDocument: NSView {
         defer { layingOut = false }
         guard let scroll = enclosingScrollView else { return }
         let width = scroll.contentSize.width
+        let column = max(0, width - laneWidth)
         var y: CGFloat = 8
         for row in rows {
-            let height = row.height(for: width)
-            row.frame = NSRect(x: 0, y: y, width: width, height: height)
+            let rowWidth = row.spansLane ? width : column
+            let height = row.height(for: rowWidth)
+            row.frame = NSRect(x: 0, y: y, width: rowWidth, height: height)
             row.needsLayout = true
             y += height
         }

@@ -66,7 +66,8 @@ extension AppKitTests {
         #expect(row.height(for: 600) == height)
         let body = try #require(row.content.subviews.compactMap { $0 as? NSTextField }.first { $0.stringValue == "前の発言。" })
         #expect(body.accessibilityHelp()?.hasPrefix("未確定の発言") == true)
-        #expect(!row.subviews.contains { $0 !== row.content })
+        // 画像レーンだけは画像を声の確定と関係なく見せるため、濃さを変える層の外に置く。
+        #expect(!row.subviews.contains { $0 !== row.content && $0 !== row.lane })
 
         // 除外は未確定と掛け合わせず、除外の薄さだけにする。
         row.updateExclusion(true)

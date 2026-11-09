@@ -71,7 +71,8 @@ extension TranscriptWindowController {
         searchHits = []
         if searchOpen, !searchField.stringValue.isEmpty {
             var occurrences: [RowKey: Int] = [:]
-            for (index, utterance) in snapshot.utterances.enumerated() {
+            // 画面の行は発言の列に行を持たず、画像レーンに出す。移れる行が無いので一致に数えない。
+            for (index, utterance) in snapshot.utterances.enumerated() where utterance.kind != .screen {
                 let key = RowKey(kind: utterance.kind, start: utterance.start)
                 let occurrence = occurrences[key, default: 0]
                 occurrences[key] = occurrence + 1

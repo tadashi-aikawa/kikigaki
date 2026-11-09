@@ -162,7 +162,14 @@ final class TranscriptRow: NSView, DocumentRow {
     private var displayedImagePaths: [String] = []
     private var imagesHeight: CGFloat { displayedImagePaths.isEmpty ? 0 : imageStrip.contentHeight + 6 }
     private var bodyX: CGFloat { 20 + 34 * textScale }
-    private func bodyWidth(_ width: CGFloat) -> CGFloat { max(44, width - bodyX - 20) }
+    private func bodyWidth(_ width: CGFloat) -> CGFloat { max(44, width - laneWidth - bodyX - 20) }
+    /// 右端の画像レーン。行の枠はレーンまで含め、発言の文字はレーンの手前で折り返す。
+    /// 行の不透明度の外に置くため、`content` ではなく行へ直接載せる。仕様は docs/screen-capture.md の「表示」
+    let lane = ScreenLaneView()
+    private(set) var laneWidth: CGFloat = 0
+    var spansLane: Bool { true }
+    /// 発言の文字の部分の高さ。レーンで行が伸びても、本文と音量の注記はこの高さで上から詰める。
+    private var measuredTextHeight: CGFloat = 0
     private let speakerButton = SpeakerButton()
     var onRename: ((Int, NSView) -> Void)?
     /// 元の音声のこの行の区間を流す・止める。仕様は docs/utterance-playback.md
@@ -205,6 +212,7 @@ final class TranscriptRow: NSView, DocumentRow {
         }
         typedBody.selectedRanges = selection
         imageStrip.setTextScale(scale)
+        lane.setTextScale(scale)
         refreshPlayButton()
         measuredWidth = -1
         needsLayout = true
@@ -255,7 +263,16 @@ final class TranscriptRow: NSView, DocumentRow {
         playButton.action = #selector(playPressed)
         playButton.isHidden = true
         content.addSubview(playButton)
+        addSubview(lane)
         applyOpacity()
+    }
+    /// 画像レーンの幅と中身。どちらも変わらなければ再計測しない。
+    func updateLane(_ items: [ScreenLaneView.Item], width: CGFloat) {
+        guard items != lane.items || width != laneWidth else { return }
+        lane.update(items)
+        laneWidth = width
+        measuredWidth = -1
+        needsLayout = true
     }
     required init?(coder: NSCoder) { fatalError() }
     /// 本文の更新と分離し、確定状態だけの変更では点灯も再計測も起こさない。手入力と画面の行は常に確定として扱う。
@@ -422,7 +439,7 @@ final class TranscriptRow: NSView, DocumentRow {
         } else { body.attributedStringValue = highlighted(body.attributedStringValue, textRanges, currentText) }
     }
     private func setBody(_ text: String) {
-        // 画面の行はステップ3で見出しの表示へ替えるまで、手入力と同じ本文と画像帯で描く。
+        // 画面の行は画像レーンに出し、この行ビューでは描かない。ここへ来る声以外の行は手入力だけ。
         let typed = utterance?.isEntry == true
         guard (typed ? typedBody.string : body.stringValue) != text else { return }
         let paragraph = NSMutableParagraphStyle()
@@ -449,7 +466,9 @@ final class TranscriptRow: NSView, DocumentRow {
             // NSTextFieldの内側余白まで含めて測る。文字列だけのboundingRectでは
             // 折り返し境界の数pt差で最終行が切れるため、描画するセル自身に問い合わせる。
             let size = body.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: bodyWidth(width), height: .greatestFiniteMagnitude)) ?? .zero
-            measuredHeight = max(20 * textScale, typedBody.isHidden ? ceil(size.height) : typedBody.height(for: bodyWidth(width))) + 31 * textScale + 5 + (hasLevelNote ? 20 * textScale : 0) + imagesHeight
+            measuredTextHeight = max(20 * textScale, typedBody.isHidden ? ceil(size.height) : typedBody.height(for: bodyWidth(width))) + 31 * textScale + 5 + (hasLevelNote ? 20 * textScale : 0) + imagesHeight
+            // 画像がレーンに収まらなければ行を伸ばす。最初と最後の2枚までに畳むので、伸びるのは短い発言だけ。
+            measuredHeight = max(measuredTextHeight, lane.isEmpty || laneWidth == 0 ? 0 : 8 + lane.contentHeight + 8)
             measuredWidth = width
         }
         return measuredHeight
@@ -460,13 +479,18 @@ final class TranscriptRow: NSView, DocumentRow {
         layoutCount += 1
 #endif
         content.frame = bounds
-        flash.frame = NSRect(x: 12, y: 2, width: max(0, bounds.width - 24), height: bounds.height - 4)
+        _ = height(for: bounds.width)
+        let textHeight = min(bounds.height, measuredTextHeight)
+        // 更新の点灯は発言の文字の部分だけ。画像は声の本文や話者の変化と関係しない。
+        flash.frame = NSRect(x: 12, y: 2, width: max(0, bounds.width - laneWidth - 24), height: textHeight - 4)
+        lane.isHidden = laneWidth == 0 || lane.isEmpty
+        lane.frame = ScreenLaneView.frame(in: bounds, height: lane.contentHeight)
         // アバター内のイニシャルも同じ倍率で描く。外側の紙の余白は固定する。
         avatar.frame = NSRect(x: 20, y: 8, width: 25 * textScale, height: 26 * textScale)
         // 太字の字形が計測幅の右端へ届くため、端数の丸めと描画の余白を確保する。
         let oldWidth = previousNameLabel.isHidden ? 0 : previousNameLabel.intrinsicContentSize.width
         let nameWidth = min(ceil(max(nameLabel.intrinsicContentSize.width, oldWidth)) + 4,
-                            max(70 * textScale, bounds.width - bodyX - 104 - 62 * textScale))
+                            max(70 * textScale, bounds.width - laneWidth - bodyX - 104 - 62 * textScale))
         nameLabel.frame = NSRect(x: bodyX, y: 8, width: nameWidth, height: 18 * textScale)
         previousNameLabel.frame = nameLabel.frame
         speakerRevealCoin.frame = avatar.frame
@@ -482,10 +506,10 @@ final class TranscriptRow: NSView, DocumentRow {
                                   width: playSide, height: playSide)
         syncPointer()
         let levelHeight: CGFloat = hasLevelNote ? 20 * textScale : 0
-        body.frame = NSRect(x: bodyX, y: 31 * textScale, width: bodyWidth(bounds.width), height: max(20 * textScale, bounds.height - 31 * textScale - 5 - levelHeight - imagesHeight))
+        body.frame = NSRect(x: bodyX, y: 31 * textScale, width: bodyWidth(bounds.width), height: max(20 * textScale, textHeight - 31 * textScale - 5 - levelHeight - imagesHeight))
         typedBody.frame = body.frame
         imageStrip.frame = NSRect(x: bodyX, y: body.frame.maxY + 4, width: bodyWidth(bounds.width), height: imageStrip.contentHeight)
-        levelLabel.frame = NSRect(x: bodyX, y: bounds.height - 5 - 18 * textScale, width: bodyWidth(bounds.width), height: 18 * textScale)
+        levelLabel.frame = NSRect(x: bodyX, y: textHeight - 5 - 18 * textScale, width: bodyWidth(bounds.width), height: 18 * textScale)
     }
     func appear(animated: Bool) {
         guard animated else { stopAnimations(); return }
