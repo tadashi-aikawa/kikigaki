@@ -11,7 +11,7 @@ import Testing
     private func stage(_ model: String, _ directory: String? = nil) -> AIModelLabel.Stage {
         AIModelLabel.Stage(model: model, directory: directory)
     }
-    /// 文字数だけで測る物差し。フォントに依存させずに段の落ち方を確かめる。
+    /// 文字数だけで測る物差し。フォントに依存させずにステージの落ち方を確かめる。
     private func measure(_ stage: AIModelLabel.Stage) -> Double { Double(stage.text.count) * 6 }
 
     /// 相手の塊は録音開始シートの宛先と同じ表記。effortは括弧でモデルに掛ける。
@@ -40,13 +40,13 @@ import Testing
     }
 
     /// モデルとエフォートは前の塊、末端ディレクトリは後ろの塊。落ちるのは後ろの塊から。
-    @Test func 段は作業場所の塊からエフォートの順に落ちる() {
+    @Test func ステージは作業場所の塊からエフォートの順に落ちる() {
         let value = AIModelLabel(model: "gpt-6-astra", effort: "high", directory: "minutes")
         #expect(value.stages == [stage("gpt-6-astra (high)", "minutes"), stage("gpt-6-astra (high)"), stage("gpt-6-astra")])
         #expect(value.stages.first?.text == "gpt-6-astra (high) · minutes")
     }
 
-    @Test func 幅に収まる最も広い段を選ぶ() {
+    @Test func 幅に収まる最も広いステージを選ぶ() {
         let stages = AIModelLabel(model: "gpt-6-astra", effort: "high", directory: "minutes").stages
         func fit(_ available: Double) -> AIModelLabel.Stage? {
             AIModelLabel.fit(stages, available: available, measure: measure)
@@ -57,7 +57,7 @@ import Testing
     }
 
     /// どれも収まらなければ表記ごと出さない。時刻を押し出してまで一部を出さない。
-    @Test(arguments: [0.0, -20.0, 10.0]) func 収まる段が無ければnilを返す(available: Double) {
+    @Test(arguments: [0.0, -20.0, 10.0]) func 収まるステージが無ければnilを返す(available: Double) {
         let stages = AIModelLabel(model: "gpt-6-astra", effort: "high", directory: "minutes").stages
         #expect(AIModelLabel.fit(stages, available: available, measure: measure) == nil)
     }

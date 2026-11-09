@@ -43,7 +43,7 @@ public struct AIModelLabel: Equatable, Sendable {
     public struct Stage: Equatable, Sendable {
         /// `cpu` のアイコンを付ける前の塊。「Codex · gpt-6-astra (high)」。
         public let model: String
-        /// `folder` のアイコンを付ける後ろの塊。落とした段ではnil。
+        /// `folder` のアイコンを付ける後ろの塊。落としたステージではnil。
         public let directory: String?
         public init(model: String, directory: String? = nil) {
             self.model = model
@@ -54,7 +54,7 @@ public struct AIModelLabel: Equatable, Sendable {
     }
 
     /// 広い順の候補。先頭が全部入りで、以降は 作業場所の塊 → エフォート の順に落ちる。
-    /// 項目が元から無い段は重複するので畳む。
+    /// 項目が元から無いステージは重複するので畳む。
     public var stages: [Stage] {
         let head = [provider, model].compactMap { $0 }.filter { !$0.isEmpty }
             .joined(separator: AIModelLabel.separator)

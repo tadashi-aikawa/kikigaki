@@ -52,7 +52,7 @@ extension AppKitTests {
         state.aiSchedule.active = true; state.aiSchedule.nextFire = Date().addingTimeInterval(180)
         state.aiRecoveryWarning = "復元できない会議があります"
         window.apply(state)
-        // 自動送信は自動の段へ置き、前の会議の案内は出さない。
+        // 自動送信は自動のボタンへ置き、前の会議の案内は出さない。
         let quiet = window.footerMenu()
         #expect(quiet.items.map(\.title) == ["会話をコピー"])
         #expect(!quiet.items[0].isEnabled)

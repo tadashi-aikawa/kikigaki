@@ -170,7 +170,7 @@ snapshotは従来どおり確定済みの会話全文だけを固定保存する
     - 停止後: 録音中に受け付けた追記の送り直しは後片付けの対象に含める。再起動回収ではAIセッションを復元せず、新しい送信もしない。
 - 会議Markdownの `### AI #n` に追記ごとの本文・会話差分・暫定末尾と、反映済みまたは引継先の番号を残す。
 
-表示は [AIの行](ai-timeline.md)、進行段は [AI依頼の進行表示](ai-progress.md) を参照する。
+表示は [AIの行](ai-timeline.md)、進行のステージは [AI依頼の進行表示](ai-progress.md) を参照する。
 
 ## 受信箱と永続化
 
@@ -197,7 +197,7 @@ ai/
 
 manifestとrequestはアプリが送信前に保存する。sessionの接続情報更新、state、archiveはアプリの会議単位の直列処理で原子的に更新する。requestは作成後に変更しない。返送側は既知sessionからrequestを引き、自由な出力先指定を受け付けない。
 
-acceptとresultはrequest内で各一つ。resultのkindはanswered、needs_input、failedのいずれか。ファイル名を固定することでCLI再実行も同じ論理イベントとして扱う。progressはrequest内で段ごとに一つで、AIがその段へ入ったことだけを伝える自己申告であり、受領・完了・回答の代わりにはならない。`phase` は `editing` と `replying` の2つで、event IDは `<request_id>/progress/<phase>`、ファイル名は `<request_id>.progress.<phase>.json`。`total` は1〜999の任意で `editing` にだけ添えられる。段ごとに最初の1件だけが有効で、2回目以降は保存も失敗もせず同じevent IDを返す。結果より後に保存された申告はアプリが無視する。`schema_version` は据え置き、request・envelope・reply・state.jsonの形式は変えない。notifyはプロバイダのイベント識別子を使い、なければ正規化したペイロードのdigestでIDを作る。モデルにevent ID・会議ID・保存時刻を捏造させず、同梱CLIがrequestの固定情報から生成する。
+acceptとresultはrequest内で各一つ。resultのkindはanswered、needs_input、failedのいずれか。ファイル名を固定することでCLI再実行も同じ論理イベントとして扱う。progressはrequest内でステージごとに一つで、AIがそのステージへ入ったことだけを伝える自己申告であり、受領・完了・回答の代わりにはならない。`phase` は `editing` と `replying` の2つで、event IDは `<request_id>/progress/<phase>`、ファイル名は `<request_id>.progress.<phase>.json`。`total` は1〜999の任意で `editing` にだけ添えられる。ステージごとに最初の1件だけが有効で、2回目以降は保存も失敗もせず同じevent IDを返す。結果より後に保存された申告はアプリが無視する。`schema_version` は据え置き、request・envelope・reply・state.jsonの形式は変えない。notifyはプロバイダのイベント識別子を使い、なければ正規化したペイロードのdigestでIDを作る。モデルにevent ID・会議ID・保存時刻を捏造させず、同梱CLIがrequestの固定情報から生成する。
 
 minutesもrequest内で一つ。AIが作成・更新した議事録の絶対パスを独立イベントとして保存する。event IDは `<request_id>/minutes`、ファイル名は `<request_id>.minutes.json`。会議ごとの対象は `ai/minutes.json` に保存し、古い後着通知は人の指定や対象解除を巻き戻さない。詳細は [議事録プレビューの設計](minutes-preview.md) を参照する。
 
@@ -308,7 +308,7 @@ replyは通常 `context_received: true`。文脈を読めなかったcontext_mis
 
 Codexには引数配列で `-c` と、TOMLとして正しくエンコードした `notify=["<同梱CLI>","notify","--provider","codex","--session","<path>","--token","<token>"]` を渡す。引用符やバッククォートをシェルへ解釈させない。当該会議セッションの既存notifyを差し替え、元の通知スクリプトは連鎖して呼ばない。既存の通知音・本文通知が会議用途の既定無効を破るため。グローバル設定ファイルは変更せず、通常のCodexセッションには影響させない。
 
-Claudeには専用の0600のJSON設定ファイルを作り、`--settings <絶対パス>` を渡す。StopとPreToolUseのcommandフックが同梱CLIのnotifyを呼ぶ。PreToolUseのmatcherは `Edit|Write|MultiEdit|NotebookEdit` に限り、進行表示の編集の段を補助するためだけに使う。フックを受領・返答の根拠にしない既存の契約は変えない。Codexにはツール単位のフックが無いので、Codexの編集は自己申告だけで観測する。commandフックは、固定コマンドと引用済みのパス・トークンだけで組み立てる。会話・回答本文はコマンド文字列へ埋めず、stdinで受け取る。Claude Code 2.1.263では生成JSONのSessionStartと既存のherdr SessionStartが両方動き、同じイベントのhooksが併合された。既存フックをコピーしたり置換したりしない。詳細は [段2の実測](records/ai-participant-spike.md)。
+Claudeには専用の0600のJSON設定ファイルを作り、`--settings <絶対パス>` を渡す。StopとPreToolUseのcommandフックが同梱CLIのnotifyを呼ぶ。PreToolUseのmatcherは `Edit|Write|MultiEdit|NotebookEdit` に限り、進行表示の編集のステージを補助するためだけに使う。フックを受領・返答の根拠にしない既存の契約は変えない。Codexにはツール単位のフックが無いので、Codexの編集は自己申告だけで観測する。commandフックは、固定コマンドと引用済みのパス・トークンだけで組み立てる。会話・回答本文はコマンド文字列へ埋めず、stdinで受け取る。Claude Code 2.1.263では生成JSONのSessionStartと既存のherdr SessionStartが両方動き、同じイベントのhooksが併合された。既存フックをコピーしたり置換したりしない。詳細は [ステップ2の実測](records/ai-participant-spike.md)。
 
 同じ生成JSONの `permissions.allow` に `Bash(<同梱CLIの絶対パス> *)` だけを追加する。既定autoでは未知のMach-Oとして拒否されたが、このルールを渡したセッションではautoのまま返送できた。`--permission-mode` は追加せず、利用者の設定を保つ。これは本番の返送経路にも必要な設定で、検証専用の緩和ではない。グローバルのsettingsは変更しない。ask・denyや組織ポリシーが優先して返送できない場合はペインで確認してもらい、自動で権限を拡大しない。[^permissions]
 
@@ -326,9 +326,9 @@ Codexの本threadはherdrのagent_session、またはaccept/reply実行環境の
 
 返し忘れの検知はMVPでは「返送未確認」の補助表示に留める。対象世代に未完了質問があり、完成済みresultを再走査しても未着で、herdrのidle/doneが5秒続いた場合に表示する。blocked・unknown・切断は別表示とする。Claude Stopに実行中background_tasksがあれば休止とは扱わず、次の状態観測を待つ。背景処理を完全に検出できる保証はなく、5秒は初期値である。これをfailed・answeredへ変換せず、自動再プロンプトもしない。後着resultで警告を消す。未連携本文を診断表示で読める場合も、質問への確定回答とは表示しない。
 
-Codexのnotifyの項目とClaudeのStop本文は公式資料に記載がある。Claudeの中断時はStopが発火せず、APIエラーには別イベントがある。実測でも背景sleepが継続中のStopが届いた。全payload項目と試験の限界は段2の記録へ残す。[^hooks]
+Codexのnotifyの項目とClaudeのStop本文は公式資料に記載がある。Claudeの中断時はStopが発火せず、APIエラーには別イベントがある。実測でも背景sleepが継続中のStopが届いた。全payload項目と試験の限界はステップ2の記録へ残す。[^hooks]
 
-[^hooks]: [OpenAI公式のnotify仕様](https://learn.chatgpt.com/docs/config-file/config-advanced#notifications)、[Claude Code公式のStop仕様](https://code.claude.com/docs/en/hooks#stop)、[Claude Code公式のCLI設定](https://code.claude.com/docs/en/cli-reference)。実測は [段2の記録](records/ai-participant-spike.md)。
+[^hooks]: [OpenAI公式のnotify仕様](https://learn.chatgpt.com/docs/config-file/config-advanced#notifications)、[Claude Code公式のStop仕様](https://code.claude.com/docs/en/hooks#stop)、[Claude Code公式のCLI設定](https://code.claude.com/docs/en/cli-reference)。実測は [ステップ2の記録](records/ai-participant-spike.md)。
 
 ## herdrセッションの管理
 
@@ -347,7 +347,7 @@ pane run で起こした直後は herdr がまだagentを検知しておらず�
 
 Codexの起動では `-c sandbox_workspace_write.writable_roots=[...]` に保存先 `outputDir` を追加する。利用者の `~/.codex/config.toml` 最上位の既存許可を先頭へ引き継ぎ、設定ファイルは変更しない。任意パスの指定では許可を増やさない。全会議のMarkdown・管理状態・token入りrequestsもモデルから書き換え可能になる点は受け入れたリスクである。詳細は [議事録プレビューの許可とリスク](minutes-preview.md#skillの規則と書き込み許可) を参照する。
 
-設定commandの絶対パスを守る起動には `herdr pane run <pane> <厳密に引用した起動コマンド>` を使う。段2ではworkspace作成時のPATH差替がペイン内の解決先に反映されず、canonical executableによる起動では指定パスを保証できなかった。pane runで絶対パスを指定すると両CLIが起動した。Codexはagent getがunknownを抜けてidle/doneになるまで、Claudeは新しいagent_sessionが立ちidle/doneになるまで待つ。旧session値やblockedをreadyとしない。起動コマンドにはパスと引数だけを引用して置き、会話本文を含めない。KIKIGAKI自身はherdrを引数配列で起動するが、この起動コマンドは受信先シェルで解釈される。
+設定commandの絶対パスを守る起動には `herdr pane run <pane> <厳密に引用した起動コマンド>` を使う。ステップ2ではworkspace作成時のPATH差替がペイン内の解決先に反映されず、canonical executableによる起動では指定パスを保証できなかった。pane runで絶対パスを指定すると両CLIが起動した。Codexはagent getがunknownを抜けてidle/doneになるまで、Claudeは新しいagent_sessionが立ちidle/doneになるまで待つ。旧session値やblockedをreadyとしない。起動コマンドにはパスと引数だけを引用して置き、会話本文を含めない。KIKIGAKI自身はherdrを引数配列で起動するが、この起動コマンドは受信先シェルで解釈される。
 
 Claudeのagent_sessionは、herdrのClaude連携のSessionStartフックだけが報告する (実測: herdr 0.9.5)。連携が無いとidleでもreadyにならず、準備待ちの30秒が切れて止まる。
 
@@ -357,7 +357,7 @@ Claudeのagent_sessionは、herdrのClaude連携のSessionStartフックだけ�
 
 既定cwdは固定の `~/Library/Application Support/KIKIGAKI/ai-work/`。会議ごとの新規ディレクトリで毎回信頼確認を発生させない。固定cwdでも選択したCLIの初回には利用者の信頼確認が必要である。最初の送信時に「初回設定をherdrで確認」とペインを開く操作を表示し、利用者が内容を見て一度承認する。入力準備完了を再確認してから送信し、ダイアログ中へenvelopeを入力しない。CLI切替・cwd変更時にも必要となり得る。自動承認や信頼設定の自動書き換えはしない。
 
-段2では初回に両CLIがagent_not_readyとなり、信頼ダイアログを表示した。承認後、Codexはconfig.tomlのprojectsへtrust_level、Claudeは.claude.jsonのprojectsへhasTrustDialogAcceptedを保存した。これらはCLIが保存する利用者設定であり、KIKIGAKIは編集・削除しない。段2の返送成功は試験cwd配下への保存であり、任意の保存先への権限を保証しない。outputDirへの許可は上記の `writable_roots` で渡す。
+ステップ2では初回に両CLIがagent_not_readyとなり、信頼ダイアログを表示した。承認後、Codexはconfig.tomlのprojectsへtrust_level、Claudeは.claude.jsonのprojectsへhasTrustDialogAcceptedを保存した。これらはCLIが保存する利用者設定であり、KIKIGAKIは編集・削除しない。ステップ2の返送成功は試験cwd配下への保存であり、任意の保存先への権限を保証しない。outputDirへの許可は上記の `writable_roots` で渡す。
 
 - 後続送信前もagent getで生存を確認する。blockedなら入力せず「herdrで確認」を表示する。権限ダイアログのEnterを代行しない。
 - herdrへ接続できない場合は接続不能。正常な一覧・getから対象消失を確認できたときだけ切断とする。別CLIや別sessionへの置換が分かった場合も切断する。

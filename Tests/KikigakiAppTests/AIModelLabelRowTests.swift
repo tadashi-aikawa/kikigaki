@@ -98,7 +98,7 @@ extension AppKitTests {
         // 枠違いの表記は引かない。会議で固定した自分の枠のものだけを読む。
         let otherSlot = try row(root: root, labels: [2: label])
         #expect(otherSlot.modelText.isEmpty)
-        // 行が高くなるのはフッターを出す行だけで、その分はちょうど1段。
+        // 行が高くなるのはフッターを出す行だけで、その分はちょうど1行。
         let shown = try row(root: root)
         #expect(shown.height(for: 600) == missing.height(for: 600) + AIModelFooter.height)
     }
@@ -114,7 +114,7 @@ extension AppKitTests {
             row.layoutSubtreeIfNeeded()
             if seen.last != row.modelText { seen.append(row.modelText) }
             let footer = row.modelFooter
-            // 折り返さず、本文の幅に収める。段を落としても行の高さは動かない。
+            // 折り返さず、本文の幅に収める。塊を落としても行の高さは動かない。
             #expect(footer.frame.height == AIModelFooter.height && row.height(for: width) == height)
             if let stage = footer.stage {
                 #expect(AIModelFooter.width(of: stage) <= AIRowMetrics.bodyWidth(width))
@@ -128,7 +128,7 @@ extension AppKitTests {
         #expect(seen == label.stages.map(\.text))
     }
 
-    /// 失敗の帯は見出しだけの1行なので、段を足さない。
+    /// 失敗のバーは見出しだけの1行なので、行を足さない。
     @Test func 失敗の帯には出さない() throws {
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let meeting = UUID(); var history = try AIStreamHistory(meetingID: meeting)

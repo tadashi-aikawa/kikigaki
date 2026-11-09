@@ -85,16 +85,16 @@ final class AIFooterDestination: HoverButton {
         filled ? Washi.red.withAlphaComponent(isEnabled ? 1 : 0.55) : Washi.paper.withAlphaComponent(0.6)
     }
     var statusWidth: CGFloat { (displayText as NSString).size(withAttributes: [.font: statusFont]).width }
-    /// 推定付きの宛先に添える札。段の高さ20ptに収め、幅が足りないときは宛先名を先に省く。
+    /// 推定付きの宛先に添えるバッジ。ボタンの高さ20ptに収め、幅が足りないときは宛先名を先に省く。
     var showsSpeakerEstimation: Bool { destination?.identifySpeakers == true }
     static let chipSize = NSSize(width: SpeakerEstimationChip.size.width, height: 14)
-    /// 札を入れても宛先名に残す幅。これを切るほど狭い段では札を省き、読み上げとツールチップに残す。
+    /// バッジを入れても宛先名に残す幅。これを切るほど狭いボタンではバッジを省き、読み上げとツールチップに残す。
     static let minimumNameWidth: CGFloat = 36
     private var nameStart: CGFloat { destination == nil ? 32 : 53 }
     private var nameEndWithoutChip: CGFloat {
         bounds.width - 7 - (automatic ? 13 : 0) - (displayText.isEmpty ? 0 : statusWidth + 6)
     }
-    /// 実際に札を描くか。通知のアイコンが並ぶ狭い窓では段が細くなり、状態の文字と重なるため。
+    /// 実際にバッジを描くか。通知のアイコンが並ぶ狭いウィンドウではボタンが細くなり、状態の文字と重なるため。
     var drawsSpeakerEstimation: Bool {
         showsSpeakerEstimation && nameEndWithoutChip - nameStart - Self.chipSize.width - 6 >= Self.minimumNameWidth
     }
@@ -173,7 +173,7 @@ final class AIFooterDestination: HoverButton {
         (destinationName as NSString).draw(in: nameFrame, withAttributes: [
             .font: nameFont, .foregroundColor: destination == nil && !filled ? Washi.muted : foreground,
             .paragraphStyle: paragraph])
-        // 朱の塗りの段では、札の文字と輪郭を白にする。無効時は薄墨。
+        // 朱の塗りのボタンでは、バッジの文字と輪郭を白にする。無効時は薄墨。
         if let chipFrame {
             SpeakerEstimationChip.draw(in: chipFrame, color: !isEnabled ? Washi.muted : filled ? .white : nil)
         }
@@ -187,7 +187,7 @@ final class AIFooterDestination: HoverButton {
     }
 }
 
-/// 手動の段と同じ高さの固定サイズ操作。本文の文字倍率は掛けない。
+/// 手動のボタンと同じ高さの固定サイズ操作。本文の文字倍率は掛けない。
 final class AIFooterManualSend: HoverButton {
     var callback: (() -> Void)?
     override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }

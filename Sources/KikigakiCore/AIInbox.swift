@@ -39,7 +39,7 @@ public struct AIInbox: Sendable {
         return event
     }
 
-    /// 段ごとに別ファイル。名前の段とJSONの段が食い違えば検証で弾く。
+    /// ステージごとに別ファイル。名前のステージとJSONのステージが食い違えば検証で弾く。
     public func readProgress(_ phase: AIProgressEvent.Phase, for request: AIRequest) throws -> AIProgressEvent {
         let filename = AIProgressEvent.filename(requestID: request.id, phase: phase)
         let suffixes = AIProgressEvent.Phase.allCases.map { "progress.\($0.rawValue)" }

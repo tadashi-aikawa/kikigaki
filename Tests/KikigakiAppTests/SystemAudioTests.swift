@@ -63,7 +63,7 @@ struct SystemAudioTests {
         #expect(ring.take(into: output) == 0)
         #expect(ring.failure.load(ordering: .acquiring) == 0)
     }
-    @Test func 変換器はchunk間で終了せず末尾まで排出する() throws {
+    @Test func 変換器はchunk間で終了せず末尾まで出し切る() throws {
         let converter = try SystemAudioConversion(rate: 48000)
         var output: [Float] = []
         var remaining = 48000

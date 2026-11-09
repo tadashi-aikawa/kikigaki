@@ -699,7 +699,7 @@ final class AIConversationController {
         var reports: [UUID: AIProgressReport] = [:]
         for q in conversation.questions where q.sendAttemptedAt != nil {
             var isEditing = false, total: Int?, isReplying = false
-            // 段ごとに1ファイル。片方が壊れていても、もう片方の申告は読める。
+            // ステージごとに1ファイル。片方が壊れていても、もう片方の申告は読める。
             for phase in AIProgressEvent.Phase.allCases {
                 let name = AIProgressEvent.filename(requestID: q.request.id, phase: phase)
                 do {
@@ -720,7 +720,7 @@ final class AIConversationController {
         }
         // フックは総数を出せず、どのrequestのものかも名乗らない。返事待ちの依頼へだけ、
         // 送信より後の観測を補助として付ける。自己申告のある依頼は上書きしない。
-        // 返答の段はフックでは観測しない(自己申告だけ)。
+        // 返答のステージはフックでは観測しない(自己申告だけ)。
         for q in conversation.questions where q.result == nil && reports[q.request.id] == nil {
             guard let sent = q.sendAttemptedAt, q.state != .cancelled, q.state != .failed,
                   let channel = channels[slot(of: q.request)],

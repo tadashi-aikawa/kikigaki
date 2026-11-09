@@ -91,7 +91,7 @@ extension AppKitTests {
         #expect(controller.transcriptDocument.rows.compactMap { $0 as? AISendLineRow }.first?.displayText.contains("送達不明") == true)
     }
 
-    @Test func 返答の申告は宛先ごとに返答の段を現在として出す() throws {
+    @Test func 返答の申告は宛先ごとに返答のステージを現在として出す() throws {
         _ = NSApplication.shared
         let conversation = try conversation(count: 3)
         let ids = conversation.questions.map { $0.request.id }
@@ -114,7 +114,7 @@ extension AppKitTests {
         #expect(rows(controller)[0].progressView.displayText.hasPrefix("返答を作成中 · "))
     }
 
-    @Test(arguments: [false, true]) func 返答到着は全段点灯を見せてから本文へ入れ替える(reduceMotion: Bool) throws {
+    @Test(arguments: [false, true]) func 返答到着は全ステージ点灯を見せてから本文へ入れ替える(reduceMotion: Bool) throws {
         _ = NSApplication.shared
         var conversation = try conversation()
         let request = conversation.questions[0].request

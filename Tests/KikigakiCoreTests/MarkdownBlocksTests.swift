@@ -37,7 +37,7 @@ import KikigakiCore
         #expect(url.first?.webURL?.absoluteString == "https://example.com/minutes")
     }
 
-    @Test func 見出しの元の段を保持して描画のサイズから分離する() {
+    @Test func 見出しの元のレベルを保持して描画のサイズから分離する() {
         for level in 1...6 {
             #expect(MarkdownBlocks.parse(String(repeating: "#", count: level) + " 見出し ###")
                 == [.heading(level: level, content: [.init("見出し")])])

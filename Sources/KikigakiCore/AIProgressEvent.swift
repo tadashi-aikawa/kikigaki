@@ -1,9 +1,9 @@
 import Foundation
 
-/// AIが段へ入ったことだけを伝える1回の自己申告。accept・replyの代わりにはならず、
-/// 作業の完了・正しさ・文脈の受領を意味しない。1 requestの段ごとに最初の1件だけを採る。
+/// AIがステージへ入ったことだけを伝える1回の自己申告。accept・replyの代わりにはならず、
+/// 作業の完了・正しさ・文脈の受領を意味しない。1 requestのステージごとに最初の1件だけを採る。
 public struct AIProgressEvent: Codable, Equatable, Sendable {
-    /// 申告できる段。送信・読込はアプリとCLIの観測が正本なので申告を受けない。
+    /// 申告できるステージ。送信・読込はアプリとCLIの観測が単一情報源なので申告を受けない。
     public enum Phase: String, Codable, CaseIterable, Sendable {
         case editing, replying
     }
@@ -21,7 +21,7 @@ public struct AIProgressEvent: Codable, Equatable, Sendable {
     /// 分かっている場合の編集箇所の総数。進捗率ではないので、件数の消化は表示しない。
     /// 返答の申告には添えられない。
     public let total: Int?
-    /// 段ごとに1ファイル。後から届く返答の申告が編集の申告を消さない。
+    /// ステージごとに1ファイル。後から届く返答の申告が編集の申告を消さない。
     public var filename: String { "\(requestID.uuidString).progress.\(phase.rawValue).json" }
     public static func filename(requestID: UUID, phase: Phase) -> String {
         "\(requestID.uuidString).progress.\(phase.rawValue).json"

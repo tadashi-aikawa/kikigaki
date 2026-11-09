@@ -55,7 +55,7 @@ public struct AIAppendix: Codable, Equatable, Sendable {
         return "$kikigaki\nKIKIGAKI_APPENDIX\n```json\n\(json)\n```\n"
             + "依頼 \(requestID.uuidString) への追記 \(number) です。新しい依頼ではありません。"
             + "context.transcript_path の read_start_line から read_line_count 行と、question、tentative_tail を読み、現在の作業に反映してください。"
-            + "元の依頼の作業許可を守り、進行の段を戻さず、accept を重ねて返さないでください。"
+            + "元の依頼の作業許可を守り、進行のステージを戻さず、accept を重ねて返さないでください。"
             + "返事には反映した追記番号を --appendices 1,2 の形で添えてください。"
             + "元の依頼へ返送済みなら追記への返送・作業をせず、KIKIGAKIの新しい依頼を待ってください。\n"
             + "返送CLI: \(p.cliPath) / session: \(p.sessionPath) / request: \(requestID.uuidString)"

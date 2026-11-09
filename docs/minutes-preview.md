@@ -164,4 +164,4 @@ Claudeの同梱CLI限定allowは維持し、cwd外の編集は利用者の権限
 
 この制約は `CLAUDE.md` の「変える前に知っておくこと」と、利用者向けサイトの `site/src/content/docs/docs/data.md` にも記載している。
 
-設計時の段ごとの検証とレビューの記録は [議事録プレビューの実装記録](records/minutes-preview-implementation.md) を参照する。
+設計時のステップごとの検証とレビューの記録は [議事録プレビューの実装記録](records/minutes-preview-implementation.md) を参照する。

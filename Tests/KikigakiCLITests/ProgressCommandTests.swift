@@ -26,7 +26,7 @@ import KikigakiAIIO
         #expect(try FileManager.default.contentsOfDirectory(atPath: f.files.directory(f.base + ["inbox"]).path).count == 3)
     }
 
-    /// 段ごとに別ファイル。返答の申告が編集の申告を消さず、総数も残る。
+    /// ステージごとに別ファイル。返答の申告が編集の申告を消さず、総数も残る。
     @Test func 返答の申告は編集とは別のファイルへ置く() throws {
         let f = try ReturnCommandTests.Fixture()
         _ = try ReturnCommand(f.args("progress", ["--editing", "--total", "2"]))
@@ -54,7 +54,7 @@ import KikigakiAIIO
 
     /// 2回目以降は無視して成功で返す。失敗にすると、申告のためにAIの手が止まる。
     @Test(arguments: [["--editing"], ["--replying"]])
-    func 段ごとに有効なのは最初の1回だけで再申告は上書きも失敗もしない(_ stage: [String]) throws {
+    func ステージごとに有効なのは最初の1回だけで再申告は上書きも失敗もしない(_ stage: [String]) throws {
         let f = try ReturnCommandTests.Fixture()
         let phase: AIProgressEvent.Phase = stage == ["--editing"] ? .editing : .replying
         let first = try ReturnCommand(f.args("progress", stage))
@@ -87,7 +87,7 @@ import KikigakiAIIO
         let f = try ReturnCommandTests.Fixture()
         for extra in [[], ["--total", "2"], ["--editing", "--editing"], ["--editing", "--kind", "answered"],
                       ["--editing", "--path", "/tmp/a.md"], ["--editing", "--total"],
-                      // 段はどちらか1つ。総数は編集にしか添えられない。
+                      // ステージはどちらか1つ。総数は編集にしか添えられない。
                       ["--editing", "--replying"], ["--replying", "--replying"], ["--replying", "--total", "2"]] {
             #expect(throws: (any Error).self) { try ReturnCommand(f.args("progress", extra)) }
         }
@@ -128,9 +128,9 @@ import KikigakiAIIO
         let bytes = try f.files.read(f.base + ["inbox", name(f)])
         #expect(throws: (any Error).self) { try AIInbox.decodeProgress(bytes, filename: name(f), for: other.request) }
         #expect(throws: (any Error).self) { try AIInbox.decodeProgress(bytes, filename: "other.progress.editing.json", for: f.request) }
-        // 名前の段とJSONの段が食い違うものは読まない。編集の申告を返答の枠へ置けない。
+        // 名前のステージとJSONのステージが食い違うものは読まない。編集の申告を返答の枠へ置けない。
         #expect(throws: (any Error).self) { try AIInbox.decodeProgress(bytes, filename: name(f, .replying), for: f.request) }
-        // 段の申告先を増やさない。編集・返答以外のphaseは読まない。
+        // ステージの申告先を増やさない。編集・返答以外のphaseは読まない。
         var json = try #require(try JSONSerialization.jsonObject(with: bytes) as? [String: Any])
         for forgedPhase in ["reply", "reading", ""] {
             json["phase"] = forgedPhase

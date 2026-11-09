@@ -87,7 +87,7 @@ extension AppKitTests {
         _ = try hook("Edit", "/tmp/before.md", at: sent.addingTimeInterval(-1))
         controller.scan()
         #expect(controller.progressReports.isEmpty)
-        // 編集系以外のツールは段を進めない。
+        // 編集系以外のツールはステージを進めない。
         #expect(throws: (any Error).self) {
             try AIHookObservation(payload: Data("{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"main\",\"tool_name\":\"Bash\"}".utf8),
                                   session: session, now: sent)

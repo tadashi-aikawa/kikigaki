@@ -2,7 +2,7 @@
 
 行表示の説明には半透明と通常の濃さによる2状態表示を反映している。文字の確定と話者の固定は別の状態であり、「確定」は認識の正しさを保証しない。録音中に固定した話者も、停止時には全体の突き合わせで変わり得る。
 
-各段の仕様は次の文書が正本で、この文書は流れの図と実コードの対応だけを置く。
+各ステージの仕様は次の文書が単一情報源で、この文書は流れの図と実コードの対応だけを置く。
 
 - 話者の補正の順序と凍結の条件: [話者の割当と固定](speaker-assignment.md)
 - 速報と高精度の合流、時間の目安: [文字起こしの速報表示](fast-transcription.md)
@@ -100,13 +100,13 @@ stateDiagram-v2
         end note
     }
     [*] --> Recording : 音源開始
-    state "停止処理：入力を排出・高精度最終化" as Finishing
+    state "停止処理：残りの入力を流し切り・高精度最終化" as Finishing
     state "停止時の話者再判定・行生成" as Rejudge
     state "停止時の話者なし行生成" as FinalOff
     state "Markdown保存" as Saving
     state "最終表示・保存済み" as Saved
     state "保存失敗：画面にエラー" as SaveFailed
-    Recording --> Finishing : stop呼出、文字・話者のどの段からも移行
+    Recording --> Finishing : stop呼出、文字・話者のどのステージからも移行
     Finishing --> Rejudge : オン、話者finish後に凍結なしで全体を突き合わせ
     Finishing --> FinalOff : オフ、高精度結果だけで行生成
     Rejudge --> Saving : 手入力を併合
@@ -125,7 +125,7 @@ stateDiagram-v2
 
 ## 図と実コードの対応
 
-| 段・データ | 型・関数 | ファイルと役割 |
+| ステージ・データ | 型・関数 | ファイルと役割 |
 | --- | --- | --- |
 | 音声入力・任意の録音保存 | `AudioSource.start`、`MicSource.start`、`FileSource.start`、`WavWriter.write` / `close` | [AudioSource.swift](../Sources/Kikigaki/AudioSource.swift)。音源から16kHz mono Float32を渡す |
 | 受付・投入・更新周期 | `PauseFlag.accept`、`MeetingSession.start` / `makeConsumer` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)。受付時に一時停止を除外し、単一消費タスクで処理 |

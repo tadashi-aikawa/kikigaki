@@ -50,7 +50,7 @@ import KikigakiCore
                    isUnconfirmed: unconfirmed, report: report, previous: previous)
     }
 
-    @Test func 送信から読込編集返答まで確認した段だけを保持する() throws {
+    @Test func 送信から読込編集返答まで確認したステージだけを保持する() throws {
         var value = try question()
         var current = progress(value)
         #expect(current.observedStages.isEmpty && current.currentStage == nil)
@@ -66,7 +66,7 @@ import KikigakiCore
         current = progress(value, previous: current)
         #expect(current.observedStages == [.sending, .reading] && current.currentStage == .reading)
         #expect(current.message == "読込済み · 作業中")
-        // workingだけでは編集へ進めない。現在段は読込に留める。
+        // workingだけでは編集へ進めない。現在のステージは読込に留める。
         current = progress(value, .working, previous: current)
         #expect(current.currentStage == .reading && current.message == "読込済み · 作業中")
         current = progress(value, .working, report: .editing(total: 7), previous: current)
@@ -86,14 +86,14 @@ import KikigakiCore
         #expect(plain.message == "編集中" && plain.currentStage == .editing)
         let counted = progress(value, report: .editing(total: 1), previous: plain)
         #expect(counted.message == "編集中(全1か所)")
-        // 観測が途切れても前回の位置と総数は残す。塗り直しで段が戻らない。
+        // 観測が途切れても前回の位置と総数は残す。塗り直しでステージが戻らない。
         let lost = progress(value, .unknown, previous: counted)
         #expect(lost.currentStage == .editing && lost.message == "? 読込 → 状況を確認できません")
         let again = progress(value, previous: lost)
         #expect(again.message == "編集中(全1か所)")
     }
 
-    @Test func 返答の申告で返答が現在段になり総数の表記は消える() throws {
+    @Test func 返答の申告で返答が現在のステージになり総数の表記は消える() throws {
         let value = try question(.accepted)
         let editing = progress(value, .working, report: .editing(total: 3))
         #expect(editing.currentStage == .editing && editing.message == "編集中(全3か所)")
@@ -111,7 +111,7 @@ import KikigakiCore
         let writing = progress(value, .working, report: .replying)
         #expect(writing.observedStages == [.sending, .reading, .reply])
         #expect(writing.currentStage == .reply && writing.message == "返答を作成中")
-        // 返答の後に編集の申告が届いても、現在段は返答のまま戻さない。
+        // 返答の後に編集の申告が届いても、現在のステージは返答のまま戻さない。
         let late = progress(value, .working,
                             report: AIProgressReport(isEditing: true, isReplying: true), previous: writing)
         #expect(late.observedStages == Set(AIProgress.Stage.allCases))
@@ -309,7 +309,7 @@ import KikigakiCore
         #expect(replayed.currentStage == .editing && replayed.message == "編集中(全4か所)")
     }
 
-    @Test func 返答到着の点灯は全段を塗り経過も現在段も出さない() throws {
+    @Test func 返答到着の点灯は全ステージを塗り経過も現在のステージも出さない() throws {
         var value = try question(.accepted)
         let editing = progress(value, .working, report: .editing(total: 2))
         #expect(editing.arrival() == nil)

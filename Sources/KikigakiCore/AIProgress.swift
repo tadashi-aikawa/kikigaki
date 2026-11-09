@@ -1,6 +1,6 @@
 import Foundation
 
-/// 受信箱の自己申告とフック観測から集めた、1依頼分の段の到達。
+/// 受信箱の自己申告とフック観測から集めた、1依頼分のステージの到達。
 /// 進捗率ではないので、総数が分かっても消化件数は表さない。
 public struct AIProgressReport: Equatable, Sendable {
     /// 編集の観測。AIの1回の自己申告を正、Claudeのフックの編集系ツール呼び出しを補助にする。
@@ -18,7 +18,7 @@ public struct AIProgressReport: Equatable, Sendable {
     public static let replying = Self(isReplying: true)
 }
 
-/// 依頼ごとに確認できた段と、現在の補助表示。作業量や残り時間は表さない。
+/// 依頼ごとに確認できたステージと、現在の補助表示。作業量や残り時間は表さない。
 /// 保存する状態ではない。接続の観測が途切れても位置を残すため、呼び出し側が同じrequestの
 /// 前回値を渡す。再読込では保存済みAIQuestionと受信箱の証拠だけから作り直す。
 public struct AIProgress: Equatable, Sendable {
@@ -44,13 +44,13 @@ public struct AIProgress: Equatable, Sendable {
     /// 連続prefixではない。返答だけ先着した場合に未観測の読込・編集を塗らない。
     public let observedStages: Set<Stage>
     /// 最後に確認した最も先の位置。不明・切断・idleでは前回より戻さない。
-    /// 何も観測していなければnilで、どの段も現在地にしない。
+    /// 何も観測していなければnilで、どのステージも現在地にしない。
     public let currentStage: Stage?
     public let status: Status
     public let showsReplyProgress: Bool
     public let isHistorical: Bool
     public let sendAttemptedAt: Date?
-    /// 返答到着の一瞬だけ全段を点灯させる表示用の派生。観測の記録ではない。
+    /// 返答到着の一瞬だけ全ステージを点灯させる表示用の派生。観測の記録ではない。
     public let isArrival: Bool
     /// 編集の総数。自己申告に添えられていた場合だけ入る。
     public let editingTotal: Int?
@@ -86,7 +86,7 @@ public struct AIProgress: Equatable, Sendable {
         // 送信していない依頼の申告は成立しない。準備中・起動失敗を申告で塗らない。
         if question.sendAttemptedAt != nil {
             if report?.isEditing == true { observed.insert(.editing) }
-            // 返答の申告は返答の段だけを塗る。編集を経ていなければ編集は塗らない。
+            // 返答の申告は返答のステージだけを塗る。編集を経ていなければ編集は塗らない。
             if report?.isReplying == true { observed.insert(.reply) }
         }
         editingTotal = observed.contains(.editing) ? total : nil
@@ -148,7 +148,7 @@ public struct AIProgress: Equatable, Sendable {
         editingTotal = source.editingTotal
     }
 
-    /// 返答が届いた行に、本文へ入れ替える前の全段点灯を出すための派生。
+    /// 返答が届いた行に、本文へ入れ替える前の全ステージ点灯を出すための派生。
     /// 読み取り専用snapshotと、結果以外の状態では作らない。
     public func arrival() -> AIProgress? {
         guard !isHistorical, status == .answered || status == .needsInput else { return nil }

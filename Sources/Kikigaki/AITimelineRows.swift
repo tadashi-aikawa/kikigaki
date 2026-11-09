@@ -104,7 +104,7 @@ final class AITagPill: NSView {
 /// 塊ごとにアイコンを付けて12pt離す。折り返さないので、幅が足りなければ
 /// 作業場所の塊 → エフォート の順に落とす。
 final class AIModelFooter: NSView {
-    /// 本文の下へ足す段の高さ。11ptの文字とアイコンが収まる最小。
+    /// 本文の下へ足す行の高さ。11ptの文字とアイコンが収まる最小。
     static let height: CGFloat = 18
     /// 2つの塊の間。中黒より広く、別のものだと一目で読めるだけ空ける。
     static let gap: CGFloat = 12
@@ -112,7 +112,7 @@ final class AIModelFooter: NSView {
     private static let modelGlyph = glyph("cpu")
     private static let placeGlyph = glyph("folder")
     private var stages: [AIModelLabel.Stage] = []
-    /// 今の幅で選んだ段。どれも収まらなければnilで、何も描かない。
+    /// 今の幅で選んだステージ。どれも収まらなければnilで、何も描かない。
     private(set) var stage: AIModelLabel.Stage?
     var textScale: CGFloat = 1 { didSet { refresh(); needsDisplay = true } }
     var displayText: String { stage?.text ?? "" }
@@ -138,7 +138,7 @@ final class AIModelFooter: NSView {
         refresh()
     }
 
-    /// 幅へ収まる最も広い段を選ぶ。同じ幅なら同じ段に落ち着くので、描き直しは循環しない。
+    /// 幅へ収まる最も広いステージを選ぶ。同じ幅なら同じステージに落ち着くので、描き直しは循環しない。
     private func refresh() {
         let selected = AIModelLabel.fit(stages, available: Double(bounds.width)) { Double(AIModelFooter.width(of: $0, scale: textScale)) }
         guard selected != stage else { return }
@@ -268,7 +268,7 @@ final class AISendLineRow: NSView, AITimelineRowView {
         cancelAction.isHidden = !item.canCancel || state.readOnly
         needsLayout = true
     }
-    /// 取消は同じ行の右端へ置く。段を足すと、結果が届いて取消が消えたときに行が縮み、
+    /// 取消は同じ行の右端へ置く。取消のための行を足すと、結果が届いて取消が消えたときに行が縮み、
     /// 末尾を読んでいる利用者の画面が動く。
     func height(for width: CGFloat) -> CGFloat { 26 * textScale }
     override func layout() {
@@ -362,7 +362,7 @@ final class AITypedSendRow: NSView, AITimelineRowView {
         cancelAction.isHidden = !item.canCancel || state.readOnly
         needsLayout = true
     }
-    /// 取消は見出しの行へ置く。段を足すと、結果が届いて取消が消えたときに行が縮み、
+    /// 取消は見出しの行へ置く。取消のための行を足すと、結果が届いて取消が消えたときに行が縮み、
     /// 末尾を読んでいる利用者の画面が動く。
     func height(for width: CGFloat) -> CGFloat {
         measured = AIRowMetrics.measure(body, width: bodyWidth(width))
@@ -432,7 +432,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
     private let quoteRule = NSView()
     private let markdownBody = MarkdownBodyView()
     let progressView = AIProgressView()
-    /// 返答到着の点灯。全段を見せてから本文へ入れ替えるまでの猶予
+    /// 返答到着の点灯。全ステージを見せてから本文へ入れ替えるまでの猶予
     static let arrivalDuration: TimeInterval = 1.5
     private var arrivalTimer: Timer?
     private var lastProgress: AIProgress?
@@ -442,7 +442,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
     private let notes = NSTextField(wrappingLabelWithString: "")
     let answerLabel = Washi.label(size: 12, color: Washi.muted)
     private var measuredAnswer: CGFloat = 0
-    /// 本文15・名前12の間に段を増やさないよう12ptに揃える。
+    /// 本文15・名前12の間に文字サイズの段階を増やさないよう12ptに揃える。
     private let failureLabel = Washi.label(size: 12, weight: .semibold)
     private lazy var replyAction = AIActionButton("返答する", size: 12) { [weak self] in self?.onReply?() }
     lazy var resolveAction = AIActionButton("返答済みにする", size: 12) { [weak self] in self?.onResolve?() }
@@ -485,7 +485,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
     }
 
     /// 進行表示はこの入口だけから更新する。返答到着の見せ方を行が決めるため。
-    /// 返事待ちから結果へ変わった瞬間だけ全段を点灯し、1.5秒後に本文へ入れ替える。
+    /// 返事待ちから結果へ変わった瞬間だけ全ステージを点灯し、1.5秒後に本文へ入れ替える。
     /// 到着済みの行を開き直したときは点灯しない。動きを減らす設定では即入れ替える。
     func updateProgress(_ progress: AIProgress?, reduceMotion: Bool, now: Date = Date()) {
         let previous = lastStatus
@@ -613,7 +613,7 @@ final class AIReplyRow: NSView, AITimelineRowView {
         timeLabel.isHidden = isWaiting
         durationLabel.isHidden = failure || isWaiting || item.durationSeconds == nil
         // 返事待ちでも宛先は確定しているので、進行文とバーの下へ同じ表記を出す。
-        // 失敗の帯は見出しだけの1行なので、段を足さずに帯のまま残す。
+        // 失敗のバーは見出しだけの1行なので、行を足さずにバーのまま残す。
         footer.isHidden = failure || model == nil
         chip.isHidden = failure || isWaiting
         pill.isHidden = pillStyle == nil
@@ -655,11 +655,11 @@ final class AIReplyRow: NSView, AITimelineRowView {
         measuredQuote = item.question.isEmpty ? 0 : quote.height(for: bodyWidth - 12) + 8
         measuredBody = isWaiting ? 42 * textScale : measureMarkdown(bodyWidth)
         measuredNotes = notes.isHidden ? 0 : AIRowMetrics.measure(notes, width: bodyWidth) + 6
-        // 表記を出す行は1段ぶん高くなる。段の有無は幅ではなくプロファイルで決まるので、
+        // 表記を出す行は1行ぶん高くなる。表記の行の有無は幅ではなくプロファイルで決まるので、
         // 幅を狭めても行の高さは動かない。
         measuredFooter = footer.isHidden ? 0 : AIModelFooter.height * textScale
         measuredAnswer = answerLabel.isHidden ? 0 : 22 * textScale
-        // 取消は進行文と同じ行の右端へ寄せる。バーの8ptと段名の14ptを確保する。
+        // 取消は進行文と同じ行の右端へ寄せる。バーの8ptとステージ名の14ptを確保する。
         let actions = replyAction.isHidden ? 0.0 : (wrapsActions(for: width) ? 60 : 30) * textScale
         return bodyTop(for: width) + measuredQuote + max(20 * textScale, measuredBody) + measuredAnswer + measuredFooter + measuredNotes + actions + 9
     }

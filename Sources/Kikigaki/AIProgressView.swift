@@ -119,7 +119,7 @@ final class AIProgressView: NSView {
         for stage in AIProgress.Stage.allCases {
             let observed = progress.observedStages.contains(stage)
             let current = stage == progress.currentStage && !progress.isHistorical
-            // 返答到着の点灯は全段を朱にし、現在の印は置かない。
+            // 返答到着の点灯は全ステージを朱にし、現在の印は置かない。
             let color = progress.isArrival ? Washi.red
                 : current ? Washi.red.withAlphaComponent(progress.isUnknown ? 0.5 : 1)
                 : observed ? Washi.muted : Washi.aiProgressPending

@@ -422,7 +422,7 @@ final class TranscriptRow: NSView, DocumentRow {
         } else { body.attributedStringValue = highlighted(body.attributedStringValue, textRanges, currentText) }
     }
     private func setBody(_ text: String) {
-        // 画面の行は段3で見出しの表示へ替えるまで、手入力と同じ本文と画像帯で描く。
+        // 画面の行はステップ3で見出しの表示へ替えるまで、手入力と同じ本文と画像帯で描く。
         let typed = utterance?.isEntry == true
         guard (typed ? typedBody.string : body.stringValue) != text else { return }
         let paragraph = NSMutableParagraphStyle()

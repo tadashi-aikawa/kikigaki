@@ -100,7 +100,7 @@ struct SessionSnapshot {
         markdownURL != nil && ((state == .recording || state == .paused) && !transcribingFile || reviewingFile)
     }
 
-    /// 自動の段のメニューから即時送信する入口。
+    /// 自動のボタンのメニューから即時送信する入口。
     var canFireAutomatic: Bool {
         aiSchedule.active && aiSchedule.nextFire != nil && aiSchedule.canFireNow
             && ai?.isPreparing != true

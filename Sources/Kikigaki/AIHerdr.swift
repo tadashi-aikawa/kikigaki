@@ -69,13 +69,13 @@ struct AIHerdr: Sendable {
             let rawCode = (try? JSONDecoder().decode(Failure.self, from: reply.stderr))?.error.code
                 ?? (try? JSONDecoder().decode(Failure.self, from: reply.stdout))?.error.code ?? "herdr_failed"
             let code = rawCode.range(of: "^[a-z][a-z0-9_-]{0,63}$", options: .regularExpression) == rawCode.startIndex..<rawCode.endIndex ? rawCode : "herdr_failed"
-            // 切断後の定期監視は同じ失敗を繰り返すため、同じ操作で同じcodeが続く間は1回だけ記録する(段6の実測: agent_not_found が2秒ごとに出続けた)。
+            // 切断後の定期監視は同じ失敗を繰り返すため、同じ操作で同じcodeが続く間は1回だけ記録する(ステップ6の実測: agent_not_found が2秒ごとに出続けた)。
             if await gate.shouldLog(operation: operation, code: code) { log("herdr \(operation): \(code)") }
             if ["agent_not_found", "pane_not_found", "workspace_not_found"].contains(code) { throw AIHerdrError.missing }
             throw AIHerdrError.server(code)
         }
         await gate.recovered(operation: operation)
-        // report-metadata のように成功時に何も出力しないコマンドは、空の標準出力を成功として扱う(段6の実測: herdr 0.8.2)。
+        // report-metadata のように成功時に何も出力しないコマンドは、空の標準出力を成功として扱う(ステップ6の実測: herdr 0.8.2)。
         if let empty = Empty() as? T, reply.stdout.allSatisfy({ $0 == 0x0A || $0 == 0x0D || $0 == 0x20 || $0 == 0x09 }) {
             return empty
         }

@@ -18,7 +18,7 @@ public struct AIHookObservation: Codable, Equatable, Sendable {
     public var filename: String { "notify-\(eventID).json" }
     /// 編集の補助観測。到達の根拠にできるのは編集だけで、受領・返答の根拠にはしない。
     public var observesEditing: Bool { toolName != nil }
-    /// Claudeのフックで編集を観測する対象。ここに無いツールは段を進めない。
+    /// Claudeのフックで編集を観測する対象。ここに無いツールはステージを進めない。
     public static let editingTools = ["Edit", "Write", "MultiEdit", "NotebookEdit"]
 
     public init(payload: Data, session: AISessionRecord, now: Date) throws {

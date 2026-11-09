@@ -128,7 +128,7 @@ final class SystemAudioConversion {
 }
 
 /// timerのpollが最後の参照を解放し、worker上でdeinitが走る場合も同じqueueへsyncしない。
-/// 外部からの停止では従来どおり先行処理を排出し、worker自身ならその場で後片付けする。
+/// 外部からの停止では従来どおり先行処理が終わるまで待ち、worker自身ならその場で後片付けする。
 final class SystemAudioWorker {
     let queue = DispatchQueue(label: "kikigaki.system-audio.worker", qos: .userInitiated)
     private let key = DispatchSpecificKey<UInt8>()
@@ -152,7 +152,7 @@ struct SystemAudioInputWatchdog {
 }
 
 /// 制御はstart/stop呼出元、変換と監視はworker、producerはHALのserial IO queue。
-/// 破棄はIO停止→IO queue排出→worker排出→aggregate/tapの順に行う。
+/// 破棄はIO停止→IO queueのドレイン→workerのドレイン→aggregate/tapの順に行う。
 protocol SystemAudioCapturing: AudioSource {
     var onFailure: ((String) -> Void)? { get set }
 }
@@ -277,7 +277,7 @@ final class SystemAudioCapture: SystemAudioCapturing {
         if let io { AudioDeviceDestroyIOProcID(aggregate, io); self.io = nil }
         ioQueue.sync {}
         worker.drain {
-            // 不正な区間の入力は渡さない。通常停止なら変換器の末尾まで排出する。
+            // 不正な区間の入力は渡さない。通常停止なら変換器の末尾まで出し切る。
             if !failed, ring?.failure.load(ordering: .acquiring) == 0, let emit {
                 try? drain(); try? conversion?.consume(ending: true, emit: emit)
             }

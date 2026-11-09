@@ -94,7 +94,7 @@ extension AppKitTests {
     }
 
     /// 推定付きの宛先は、開始シートと同じ札「話者を推定」を名前の右に添える。狭いときは宛先名を先に省く。
-    @Test(arguments: [420, 600]) func 推定付きの宛先は段に札を添え宛先名を先に省く(width: Int) throws {
+    @Test(arguments: [420, 600]) func 推定付きの宛先はボタンにバッジを添え宛先名を先に省く(width: Int) throws {
         _ = NSApplication.shared
         let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
         let suite = "DestinationFooterTests.\(UUID())"
@@ -127,7 +127,7 @@ extension AppKitTests {
                     > footer.automaticDestination.nameFrame.width)
         }
         try capture(footer, name: "footer-\(width)-speaker-estimation")
-        // 要返答・警告・議事録のアイコンが並ぶと段が細くなる。札は状態の文字と重ねず、入らなければ省く。
+        // 要返答・警告・議事録のアイコンが並ぶとボタンが細くなる。バッジは状態の文字と重ねず、入らなければ省く。
         var crowded = try self.state(root, long: true, notices: true, manualWaiting: true)
         crowded.automaticDestination?.identifySpeakers = true
         crowded.manualDestination?.identifySpeakers = true

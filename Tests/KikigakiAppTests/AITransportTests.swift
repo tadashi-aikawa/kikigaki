@@ -157,7 +157,7 @@ import TOMLKit
         #expect((settings["permissions"] as? [String: [String]])?["allow"] == ["Bash(/bin/echo *)"])
         #expect(!launch.arguments.contains("--permission-mode"))
         #expect(String(decoding: bytes, as: UTF8.self).contains(controller.sessionToken!))
-        // 編集の段を補助する観測。matcherは編集系ツールに限り、Stopの返し忘れ検知は残す。
+        // 編集のステージを補助する観測。matcherは編集系ツールに限り、Stopの返し忘れ検知は残す。
         let hooks = try #require(settings["hooks"] as? [String: [[String: Any]]])
         #expect(hooks["Stop"]?.count == 1 && hooks["Stop"]?[0]["matcher"] == nil)
         let preToolUse = try #require(hooks["PreToolUse"]?.first)
@@ -203,7 +203,7 @@ import TOMLKit
         let quoted = try await runner.run(URL(fileURLWithPath: "/bin/sh"), ["-c", AIShell.command(["/usr/bin/printf", "%s", literal])])
         #expect(quoted.stdout == printed.stdout)
     }
-    @Test func 両方のパイプを最後まで排出する() async throws {
+    @Test func 両方のパイプを最後まで読み切る() async throws {
         let result = try await AIProcessRunner().run(URL(fileURLWithPath: "/bin/sh"),
             ["-c", "i=0; while [ $i -lt 12000 ]; do echo abcdefgh; echo ijklmnop >&2; i=$((i+1)); done; printf END; printf FIN >&2"], timeout: 10)
         #expect(result.status == 0)

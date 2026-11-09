@@ -131,7 +131,7 @@ codexの `-c` の値はTOMLとして解釈されるので、文字列はクォ�
 <details>
 <summary>利用者が手で起こした既存herdrペインへ接続する案</summary>
 
-段1から段4まではこの案で実装し、実herdrで動くところまで確認した。取り下げたのは、KIKIGAKIが起動しない以上、起動時にしか渡せないものを渡せないため。
+ステップ1からステップ4まではこの案で実装し、実herdrで動くところまで確認した。取り下げたのは、KIKIGAKIが起動しない以上、起動時にしか渡せないものを渡せないため。
 
 - Claudeの `--settings` によるStopフックとCodexの `notify` 差し替えを仕込めず、返し忘れ検知が使えない
 - `-c sandbox_workspace_write.writable_roots` を渡せず、Codexの `workspace-write` では返送が `unsafe_file` で落ちる
@@ -142,7 +142,7 @@ codexの `-c` の値はTOMLとして解釈されるので、文字列はクォ�
 </details>
 
 <details>
-<summary>会議に紐づかない準備済みAIセッション(段6〜8で実装し、後に撤去)</summary>
+<summary>会議に紐づかない準備済みAIセッション(ステップ6〜8で実装し、後に撤去)</summary>
 
 会議の初回送信でセッションを起こすと下ごしらえが会議中に走るため、KIKIGAKIが従来どおり起こしつつ会議には紐づけないセッションを台帳 `ai-prepared.json` で持ち、録音開始時のシートで枠ごとに選んで紐づける形を実装した。これも取り下げ、実装ごと撤去した。理由は3つ。
 
@@ -184,7 +184,7 @@ session recordの置き場を `ai/sessions/<slot>/<generation>.json` へ変え�
 
 ただし**プロファイルが1つだけの会議は従来の平置き** `ai/sessions/<generation>.json` のままにする。単一プロファイルの設定でファイル配置が動くと、旧会議と新会議で形が食い違う理由がないのに増える。Claudeの `--settings` もsession recordの隣へ置き、同じ規則で枝に入る。
 
-**同梱CLIも両方の形を解釈する。** CLIは `--session` のパスから保存先の根を割り出しており、平置きを前提に決め打ちで5階層を遡っていた。枝を切った会議ではここが合わずに `unsafe_file` となり、段4の実herdrで返送が全滅した。アプリのテストはCLIを実行しないので落ちず、CLIのテストは平置きしか作っていなかった。枝の有無を見て遡る階層を変え、両方の形をCLIのテストで固定した。
+**同梱CLIも両方の形を解釈する。** CLIは `--session` のパスから保存先の根を割り出しており、平置きを前提に決め打ちで5階層を遡っていた。枝を切った会議ではここが合わずに `unsafe_file` となり、ステップ4の実herdrで返送が全滅した。アプリのテストはCLIを実行しないので落ちず、CLIのテストは平置きしか作っていなかった。枝の有無を見て遡る階層を変え、両方の形をCLIのテストで固定した。
 
 `AIParticipantContext` に任意キー `profile`(表示名)と `profile_slot`(整数)を足す。`trigger` と同じ扱いで、`schema_version` は1のまま、欠損は既定プロファイル・slot 1として読む。単一プロファイルの会議ではこの2つも付けない。片方だけの指定は拒否する。`AIEnvelope.validate` の `sessionPath` 検証は、slotがあれば `ai/sessions/<slot>/<generation>.json`、無ければ従来の `ai/sessions/<generation>.json` を要求する。
 
@@ -219,7 +219,7 @@ manifestは `schemaVersion` を2へ上げ、`config` を `profiles: [ResolvedAIP
 
 ## 採用した判断
 
-- **`autoStart` は配列全体で1つまで。** 自動送信の状態機械 `AIScheduleState` は会議に1つで、複数同時は期限・失敗回数・最後の1回の権利をすべて多重化する。必要なら段を分ける。
+- **`autoStart` は配列全体で1つまで。** 自動送信の状態機械 `AIScheduleState` は会議に1つで、複数同時は期限・失敗回数・最後の1回の権利をすべて多重化する。必要になったら別のステップで実装する。
 - **プロファイルの定義は固定値としてmanifestへ残す。** requestのenvelopeがプロファイルを参照するので、記録の側に定義が無いと過去会議を復元できない。
 - **切断したチャネルは「作り直す」で新しい世代を起こせる。** KIKIGAKIが起動する形なので、この操作は既存の契約のまま使える。
 - **`extraArgs` での effort 指定は設定エラーにする。** 受理すると翻訳した引数との順序依存になり、どちらが効くか読めない。移行は1行の書き換えで済む。

@@ -69,7 +69,7 @@ import KikigakiCore
             connections: Dictionary(uniqueKeysWithValues: (1...count).map { ($0, AIConnectionStatus.idle) }),
             generations: Dictionary(uniqueKeysWithValues: (1...count).map { ($0, 1) }))
         if let source = ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_AVATAR"] { ai.avatarSources[1] = source }
-        // 編集・返答の申告は受信箱から来る値。枠ごとに別の段を見せるため、slotで指定する。
+        // 編集・返答の申告は受信箱から来る値。枠ごとに別のステージを見せるため、slotで指定する。
         for question in conversation.questions {
             guard let report = reportSlots[ai.slot(of: question.request)] else { continue }
             ai.progressReports[question.request.id] = report
@@ -129,7 +129,7 @@ import KikigakiCore
         var state = try fixture(count: 1, accepted: true, reportSlots: [1: .editing(total: 7)])
         state.ai?.connections[1] = .working
         apply(state); try capture("editing")
-        // 編集を終えて返答を書いている最中。総数は消え、現在段は返答へ進む。
+        // 編集を終えて返答を書いている最中。総数は消え、現在のステージは返答へ進む。
         var writing = try fixture(count: 1, accepted: true,
             reportSlots: [1: AIProgressReport(isEditing: true, editingTotal: 7, isReplying: true)])
         writing.ai?.connections[1] = .working
@@ -150,7 +150,7 @@ import KikigakiCore
         controller.window?.setContentSize(NSSize(width: 420, height: 740))
         apply(busy); try capture("three-destinations-narrow")
         controller.window?.setContentSize(NSSize(width: 600, height: 740))
-        // 同じ混雑画面で、#2だけが返答を書いている最中。宛先ごとに段が分かれることを見る。
+        // 同じ混雑画面で、#2だけが返答を書いている最中。宛先ごとにステージが分かれることを見る。
         var mixed = try fixture(count: 3, accepted: true, crowded: true,
             reportSlots: [1: .editing(total: 7), 2: .replying])
         mixed.ai?.connections = [1: .working, 2: .working, 3: .idle]
