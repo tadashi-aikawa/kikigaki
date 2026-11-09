@@ -19,6 +19,14 @@ public enum TranscriptRenderer {
     /// AI・コピーは1発話1行の契約があるため、従来のlineを使う。
     static func markdownLine(_ utterance: Utterance, names: SpeakerNames,
                              timeline: MeetingTimeline, timeZone: TimeZone) -> String {
+        if utterance.kind == .screen {
+            // 画面の行は1行。見出しの後ろに画像を埋め込む。イベントの行は文言だけ。
+            let stamp = clock(for: utterance, timeline: timeline, timeZone: timeZone)
+            let images = utterance.imagePaths.enumerated().map { index, path in
+                "![画面\(index + 1)](<\(URL(fileURLWithPath: path).absoluteString)>)"
+            }
+            return "[\(stamp)] \(names.displayName(for: utterance)): " + ([utterance.text] + images).joined(separator: " ")
+        }
         guard utterance.kind == .typed else {
             return line(utterance, names: names, timeline: timeline, timeZone: timeZone)
         }
@@ -43,9 +51,9 @@ public enum TranscriptRenderer {
         return result
     }
 
-    /// 並びの第一キーは音声位置だが、手入力の時計は実際の投稿日時で固定する。
+    /// 並びの第一キーは音声位置だが、手入力と画面の時計は投稿・観測の実時刻で固定する。
     public static func date(for utterance: Utterance, timeline: MeetingTimeline) -> Date {
-        if utterance.kind == .typed, let postedAt = utterance.postedAt { return postedAt }
+        if utterance.isEntry, let postedAt = utterance.postedAt { return postedAt }
         return timeline.date(at: utterance.start)
     }
 

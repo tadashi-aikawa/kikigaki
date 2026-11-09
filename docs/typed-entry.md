@@ -35,6 +35,8 @@ typed行だけ、`http` と `https` のURLをリンク属性にする。URL検�
 
 `Utterance.Kind: String, Codable, Sendable` に `voice` と `typed` を定義し、`Utterance.kind` と `postedAt: Date?` を追加する。既存の音声イニシャライザ呼び出しは互換を保つ。typed専用の生成口は `speaker = nil`、`start = end` と投稿日時postedAtを保証する。voiceのpostedAtはnilとする。
 
+画面の記録の `screen` も声以外の行として、併合・退避・AI送信の固定を手入力と共通にする。経路ごとの扱いは [画面の記録](screen-capture.md) の「経路ごとの扱い」が単一情報源。
+
 | データ | 取り扱い |
 |---|---|
 | 旧JSONにkindがない | 独自の `init(from:)` で `.voice` として読む |
@@ -65,7 +67,7 @@ archiveに含まれる `Utterance` 配列もこのデコード規則で読む。
 
 Coreへ `TranscriptEntries.merge(voice:typed:timeline:pendingVoiceRows:)` を置き、併合済み発話と、併合後の話者未確定行の添字を返す。既定のpending集合は空とする。
 
-入力列へ別のkindが混ざっても本番を停止させず、kindで声と手入力へ振り分け直す。voice列に混ざったtypedも投稿として保持し、未確定の印は元のvoice列にある声だけへ付ける。
+入力列へ別のkindが混ざっても本番を停止させず、kindで声と声以外の行へ振り分け直す。voice列に混ざったtypedも投稿として保持し、未確定の印は元のvoice列にある声だけへ付ける。
 
 順序はstart昇順。同じstartで声と手入力を比較するときだけ、typed.postedAtとvoiceの `timeline.date(at: start)` を比べ、早いほうを先にする。時計まで同値ならvoiceを先にする。voice同士は元の順、typed同士は投稿順を保つ。音声行の途中に手入力の時刻が入っても音声行を分割せず、その音声行の後ろへ置く。本文一致による削除は行わない。
 

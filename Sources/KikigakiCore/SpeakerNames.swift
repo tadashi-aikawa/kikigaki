@@ -35,7 +35,11 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
     }
 
     public func displayName(for utterance: Utterance) -> String {
-        utterance.kind == .typed ? "手入力" : name(for: utterance.speaker)
+        switch utterance.kind {
+        case .typed: return "手入力"
+        case .screen: return "画面"
+        case .voice: return name(for: utterance.speaker)
+        }
     }
 
     /// 付けた名前(既定のままなら nil)

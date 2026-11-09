@@ -1,14 +1,15 @@
 import Foundation
 
-/// 音声の判定が済んだ境界で手入力を混ぜる。音声処理へ渡す配列は作らない。
+/// 音声の判定が済んだ境界で、声以外の行(手入力・画面の記録)を混ぜる。音声処理へ渡す配列は作らない。
 public enum TranscriptEntries {
     public struct Merged: Equatable, Sendable {
         public let utterances: [Utterance]
         public let pendingSpeakerRows: Set<Int>
-        /// 薄く表示する未確定の声の行。手入力は含めない。
+        /// 薄く表示する未確定の声の行。声以外の行は含めない。
         public let unconfirmedRows: Set<Int>
     }
 
+    /// - typed: 声以外の行。手入力と画面の記録を同じ列で受ける。
     public static func merge(voice: [Utterance], typed: [Utterance], timeline: MeetingTimeline,
                              pendingVoiceRows: Set<Int> = [], unconfirmedVoiceRows: Set<Int> = []) -> Merged {
         // 呼び出し側に併合済みの行が混ざっても落とさず、由来で正しい列へ戻す。
@@ -17,7 +18,7 @@ public enum TranscriptEntries {
         let voices = all.enumerated().filter { $0.element.kind == .voice }.sorted {
             $0.element.start == $1.element.start ? $0.offset < $1.offset : $0.element.start < $1.element.start
         }
-        let entries = all.enumerated().filter { $0.element.kind == .typed }.sorted {
+        let entries = all.enumerated().filter { $0.element.isEntry }.sorted {
             $0.element.start == $1.element.start ? $0.offset < $1.offset : $0.element.start < $1.element.start
         }
         var result: [Utterance] = []

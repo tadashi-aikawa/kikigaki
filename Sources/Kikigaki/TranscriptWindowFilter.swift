@@ -112,7 +112,8 @@ extension TranscriptWindowController {
             avatar.undiarized = slot == nil && !snapshot.names.diarizationEnabled
             avatar.initial = slot.map { snapshot.names.customName(for: $0) == nil ? SpeakerNames.letter(for: $0) : String(name.prefix(1)) } ?? "?"
             avatar.image = slot == nil ? nil : avatars.image(for: snapshot.speakers.first { $0.name == name }?.avatar)
-        case .typed:
+        case .typed, .screen:
+            // 画面は選ぶ一覧に出さないのでここへ来ない。網羅のために手入力と同じ形を当てる。
             avatar.typed = true
         case let .ai(name):
             avatar.accent = Washi.ai

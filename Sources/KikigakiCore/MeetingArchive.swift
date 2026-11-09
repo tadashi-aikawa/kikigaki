@@ -25,9 +25,9 @@ public struct MeetingArchive: Codable {
         }
     }
 
-    /// 統合訂正は原トークンから再計算した結果を入れる。手入力は保持する。
+    /// 統合訂正は原トークンから再計算した結果を入れる。手入力と画面の記録は保持する。
     public mutating func replaceResult(_ result: MeetingResult) {
-        let typed = original.utterances.filter { $0.kind == .typed }
+        let typed = original.utterances.filter(\.isEntry)
         original.utterances = TranscriptEntries.merge(voice: result.utterances, typed: typed, timeline: original.timeline).utterances
     }
 

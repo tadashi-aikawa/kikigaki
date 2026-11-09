@@ -70,4 +70,14 @@ import KikigakiCore
         #expect(AIRangeBoundaries.resolve(history: history, questions: questions,
             utterances: rows([0, 30, 50]) + [typed]) == .init(answered: 1, accepted: 3))
     }
+
+    @Test func 画面の行は境界の候補にしない() throws {
+        var history = try AIStreamHistory(meetingID: UUID())
+        let answered = try question(&history, number: 1, lines: 4, kind: .answered)
+        // cutoffは35秒。遅れて届いた画面の行が境界の前後にあっても、線は声の行で引く。
+        let screen = try Utterance(screenLabel: "EV3895", imagePath: "/tmp/m.captures/000035.webp", at: 35, postedAt: Date())
+        let rows = [Utterance(speaker: 0, start: 0, end: 3, text: "a"), Utterance(speaker: 0, start: 30, end: 33, text: "b"), screen,
+                    Utterance(speaker: 0, start: 40, end: 43, text: "c")]
+        #expect(AIRangeBoundaries.resolve(history: history, questions: [answered], utterances: rows) == .init(answered: 1))
+    }
 }

@@ -9,6 +9,8 @@ public enum TranscriptFilter {
         /// 声の行の話者枡。nilはどの話者区間にも当たらなかった行と、話者判別なしの「発言」。
         case speaker(Int?)
         case typed
+        /// 画面の記録。選ぶ一覧には出さず、絞り込み中も畳まない。どの発言がどの画面を見ながらかを残すため。
+        case screen
         /// AIの宛先名。その宛先への送信の行と返事の行の両方が属する。
         case ai(String)
     }
@@ -21,13 +23,18 @@ public enum TranscriptFilter {
     }
 
     public static func subject(for utterance: Utterance) -> Subject {
-        utterance.kind == .typed ? .typed : .speaker(utterance.speaker)
+        switch utterance.kind {
+        case .typed: return .typed
+        case .screen: return .screen
+        case .voice: return .speaker(utterance.speaker)
+        }
     }
 
     public static func name(for subject: Subject, names: SpeakerNames) -> String {
         switch subject {
         case let .speaker(slot): return names.name(for: slot)
         case .typed: return "手入力"
+        case .screen: return "画面"
         case let .ai(name): return name
         }
     }
@@ -61,7 +68,7 @@ public enum TranscriptFilter {
             hidden = []; count = 0
         }
         for index in subjects.indices {
-            if expanded.contains(keys[index]) || subjects[index].map(selected.contains) == true {
+            if expanded.contains(keys[index]) || subjects[index] == .screen || subjects[index].map(selected.contains) == true {
                 close()
                 result.append(.row(index))
             } else {
@@ -79,7 +86,8 @@ public enum TranscriptFilter {
             case let .speaker(slot?): return (0, slot, "")
             case .speaker(nil): return (1, 0, "")
             case .typed: return (2, 0, "")
-            case let .ai(name): return (3, 0, name)
+            case .screen: return (3, 0, "")
+            case let .ai(name): return (4, 0, name)
             }
         }
         return rank(left) < rank(right)

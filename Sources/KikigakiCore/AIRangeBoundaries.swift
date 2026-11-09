@@ -17,7 +17,8 @@ public struct AIRangeBoundaries: Equatable, Sendable {
         }
         func end(_ question: AIQuestion?) -> Int? {
             guard let envelope = question?.request.envelope, envelope.totalLineCount > 0 else { return nil }
-            return utterances.lastIndex { $0.start <= envelope.participant.audioCutoffSeconds }
+            // 画面の行は保存の遅れで送信済みの範囲より前に届くことがある。線は声と手入力の位置で引く。
+            return utterances.lastIndex { $0.kind != .screen && $0.start <= envelope.participant.audioCutoffSeconds }
         }
         let answered = end(current.filter { $0.result?.kind == .answered && $0.contextReceived }
             .max { ($0.resultOrder ?? 0) < ($1.resultOrder ?? 0) })

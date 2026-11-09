@@ -865,7 +865,7 @@ final class MeetingSession {
             return value
         }
         let assessments: [AudioLevelAssessment?] = snapshot.utterances.map { row in
-            row.kind == .typed ? nil : AudioLevelAssessment(dbFS: level(row.start, row.end), exclusion: audioExclusion)
+            row.isEntry ? nil : AudioLevelAssessment(dbFS: level(row.start, row.end), exclusion: audioExclusion)
         }
         snapshot.excludedRows = audioExclusion.enabled
             ? Set(assessments.indices.filter { assessments[$0]?.isCandidate == true }) : []
@@ -1801,7 +1801,7 @@ extension MeetingSession {
         finalTokens = utterances.filter { $0.kind == .voice }.enumerated().map {
             TimedToken(text: $0.element.text, phraseId: $0.offset, start: $0.element.start, end: $0.element.end)
         }
-        typedEntries = utterances.filter { $0.kind == .typed }
+        typedEntries = utterances.filter(\.isEntry)
         consumedAudioTime = meter.track().duration; snapshot.elapsed = consumedAudioTime
         emit()
     }

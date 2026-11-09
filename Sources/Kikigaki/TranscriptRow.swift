@@ -258,9 +258,9 @@ final class TranscriptRow: NSView, DocumentRow {
         applyOpacity()
     }
     required init?(coder: NSCoder) { fatalError() }
-    /// 本文の更新と分離し、確定状態だけの変更では点灯も再計測も起こさない。手入力は常に確定として扱う。
+    /// 本文の更新と分離し、確定状態だけの変更では点灯も再計測も起こさない。手入力と画面の行は常に確定として扱う。
     func updateConfirmation(unconfirmed value: Bool) {
-        let next = tentative || (value && utterance?.kind != .typed)
+        let next = tentative || (value && utterance?.isEntry != true)
         guard unconfirmed != next else { return }
         unconfirmed = next
         applyOpacity()
@@ -323,10 +323,10 @@ final class TranscriptRow: NSView, DocumentRow {
         refreshPlayButton()
     }
     func updateAvatar(speakers: [KikigakiConfig.Speaker], store: AvatarStore, editable: Bool) {
-        let source = utterance?.kind == .typed || utterance?.speaker == nil ? nil : speakers.first { $0.name == displayedName }?.avatar
+        let source = utterance?.isEntry == true || utterance?.speaker == nil ? nil : speakers.first { $0.name == displayedName }?.avatar
         avatar.image = store.image(for: source)
         speakerRevealCoin.updateBack(from: avatar)
-        speakerButton.isHidden = tentative || utterance?.kind == .typed || utterance?.speaker == nil
+        speakerButton.isHidden = tentative || utterance?.isEntry == true || utterance?.speaker == nil
         speakerButton.isEnabled = editable
         speakerButton.toolTip = "\(displayedName)の名前を変更"
         speakerButton.setAccessibilityLabel(speakerButton.toolTip)
@@ -359,11 +359,11 @@ final class TranscriptRow: NSView, DocumentRow {
         nameLabel.stringValue = name
         nameLabel.textColor = nameColor
         timeLabel.stringValue = TranscriptRenderer.clock(for: value, timeline: timeline)
-        timeLabel.toolTip = value.kind == .typed
-            ? "会話の位置 \(TranscriptRenderer.elapsed(value.start)) · 投稿 \(TranscriptRenderer.clock(for: value, timeline: timeline, seconds: true))"
+        timeLabel.toolTip = value.isEntry
+            ? "会話の位置 \(TranscriptRenderer.elapsed(value.start)) · \(value.kind == .screen ? "観測" : "投稿") \(TranscriptRenderer.clock(for: value, timeline: timeline, seconds: true))"
             : TranscriptRenderer.elapsed(value.start)
         avatar.slot = value.speaker
-        avatar.typed = value.kind == .typed
+        avatar.typed = value.isEntry
         avatar.undiarized = value.kind == .voice && !names.diarizationEnabled
         avatar.initial = value.speaker.map { names.customName(for: $0) == nil ? SpeakerNames.letter(for: $0) : String(name.prefix(1)) } ?? "?"
         avatar.setAccessibilityLabel(name)
@@ -415,14 +415,15 @@ final class TranscriptRow: NSView, DocumentRow {
             return value
         }
         nameLabel.attributedStringValue = highlighted(nameLabel.attributedStringValue, nameRanges, currentName)
-        if utterance?.kind == .typed {
+        if utterance?.isEntry == true {
             let selection = typedBody.selectedRanges
             typedBody.textStorage?.setAttributedString(highlighted(typedBody.attributedString(), textRanges, currentText))
             typedBody.selectedRanges = selection
         } else { body.attributedStringValue = highlighted(body.attributedStringValue, textRanges, currentText) }
     }
     private func setBody(_ text: String) {
-        let typed = utterance?.kind == .typed
+        // 画面の行は段3で見出しの表示へ替えるまで、手入力と同じ本文と画像帯で描く。
+        let typed = utterance?.isEntry == true
         guard (typed ? typedBody.string : body.stringValue) != text else { return }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = 4

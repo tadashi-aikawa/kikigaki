@@ -74,10 +74,10 @@ struct SessionSnapshot {
         }
         return tentativeText ?? last.flatMap { excludedRows.contains($0) ? nil : utterances[$0].text } ?? "空欄なら声の末尾を送ります"
     }
-    /// 音声消費が遅れていても、投稿済みの位置までを表示範囲に含める。
-    var contextEnd: Double { max(elapsed, utterances.filter { $0.kind == .typed }.map(\.start).max() ?? 0) }
+    /// 音声消費が遅れていても、投稿・公開済みの位置までを表示範囲に含める。
+    var contextEnd: Double { max(elapsed, utterances.filter(\.isEntry).map(\.start).max() ?? 0) }
     var contextEndClock: String {
-        if let latest = utterances.filter({ $0.kind == .typed }).compactMap(\.postedAt).max(),
+        if let latest = utterances.filter(\.isEntry).compactMap(\.postedAt).max(),
            latest > timeline.date(at: contextEnd) {
             return MeetingTimeline(startedAt: latest).clock(at: 0, seconds: true)
         }

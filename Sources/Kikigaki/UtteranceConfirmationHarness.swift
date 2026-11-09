@@ -119,7 +119,8 @@ import KikigakiCore
         guard let actualPNG = actual.representation(using: .png, properties: [:]) else { throw AIError.invalid("1x png") }
         try actualPNG.write(to: output.appendingPathComponent(name + "-1x.png"))
         let rows = snapshot.utterances.indices.map { index in
-            let kind = snapshot.utterances[index].kind == .typed ? "手入力" : snapshot.unconfirmedRows.contains(index) ? "未確定" : "確定"
+            let row = snapshot.utterances[index]
+            let kind = row.kind == .typed ? "手入力" : row.kind == .screen ? "画面" : snapshot.unconfirmedRows.contains(index) ? "未確定" : "確定"
             return snapshot.excludedRows.contains(index) ? kind + "+除外" : kind
         }.joined(separator: ",")
         print("\(name): \(Int(view.bounds.width))×\(Int(view.bounds.height))pt, rows=\(rows), tentative=\(snapshot.tentativeText == nil ? "なし" : "未確定")")

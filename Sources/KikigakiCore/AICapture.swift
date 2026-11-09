@@ -17,14 +17,14 @@ public struct AICapture: Equatable, Sendable {
               finalCount >= 0, finalCount <= tokens.count, speakers.count == tokens.count,
               tokens.allSatisfy({ $0.start.isFinite && $0.end.isFinite && $0.start >= 0 && $0.end >= $0.start }),
               zip(tokens, tokens.dropFirst()).allSatisfy({ $0.start <= $1.start }),
-              typed.allSatisfy({ $0.kind == .typed && $0.speaker == nil && $0.start.isFinite && $0.start >= 0 && $0.end == $0.start })
+              typed.allSatisfy({ $0.isEntry && $0.speaker == nil && $0.start.isFinite && $0.start >= 0 && $0.end == $0.start })
               else { throw AIError.invalid("capture boundary") }
         let count = tokens.prefix { $0.start < cutoff }.count
         let fixed = tokens.prefix(min(finalCount, count)).prefix { $0.end <= cutoff }.count
         let utterances = names.diarizationEnabled
             ? Aligner.utterances(tokens: Array(tokens.prefix(fixed)), speakers: Array(speakers.prefix(fixed)))
             : UndiarizedTranscript.utterances(tokens: Array(tokens.prefix(fixed)))
-        // typedは送信操作時点の値コピーを受け取る。一時停止中にも届くよう境界の等号を含める。
+        // typedは送信操作時点の手入力と公開済みの画面の行の値コピーを受け取る。一時停止中にも届くよう境界の等号を含める。
         let merged = TranscriptEntries.merge(voice: utterances, typed: typed.filter { $0.start <= cutoff }, timeline: timeline)
         lines = TranscriptRenderer.lines(audioExclusion.included(merged.utterances, track: audioLevels), names: names, timeline: timeline)
         let pending = Array(tokens[fixed..<count])
