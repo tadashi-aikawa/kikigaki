@@ -62,6 +62,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `docs/` との分担と対応表は「変える前に知っておくこと」
 - `experiments/nemotron/`: 話者判別モデルの比較用の独立CLI。アプリにはエンジンの切替を置かない
 - `experiments/system-audio/`: システム音声とマイクの同時取り込みを検証する独立CLI。検証記録は [システム音声取り込みの実現性試作](docs/records/system-audio-spike.md)
+- `experiments/screen-capture/`: 画面の記録の撮る契機・負荷・許可を検証する独立CLI。検証記録は [画面の記録の試作](docs/records/screen-capture-spike.md)
 - `scripts/`: アプリバンドル組み立て・リリース成果物・Cask・tap更新
   - `make-app.sh`: `Contents/Helpers/kikigaki-cli` と `Contents/Resources/skills/kikigaki`、本体と第三者のライセンスを置く `Contents/Resources/licenses` を同梱し、helperを先に署名してから.appを署名する。配布ZIPでもhelperとSkillの存在、helperの署名を検証する
   - `build_release.sh`: リリース成果物 (ZIP) を作る
@@ -179,6 +180,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 - [被りの島の補正を段階的に強める試験](docs/records/speaker-overlap-islands.md)
 - [Nemotron fast128 への切替の検証記録](docs/records/nemotron-verification.md)
 - [システム音声取り込みの実現性試作の検証記録](docs/records/system-audio-spike.md)
+- [画面の記録の試作の検証記録](docs/records/screen-capture-spike.md)
 - [音声ファイルの書き起こしの試作記録](docs/records/audio-file-spike.md)
 - [議事録プレビューの実装記録](docs/records/minutes-preview-implementation.md)
 - [会議参加モードの検証項目と段1〜5の実装記録](docs/records/ai-participant-implementation.md)
