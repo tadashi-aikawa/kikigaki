@@ -81,7 +81,7 @@ import KikigakiAIIO
         defer { notify(after: previous) }
         pendingSelection = (path, date)
         do {
-            // 壊れた正本の修復はこの明示操作だけ。通知からは呼ばない。
+            // 壊れた単一情報源の `minutes.json` の修復はこの明示操作だけ。通知からは呼ばない。
             if (try? storage.read()) == nil {
                 state = try storage.repair(selecting: path, at: date)
             } else {
@@ -109,7 +109,7 @@ import KikigakiAIIO
         let previous = change
         defer { notify(after: previous) }
         hasPendingEvents = false
-        // 正本を読めない会議は回収登録に残さない。明示修復後に到達点から再評価する。
+        // 単一情報源の `minutes.json` を読めない会議は回収登録に残さない。明示修復後に到達点から再評価する。
         guard let saved = try? storage.read(), (try? validatePaths(in: saved)) != nil else {
             hasSaveFailure = true
             warning = "議事録の設定を読めません。パスを指定し直すと退避して再作成します"
@@ -148,7 +148,7 @@ import KikigakiAIIO
         }
     }
 
-    /// 保存直前の比較に失敗したら最新の正本へ操作を再適用する。
+    /// 保存直前の比較に失敗したら、単一情報源の `minutes.json` の最新の内容へ操作を再適用する。
     /// 更新主体の直列化はMainActorで担い、別アプリプロセスとの排他は保証しない。
     @discardableResult
     private func update(_ operation: (inout MinutesState) throws -> Void) throws -> Bool {

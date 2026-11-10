@@ -5,7 +5,7 @@
 - 詳細: [図の選択と拡大縮小](minutes-rendering.md#mermaid図の選択と拡大縮小)
 - 詳細: [ボードのキャンバス](minutes-rendering.md#ボードのキャンバス)
 
-議事録・ボード・目次のWeb描画だけが書き起こしウィンドウの倍率に従う。正本は[文字の倍率](transcript-window.md#文字の倍率)。
+議事録・ボード・目次のWeb描画だけが書き起こしウィンドウの倍率に従う。単一情報源は[文字の倍率](transcript-window.md#文字の倍率)。
 
 書き起こしウィンドウの右に開く、議事録の閲読用ペインの仕様。AIとの受け渡しの契約は [議事録プレビューの設計](minutes-preview.md)、本文の描画・検索は [議事録の描画と検索](minutes-rendering.md)、録音開始シートでの指定は [録音開始シート](start-sheet.md) を参照する。
 
@@ -78,7 +78,7 @@
 - 画像レーンの出ている会議では、会話側の幅・最小幅・ドラッグの下限にレーンの分を足し、`leftWidth` にはレーンを含めずに保存する。詳細は [画面の記録](screen-capture.md) の「ウィンドウの幅」。
 - 解除時とライブリサイズ終了時に希望幅を画面へ合わせ直す。タイルは公開状態がないため、画面全高かつ半幅または全幅で左右端に接する配置から推定する。同じ配置を手動で作った場合との区別はできない。
 
-`NSSplitView.autosaveName` は使わない。希望幅の正本を上記の1キーに統一する。Apple公式資料: [分割配置の保存](https://developer.apple.com/documentation/appkit/nssplitview/autosavename-swift.property)。
+`NSSplitView.autosaveName` は使わない。希望幅の単一情報源を上記の1キーに統一する。Apple公式資料: [分割配置の保存](https://developer.apple.com/documentation/appkit/nssplitview/autosavename-swift.property)。
 
 ## 保存先の扱い
 

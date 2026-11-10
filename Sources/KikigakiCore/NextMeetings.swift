@@ -1,6 +1,6 @@
 import Foundation
 
-/// 次の会議へ渡す指定。設定の正本は読まず、宛先名の照合は開始シートに任せる。
+/// 次の会議へ渡す指定。設定の単一情報源は読まず、宛先名の照合は開始シートに任せる。
 public struct NextMeeting: Codable, Equatable, Sendable {
     public let id: UUID
     public let minutesPath: String

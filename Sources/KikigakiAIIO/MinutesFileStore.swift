@@ -23,7 +23,7 @@ public struct MinutesFileStore: Sendable {
         try files.write(AIJSON.encode(next), to: parts)
     }
 
-    /// 人が明示的に指定したときだけ壊れた正本を退避する。
+    /// 人が明示的に指定したときだけ、壊れた単一情報源の `minutes.json` を退避する。
     /// 退避の排他公開とfsyncを終えてから置換し、失敗時も元のバイト列を失わない。
     public func repair(selecting path: String?, at date: Date) throws -> MinutesState {
         let previous = try bytes()

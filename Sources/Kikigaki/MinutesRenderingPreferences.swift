@@ -4,7 +4,7 @@ import ObjectiveC
 
 /// 議事録ペインのpreferencesだけで60Hz優先を外す。Safariや永続設定には触れない。
 /// 非公開APIの廃止・名前変更・型変更はすべて未対応として扱う。KVCは使わない。
-/// 正本: docs/minutes-rendering.md「画面の更新頻度」
+/// 単一情報源: docs/minutes-rendering.md「画面の更新頻度」
 enum MinutesRenderingPreferences {
     static let near60FPSKey = "PreferPageRenderingUpdatesNear60FPSEnabled"
 

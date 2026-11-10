@@ -84,7 +84,7 @@ final class MinutesToggleButton: HoverButton {
     }
 }
 
-/// 分割幅の正本は1キーだけ。画面制約やプログラムによるresizeを希望幅に保存しない。
+/// 分割幅の単一情報源は1キーだけ。画面制約やプログラムによるresizeを希望幅に保存しない。
 @MainActor final class MinutesSplitView: NSSplitView, NSSplitViewDelegate {
     let left: NSView
     let preview: MinutesPreviewView

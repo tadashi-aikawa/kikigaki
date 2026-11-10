@@ -41,7 +41,7 @@ extension AppKitTests {
         #expect(try disk.read().humanMinutesPath == "/tmp/別.md")
         #expect(throws: (any Error).self) { try first.select(markdown.path) }
         #expect(throws: (any Error).self) { try first.select(root.appendingPathComponent("meeting.raw.md").path) }
-        // 外から正本を書き換えられていても、会議Markdownを表示・次requestの書き先へ採用しない。
+        // 外から単一情報源の `minutes.json` を書き換えられていても、会議Markdownを表示・次requestの書き先へ採用しない。
         let valid = try disk.read()
         var invalid = valid; try invalid.select(markdown.path, at: Date()); try invalid.advanceRevision()
         try disk.save(invalid, replacing: valid)

@@ -40,7 +40,7 @@ public enum AIMarkdown {
             if $0.kind != $1.kind { return $0.kind < $1.kind }
             return $0.order < $1.order
         }
-        // 会話行は音声位置順の正本を保つ。postedAtで全文をsortすると、replayや
+        // 会話行は音声位置の順を崩さない。postedAtで全文をsortすると、replayや
         // 壁時計の変更時に手入力だけ末尾へ飛ぶため、AIの印だけ日時順で差し込む。
         var rendered: [String] = []
         var markIndex = 0

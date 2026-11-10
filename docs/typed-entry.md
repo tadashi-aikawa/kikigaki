@@ -57,7 +57,7 @@ archiveに含まれる `Utterance` 配列もこのデコード規則で読む。
 
 ### セッションでの保持
 
-`MeetingSession` が `private var typedEntries: [Utterance]` を投稿順に保持する。`snapshot.utterances` は音声と手入力を併合した表示結果であり、投稿の正本にはしない。開始時に `liveSource`・`finalTokens` と一緒に空へ戻す。
+`MeetingSession` が `private var typedEntries: [Utterance]` を投稿順に保持する。`snapshot.utterances` は音声と手入力を併合した表示結果であり、投稿の単一情報源にはしない。開始時に `liveSource`・`finalTokens` と一緒に空へ戻す。
 
 `submitTyped(_:)` は受付状態を確認し、前後の空白を除き、改行をLFへ正規化して空なら拒否する。本文の内部スペースやURLの文字列は保つ。改行はCR・LFだけでなくUnicodeの改行も対象にし、AI文脈の検証で拒否されるNULは投稿時点で拒否する。`pause.audioTime` を1回読んで `start = end` に設定し、同じ受付で `Date()` をpostedAtとして固定する。受理後は `refreshLive()` と `emit()` を呼ぶため、ASRの次回更新を待たずに画面とコピー範囲へ反映される。
 
