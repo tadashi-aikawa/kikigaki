@@ -96,7 +96,7 @@ autoSendPhrases = ["アバンティ", "アヴァンティ"]
 
 | キー | 既定 | 説明 |
 | --- | --- | --- |
-| `outputDir` | `~/Documents/KIKIGAKI` | Markdownと録音WAVの保存先。絶対パスか `~` から始まるパスで書く。相対パスと空文字は設定エラー |
+| `outputDir` | `~/Documents/KIKIGAKI` | Markdownと録音WAVの保存先。絶対パスか `~` から始まるパスで書く。相対パスと空文字は設定エラー。`/` で区切った要素がちょうど `..` のときも設定エラー。要素がちょうど `.` のときと、重なった `/`、末尾の `/` は取り除いて読む。`a..b` や `...` のように名前に含まれるドットはそのまま使える |
 | `saveRecording` | `false` | `true` で、録音WAVをMarkdownと同じ名前で並べて残す。停止後に発言ごとの音声を聞ける |
 | `measureAudioLevels` | `false` | `true` で、発話ごとの音量と小音量の候補を画面に出し、`.levels.json` とMarkdown末尾の表に残す。音量を調べるための表示。次の会議から効く |
 | `participantsKey` | `participants` | 話者名の候補に「参加者」として出す名前を、議事録の先頭のどのキーから読むか。`attendees` などに変えられる。空白・`:`・`#`・`,`・引用符・括弧を含む名前、空文字、`-` で始まる名前は設定エラー |

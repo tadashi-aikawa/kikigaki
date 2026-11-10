@@ -86,6 +86,15 @@ final class AIConversationController {
         // Codableの公開入口を通し、呼び手が作った値も復元と同じ整合検証を受ける。
         _ = try AIJSON.decode(AIConversation.self, from: AIJSON.encode(conversation))
         for q in conversation.questions { try q.request.envelope.validatePaths(outputDirectory: outputDirectory) }
+        // 会議Markdownが分かるので、回収したrequestの画像の置き場はこの会議のものとの完全一致で確かめる。
+        // 形だけの検証では、同じ保存先の別会議の置き場への差し替えを拒めない。
+        if let markdown = minutes.markdownURL {
+            for q in conversation.questions {
+                if let directories = q.request.envelope.imageDirectories {
+                    try AIImageDirectories.validate(directories, markdownURL: markdown)
+                }
+            }
+        }
         channels[defaultSlot] = try Channel(slot: defaultSlot, meetingID: meetingID)
         if recovered != nil {
             let perSlot = Dictionary(grouping: conversation.questions) { $0.request.envelope.participant.profileSlot ?? defaultSlot }
@@ -360,7 +369,9 @@ final class AIConversationController {
             trigger: trigger, profile: slot == nil ? nil : config.name, profileSlot: slot,
             minutesPath: minutesPath, boardHeading: boardHeading, speakerIdentification: speakerIdentification,
             unansweredQuestions: conversation.unansweredQuestions)
-        let request = try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant),
+        // 画像の置き場は会議の議事録の状態が持つ会議Markdownから導く。手動・自動・確認への返答・再送で同じ値になる。
+        let images = minutes.markdownURL.map(MeetingFiles.imageDirectories(for:))
+        let request = try AIRequest(envelope: AIEnvelope(snapshot: snapshot, participant: participant, imageDirectories: images),
             number: conversation.questions.count + 1, voiceQuestion: voiceQuestion, snapshot: snapshot, voiceUtteranceStart: voiceUtteranceStart)
         var next = conversation
         try next.append(request)

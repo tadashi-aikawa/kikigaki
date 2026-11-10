@@ -35,22 +35,35 @@ public struct HandoffHistory {
     }
 
     /// 議事録は本文を写さずパスだけ渡す。会話と違い、AIや人が書き換え続けるため。
+    /// - meetingMarkdown: 会議Markdown。ここから `MeetingFiles.imageDirectories(for:)` で導いた値を `image_dirs` に載せる。
+    ///   会議参加モードのenvelopeと同じ導き方で、呼び手から置き場そのものは受け取らない
     public mutating func copy(
         utterances: [Utterance], names: SpeakerNames, outputDirectory: URL,
-        timeline: MeetingTimeline? = nil, minutesPath: String? = nil, writeClipboard: (String) -> Bool
+        timeline: MeetingTimeline? = nil, minutesPath: String? = nil, meetingMarkdown: URL? = nil,
+        writeClipboard: (String) -> Bool
     ) throws -> HandoffCopy? {
         let lines = TranscriptRenderer.lines(utterances, names: names, timeline: timeline ?? MeetingTimeline(startedAt: startedAt))
         guard !lines.isEmpty else { return nil }
         let snapshotID = UUID()
         let sequence = (lastCopy?.sequence ?? 0) + 1
-        let root = outputDirectory.standardizedFileURL
+        // 保存先は渡された表記のまま使い、ここでは正規化しない。字句上の正規化は `ResolvedConfig.outputDir` で1回だけ行い、
+        // 会議Markdown・行の画像参照・会議参加モードの会話ファイルもその値から導く。ここで正規化し直すと表記がずれる。
+        // `standardizedFileURL` は `/private/tmp` をファイルの在るときだけ `/tmp` にするので、なおさら通さない。
+        let root = outputDirectory
         let url = root.appendingPathComponent(".kikigaki-context", isDirectory: true)
             .appendingPathComponent(meetingID.uuidString, isDirectory: true)
             .appendingPathComponent(snapshotID.uuidString + ".md")
+        let imageDirectories: [String]? = try meetingMarkdown.map { markdown in
+            // 会話ファイルと同じ保存先の会議でなければ渡さない。置き場は会議Markdownから導いた値と完全一致で確かめる。
+            let directories = MeetingFiles.imageDirectories(for: markdown)
+            try AIImageDirectories.validate(directories, outputDirectory: root.path)
+            try AIImageDirectories.validate(directories, markdownURL: markdown)
+            return directories
+        }
         let metadata = Metadata(
             meetingID: meetingID.uuidString, snapshotID: snapshotID.uuidString, sequence: sequence,
             transcriptPath: url.path, readLineCount: lines.count, totalLineCount: lines.count,
-            minutesPath: minutesPath)
+            minutesPath: minutesPath, imageDirectories: imageDirectories)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let json = String(decoding: try encoder.encode(metadata), as: UTF8.self)
@@ -80,6 +93,7 @@ public struct HandoffHistory {
         let readLineCount: Int
         let totalLineCount: Int
         let minutesPath: String?
+        let imageDirectories: [String]?
 
         enum CodingKeys: String, CodingKey {
             case schemaVersion = "schema_version"
@@ -92,6 +106,7 @@ public struct HandoffHistory {
             case readLineCount = "read_line_count"
             case totalLineCount = "total_line_count"
             case minutesPath = "minutes_path"
+            case imageDirectories = "image_dirs"
         }
     }
 

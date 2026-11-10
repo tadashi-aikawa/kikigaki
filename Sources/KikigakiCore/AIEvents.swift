@@ -21,7 +21,8 @@ public struct AIRequest: Codable, Equatable, Sendable {
                 voiceUtteranceStart: Double? = nil) throws {
         self.envelope = envelope; self.number = number
         if let snapshot {
-            guard try AIEnvelope(snapshot: snapshot, participant: envelope.participant) == envelope else { throw AIError.mismatch }
+            guard try AIEnvelope(snapshot: snapshot, participant: envelope.participant,
+                                 imageDirectories: envelope.imageDirectories) == envelope else { throw AIError.mismatch }
         }
         timeRange = snapshot?.timeRange
         self.voiceUtteranceStart = envelope.participant.questionSource == .voice ? voiceUtteranceStart : nil

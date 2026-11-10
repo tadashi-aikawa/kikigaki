@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "properties": {
     "outputDir": {
-      "description": "Markdownと録音WAVの保存先。絶対パスか ~ 始まり。\n\n任意 · 既定: `\"~/Documents/KIKIGAKI\"`",
+      "description": "Markdownと録音WAVの保存先。絶対パスか ~ 始まり。/ で区切った要素がちょうど `..` のときは設定エラー。要素がちょうど `.` のときは取り除く。名前に含まれるドット(`a..b` など)はそのまま使える。\n\n任意 · 既定: `\"~/Documents/KIKIGAKI\"`",
       "type": "string",
       "pattern": "^[/~]",
       "default": "~/Documents/KIKIGAKI"

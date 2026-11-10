@@ -30,6 +30,38 @@ enum AIValidation {
     }
 }
 
+/// `image_dirs` の検証。AIが会話の行の画像参照を読んでよい置き場で、アプリが会議ごとに明示する。
+/// 仕様は docs/ai-handoff.md の「画像の参照」
+///
+/// 保証は2段で、照合できる範囲が違う。
+/// - `validate(_:markdownURL:)`: 会議Markdownのパスが分かる所(送信の準備、「会話をコピー」、AI記録の回収)で、
+///   そこから導いた期待値との完全一致を求める。同じ保存先の別会議の置き場への差し替えもここで拒む
+/// - `validate(_:outputDirectory:)`: 会議Markdownを知らない所(envelopeの復号、返送CLI、受信箱)の形だけの検証。
+///   同じ会議の添付と画面の記録の組で、保存先の直下にあることまでしか確かめない。別会議の組への差し替えは拒めない
+public enum AIImageDirectories {
+    public static func validate(_ directories: [String], markdownURL: URL) throws {
+        guard directories == MeetingFiles.imageDirectories(for: markdownURL) else { throw AIError.invalid("image directories") }
+    }
+
+    /// パスは文字列のまま比べる。`.` と `..` を拒んだ後なので正規化は要らない。
+    /// `standardizedFileURL` は `/private` をファイルが在るときだけ外し、同じ場所でも値が揺れるので使わない。
+    public static func validate(_ directories: [String], outputDirectory: String) throws {
+        let root = URL(fileURLWithPath: outputDirectory).path
+        guard directories.count == 2, directories.allSatisfy({ directory in
+                  AIValidation.absolutePath(directory) && AIValidation.singleLine(directory)
+                      && directory.split(separator: "/", omittingEmptySubsequences: false).dropFirst()
+                          .allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." })
+                      && URL(fileURLWithPath: directory).deletingLastPathComponent().path == root
+              }) else { throw AIError.invalid("image directories") }
+        // 同じ会議の添付・画面の記録の順の組。別会議の添付と画面の記録を混ぜた値を拒む。
+        let names = directories.map { URL(fileURLWithPath: $0).lastPathComponent }
+        let attachments = ".attachments", captures = ".captures"
+        guard names[0].hasSuffix(attachments), names[1].hasSuffix(captures),
+              names[0].dropLast(attachments.count) == names[1].dropLast(captures.count),
+              !names[0].dropLast(attachments.count).isEmpty else { throw AIError.invalid("image directories") }
+    }
+}
+
 /// wire JSONの日時はISO8601。フックの生JSONはadapterで別に解釈する。
 public enum AIJSON {
     public static func encode<T: Encodable>(_ value: T) throws -> Data {
@@ -235,9 +267,12 @@ public struct AIEnvelope: Codable, Equatable, Sendable {
     public let readStartLine: Int
     public let readLineCount: Int
     public let totalLineCount: Int
+    /// 会話の行の画像参照を読んでよい置き場。手動コピーと同じトップレベルの `image_dirs` に載せ、Skillの読み方を1つに保つ。
+    /// 旧requestでは欠損し、そのときAIは画像を読まない。仕様は docs/ai-handoff.md の「画像の参照」
+    public let imageDirectories: [String]?
     public let participant: AIParticipantContext
 
-    public init(snapshot: AIContextSnapshot, participant: AIParticipantContext) throws {
+    public init(snapshot: AIContextSnapshot, participant: AIParticipantContext, imageDirectories: [String]? = nil) throws {
         guard snapshot.readStartLine >= 1, snapshot.readStartLine <= snapshot.lines.count + 1,
               !snapshot.lines.contains(where: { $0.contains("\n") || $0.contains("\r") || $0.contains("\0") }) else {
             throw AIError.invalid("snapshot range")
@@ -249,6 +284,7 @@ public struct AIEnvelope: Codable, Equatable, Sendable {
         sequence = snapshot.sequence; previousSnapshotID = snapshot.previousSnapshotID; kind = snapshot.kind
         transcriptPath = snapshot.fileURL.path; readStartLine = snapshot.readStartLine
         readLineCount = snapshot.readLineCount; totalLineCount = snapshot.lines.count; self.participant = participant
+        self.imageDirectories = imageDirectories
         try validate()
     }
 
@@ -274,6 +310,9 @@ public struct AIEnvelope: Codable, Equatable, Sendable {
                 .allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
               participant.sessionPath == meetingURL.appendingPathComponent(Self.sessionPath(for: participant)).path else {
             throw AIError.invalid("context paths")
+        }
+        if let imageDirectories {
+            try AIImageDirectories.validate(imageDirectories, outputDirectory: meetingURL.deletingLastPathComponent().deletingLastPathComponent().path)
         }
     }
 
@@ -308,6 +347,7 @@ public struct AIEnvelope: Codable, Equatable, Sendable {
         case schemaVersion = "schema_version", meetingID = "meeting_id", snapshotID = "snapshot_id", sequence
         case previousSnapshotID = "previous_snapshot_id", kind, transcriptPath = "transcript_path"
         case readStartLine = "read_start_line", readLineCount = "read_line_count", totalLineCount = "total_line_count", participant
+        case imageDirectories = "image_dirs"
     }
 }
 

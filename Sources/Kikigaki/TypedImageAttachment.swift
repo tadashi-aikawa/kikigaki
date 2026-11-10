@@ -96,7 +96,7 @@ struct TypedImageDraft {
 
     static func save(_ images: [Self], beside markdownURL: URL) throws -> [String] {
         guard !images.isEmpty else { return [] }
-        let directory = markdownURL.deletingPathExtension().appendingPathExtension("attachments")
+        let directory = MeetingFiles.attachmentsDirectory(for: markdownURL)
         try PrivateFileIO.createDirectory(at: directory)
         var saved: [URL] = []
         do {

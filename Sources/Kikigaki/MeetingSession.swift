@@ -944,7 +944,8 @@ final class MeetingSession {
         do {
             if try handoff.copy(utterances: snapshot.includedUtterances, names: snapshot.names,
                                 outputDirectory: url.deletingLastPathComponent(), timeline: snapshot.timeline,
-                                minutesPath: copyableMinutesPath(markdownURL: url), writeClipboard: writeClipboard) != nil {
+                                minutesPath: copyableMinutesPath(markdownURL: url),
+                                meetingMarkdown: url, writeClipboard: writeClipboard) != nil {
                 snapshot.handoffMessage = "会話をコピーしました。AIへ貼り付けられます"
                 snapshot.handoffFailed = false
             }
@@ -1938,10 +1939,12 @@ extension MeetingSession {
         consumedAudioTime = meter.track().duration; snapshot.elapsed = consumedAudioTime
         emit()
     }
-    func setScheduleTranscriptForTesting(_ text: String, speaker: Int? = nil) {
-        finalTokens = [.init(text: text, phraseId: 0, start: 0, end: 0)]
-        snapshot.utterances = [.init(speaker: speaker, start: 0, end: 0, text: text)]
-        consumedAudioTime = 1; snapshot.elapsed = 1
+    /// - start: 発言の位置。画面の行をそれより前の位置に遅れて届かせる検証で後ろへずらす
+    /// - elapsed: 処理済みの音声位置。録音の固定に渡した音声の長さと合わせ、確定待ちを起こさない
+    func setScheduleTranscriptForTesting(_ text: String, speaker: Int? = nil, start: Double = 0, elapsed: Double = 1) {
+        finalTokens = [.init(text: text, phraseId: 0, start: start, end: start)]
+        snapshot.utterances = [.init(speaker: speaker, start: start, end: start, text: text)]
+        consumedAudioTime = elapsed; snapshot.elapsed = elapsed
         emit()
     }
 #endif

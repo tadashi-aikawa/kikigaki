@@ -49,7 +49,9 @@ public struct AIAppendix: Codable, Equatable, Sendable {
             workAllowed: p.workAllowed, trigger: p.trigger, profile: p.profile, profileSlot: p.profileSlot,
             minutesPath: p.minutesPath, boardHeading: p.boardHeading)
         // 保存用snapshot.linesをペインへ載せず、通常のenvelopeと同じ範囲参照だけを渡す。
-        let delivery = Delivery(number: number, context: try AIEnvelope(snapshot: snapshot, participant: participant),
+        // 画像の置き場は元の依頼と同じ会議のものなので、元のenvelopeの値を引き継ぐ。
+        let context = try AIEnvelope(snapshot: snapshot, participant: participant, imageDirectories: request.envelope.imageDirectories)
+        let delivery = Delivery(number: number, context: context,
             question: question, capturedAt: capturedAt, audioCutoffSeconds: audioCutoffSeconds, tentativeTail: tentativeTail)
         let json = String(decoding: try AIJSON.encode(delivery), as: UTF8.self).replacingOccurrences(of: "`", with: "\\u0060")
         return "$kikigaki\nKIKIGAKI_APPENDIX\n```json\n\(json)\n```\n"

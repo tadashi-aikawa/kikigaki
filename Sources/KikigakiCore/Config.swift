@@ -80,7 +80,10 @@ public struct ResolvedConfig: Equatable, Sendable {
     public var aiAutoStart: ResolvedAIConfig? { aiProfiles.first { $0.autoStart } }
 
     public init(config: KikigakiConfig, home: URL = FileManager.default.homeDirectoryForCurrentUser) {
-        outputDir = Self.expand(config.outputDir ?? Self.defaultOutputDir, home: home)
+        // 保存先はここで1回だけ字句上で正規化する。会議Markdown・画像の置き場・AIへ渡す会話ファイルと `image_dirs` は
+        // この値から導き、後から正規化し直さない。途中で正規化すると表記がずれ、Skillの文字列の照合が外れる。
+        // `~` の展開も文字列だけで行い、ファイルシステムへ問い合わせない。
+        outputDir = LexicalPath.directory(Self.expandedPath(config.outputDir ?? Self.defaultOutputDir, home: home))
         saveRecording = config.saveRecording ?? false
         measureAudioLevels = config.measureAudioLevels ?? false
         participantsKey = config.participantsKey ?? Self.defaultParticipantsKey
@@ -105,6 +108,13 @@ public struct ResolvedConfig: Equatable, Sendable {
     }
 
     /// 先頭の `~` をホームに置き換える。`~user` 形式は扱わない
+    /// `~` と `~/` だけを家のディレクトリへ置き換えた文字列。`URL` を作らないので、在るかどうかを見ない。
+    static func expandedPath(_ path: String, home: URL) -> String {
+        if path == "~" { return home.path }
+        if path.hasPrefix("~/") { return home.path + "/" + path.dropFirst(2) }
+        return path
+    }
+
     static func expand(_ path: String, home: URL) -> URL {
         if path == "~" { return home }
         if path.hasPrefix("~/") {
@@ -173,7 +183,22 @@ public enum ConfigLoader {
             if !dir.hasPrefix("/"), !dir.hasPrefix("~") {
                 throw ConfigError.invalid(description: "outputDir must be an absolute path or start with ~ (got: \(dir))")
             }
+            try validateOutputDirParentReference(dir)
         }
+    }
+
+    /// `outputDir` の要素に `..` があれば設定エラーにする。
+    ///
+    /// 仮決め(タダシの承認待ち)。外すときはこの関数の呼び出しと、`Resources/config.schema.json` の `outputDir` の説明、
+    /// docs/config.md と site の設定リファレンスの1文を消す。`LexicalPath` は `..` を畳まないので、外しても保存先は変わらない。
+    /// - スキーマの `pattern` では表さない。Taploの正規表現は先読みを持たず、`not` は補完を止めるため使えない
+    /// - 外す場合の注意: 下の理由のとおり、残した `..` は `AIEnvelope.validate` が拒む。AIへ渡すには別の手当てが要る
+    /// - 理由: `..` は字句上では安全に畳めない。直前の要素がシンボリックリンクだと、字句上で戻した場所とOSが辿る場所が違い、
+    ///   既存の設定の保存先が黙って変わる。かといって畳まずに残すと、会話ファイルのパスの検証が `..` を拒み、AIへ渡せない
+    static func validateOutputDirParentReference(_ dir: String) throws {
+        guard LexicalPath.containsParentReference(dir) else { return }
+        throw ConfigError.invalid(description:
+            "outputDir must not contain '..'; write an absolute path or a path starting with ~ without '..' (got: \(dir))")
     }
 
     /// 設定ファイルを読み込む。ファイルが存在しない場合は既定設定を返す

@@ -23,7 +23,7 @@
 | `TranscriptWindow` | 現在表示中の会議へプレビューを接続する。 |
 | `AIInboxMonitor` | fdの同一性確認とTimerの再走査を、議事録ファイルの監視へ応用する。 |
 
-既存manifestはAIプロファイルを必須にし、AI利用開始時に初めて作る。人だけで使うプレビューをその生成条件へ結び付けないため、議事録のmanifest相当情報を同じ会議の `ai/minutes.json` へ分ける。パスの正本はこの1か所にし、既存 `ai/manifest.json` へ複製しない。
+既存manifestはAIプロファイルを必須にし、AI利用開始時に初めて作る。人だけで使うプレビューをその生成条件へ結び付けないため、議事録のmanifest相当情報を同じ会議の `ai/minutes.json` へ分ける。パスの単一情報源はこの1か所にし、既存 `ai/manifest.json` へ複製しない。
 
 ## 両方向の受け渡し
 
@@ -142,7 +142,7 @@ stdinは読まない。4つの必須引数以外、重複引数、空の値を�
 
 ## 右ペインと描画
 
-右ペインの開閉・パス欄・履歴・幅と復元・ファイルの監視は [議事録ペイン](minutes-pane.md) が正本。本文の描画と検索は [議事録の描画と検索](minutes-rendering.md) が正本。ここでは扱わない。
+右ペインの開閉・パス欄・履歴・幅と復元・ファイルの監視は [議事録ペイン](minutes-pane.md) が単一情報源。本文の描画と検索は [議事録の描画と検索](minutes-rendering.md) が単一情報源。ここでは扱わない。
 
 ## Skillの規則と書き込み許可
 
@@ -153,7 +153,7 @@ stdinは読まない。4つの必須引数以外、重複引数、空の値を�
 - 保存に失敗したらminutesは送らず、`failed --reason work_failed` で原因と残った作業を返す。保存は成功したが通知に失敗した場合もその区別を返す
 - `work_allowed` の説明では通知自体を連携操作に含める。falseのときに議事録を作成・更新してよいという意味にはしない
 
-`AILaunchConfiguration` が `outputDir` をCodexの `sandbox_workspace_write.writable_roots` へ追加する。保持する既存許可先は `~/.codex/config.toml` 最上位の `[sandbox_workspace_write]` に限る。`CODEX_HOME` やプロファイル別の設定を拾わない既存の制約は変えない。任意に選択した議事録の親を追加したり、起動済みCLIの権限を変更したりしない。
+`AILaunchConfiguration` が `outputDir` をCodexの `sandbox_workspace_write.writable_roots` へ追加する。会話の行が参照する画像の置き場 `image_dirs` も `outputDir` の直下なので、許可を足さずに読める。詳細は [AIへの受け渡し](ai-handoff.md) の「画像の参照」。保持する既存許可先は `~/.codex/config.toml` 最上位の `[sandbox_workspace_write]` に限る。`CODEX_HOME` やプロファイル別の設定を拾わない既存の制約は変えない。任意に選択した議事録の親を追加したり、起動済みCLIの権限を変更したりしない。
 
 受け入れたリスク: outputDirへの許可は、全会議のMarkdown、state、archive、minutes、tokenを含むrequestsをモデルから書き換え可能にする。会議Markdownを直接編集しない制約はSkillの規則であり、サンドボックスの境界では保証されなくなる。tokenは同じユーザー内での隔離ではない。この点は `CLAUDE.md` にも記載している。
 
