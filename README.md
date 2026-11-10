@@ -14,7 +14,7 @@
 | 知りたいこと | ページ |
 | --- | --- |
 | 動作環境と導入、初めての録音 | [はじめに・インストール](https://tadashi-aikawa.github.io/kikigaki/docs/getting-started/) |
-| 録音・話者名の編集・手入力 | [録音と書き起こし](https://tadashi-aikawa.github.io/kikigaki/docs/recording/) |
+| 録音・話者名の編集・手入力・画面の記録 | [録音と書き起こし](https://tadashi-aikawa.github.io/kikigaki/docs/recording/) |
 | イヤホンで相手の声も残す | [オンライン会議で使う](https://tadashi-aikawa.github.io/kikigaki/docs/online-meetings/) |
 | CodexやClaude Codeを会議へ参加させる | [AIエージェントを会議に参加させる](https://tadashi-aikawa.github.io/kikigaki/docs/ai-participant/) |
 | AIが書いた議事録とボードを見る | [議事録とボード](https://tadashi-aikawa.github.io/kikigaki/docs/minutes-and-board/) |
@@ -31,7 +31,7 @@ brew install --cask tadashi-aikawa/tap/kikigaki
 
 ## データの行き先
 
-音声と文字起こしは端末内で処理し、保存先も端末内です。外へ出るのは、AI参加を自分で設定して送信した内容だけです。
+音声と文字起こし、画面の記録は端末内で処理し、保存先も端末内です。外へ出るのは、AI参加を自分で設定して送信した内容だけです。
 
 詳しくは [データの行き先](https://tadashi-aikawa.github.io/kikigaki/docs/data/) を参照してください。
 

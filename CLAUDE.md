@@ -27,10 +27,13 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `GlobalHotkey.swift`: 手動宛先へ送るグローバルキーの書式と表記。登録はアプリ側の `GlobalHotkeyRegistration.swift`
   - `SystemAudioMix.swift`: システム音声の3択、出力の3値判定、16kHzの加算とピーク保護
   - `ScreenChange.swift`: 画面の記録の撮る契機の判定と縮小画像。仕様は [画面の記録](docs/screen-capture.md)
+  - `ScreenCapture.swift`: 画面の記録の置き場とファイル名、見出し、保存の失敗の数え方、観測した瞬間の音声位置
   - `ScreenLane.swift`: 画面の行を書き起こしウィンドウの画像レーンへ割り当てる置き場と畳み方。仕様は [画面の記録](docs/screen-capture.md) の「表示」
+  - `LexicalPath.swift`: 保存先 `outputDir` の字句上の正規化。ファイルの有無を見ない。仕様は [AIへの受け渡し](docs/ai-handoff.md) の「画像の参照」
   - `UtterancePlayback.swift`: 発言の行から元の音声を流す区間。仕様は [発言ごとの音声再生](docs/utterance-playback.md)
   - `AudioFile.swift`: 音声ファイルの書き起こしの音源。録音日時の選び方と、開始シート・ヘッダーの表記。仕様は [音声ファイルの書き起こし](docs/audio-file.md)
   - AI設定、独立stream履歴、envelope、質問と受信イベント、AIの返事のMarkdownもここに置く。契約は [AI参加者の設計](docs/ai-participant.md)
+    - AIが読んでよい画像の置き場 `image_dirs` の導出と検証は `MeetingFiles.swift` と `AIContext.swift`。契約は [AIへの受け渡し](docs/ai-handoff.md) の「画像の参照」
 - `Sources/KikigakiAIIO/`: アプリと返送CLIが共有するfd検証、原子的な保存、sessionとフック観測の型
 - `Sources/KikigakiCLI/`: 同梱CLI `kikigaki-cli`。配置は `.app/Contents/Helpers/kikigaki-cli`
   - コマンド: `accept`・`reply`・`progress`・`notify`・`minutes`・`speaker`・`resolve`・`skill`・`next`。書式は `ReturnCommand.swift`、`SkillCommand.swift`、`NextCommand.swift`
@@ -43,8 +46,10 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `UtterancePlayer.swift`: 発言の行の区間だけを元の音声から流す
   - `SystemAudioHardware.swift` / `SystemAudioCapture.swift` / `MicAndSystemSource.swift`: 出力の判定、プロセスタップとマイクの同時取り込み、継続的な変換、失敗時のマイクへの切替
   - `AppleTranscriber.swift` / `SpeakerDiarizer.swift`: エンジンのラッパー
-  - `StartSheet.swift`: 録音開始シート。会議ごとの話者判別・議事録・自動送信を `session.start` の前に決める
+  - `StartSheet.swift`: 録音開始シート。会議ごとの話者判別・画面の記録・議事録・自動送信を `session.start` の前に決める
+  - `ScreenRecorder.swift` / `WebPEncoder.swift`: 画面の記録の撮影・保存・公開。ScreenCaptureKitのストリームと「いま撮る」、libwebpでの符号化
   - `TranscriptWindow.swift` / `StatusItem.swift` / `AppDelegate.swift`
+  - `ScreenLaneView.swift` / `TranscriptWindowScreenLane.swift`: 書き起こしウィンドウの画像レーンの描画と組み立て、開閉、Quick Look
   - `AI*.swift` / `Minutes*.swift`: AI参加のherdr接続・会議の記録・進行表示と、議事録ペイン
 - `Tests/`: ユニットテスト (swift-testing)
   - `KikigakiCoreTests`: ロジック層。主戦場
@@ -96,7 +101,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 - 受け入れたリスク
   - 議事録ペインで非公開のWebKit設定を使い、60Hz優先を外す。[議事録の描画と検索](docs/minutes-rendering.md#画面の更新頻度)
     - 条件: macOSの更新で設定がなくなると約60Hzへ戻りうる。
-  - `outputDir` をCodexの書き込み許可へ加えるため、全会議のMarkdown・state・archive・minutes・返送tokenを含むrequestsをモデルから書き換えられる。会議Markdownを直接編集しない制約はSkillの規則で、サンドボックスでは保証されない。[議事録プレビューの設計](docs/minutes-preview.md) の「Skillの規則と書き込み許可」
+  - `outputDir` をCodexの書き込み許可へ加えるため、全会議のMarkdown・添付と画面の記録の画像・state・archive・minutes・返送tokenを含むrequestsをモデルから書き換えられる。会議Markdownを直接編集しない制約はSkillの規則で、サンドボックスでは保証されない。[議事録プレビューの設計](docs/minutes-preview.md) の「Skillの規則と書き込み許可」
   - 速報を並走させると高精度側の認識結果も変わり、語尾や助詞が落ちやすくなる。認識品質の検証は等倍で行う。[文字起こしの速報表示](docs/fast-transcription.md)
   - 話者補正が残す限界。吸収の廃止で元の形に戻る事例を含む。[話者の割当と固定](docs/speaker-assignment.md) の「受け入れた限界」
   - 議事録に書かれた外部画像は、表示時に配信元へ通信する。議事録の外にあるローカル画像も絶対パスで指せば表示する。議事録を書くのは利用者自身と利用者が設定したAIで、信頼できない相手が書く前提を置かない。表示側で塞いでもAIは自分のネットワークを持つため、塞ぐ効果が薄い。[議事録の描画と検索](docs/minutes-rendering.md)
@@ -126,11 +131,11 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | `site/` のページ | 元になる正本 |
 | --- | --- |
 | `getting-started.md` | `site/` が正本。モデル取得は [Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md) |
-| `recording.md` | [録音開始シート](docs/start-sheet.md)、[音声ファイルの書き起こし](docs/audio-file.md)、[発話の確定表示](docs/utterance-progress.md)、[話者判別の切替](docs/diarization-toggle.md)、[話者の手動統合](docs/speaker-mapping.md)、[小音量発話の除外](docs/audio-exclusion.md)、[手入力の設計](docs/typed-entry.md)、[書き起こしウィンドウ](docs/transcript-window.md)、[発言ごとの音声再生](docs/utterance-playback.md) |
+| `recording.md` | [録音開始シート](docs/start-sheet.md)、[音声ファイルの書き起こし](docs/audio-file.md)、[発話の確定表示](docs/utterance-progress.md)、[話者判別の切替](docs/diarization-toggle.md)、[話者の手動統合](docs/speaker-mapping.md)、[小音量発話の除外](docs/audio-exclusion.md)、[手入力の設計](docs/typed-entry.md)、[書き起こしウィンドウ](docs/transcript-window.md)、[発言ごとの音声再生](docs/utterance-playback.md)、[画面の記録](docs/screen-capture.md) |
 | `online-meetings.md` | [システム音声の取り込み](docs/system-audio.md) |
 | `ai-participant.md` | [AI参加者の設計](docs/ai-participant.md)、[AI設定の複数プロファイル](docs/ai-profiles.md)、[AIへの定期自動送信](docs/ai-scheduled.md)、[AIを会話の参加者として並べる](docs/ai-timeline.md)、[AIへの受け渡し](docs/ai-handoff.md) |
 | `minutes-and-board.md` | [議事録ペイン](docs/minutes-pane.md)、[議事録の描画と検索](docs/minutes-rendering.md)、[議事録プレビューの設計](docs/minutes-preview.md)、[議論のボード](docs/board.md) |
-| `data.md` | `site/` が正本。根拠は [議事録プレビューの設計](docs/minutes-preview.md) の書き込み許可、[AI参加者の設計](docs/ai-participant.md) の受け渡し、[設定リファレンス](docs/config.md) の保存物 |
+| `data.md` | `site/` が単一情報源。根拠は [議事録プレビューの設計](docs/minutes-preview.md) の書き込み許可、[AI参加者の設計](docs/ai-participant.md) の受け渡し、[AIへの受け渡し](docs/ai-handoff.md) の画像の参照、[設定リファレンス](docs/config.md) の保存物 |
 | `configuration.md` | [設定リファレンス](docs/config.md)、[AI設定の複数プロファイル](docs/ai-profiles.md) |
 
 ## 文書の索引
@@ -149,7 +154,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | [Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md) | 依存、モデル、区間化、失敗の扱い、8枠、保存互換 | `SpeakerDiarizer` ・ `SpeakerRuns` ・FluidAudioを変える前 |
 | [話者判別の切替](docs/diarization-toggle.md) | 話者判別のオン・オフ、無効時の行分割 | 話者判別の有効・無効の経路を変える前 |
 | [システム音声の取り込み](docs/system-audio.md) | 開始シートの3択、出力判定、同時取り込みと混合、失敗時の扱い | 音源・混合・システム音声の許可を変える前 |
-| [画面の記録](docs/screen-capture.md) | 画面の行の形、保存とAIへの行、声以外の行の経路ごとの扱い、画像レーンの表示とウィンドウの幅、撮る契機の判定 | `Utterance.Kind` に触れる・声以外の行の扱いを変える前 |
+| [画面の記録](docs/screen-capture.md) | 画面の行の形、保存とAIへの行、声以外の行の経路ごとの扱い、画像レーンの表示とウィンドウの幅、撮影と保存と公開の順序、撮る契機の判定 | `Utterance.Kind` に触れる・声以外の行の扱いを変える・画面の撮影や画像レーンを変える前 |
 | [話者の手動統合](docs/speaker-mapping.md) | 統合先の指定と解除、使用枠 | 統合・枠の数え方を変える前 |
 | [小音量発話の除外](docs/audio-exclusion.md) | 除外の判定、操作、保存・コピー・AI送信への適用 | 除外の判定や適用先を変える前 |
 | [小音量発話の計測](docs/audio-levels.md) | 音量トラックと診断表示、`.levels.json` | 音量の計測・保存を変える前 |
@@ -165,7 +170,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | [議論のボード](docs/board.md) | ボードの設定、内蔵プロンプト、見出しの扱い | ボード・`BoardPrompt` を変える前。テストが本文を読む |
 | [AI参加者の設計](docs/ai-participant.md) | 会議参加モードの契約、envelope、受信箱、同梱CLI、Skill、フック、停止後の後片付け | AI参加・同梱CLI・返送・Skillを変える前 |
 | [Homebrew tapの更新](docs/tap-update.md) | tap更新の認証と一時領域の後始末 | `update_tap.sh`を変える前 |
-| [AIへの受け渡し](docs/ai-handoff.md) | 「会話をコピー」と会話ファイルの契約 | 手動コピーを変える前 |
+| [AIへの受け渡し](docs/ai-handoff.md) | 「会話をコピー」と会話ファイルの契約、画像の参照と `image_dirs`、保存先の字句上の正規化 | 手動コピー・画像の参照・保存先のパスの扱いを変える前 |
 | [AI設定の複数プロファイル](docs/ai-profiles.md) | `[[ai]]` のキー・検証、宛先の選択 | `AIConfig` ・宛先選択を変える前 |
 | [AIへの定期自動送信](docs/ai-scheduled.md) | 自動送信の状態機械、2段の宛先ボタン、最後の1回 | 自動送信・宛先ボタンの表示を変える前 |
 | [AI依頼の進行表示](docs/ai-progress.md) | 返事待ち行の進行文と4分割バー | `AIProgress` を変える前 |

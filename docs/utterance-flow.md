@@ -33,7 +33,7 @@ flowchart TD
     freeze --> live["LiveTranscript：通常行と暫定末尾を分離"]
     merge -->|オフ：onResultからpublishUndiarized| off["UndiarizedTranscript.utterances：話者なしの行生成"]
     off --> live
-    live --> entries["TranscriptEntries.merge：手入力を併合、未凍結行の添字を引継ぎ"]
+    live --> entries["TranscriptEntries.merge：手入力と画面の記録を併合、未凍結行の添字を引継ぎ"]
     entries --> ui["TranscriptRow / TranscriptDocument：表示"]
 
     stop["MeetingSession.stop：音源停止・入力を閉じる"] --> drain["consumer完了待ち・WAVをclose"]
@@ -44,8 +44,9 @@ flowchart TD
     speakerEnd --> finalMode{"話者判別"}
     finalMode -->|オン| realign["MeetingResult.make：凍結なしでAligner.speakersを全体へ適用"]
     finalMode -->|オフ| noDiarization["MeetingResult.withoutDiarization：話者判定なし"]
-    realign --> finalEntries["TranscriptEntries.merge：最終判定の発話に手入力を併合"]
-    noDiarization --> finalEntries
+    realign --> screenDrain["ScreenRecorder.drain：受付済みの画面の公開を待つ"]
+    noDiarization --> screenDrain
+    screenDrain --> finalEntries["TranscriptEntries.merge：最終判定の発話に手入力と画面の記録を併合"]
     finalEntries --> archive["MeetingArchive.save：Markdown保存"]
     archive --> md["通常の .md を保存"]
     archive -->|SaveResult.utterancesで停止後の行を更新| ui
@@ -109,8 +110,8 @@ stateDiagram-v2
     Recording --> Finishing : stop呼出、文字・話者のどのステージからも移行
     Finishing --> Rejudge : オン、話者finish後に凍結なしで全体を突き合わせ
     Finishing --> FinalOff : オフ、高精度結果だけで行生成
-    Rejudge --> Saving : 手入力を併合
-    FinalOff --> Saving : 手入力を併合
+    Rejudge --> Saving : 手入力と画面の記録を併合
+    FinalOff --> Saving : 手入力と画面の記録を併合
     Saving --> Saved : 通常Markdownの保存成功
     Saving --> SaveFailed : 通常Markdownの保存失敗
     Saved --> [*]
@@ -140,7 +141,7 @@ stateDiagram-v2
 | 表示用の行と暫定末尾 | `LiveTranscript.init`、`Aligner.utterances` / `utteranceTokenRanges` | [LiveTranscript.swift](../Sources/KikigakiCore/LiveTranscript.swift)、[Aligner.swift](../Sources/KikigakiCore/Aligner.swift)。`finalCount` まで通常行、その先を `tentativeText` へ。未凍結を含む行を `pendingSpeakerRows` へ |
 | 話者判別オフの経路 | `MeetingSession.publishUndiarized` / `flushUndiarized`、`UndiarizedTranscript.utterances` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[UndiarizedTranscript.swift](../Sources/KikigakiCore/UndiarizedTranscript.swift)。結果通知で更新し、話者ラベルはnil、未凍結行集合は空 |
 | 話者統合の反映 | `SpeakerMapping.apply`、`MeetingSession.refreshLive` | [SpeakerMapping.swift](../Sources/KikigakiCore/SpeakerMapping.swift)、[MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)。録音中は推定・凍結後のラベルへ統合設定を適用 |
-| 手入力の併合 | `TranscriptEntries.merge` | [TranscriptEntries.swift](../Sources/KikigakiCore/TranscriptEntries.swift)。声の判定・行生成後に手入力を混ぜ、未凍結行の添字を更新 |
+| 手入力と画面の記録の併合 | `TranscriptEntries.merge` | [TranscriptEntries.swift](../Sources/KikigakiCore/TranscriptEntries.swift)。声の判定・行生成後に声以外の行を混ぜ、未凍結行の添字を更新。画面の記録の公開と停止時の待ちは [画面の記録](screen-capture.md) の「保存と公開の順序」 |
 | 画面の更新 | `MeetingSession.publishLive` / `refreshLive`、`TranscriptWindow.updateRows`、`TranscriptRow.update` / `updateTentative`、`TranscriptDocument.setRows` / `reflow` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[TranscriptWindow.swift](../Sources/Kikigaki/TranscriptWindow.swift)、[TranscriptRow.swift](../Sources/Kikigaki/TranscriptRow.swift)、[TranscriptDocument.swift](../Sources/Kikigaki/TranscriptDocument.swift)。状態はSessionから渡し、Documentは行を配置 |
 | 停止・エンジン最終化 | `MeetingSession.stop`、`AppleTranscriber.finish` / `tokens`、`SpeakerDiarizer.finish` | [MeetingSession.swift](../Sources/Kikigaki/MeetingSession.swift)、[AppleTranscriber.swift](../Sources/Kikigaki/AppleTranscriber.swift)、[SpeakerDiarizer.swift](../Sources/Kikigaki/SpeakerDiarizer.swift)。消費完了後に高精度、話者の順で最終化 |
 | 全体再判定・最終行 | `MeetingResult.make` / `withoutDiarization` | [MeetingResult.swift](../Sources/KikigakiCore/MeetingResult.swift)。オンは凍結なしでAlignerを呼び、統合設定を反映。オフは話者なし行を生成 |

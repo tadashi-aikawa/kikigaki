@@ -155,7 +155,7 @@ stdinは読まない。4つの必須引数以外、重複引数、空の値を�
 
 `AILaunchConfiguration` が `outputDir` をCodexの `sandbox_workspace_write.writable_roots` へ追加する。会話の行が参照する画像の置き場 `image_dirs` も `outputDir` の直下なので、許可を足さずに読める。詳細は [AIへの受け渡し](ai-handoff.md) の「画像の参照」。保持する既存許可先は `~/.codex/config.toml` 最上位の `[sandbox_workspace_write]` に限る。`CODEX_HOME` やプロファイル別の設定を拾わない既存の制約は変えない。任意に選択した議事録の親を追加したり、起動済みCLIの権限を変更したりしない。
 
-受け入れたリスク: outputDirへの許可は、全会議のMarkdown、state、archive、minutes、tokenを含むrequestsをモデルから書き換え可能にする。会議Markdownを直接編集しない制約はSkillの規則であり、サンドボックスの境界では保証されなくなる。tokenは同じユーザー内での隔離ではない。この点は `CLAUDE.md` にも記載している。
+受け入れたリスク: outputDirへの許可は、全会議のMarkdown、添付と画面の記録の画像、state、archive、minutes、tokenを含むrequestsをモデルから書き換え可能にする。会議Markdownを直接編集しない制約はSkillの規則であり、サンドボックスの境界では保証されなくなる。tokenは同じユーザー内での隔離ではない。この点は `CLAUDE.md` にも記載している。
 
 Claudeの同梱CLI限定allowは維持し、cwd外の編集は利用者の権限設定によって承認待ちとなり、herdrでblockedとして見える。Codexのwork_failedと区別して検証する。
 
