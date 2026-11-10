@@ -22,12 +22,15 @@ extension AppKitTests {
         context.fill(CGRect(x: 0, y: 0, width: 64, height: 36))
         return try #require(context.makeImage())
     }
-    private func wait(_ condition: () -> Bool) async {
+    /// 期限の約3秒を超えたらテストの失敗にする。成立しない条件を黙って待ち越さない。
+    private func wait(_ condition: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async {
         for _ in 0..<300 where !condition() { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(condition(), "待ちの期限を超えた", sourceLocation: sourceLocation)
     }
     /// 10秒分の音声を受け付けた録音中の会議。5秒の位置に発言が1つある。
     /// - outputDir: 設定の `outputDir` に書く文字列。会議Markdownは、設定が解決した保存先から導く。省略時は `root`
-    private func session(_ root: URL, fake: FakeHerdr, outputDir: String? = nil) throws -> MeetingSession {
+    /// - voiced: 10秒の音量を話している音量にする。falseなら無音で、自動の画面は保留される
+    private func session(_ root: URL, fake: FakeHerdr, outputDir: String? = nil, voiced: Bool = true) throws -> MeetingSession {
         var config = ResolvedConfig(config: KikigakiConfig(outputDir: outputDir ?? root.path), home: root)
         config.ai = ResolvedAIConfig(config: AIConfig(command: "/bin/echo", cwd: root.path), home: root)
         try FileManager.default.createDirectory(at: config.outputDir, withIntermediateDirectories: true)
@@ -35,6 +38,7 @@ extension AppKitTests {
         let session = MeetingSession(testingRecordingAt: config.outputDir.appendingPathComponent("meeting.md"), config: config,
                                      aiStore: store, recordedSamples: 160_000)
         session.setScheduleTranscriptForTesting("この図の数字を確認します", start: 5, elapsed: 10)
+        session.measureAudioForTesting(Array(repeating: voiced ? 0.1 : 0, count: 160_000))
         return session
     }
     private func reply(_ session: MeetingSession, root: URL) throws {
@@ -164,6 +168,72 @@ extension AppKitTests {
         try expectSameNotation(transcriptPath: manual.envelope.transcriptPath, imageDirectories: manual.envelope.imageDirectories,
                                expected: expected)
         await wait { recorder.pendingForTesting == 0 }
+    }
+
+    @Test func 黙って画面だけを替え続けても期限で送らず_声の変更があれば保留の1枚も一緒に送る() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), session = try session(root, fake: fake, voiced: false), now = Date()
+        defer { session.stopAISchedule() }
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: root.appendingPathComponent("meeting.md"))
+        try session.startAISchedule(options: .init(prompt: "議事録を更新", sendFinal: false), helper: URL(fileURLWithPath: "/bin/echo"), now: now)
+        await session.submissionTaskForTesting?.value
+        try reply(session, root: root)
+        recorder.observeForTesting(try image(), label: "EV3895 · Keynote「提案資料」")
+        await wait { recorder.pendingForTesting == 0 }
+        #expect(session.heldScreenCountForTesting == 1 && session.screenEntriesForTesting.isEmpty)
+        // 期限が来ても、保留だけでは変更に数えず、公開もしない。期限を重ねても同じ。
+        for minutes in [200.0, 400, 600] {
+            #expect(session.evaluateAISchedule(now: now.addingTimeInterval(minutes)) == .skipped(.noChange))
+            await session.submissionTaskForTesting?.value
+            #expect(session.heldScreenCountForTesting == 1 && session.screenEntriesForTesting.isEmpty)
+        }
+        #expect(session.aiRecord?.controller.conversation.questions.count == 1)
+        // 声の変更で送ると決まったら、値を固定する前に保留を公開し、今の画面を一緒に渡す。
+        session.setScheduleTranscriptForTesting("この図の数字を確認します。次の表も見ます", start: 5, elapsed: 10)
+        session.evaluateAISchedule(now: now.addingTimeInterval(1000)); await session.submissionTaskForTesting?.value
+        #expect(session.heldScreenCountForTesting == 0 && session.screenEntriesForTesting.count == 1)
+        let questions = try #require(session.aiRecord?.controller.conversation.questions)
+        #expect(questions.count == 2)
+        let last = try #require(questions.last?.request)
+        #expect(last.trigger == .scheduled)
+        let lines = try sentLines(last)
+        #expect(lines.contains { $0.contains("次の表も見ます") })
+        #expect(lines.contains { $0.contains("画面:") && $0.contains(".captures/") })
+    }
+
+    @Test func 停止で公開した保留の画面だけが変更でも_最後の1回で送る() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), session = try session(root, fake: fake, voiced: false)
+        defer { session.stopAISchedule() }
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: root.appendingPathComponent("meeting.md"))
+        try session.startAISchedule(options: .init(prompt: "議事録を更新"), helper: URL(fileURLWithPath: "/bin/echo"), now: Date())
+        await session.submissionTaskForTesting?.value
+        try reply(session, root: root)
+        recorder.observeForTesting(try image(), label: "EV3895 · Keynote「提案資料」")
+        await wait { recorder.pendingForTesting == 0 }
+        #expect(session.heldScreenCountForTesting == 1)
+        // 停止で保留は会議Markdownの行になる。最後の1回は保存した会話の差分で決めるので、画面の行だけでも送る。
+        await session.stop()
+        #expect(session.heldScreenCountForTesting == 0 && session.screenEntriesForTesting.count == 1)
+        session.evaluateAISchedule(); await session.submissionTaskForTesting?.value
+        let questions = try #require(session.aiRecord?.controller.conversation.questions)
+        #expect(questions.count == 2)
+        let last = try #require(questions.last?.request)
+        #expect(last.trigger == .scheduled)
+        #expect(try sentLines(last).contains { $0.contains("画面:") && $0.contains(".captures/") })
+    }
+
+    @Test func 手動送信は無音の間に保留した画面を公開してから値を取る() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        let fake = FakeHerdr(), session = try session(root, fake: fake, voiced: false)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: root.appendingPathComponent("meeting.md"))
+        recorder.observeForTesting(try image(), label: "EV3895 · Keynote「提案資料」")
+        await wait { recorder.pendingForTesting == 0 }
+        #expect(session.heldScreenCountForTesting == 1)
+        session.submitAI(question: "この画面を見て", full: true, parent: nil, helper: URL(fileURLWithPath: "/bin/echo"))
+        await session.submissionTaskForTesting?.value
+        let request = try #require(session.aiRecord?.controller.conversation.questions.last?.request)
+        #expect(try sentLines(request).contains { $0.contains("画面:") && $0.contains(".captures/") })
     }
 
     @Test func 送信済みの発言より前に遅れて届いた画面は_次の自動送信で1回だけ送り受領後は送り直さない() async throws {

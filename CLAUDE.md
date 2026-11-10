@@ -27,6 +27,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `GlobalHotkey.swift`: 手動宛先へ送るグローバルキーの書式と表記。登録はアプリ側の `GlobalHotkeyRegistration.swift`
   - `SystemAudioMix.swift`: システム音声の3択、出力の3値判定、16kHzの加算とピーク保護
   - `ScreenChange.swift`: 画面の記録の撮る契機の判定と縮小画像。仕様は [画面の記録](docs/screen-capture.md)
+  - `ScreenSilence.swift`: 音量のトラックでの声の判定と、無音の間に撮った画面の保留。仕様は [画面の記録](docs/screen-capture.md) の「無音の間の保留」
   - `ScreenCapture.swift`: 画面の記録の置き場とファイル名、見出し、保存の失敗の数え方、観測した瞬間の音声位置
   - `ScreenLane.swift`: 画面の行を書き起こしウィンドウの画像レーンへ割り当てる置き場と畳み方。仕様は [画面の記録](docs/screen-capture.md) の「表示」
   - `LexicalPath.swift`: 保存先 `outputDir` の字句上の正規化。ファイルの有無を見ない。仕様は [AIへの受け渡し](docs/ai-handoff.md) の「画像の参照」
@@ -154,7 +155,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | [Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md) | 依存、モデル、区間化、失敗の扱い、8枠、保存互換 | `SpeakerDiarizer` ・ `SpeakerRuns` ・FluidAudioを変える前 |
 | [話者判別の切替](docs/diarization-toggle.md) | 話者判別のオン・オフ、無効時の行分割 | 話者判別の有効・無効の経路を変える前 |
 | [システム音声の取り込み](docs/system-audio.md) | 開始シートの3択、出力判定、同時取り込みと混合、失敗時の扱い | 音源・混合・システム音声の許可を変える前 |
-| [画面の記録](docs/screen-capture.md) | 画面の行の形、保存とAIへの行、声以外の行の経路ごとの扱い、画像レーンの表示とウィンドウの幅、撮影と保存と公開の順序、撮る契機の判定 | `Utterance.Kind` に触れる・声以外の行の扱いを変える・画面の撮影や画像レーンを変える前 |
+| [画面の記録](docs/screen-capture.md) | 画面の行の形、保存とAIへの行、声以外の行の経路ごとの扱い、画像レーンの表示とウィンドウの幅、撮影と保存と公開の順序、撮る契機の判定、無音の間の保留 | `Utterance.Kind` に触れる・声以外の行の扱いを変える・画面の撮影や画像レーンを変える前 |
 | [話者の手動統合](docs/speaker-mapping.md) | 統合先の指定と解除、使用枠 | 統合・枠の数え方を変える前 |
 | [小音量発話の除外](docs/audio-exclusion.md) | 除外の判定、操作、保存・コピー・AI送信への適用 | 除外の判定や適用先を変える前 |
 | [小音量発話の計測](docs/audio-levels.md) | 音量トラックと診断表示、`.levels.json` | 音量の計測・保存を変える前 |
@@ -189,6 +190,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 - [Nemotron fast128 への切替の検証記録](docs/records/nemotron-verification.md)
 - [システム音声取り込みの実現性試作の検証記録](docs/records/system-audio-spike.md)
 - [画面の記録の試作の検証記録](docs/records/screen-capture-spike.md)
+- [無音の間の画面の保留の見積もり](docs/records/screen-silence-estimate.md)
 - [音声ファイルの書き起こしの試作記録](docs/records/audio-file-spike.md)
 - [議事録プレビューの実装記録](docs/records/minutes-preview-implementation.md)
 - [会議参加モードの検証項目とステップ1〜5の実装記録](docs/records/ai-participant-implementation.md)

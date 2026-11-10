@@ -111,6 +111,15 @@ import Testing
     }
 }
 
+private extension ScreenChangeDetector {
+    /// 保存を受け付けて成功を返す。受付の番号を省くと、自動だけの検証としてフレームの番号と同じ値を振る。
+    /// 番号は呼び出し側が振る受付の番号で、判定器はフレームの番号と比べない。
+    mutating func succeed(_ frame: Int, order: Int? = nil) {
+        accepted(frame: frame, order: order ?? frame)
+        saveSucceeded(frame: frame)
+    }
+}
+
 @Suite struct ScreenChangeDetectorTests {
     private func thumbnail(_ fill: UInt8, patch: (Int, UInt8)? = nil) -> ScreenThumbnail {
         var luma = [UInt8](repeating: fill, count: 100)
@@ -164,7 +173,7 @@ import Testing
     @Test func 保存に失敗したら間隔をおいて同じ画面をもう一度保存する() {
         var detector = ScreenChangeDetector(parameters: parameters)
         _ = detector.observe(frame: 0, at: 0, thumbnail: thumbnail(200))
-        detector.saveSucceeded(frame: 0)
+        detector.succeed(0)
         _ = detector.observe(frame: 1, at: 1, thumbnail: thumbnail(50))
         #expect(detector.tick(at: 2.5)?.frame == 1)
         #expect(detector.tick(at: 3) == nil)
@@ -186,7 +195,7 @@ import Testing
         func pending() -> ScreenChangeDetector {
             var detector = ScreenChangeDetector(parameters: parameters)
             _ = detector.observe(frame: 0, at: 0, thumbnail: thumbnail(200))
-            detector.saveSucceeded(frame: 0)
+            detector.succeed(0)
             _ = detector.observe(frame: 1, at: 1, thumbnail: thumbnail(50))
             #expect(detector.tick(at: 2.5)?.frame == 1)
             _ = detector.observe(frame: 2, at: 3, thumbnail: thumbnail(120))
@@ -202,12 +211,12 @@ import Testing
         // Bが先に失敗し、Aが後で成功: 基準はA。画面がAのままなら保存しない。
         detector = pending()
         detector.saveFailed(frame: 2, at: 5)
-        detector.saveSucceeded(frame: 1)
+        detector.succeed(1)
         _ = detector.observe(frame: 3, at: 6, thumbnail: thumbnail(50))
         #expect(detector.tick(at: 10) == nil)
         // Bが先に成功し、Aが後で失敗: Aの結果を待つ間もBを撮り直さず、基準はBのまま。
         detector = pending()
-        detector.saveSucceeded(frame: 2)
+        detector.succeed(2)
         #expect(detector.tick(at: 5) == nil)
         #expect(detector.tick(at: 9) == nil)
         detector.saveFailed(frame: 1, at: 5)
@@ -222,14 +231,123 @@ import Testing
         detector.reset()
         #expect(detector.tick(at: 10) == nil)
         // reset の前に決めた保存の結果は無視する。
-        detector.saveSucceeded(frame: 0)
+        detector.succeed(0)
         #expect(detector.observe(frame: 2, at: 11, thumbnail: thumbnail(50))?.reason == .first)
+    }
+
+    @Test func 一時停止をまたいで比較の基準を引き継ぎ_同じ画面を続けて保存しない() {
+        var detector = ScreenChangeDetector(parameters: parameters)
+        _ = detector.observe(frame: 0, at: 0, thumbnail: thumbnail(200))
+        detector.succeed(0)
+        // 再開の直後が一時停止の前と同じ画面なら保存しない。
+        detector.restart()
+        #expect(detector.observe(frame: 1, at: 30, thumbnail: thumbnail(200)) == nil)
+        #expect(detector.tick(at: 40) == nil)
+        // 違えば落ち着きを待たずに保存する。動きは再開の後から数え直す。
+        detector.restart()
+        #expect(detector.observe(frame: 2, at: 60, thumbnail: thumbnail(50)) == .init(frame: 2, reason: .settled))
+        // 一時停止の前に決めた保存の結果は、再開の後に返っても基準に入る。
+        detector.restart()
+        detector.succeed(2)
+        #expect(detector.observe(frame: 3, at: 90, thumbnail: thumbnail(50)) == nil)
+        // 基準を持たないまま再開したら、最初の1枚として撮る。
+        var fresh = ScreenChangeDetector(parameters: parameters)
+        fresh.restart()
+        #expect(fresh.observe(frame: 0, at: 0, thumbnail: thumbnail(200))?.reason == .first)
+    }
+
+    @Test func いま撮るの画像を基準に採った後_押す前の観測を何度も保存しない() {
+        var detector = ScreenChangeDetector(parameters: parameters)
+        #expect(detector.observe(frame: 0, at: 0, thumbnail: thumbnail(200))?.frame == 0)
+        detector.succeed(0, order: 0)
+        // 手動の画像の受付は1。新しい観測を挟まずに、時間と保存の結果だけを進める。
+        detector.adopt(order: 1, thumbnail: thumbnail(50))
+        for second in 1...5 {
+            #expect(detector.tick(at: Double(second) * 10) == nil)
+            detector.succeed(0, order: 0)
+        }
+        // 新しい観測は、手動の画像と比べる。
+        #expect(detector.observe(frame: 1, at: 60, thumbnail: thumbnail(50)) == nil)
+        #expect(detector.tick(at: 65) == nil)
+        #expect(detector.observe(frame: 2, at: 70, thumbnail: thumbnail(200)) == nil)
+        #expect(detector.tick(at: 72) == .init(frame: 2, reason: .settled))
+    }
+
+    @Test func 保存しなかった再観測は_いま撮るの後に保存して基準を古い画面へ戻さない() {
+        var detector = ScreenChangeDetector(parameters: parameters)
+        _ = detector.observe(frame: 0, at: 0, thumbnail: thumbnail(200), acceptedBefore: 0)
+        detector.succeed(0, order: 0)
+        // 同じ画面Aを新しく観測した。基準と同じなので保存しない。観測までに受け付けた保存は1件。
+        #expect(detector.observe(frame: 1, at: 10, thumbnail: thumbnail(200), acceptedBefore: 1) == nil)
+        // 手動の画像Bを受付1で撮った。押す前の観測Aは、以後の判定で使わない。
+        detector.adopt(order: 1, thumbnail: thumbnail(50))
+        for second in 1...5 { #expect(detector.tick(at: 10 + Double(second) * 10) == nil) }
+        // 新しい観測は手動の画像と比べる。Aのままの画面を観測したら撮る。
+        #expect(detector.observe(frame: 2, at: 70, thumbnail: thumbnail(200), acceptedBefore: 2) == .init(frame: 2, reason: .settled))
+    }
+
+    @Test func いま撮るより後の観測は_手動の画像を基準に採っても残す() {
+        var detector = ScreenChangeDetector(parameters: parameters)
+        _ = detector.observe(frame: 0, at: 0, thumbnail: thumbnail(200), acceptedBefore: 0)
+        detector.succeed(0, order: 0)
+        // 手動を受付1で押した後に、別の画面Cを観測した。観測までに受け付けた保存は2件。落ち着く前に手動の画像が完成した。
+        #expect(detector.observe(frame: 1, at: 10, thumbnail: thumbnail(120), acceptedBefore: 2) == nil)
+        detector.adopt(order: 1, thumbnail: thumbnail(50))
+        // Cは手動の撮影より後の観測なので、落ち着いたら手動の画像と比べて撮る。
+        #expect(detector.tick(at: 12) == .init(frame: 1, reason: .settled))
+    }
+
+    @Test func 保存中の自動の画像より後に受け付けたいま撮るを基準にし_捨てた自動の画像へ戻れば撮る() {
+        // 自動の画像Aを受付0で保存中に、手動の画像Bを受付1で押した。Aの成功が先に返っても、基準はB。
+        var detector = ScreenChangeDetector(parameters: parameters)
+        _ = detector.observe(frame: 0, at: 0, thumbnail: thumbnail(200))
+        detector.accepted(frame: 0, order: 0)
+        detector.saveSucceeded(frame: 0)
+        detector.adopt(order: 1, thumbnail: thumbnail(50))
+        for second in 1...5 { #expect(detector.tick(at: Double(second) * 10) == nil) }
+        // Aのままの画面を新しく観測したら、Bと違うので撮る。動きは無いので待たない。
+        #expect(detector.observe(frame: 1, at: 60, thumbnail: thumbnail(200)) == .init(frame: 1, reason: .settled))
+        // 手動の画像より後に受け付けた自動の画像の成功が後から返ったら、そちらが新しい基準になる。
+        var later = ScreenChangeDetector(parameters: parameters)
+        _ = later.observe(frame: 0, at: 0, thumbnail: thumbnail(200))
+        later.succeed(0, order: 0)
+        _ = later.observe(frame: 1, at: 1, thumbnail: thumbnail(120))
+        #expect(later.tick(at: 2.5)?.frame == 1)
+        later.accepted(frame: 1, order: 2)
+        later.adopt(order: 1, thumbnail: thumbnail(50))
+        later.saveSucceeded(frame: 1)
+        #expect(later.observe(frame: 2, at: 10, thumbnail: thumbnail(120)) == nil)
+        #expect(later.tick(at: 20) == nil)
+    }
+
+    @Test(arguments: [false, true])
+    func 同じ間に押したいま撮るは受付の新しい方を基準にし_遅い完了で上書きしない(reversed: Bool) {
+        var detector = ScreenChangeDetector(parameters: parameters)
+        _ = detector.observe(frame: 0, at: 0, thumbnail: thumbnail(200))
+        detector.succeed(0, order: 0)
+        // 新しい観測を挟まずに、B(受付1)とC(受付2)を続けて押した。完了は順方向か逆方向。
+        let completions: [(Int, UInt8)] = [(1, 50), (2, 120)]
+        for (order, fill) in reversed ? completions.reversed() : completions { detector.adopt(order: order, thumbnail: thumbnail(fill)) }
+        // 基準はC。Cのままなら撮らず、Bへ戻れば撮る。
+        #expect(detector.observe(frame: 1, at: 10, thumbnail: thumbnail(120)) == nil)
+        #expect(detector.tick(at: 20) == nil)
+        #expect(detector.observe(frame: 2, at: 30, thumbnail: thumbnail(50)) == nil)
+        #expect(detector.tick(at: 32) == .init(frame: 2, reason: .settled))
+    }
+
+    @Test func 引き継いだ基準と寸法が違えば最初の1枚から数え直す() {
+        var detector = ScreenChangeDetector(parameters: parameters)
+        _ = detector.observe(frame: 0, at: 0, thumbnail: thumbnail(200))
+        detector.succeed(0)
+        detector.restart()
+        let wide = ScreenThumbnail(width: 20, height: 5, luma: [UInt8](repeating: 200, count: 100))
+        #expect(detector.observe(frame: 1, at: 1, thumbnail: wide) == .init(frame: 1, reason: .first))
     }
 
     @Test func 縮小画像の寸法が変わったら最初の1枚から数え直す() {
         var detector = ScreenChangeDetector(parameters: parameters)
         _ = detector.observe(frame: 0, at: 0, thumbnail: thumbnail(200))
-        detector.saveSucceeded(frame: 0)
+        detector.succeed(0)
         let wide = ScreenThumbnail(width: 20, height: 5, luma: [UInt8](repeating: 200, count: 100))
         #expect(detector.observe(frame: 1, at: 1, thumbnail: wide) == .init(frame: 1, reason: .first))
     }

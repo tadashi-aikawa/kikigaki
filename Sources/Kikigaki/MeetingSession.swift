@@ -108,6 +108,20 @@ final class MeetingSession {
     /// この会議の画面の記録。撮らない会議はnil。仕様は docs/screen-capture.md
     private var screenRecorder: ScreenRecorder?
     private var screenHealth = ScreenCaptureHealth()
+    /// 書き込みを終え、公開を待っている自動の画面。無音の間の画面はここに残し、話し始めに最後の1枚だけを出す。
+    /// 会議ごとのメモリだけの値で、`screenRecorder` を替えるときに必ず捨てる。仕様は docs/screen-capture.md の「無音の間の保留」
+    private var screenHold = ScreenSilenceHold<HeldScreen>()
+    /// order: 自動と「いま撮る」を合わせた受付の番号。行の挿入位置を決める
+    private struct HeldScreen { let entry: Utterance; let url: URL; let order: Int }
+    /// `typedEntries` の各行の受付の番号。行と同じ添字で並び、小さい順を保つ。このセッションのメモリにだけ持ち、保存しない。
+    /// - 画面の行: その画面の受付の番号
+    /// - 手入力とイベントの行: 足したときまでに受け付けた保存の数。番号がこれより小さい画面は、この行より前に受け付けている
+    /// 遅れて届いた画面は、自分の番号より大きい最初の行の前へ置く。境界で公開した画面や手入力より前に受け付けた画面も、受付の順に並ぶ。
+    private var entryOrders: [Int] = []
+    /// 消せなかった公開しない画像。片付けのときに消し直す。会議をまたいで持つ。パスは絶対パスなので、古い会議の保存先を指したまま消し直せる。
+    private var undeletedScreenFiles: [URL] = []
+    /// 公開しなかった画像を消す。初期化のときだけ差し替えられる。検証で失敗を差し込むため。
+    private let removeScreenFile: (URL) throws -> Void
     /// 画面の記録の開始・一時停止・停止を、操作した順に1本で流す。素早い一時停止と再開で、後の開始を先の停止が止めないため。
     private var screenOperation: Task<Void, Never>?
     private var finalTokens: [TimedToken] = []
@@ -309,8 +323,10 @@ final class MeetingSession {
     }
 
     init(config: ResolvedConfig, models: @escaping () async throws -> DiarizationModels.Loaded, log: @escaping (String) -> Void,
-         aiStore: AIRecordStore? = nil, diarizationDefaults: UserDefaults? = nil) {
+         aiStore: AIRecordStore? = nil, diarizationDefaults: UserDefaults? = nil,
+         removeScreenFile: @escaping (URL) throws -> Void = { try FileManager.default.removeItem(at: $0) }) {
         self.config = config
+        self.removeScreenFile = removeScreenFile
         meetingAutoSendPhrases = config.autoSendPhrases
         autoSendPhraseState = AutoSendPhraseState(phrases: config.aiProfiles.first?.autoSendPhrases ?? config.autoSendPhrases)
         self.aiStore = aiStore; meetingAIProfiles = config.aiProfiles
@@ -389,8 +405,9 @@ final class MeetingSession {
         liveSource = SpeakerTranscript(accurateFinalCount: 0)
         pendingUndiarizedDraw?.cancel(); pendingUndiarizedDraw = nil
         lastUndiarizedDraw = -Double.infinity; lastUndiarizedFinalCount = 0
-        typedEntries = []
+        typedEntries = []; entryOrders = []
         screenRecorder?.invalidate(); screenRecorder = nil
+        discardHeldScreens()
         screenHealth = ScreenCaptureHealth()
         finalTokens = []
         speakerSegments = []
@@ -574,7 +591,13 @@ final class MeetingSession {
         snapshot.timeline = pause.timeline
         // 受付済みの画面の保存を、公開まで最大3秒待つ。超えた分は無効にし、最終保存の後から公開しない。
         await screen?.drain(timeout: .seconds(3))
-        if screenRecorder === screen { screenRecorder = nil }
+        if screenRecorder === screen {
+            // 無音の間に保留していた画面も、最終保存と最後の1回に入れる。書き込みは済んでいるので待ちの3秒を使わない。
+            // 消費は終わり、音量は最後まで届いている。
+            releaseHeldScreens()
+            retryUndeletedScreens()
+            screenRecorder = nil
+        }
         snapshot.screenCaptureWarning = nil
         let merged = TranscriptEntries.merge(voice: final.utterances, typed: typedEntries, timeline: snapshot.timeline).utterances
         var meeting = MeetingMarkdown.Meeting(startedAt: startedAt, duration: duration, utterances: merged,
@@ -724,10 +747,13 @@ final class MeetingSession {
                 screenRecorder.pauseCapturing()
                 enqueueScreen { await screenRecorder.closeStream() }
             }
+            // 一時停止の空白の手前の最後の画面を残す。撮影を止めた後に境界を引くので、一時停止より前に受け付けた保存は
+            // 後から届いても公開する。再開の直後の1枚は、この画面を比較の基準に引き継いで決める。
+            releaseHeldScreens()
         case .paused:
             pause.resume()
             snapshot.state = .recording
-            // 再開の直後に1枚撮る。一時停止の間に変わった画面を取りこぼさない。
+            // 再開の直後に、一時停止の前と違えば1枚撮る。一時停止の間に変わった画面を取りこぼさない。
             if let screenRecorder, !screenRecorder.isUnavailable {
                 let epoch = screenRecorder.resumeCapturing()
                 enqueueScreen { await screenRecorder.start(epoch: epoch) }
@@ -813,7 +839,7 @@ final class MeetingSession {
         do {
             paths = try TypedImageDraft.save(images, beside: markdownURL)
             let entry = try Utterance(typedText: text, at: audioTime, postedAt: postedAt, imagePaths: paths)
-            typedEntries.append(entry)
+            appendEntry(entry)
         } catch {
             for path in paths { try? FileManager.default.removeItem(atPath: path) }
             snapshot.message = "画像付きの投稿を保存できませんでした: \(error.localizedDescription)"
@@ -851,6 +877,10 @@ final class MeetingSession {
         let pause = self.pause
         return ScreenRecorder(display: display, markdownURL: markdownURL, acceptedAudioTime: { pause.audioTime },
             publish: { [weak self] recorder, shot, url in self?.publishScreen(recorder, shot, url) ?? .rejected },
+            discardUnpublished: { [weak self] url in
+                // 公開を拒んだ画像も、保留の破棄と同じ削除と消し直しへ渡す。会議が替わった後の古い保存も同じ。
+                if let self { self.removeUnpublishedScreen(url) } else { try? FileManager.default.removeItem(at: url) }
+            },
             failed: { [weak self] recorder, reason in self?.screenSaveFailed(recorder, reason) },
             becameUnavailable: { [weak self] recorder, reason in self?.screenBecameUnavailable(recorder, reason) })
     }
@@ -860,13 +890,27 @@ final class MeetingSession {
     private func publishScreen(_ recorder: ScreenRecorder, _ shot: ScreenShot, _ url: URL) -> ScreenRecorder.PublishResult {
         guard recorder === screenRecorder, !recorder.isInvalidated,
               snapshot.state == .recording || snapshot.state == .paused || snapshot.state == .finishing,
+              let order = shot.order,
               let entry = try? Utterance(screenLabel: shot.label, imagePath: url.path, at: shot.audioTime, postedAt: shot.observedAt)
         else { return .rejected }
-        typedEntries.append(entry)
+        let published: Bool
+        if shot.frame != nil {
+            // 自動の1枚は、話している間なら決まった時点で出し、無音の間なら保留する。保留も判定器には保存の成功として返す。
+            // 行き先は届いた順ではなく受付の番号の順で決める。境界より前に受け付けた保存は、境界の後に届いても境界の扱いになる。
+            screenHold.receive(HeldScreen(entry: entry, url: url, order: order), at: shot.audioTime, sequence: order)
+            published = advanceHeldScreens()
+        } else {
+            // 「いま撮る」は保留を通さない。受付の番号がこれより小さい自動の保留は、それより古いので捨てる。
+            // 後に受け付けた保留は、手動の完了が遅れて後から届いても残す。
+            for old in screenHold.supersede(below: order) { removeUnpublishedScreen(old.url) }
+            // 境界より前に押して境界の後に届いた1枚も、境界の後の行より前へ置く。
+            insertScreen(HeldScreen(entry: entry, url: url, order: order))
+            published = true
+        }
         screenHealth.saved()
         if snapshot.state != .finishing {
             snapshot.screenCaptureWarning = screenHealth.warning
-            refreshLive()
+            if published { refreshLive() }
         }
         emit()
         return .published
@@ -875,6 +919,8 @@ final class MeetingSession {
     private func screenSaveFailed(_ recorder: ScreenRecorder, _ reason: String) {
         log("画面の記録を保存できません: \(reason)")
         // 停止処理中の失敗はヘッダーへ出さない。停止後のヘッダーに警告を残さないため。
+        // まだ届いていない自動の保存が減ったので、それを待っていた話し始めの判定を進める。
+        if recorder === screenRecorder, advanceHeldScreens(), snapshot.state == .recording || snapshot.state == .paused { refreshLive(); emit() }
         guard recorder === screenRecorder, snapshot.state == .recording || snapshot.state == .paused else { return }
         screenHealth.failed(reason)
         snapshot.screenCaptureWarning = screenHealth.warning
@@ -887,8 +933,10 @@ final class MeetingSession {
         log("画面を記録できません: \(reason)")
         screenHealth.becameUnavailable(reason)
         snapshot.screenCaptureWarning = screenHealth.warning
+        // 撮れなくなる手前の最後の画面を、イベントの行より前に残す。
+        releaseHeldScreens()
         if let event = try? Utterance(screenEvent: .unavailable(reason), at: pause.audioTime, postedAt: Date()) {
-            typedEntries.append(event)
+            appendEntry(event)
         }
         // 撮影は知らせる前に止まっている。ストリームの片付けだけを流す。
         enqueueScreen { await recorder.closeStream() }
@@ -905,6 +953,82 @@ final class MeetingSession {
 
     var canCaptureScreenNow: Bool {
         snapshot.state == .recording && screenRecorder.map { !$0.isUnavailable } == true
+    }
+
+    // MARK: - 無音の間の保留
+
+    /// 声とみなす音量は小音量の除外のしきい値と同じ。除外のオン・オフによらず、その時点の値を使う。
+    private var voiceActivity: VoiceActivity { VoiceActivity(thresholdDBFS: audioExclusion.thresholdDBFS) }
+
+    /// 届いた音量で、公開を待つ画面の行き先を決める。公開した行があればtrue。表示の更新は呼び出し側が行う。
+    /// 音量は確定したウィンドウだけを読む。伸びている途中のウィンドウで無音と決めないため。
+    /// まだ届いていない自動の保存は、受け付けた数と届いた数を持つ `ScreenRecorder` のロックから読む。こちらに数を写さない。
+    @discardableResult
+    private func advanceHeldScreens() -> Bool {
+        guard !screenHold.isEmpty else { return false }
+        return applyHeldScreens(screenHold.advance(levels: audioLevelMeter?.track().levels ?? [], voice: voiceActivity,
+                                                   outstanding: screenRecorder?.hasAutomaticSavesInFlight ?? false))
+    }
+
+    /// 公開を待つ画面を全部出す。送信とコピーの値を取る前、一時停止と取得不能のイベントの行の前、停止の待ちの中で呼ぶ。
+    /// 書き込みは済んでいるので、符号化を待たずに同期で終わる。送信の操作が値を取る前に公開を終えられる。
+    /// 境界は、その時点までに受け付けた保存の数で引く。自動と「いま撮る」で共通の受付の番号と比べる。
+    /// まだ届いていない分は、届いたときにその場で公開する。
+    /// 一時停止と取得不能では撮影を止めた後に呼ぶ。止めた後は新しい受付が無いので、境界より前の受付を数え終えている。
+    private func releaseHeldScreens() {
+        let bound = screenRecorder?.savesAccepted ?? 0
+        let published = applyHeldScreens(screenHold.release(below: bound, levels: audioLevelMeter?.track().levels ?? [], voice: voiceActivity))
+        if published, snapshot.state == .recording || snapshot.state == .paused { refreshLive() }
+    }
+
+    private func applyHeldScreens(_ outcome: ScreenSilenceHold<HeldScreen>.Outcome) -> Bool {
+        // 捨てた画面は公開していないので、行も会議Markdownも指していない。画像ファイルだけを片付ける。
+        for item in outcome.discard { removeUnpublishedScreen(item.url) }
+        for item in outcome.publish { insertScreen(item) }
+        return !outcome.publish.isEmpty
+    }
+
+    /// 公開する画面を、受付の番号の順の位置へ置く。自分より後に受け付けた画面と、受け付けた後に足した手入力・イベントの行より前。
+    /// 理由: 併合は同じ音声位置の声以外の行を届いた順に並べる。録音の開始直後のように画面と取得不能のイベントが同じ位置だと、
+    /// 後から届いた画面がイベントの後ろに回り、「取得不能 → その前の画面」の順になる。届く順は受付の順と限らない。
+    private func insertScreen(_ item: HeldScreen) {
+        let at = entryOrders.firstIndex { item.order < $0 } ?? typedEntries.count
+        typedEntries.insert(item.entry, at: at)
+        entryOrders.insert(item.order, at: at)
+    }
+
+    /// 手入力とイベントの行を足す。番号は、足したときまでに受け付けた保存の数。
+    private func appendEntry(_ entry: Utterance) {
+        typedEntries.append(entry)
+        entryOrders.append(screenRecorder?.savesAccepted ?? 0)
+    }
+
+    /// 会議の切替・無効化で、公開していない画面を画像ごと捨てる。古い会議の保留を新しい会議へ出さない。
+    /// 前に消せなかった画像も、ここでもう一度消す。
+    private func discardHeldScreens() {
+        for item in screenHold.removeAll() { removeUnpublishedScreen(item.url) }
+        retryUndeletedScreens()
+    }
+
+    /// 公開しなかった画像を消す。消せなければパスを持ち続け、片付けのときに消し直す。無い画像は消えたものとみなす。
+    /// 公開した画像は渡さない。画像の名前は排他的に作るので、消せなかったパスを後の画像が使うことも無い。
+    private func removeUnpublishedScreen(_ url: URL) {
+        do {
+            try removeScreenFile(url)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile {
+            return
+        } catch {
+            log("公開しなかった画面の画像を消せません。片付けのときに消し直します: \(url.path): \(error)")
+            if !undeletedScreenFiles.contains(url) { undeletedScreenFiles.append(url) }
+        }
+    }
+
+    private func retryUndeletedScreens() {
+        let pending = undeletedScreenFiles
+        undeletedScreenFiles = []
+        // 念のため、今の会議で公開した画像は消さない。
+        let published = Set(typedEntries.flatMap(\.imagePaths))
+        for url in pending where !published.contains(url.path) { removeUnpublishedScreen(url) }
     }
 
     /// 枡に名前を付ける。停止後なら Markdown を保存し直す
@@ -941,6 +1065,8 @@ final class MeetingSession {
 
     func copyContext(writeClipboard: (String) -> Bool) {
         guard snapshot.canCopy, let url = snapshot.markdownURL else { return }
+        // 無音の間に保留していた今の画面も渡す。
+        releaseHeldScreens()
         do {
             if try handoff.copy(utterances: snapshot.includedUtterances, names: snapshot.names,
                                 outputDirectory: url.deletingLastPathComponent(), timeline: snapshot.timeline,
@@ -1211,6 +1337,9 @@ final class MeetingSession {
         let question = trigger == .scheduled && config.board != nil
             ? config.scheduledPrompt(minutesPath: minutesPath) : question
         let identification = config.identifySpeakers ? speakerIdentification(participants: participantNames, url: url) : nil
+        // 無音の間に保留していた今の画面を、値を取る前に公開する。公開は同期で終わるので、送信の準備は待たない。
+        // 定期自動送信は、保留を除いた変更で送ると決まった後にここへ来る。
+        releaseHeldScreens()
         let names = snapshot.names, timeline = snapshot.timeline, typed = typedEntries
         let exclusion = audioExclusion
         let workAllowed = suppliedWorkAllowed ?? aiWorkAllowed
@@ -1485,6 +1614,7 @@ final class MeetingSession {
             await enqueueScreen { await screenRecorder.closeStream() }.value
             self.screenRecorder = nil
         }
+        discardHeldScreens()
         interimSaveTask?.cancel(); interimSaveTask = nil
         pendingUndiarizedDraw?.cancel(); pendingUndiarizedDraw = nil
         source?.stop()
@@ -1534,6 +1664,10 @@ final class MeetingSession {
                     guard self.preparationID == generation else { return }
                     self.audioLevelMeter?.append(chunk)
                     self.consumedAudioTime = consumed
+                    // 音量の計測と同じ更新で、話し始めと音量待ちの画面を決める。
+                    if self.advanceHeldScreens(), self.snapshot.state == .recording || self.snapshot.state == .paused {
+                        self.refreshLive(); self.emit()
+                    }
                     if let judged { self.receiveSpeakerState(segments: judged) }
                 }
 
@@ -1888,6 +2022,8 @@ extension MeetingSession {
         observeAIScheduleResults()
         guard immediately || aiSchedule?.phase == .awaitingFinal ||
               (aiSchedule?.phase == .running && aiSchedule?.nextFire.map({ now >= $0 }) == true) else { return .none }
+        // 無音の間に保留している画面は公開せずに判定する。保留だけでは送らない。
+        // 声や手入力の変更で送ると決まったら、`submitAI` が値を取る前に公開して一緒に渡す。
         let lines = TranscriptRenderer.lines(snapshot.includedUtterances, names: snapshot.names, timeline: snapshot.timeline)
         let changed = aiRecord?.controller.hasChanges(lines: lines, slot: aiScheduleConfiguration?.slot) ?? !lines.isEmpty
         let availability = scheduleAvailability
@@ -1919,7 +2055,10 @@ extension MeetingSession {
 
 #if DEBUG
     /// ストリームを開かずに、この会議の画面の記録を据える。フレームは `observeForTesting` で渡す。
+    /// 前の記録があれば、録音の開始と同じく無効にして公開を待つ画面を捨てる。
     func installScreenRecorderForTesting(display: ScreenDisplay, markdownURL: URL) -> ScreenRecorder {
+        screenRecorder?.invalidate()
+        discardHeldScreens()
         let recorder = makeScreenRecorder(display: display, markdownURL: markdownURL)
         screenRecorder = recorder
         _ = recorder.resumeCapturing()
@@ -1927,6 +2066,23 @@ extension MeetingSession {
         return recorder
     }
     var screenEntriesForTesting: [Utterance] { typedEntries.filter { $0.kind == .screen } }
+    var heldScreenCountForTesting: Int { screenHold.count }
+    /// 声以外の行。公開の順と挿入の位置を確かめる。
+    var entriesForTesting: [Utterance] { typedEntries }
+
+    /// 音声を受け付ける。画面の観測位置はここまで進む。`measured` なら消費のループと同じ更新で音量も足す。
+    /// 消費の遅れを作るときは false にし、後から `measureAudioForTesting` で追いつかせる。
+    func acceptAudioForTesting(_ chunk: [Float], measured: Bool = true) {
+        let (_, continuation) = AsyncStream<[Float]>.makeStream()
+        pause.accept(chunk, into: continuation)
+        continuation.finish()
+        if measured { measureAudioForTesting(chunk) }
+    }
+    func measureAudioForTesting(_ chunk: [Float]) {
+        if audioLevelMeter == nil { audioLevelMeter = AudioLevelMeter() }
+        audioLevelMeter?.append(chunk)
+        if advanceHeldScreens(), snapshot.state == .recording || snapshot.state == .paused { refreshLive(); emit() }
+    }
 
     func setAudioTranscriptForTesting(_ utterances: [Utterance], meter: AudioLevelMeter, url: URL) {
         snapshot.state = .recording; snapshot.markdownURL = url
@@ -1936,6 +2092,7 @@ extension MeetingSession {
             TimedToken(text: $0.element.text, phraseId: $0.offset, start: $0.element.start, end: $0.element.end)
         }
         typedEntries = utterances.filter(\.isEntry)
+        entryOrders = Array(repeating: 0, count: typedEntries.count)
         consumedAudioTime = meter.track().duration; snapshot.elapsed = consumedAudioTime
         emit()
     }
