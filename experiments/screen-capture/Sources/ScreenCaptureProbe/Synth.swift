@@ -22,6 +22,7 @@ enum Synth {
     static let scenarios: [String: Scenario] = [
         "meeting": meeting, "noise": noise,
         "anim": anim, "video": fullVideo, "alternate": alternate, "return": returning, "pages": pages, "switch": switching,
+        "mixed": mixed, "send": sendOnce,
     ]
 
     struct Scenario {

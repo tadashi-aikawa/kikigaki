@@ -167,6 +167,7 @@ enum Sweep {
         var recentExtends = [true]
         var recentSames = [0.0]
         var recentExacts = [false]
+        var recentMaskLimits = [0.0]
         var movings = [0.0]
         var maskWindows = [0.0]
         var maskCounts = [2]
@@ -174,6 +175,7 @@ enum Sweep {
         var maskGrows = [0]
         var maskBoxes = [false]
         var maskBroads = [0.0]
+        var maskAfterBroads = [0.0]
         var maskRegionals = [false]
         var maskNovels = [false]
 
@@ -198,23 +200,24 @@ enum Sweep {
             var result: [DetectorParams] = []
             for recentCount in recentCounts { for recentSecond in recentSeconds {
             let recentOn = recentCount != 1 || recentSecond > 0
-            for extend in (recentOn ? recentExtends : [true]) { for same in (recentOn ? recentSames : [0]) { for exact in (recentOn ? recentExacts : [false]) {
+            for extend in (recentOn ? recentExtends : [true]) { for same in (recentOn ? recentSames : [0]) { for exact in (recentOn ? recentExacts : [false]) { for maskLimit in (recentOn ? recentMaskLimits : [0]) {
             for moving in movings { for window in (moving > 0 ? maskWindows : [0]) {
             let masked = moving > 0 && window != 0
             for maskCount in (masked ? maskCounts : [2]) { for maskRelease in (masked ? maskReleases : [4]) {
             for grow in (masked ? maskGrows : [0]) { for box in (masked ? maskBoxes : [false]) {
-            for broad in (masked ? maskBroads : [0]) { for regional in (masked ? maskRegionals : [false]) {
+            for broad in (masked ? maskBroads : [0]) { for afterBroad in (masked ? maskAfterBroads : [0]) { for regional in (masked ? maskRegionals : [false]) {
             for novel in (masked ? maskNovels : [false]) {
                 var params = base
                 params.maskNovel = novel
                 params.recentExact = exact
+                params.recentMaskLimit = maskLimit
                 params.recentCount = recentCount; params.recentSeconds = recentSecond; params.recentExtend = extend; params.recentSame = same
                 params.movingSeconds = moving; params.maskCount = maskCount; params.maskRelease = maskRelease; params.maskGrow = grow
-                params.maskBox = box; params.maskBroad = broad; params.maskRegional = regional
+                params.maskBox = box; params.maskBroad = broad; params.maskAfterBroad = afterBroad; params.maskRegional = regional
                 // 外すマスを数える秒数を負にすると、動き続けて撮るまでの秒数と同じにする。
                 params.maskWindow = window < 0 ? moving : window
                 if !result.contains(params) { result.append(params) }
-            } } } } } } } } } } } } } }
+            } } } } } } } } } } } } } } } }
             return result
         }
     }
@@ -236,6 +239,7 @@ enum Sweep {
         if let list = args.doubles("--recent-extend") { grid.recentExtends = list.map { $0 != 0 } }
         if let list = args.doubles("--recent-same") { grid.recentSames = list }
         if let list = args.doubles("--recent-exact") { grid.recentExacts = list.map { $0 != 0 } }
+        if let list = args.doubles("--recent-mask") { grid.recentMaskLimits = list }
         if let list = args.doubles("--moving") { grid.movings = list }
         if let list = args.doubles("--mask-window") { grid.maskWindows = list }
         if let list = args.doubles("--mask-count") { grid.maskCounts = list.map { Int($0) } }
@@ -243,6 +247,7 @@ enum Sweep {
         if let list = args.doubles("--mask-grow") { grid.maskGrows = list.map { Int($0) } }
         if let list = args.doubles("--mask-box") { grid.maskBoxes = list.map { $0 != 0 } }
         if let list = args.doubles("--mask-broad") { grid.maskBroads = list }
+        if let list = args.doubles("--mask-after-broad") { grid.maskAfterBroads = list }
         if let list = args.doubles("--mask-regional") { grid.maskRegionals = list.map { $0 != 0 } }
         if let list = args.doubles("--mask-novel") { grid.maskNovels = list.map { $0 != 0 } }
         let failEvery = args.int("--fail-every") ?? 0

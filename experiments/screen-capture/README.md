@@ -61,17 +61,22 @@ swift build -c release
 
 2026-11-11に足した規則の案と筋書き。結果は [動き続ける画面と交互に変わる画面の規則の試作の検証記録](../../docs/records/screen-motion-alternation.md)。
 
-- 案P 直近に保存した画面と比べる: `--recent-count`(1で使わない、0で枚数を絞らない) `--recent-seconds` `--recent-extend 0,1` `--recent-same`
-  - 比べるときは案Qの外すマスを掛けない
+- 案P 直近に保存した画面と比べる: `--recent-count`(1で使わない、0で枚数を絞らない) `--recent-seconds` `--recent-extend 0,1` `--recent-same` `--recent-mask <割合>`
+  - `--recent-mask` は、案Qの今の外すマスを掛けて比べる上限。外すマスが、比較に使うマスのこの割合以下のときだけ掛ける。0なら掛けない
+    - 推すのは0.5。実画面の記録で足した。経緯は検証記録の「実画面の記録」
   - `--recent-same` は変わったマスの割合。マスの判定は `--cell` を使うので、`0.000001` は「全マスの輝度の差が8以下」で、厳密な一致ではない
   - `--recent-exact 1` は縮小画像の輝度が全マスで一致するときだけ同じとみなす。比べる値の確認用
-- 案Q 動き続けたら1枚撮り、動くマスを外す: `--moving <秒>` `--mask-window <秒>`(-1で `--moving` と同じ) `--mask-count` `--mask-release` `--mask-grow` `--mask-box 0,1`
+- 案Q 動き続けたら1枚撮り、動くマスを外す: `--moving <秒>` `--mask-window <秒>`(-1で `--moving` と同じ。推すのは10) `--mask-count` `--mask-release` `--mask-grow` `--mask-box 0,1`
   - `--mask-regional 0,1`: 外したマスをつながりごとに戻す
   - `--mask-broad <割合>`: 広い差のフレームでの1度だけの変化を候補から除く。測って入れなかった
   - `--mask-novel 0,1`: 外したマスでも、動く間に見なかった明るさで落ち着いたマスは比べる。測って入れなかった
+  - `--mask-after-broad <割合>`: 外す候補を、直前との差がこの割合を超えた最後のフレームより後の観測だけで数える。測って入れなかった
   - 外すマスは、撮った1枚の保存に成功してから確定する。`sweep` は決定のたびに成功を返し、`--fail-every k` で k 回に1回を失敗として返す
 - 案R 動き続ける間は一定の間隔で撮る: `--moving <秒> --mask-window 0`
-- 筋書き: `--scenario anim|pages|switch|video|alternate|return`。中身と正解と数え方は `SynthMotion.swift` の冒頭
+- 筋書き: `--scenario anim|pages|switch|video|alternate|return|mixed|send`。中身と正解と数え方は `SynthMotion.swift` の冒頭
+  - `mixed` は、動く画像と入れ替わる図が同じスライドにある場面。実画面の記録 `real-obs-01` の13ページを写した
+  - `send` は、静止したスライドから1回送って `mixed` と同じスライドへ着く場面。送る何秒前から画面が動き始めるかを、区間ごとに0〜7秒で変える
+    - 送った後の区間は、図の2つの絵の両方を要る枚数にした。1枚なら取りこぼし1
 - `--interval min1`: 観測の間隔を1.0〜1.4秒にする。既定の揺らし方は0.6〜1.4秒
 - 出力
   - 1行に、取りこぼし・余分(うち交互の再保存)・途中の保存・戻りの拾い・最初の保存までの遅れ・保存を出す
@@ -79,14 +84,18 @@ swift build -c release
   - `--detail` の保存は `観測の時刻[印]#フレームの番号@保存を決めた時刻`。印の `m` は動き続けて撮った1枚、`f` は最初の1枚
     - フレームの番号は、`watch --keep-all` の `all/` の画像名の先頭の番号と同じ
   - 遅れの平均と最大は保存できた区間だけで数え、`測れた区間 n/m` を添える
-- `PROBE_DEBUG=1` を付けると、案Pが保存を止めた時刻と、落ち着いて撮った1枚の差の場所を出す
+- `PROBE_DEBUG=1` を付けると、次を出す
+  - 案Pが保存を止めた時刻
+  - 落ち着いて撮った1枚の、基準との差の場所
+  - 案Qの外すマスを確定した時刻と、つながりごとのマスの数と場所。戻した時刻
+  - マスの場所は縮小画像の座標。幅128なら x は0〜127
 
 ```bash
-W=work/r9
+W=work/r10
 P=.build/release/ScreenCaptureProbe
 # 筋書きごとに、1920×1080を3本、横長に等倍の文字を2本、観測の間隔を1秒以上にしたものを2本
-for s in meeting noise anim pages switch video alternate return; do
-  g=$s; [ $s = meeting ] && g=meet; [ $s = alternate ] && g=alt; [ $s = return ] && g=ret
+for s in meeting noise anim pages switch video alternate return mixed send; do
+  g=$s; [ $s = meeting ] && g=meet; [ $s = alternate ] && g=alt; [ $s = return ] && g=ret; [ $s = mixed ] && g=mix
   ph=0,0.37,0.71; [ $s = noise ] && ph=0,0.5
   $P synth --out $W/$g-1080 --scenario $s --phases $ph
   $P synth --out $W/$g-uw1 --scenario $s --size 3840x1600 --unit 1 --phases 0,0.5
@@ -98,25 +107,41 @@ $P synth --out $W/noise-uw --scenario noise --size 3840x1600 --phases 0,0.5
 
 S=($(ls -d $W/*/phase*))
 C=(--width 128 --cell 8 --motion 0.0002 --save 0.001 --settle 1.5 --top 0.0223)
-Q=(--moving 12 --mask-window -1 --mask-count 1 --mask-release 3 --mask-box 1 --mask-grow 1 --mask-regional 1)
-PP=(--recent-count 0 --recent-seconds 12 --recent-same 0.000001)
-# 初期値と各案の表
+Q=(--moving 12 --mask-window 10 --mask-count 1 --mask-release 3 --mask-box 1 --mask-grow 1 --mask-regional 1)
+# 外す候補を集める秒数を除いた案Q。秒数を振るときに使う
+QB=(--moving 12 --mask-count 1 --mask-release 3 --mask-box 1 --mask-grow 1 --mask-regional 1)
+PP=(--recent-count 0 --recent-seconds 12 --recent-same 0.000001 --recent-mask 0.5)
+P0=(--recent-count 0 --recent-seconds 12 --recent-same 0.000001)
+# 外す候補を集める秒数。-1 は --moving と同じ12秒
+$P sweep $S $C $PP $QB --mask-window -1,10,8,6 --groups
+# send の区間ごとの枚数。1行が1本で、並びは送る0・0.25・0.5・0.75・1・1.5・2・3・4・5・6・7秒前から動く区間
+for w in -1 10 8 6; do echo "== $w"; for f in $(ls -d $W/send-*/phase*); do
+  $P sweep $f $C $PP $QB --mask-window $w --label 動いた後 | grep '^  \[' | tr '/' '\n' | grep -o '保存[0-9]* 期待' | grep -o '[0-9]*' | tr '\n' ' '; echo
+done; done
+# 初期値と各案の表。P0 は外すマスを掛けない案P。前回の表の案Qは --mask-window -1 で測った
 $P sweep $S $C --groups
-$P sweep $S $C $PP --groups
+$P sweep $S $C $P0 --groups
 $P sweep $S $C $Q --groups
 $P sweep $S $C --moving 20 --mask-window 0 --groups
+$P sweep $S $C $P0 $Q --groups
 $P sweep $S $C $PP $Q --groups
-$P sweep $S $C $PP --moving 15,20,25 --mask-window 0 --groups
+$P sweep $S $C $P0 --moving 15,20,25 --mask-window 0 --groups
 # 保存の多さ: 通知の出る動く画像・会議の動画の再生中・全画面の動画の枚数
 $P sweep $S $C $PP $Q --label "A13,S7 動画の再生中,V2 全画面"
+# 外すマスを掛ける上限。全画面の動画の後の戻りで、上限が要ることを見る
+$P sweep $(ls -d $W/video-*/phase*) $C $Q --recent-count 0 --recent-seconds 12,20,30 --recent-same 0.000001 --recent-mask 0,0.5,1 --show 20
 # 案Pの秒数と「同じ」の差
 $P sweep $S $C $Q --recent-count 0 --recent-seconds 10,11,12,15,20 --recent-same 0,0.000001 --show 20
 # 案Qの形
 $P sweep $S $C --moving 8,10,12,15 --mask-window -1 --mask-count 1 --mask-release 3,5 --mask-box 1 --mask-grow 0,1 \
   --mask-broad 0,0.05 --mask-regional 0,1 --mask-novel 0,1 --show 40
+# 外す候補を広い差のフレームより後に絞る形
+$P sweep $S $C $PP $Q --mask-after-broad 0,0.02,0.05,0.2 --groups
 # 保存の失敗を混ぜる
-$P sweep $S $C $PP $Q --fail-every 5
+$P sweep $S $C $P0 --recent-mask 0,0.5 $Q --fail-every 5
 ```
+
+- 最初の総当たりは `work/r9` に出した。`mixed` を足した後は `work/r10` に全部を作り直し、数字が同じことを確かめた
 
 - シェルはzshを前提にしている。`$S` などを配列で渡す
 
@@ -189,16 +214,33 @@ P=/private/tmp/kikigaki-screen-lane/experiments/screen-capture/.build/release/Sc
 # 監視したディスプレイのメニューバーを外す割合。開始の行の top
 T=$(grep '"start"' $D/events.jsonl | sed 's/.*"top":"\([0-9.]*\)".*/\1/')
 C=(--width 128 --cell 8 --motion 0.0002 --save 0.001 --settle 1.5 --top $T)
-Q=(--moving 12 --mask-window -1 --mask-count 1 --mask-release 3 --mask-box 1 --mask-grow 1 --mask-regional 1)
-PP=(--recent-count 0 --recent-seconds 12 --recent-same 0.000001)
+Q=(--moving 12 --mask-window 10 --mask-count 1 --mask-release 3 --mask-box 1 --mask-grow 1 --mask-regional 1)
+PP=(--recent-count 0 --recent-seconds 12 --recent-same 0.000001 --recent-mask 0.5)
+P0=(--recent-count 0 --recent-seconds 12 --recent-same 0.000001)
 $P sweep $D $C --detail                                  # 初期値
 $P sweep $D $C $PP $Q --detail                           # 推す組
-$P sweep $D $C $PP --moving 15,20 --mask-window 0 --detail  # 案R
-$P sweep $D $C $Q --recent-count 0 --recent-seconds 8,12,20,30 --detail  # 案Pの秒数
+$P sweep $D $C $P0 $Q --detail                           # 外すマスを掛けない案Pとの組
+$P sweep $D $C $P0 --moving 15,20 --mask-window 0 --detail  # 案R
+$P sweep $D $C $Q --recent-count 0 --recent-seconds 8,12,20,30 --recent-same 0.000001 --recent-mask 0.5 --detail  # 案Pの秒数
+# 外すマスの確定と戻し、保存の理由と差の場所
+PROBE_DEBUG=1 $P sweep $D $C $P0 $Q | grep -E '\[Q\]|\[保存\]'
+# real-obs-01 の場面ごとの枚数。区切りの秒と名前は検証記録の「実画面の記録」の場面の表
+scenes() {
+  $P sweep $D $C "$@" --detail | grep '保存:' | sed 's/.*保存: //' | tr ' ' '\n' | sed 's/[mf]*#.*//' | awk '
+  BEGIN { n = split("0 40 46.07 122.32 128.12 131.97 168.14 224.17 241.52 249.2 313.2 316.4 9999", b, " ")
+          split("1静止 送り 2の13頁 3の14頁 3の戻り 4の14頁 4の13頁 5の12頁 途中 7動画 途中 8静止", l, " ") }
+  { for (i = 1; i < n; i++) if ($1 >= b[i] && $1 < b[i + 1]) c[i]++ }
+  END { for (i = 1; i < n; i++) printf "%s=%d ", l[i], c[i]; print "" }'
+}
+scenes                     # 初期値
+scenes $P0 $Q              # 外すマスを掛けない案Pとの組
+scenes $PP $Q              # 推す組
 ```
 
 - `--detail` のフレームの番号で `$D/all/` の画像を開き、ステップごとの枚数をタダシの控えと突き合わせる
 - 合成と違って正解が無いので、取りこぼしと余分は人が数える
+- 2026-11-11の `real-obs-01` は、元のリポジトリの `experiments/screen-capture/work/real-obs-01` にある。`D` をそこへ向ける
+  - 場面の区間と、場面ごとの数え方は検証記録の「実画面の記録」
 
 ## 実画面を監視する
 

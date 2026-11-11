@@ -22,6 +22,12 @@ import Foundation
 /// - video(100秒): 0〜10 静止A / 10〜70 全画面の動画。場面の切り替わり5回。要る枚数は1 / 70〜85 Aへ戻る / 85〜100 静止B
 /// - alternate(320秒): 2枚が3秒・5秒・10秒おき、3枚・4枚が3秒おきに巡る。ページごとに初回の取りこぼしと再保存を数える
 /// - return(360秒): A 15秒 → B 20秒・60秒・180秒 → Aへ戻る。戻ったAを拾ったかを別に数える
+/// - mixed(270秒): 動く画像と入れ替わる図が同じスライドにある。実画面の記録 real-obs-01 の13ページを写した
+///   - 図は左に置き、2つの絵が3.5秒おきに入れ替わる。動く画像は右下の画面の15%で、図の枠と重ならない
+///   - 正解は区間ごとに1〜2枚。2つの絵を1枚ずつが理想
+///   - 0〜10 静止 / 10〜16 1秒ごとに送る(途中) / 16〜76 M1 / 76〜82 静止B / 82〜86 M1へ6秒後に戻る / 86〜122 Bを36秒
+///   - 122〜182 M2: M1と同じスライドへ36秒後に戻る / 182〜200 静止C / 200〜260 M3: 動画の小窓と5秒おきの図 / 260〜270 静止D
+/// - send(720秒): 静止したスライドから1回送って `mixed` と同じスライドへ着く。送る何秒前から動き始めるかを区間ごとに変える。中身は `sendOnce`
 extension Synth {
     static func need(_ from: Double, _ to: Double, _ label: String, latency: Bool = false, max: Int = 1) -> TruthWindow {
         TruthWindow(from: from, to: to, min: 1, max: max, label: label, latency: latency ? true : nil)
@@ -189,6 +195,62 @@ extension Synth {
         canvas.menuBar(t: t)
     }
 
+    static let mixed = Scenario(duration: 270, truth: [
+        need(0, 10, "M0 静止"),
+        transit(10, 16, "M0 1秒ごとに送る"),
+        need(16, 76, "M1 動く画像と3.5秒おきの図", latency: true, max: 2),
+        need(76, 82, "MB 静止B"),
+        TruthWindow(from: 82, to: 86, min: 0, max: 1, label: "戻りM1 6秒後", kind: "return"),
+        TruthWindow(from: 86, to: 122, min: 0, max: 1, label: "MB 4秒ぶりのB"),
+        need(122, 182, "M2 36秒後に戻った動く画像と図", latency: true, max: 2),
+        need(182, 200, "MC 静止C"),
+        need(200, 260, "M3 動画の小窓と5秒おきの図", latency: true, max: 2),
+        need(260, 270, "MD 静止D"),
+    ]) { canvas, t in
+        func mixedSlide(_ from: Double, interval: Double, panels: (Int, Int), page: Int, video: Bool) {
+            canvas.mixedSlide(t: t, from: from, interval: interval, panels: panels, page: page, video: video)
+        }
+        switch t {
+        case ..<10: canvas.plainSlide(title: "動く画像と入れ替わる図", bullets: ["実画面の13ページを写す"], page: 1)
+        case 10..<16: canvas.plainSlide(title: "送る途中 \(Int(t - 10) + 2)", bullets: ["1秒ごとに送る"], page: Int(t - 10) + 2)
+        case 16..<76: mixedSlide(16, interval: 3.5, panels: (1, 3), page: 13, video: false)
+        case 76..<82, 86..<122: canvas.plainSlide(title: "キーボードに代わるインターフェース", bullets: ["指で打つ", "成果物"], page: 14)
+        case 82..<86: mixedSlide(16, interval: 3.5, panels: (1, 3), page: 13, video: false)
+        case 122..<182: mixedSlide(122, interval: 3.5, panels: (1, 3), page: 13, video: false)
+        case 182..<200: canvas.plainSlide(title: "次の話題", bullets: ["動画の小窓"], page: 15)
+        case 200..<260: mixedSlide(200, interval: 5, panels: (4, 6), page: 16, video: true)
+        default: canvas.plainSlide(title: "まとめ", bullets: ["入れ替わる図は1枚ずつ"], page: 17)
+        }
+        canvas.menuBar(t: t)
+    }
+
+    /// 送る何秒前から画面が動き始めるか。区間ごとに1つ。0は送りで初めて動く。
+    static let sendLeads: [Double] = [0, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5, 6, 7]
+
+    /// 静止したスライドから1回送って、動く画像と入れ替わる図のスライドへ着く。各60秒。
+    /// - 0〜15 静止したスライド。15〜15+a は同じスライドの上で、描き込んだポインタが動く。a は `sendLeads`
+    /// - 15+a で送り、60まで `mixed` と同じ動く画像と3.5秒おきの図
+    /// - 強制で保存するのは、動き始めた15秒の約12秒後。送りが外す候補に入るかは a で決まる
+    /// - 図の2つの絵がどちらも残るかを見るので、送った後の区間は2枚を要る枚数にする
+    static let sendOnce = Scenario(duration: Double(sendLeads.count) * 60, truth: sendLeads.enumerated().flatMap { index, lead -> [TruthWindow] in
+        let base = Double(index) * 60
+        return [
+            need(base, base + 15 + lead, String(format: "E%d 静止 送りの%g秒前から動く", index + 1, lead)),
+            TruthWindow(from: base + 15 + lead, to: base + 60, min: 2, max: 2,
+                        label: String(format: "E%d 送りの%g秒前から動いた後の動く画像と図", index + 1, lead), latency: true),
+        ]
+    }) { canvas, t in
+        let index = min(Int(t / 60), sendLeads.count - 1)
+        let lead = sendLeads[index], local = t - Double(index) * 60
+        if local < 15 + lead {
+            canvas.plainSlide(title: "送る前のスライド \(index + 1)", bullets: ["次は動く画像のあるスライド"], page: 20 + index)
+            if local >= 15 { canvas.pointer(t: t) }
+        } else {
+            canvas.mixedSlide(t: t, from: Double(index) * 60 + 15 + lead, interval: 3.5, panels: (1, 3), page: 13, video: false)
+        }
+        canvas.menuBar(t: t)
+    }
+
     /// 戻る操作。(Aの開始, Bの開始, Aへ戻る, 終わり)
     static let returns: [(a: Double, b: Double, back: Double, end: Double)] = [(0, 15, 35, 50), (50, 65, 125, 140), (140, 155, 335, 350)]
 
@@ -232,6 +294,13 @@ extension Synth.Canvas {
         if h > room { h = room; w = CGFloat(fraction) * screenW * screenH / h }
         let x = left ? 60 : screenW - w - 60
         return UnitBox(x: x, top: screenH - h - 40, w: w, h: h)
+    }
+
+    /// 動く画像と入れ替わる図のスライド。左の図が from から interval 秒おきに2つの絵で入れ替わり、右下の画面の15%が動く。
+    func mixedSlide(t: Double, from: Double, interval: Double, panels: (Int, Int), page: Int, video: Bool) {
+        let panel = Int((t - from) / interval) % 2 == 0 ? panels.0 : panels.1
+        panelSlide(title: "AIエージェントがやること", panel: panel, page: page)
+        if video { videoAnimation(t: t, areaBox(0.15), seed: 33) } else { cartoonAnimation(t: t, areaBox(0.15), seed: 31) }
     }
 
     /// 白い背景に題と箇条とページ番号。既存の `slide` と同じ体裁で、中身を引数で渡す。

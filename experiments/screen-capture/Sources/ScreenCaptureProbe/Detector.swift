@@ -48,6 +48,10 @@ struct DetectorParams: CustomStringConvertible, Hashable {
     var recentSame = 0.0
     /// 縮小画像の輝度が全マスで一致するときだけ同じとみなす。比べる値の確認用で、推す初期値ではない。
     var recentExact = false
+    /// 案Pで「同じ」を比べるときに、案Qの今の外すマスを掛ける。外すマスが比較に使うマスのこの割合以下のときだけ掛ける。0なら掛けない。
+    /// 理由: 動く画像の入ったスライドで、別の所だけが入れ替わる画面を、動く画像の違いで「別の画面」とみなし、入れ替わるたびに撮った(2026-11-11の実画面の記録)。
+    /// 割合で絞る理由: 全画面の動画が丸ごと外れると、動画の各フレームが前の画面と一致し、その画面の最後に見た時刻まで延びる(2026-11-11のレビュー 高2)。
+    var recentMaskLimit = 0.0
     var recentSameThreshold: Double { recentSame > 0 ? recentSame : save }
 
     // 案Q・案R 動き続けたら撮る(2026-11-11の試作)。
@@ -66,6 +70,9 @@ struct DetectorParams: CustomStringConvertible, Hashable {
     /// 理由: 動いている間にスライドやウィンドウを切り替えると、切替で1度だけ変わった中身まで外れ、次の画面を隠し続ける(2026-11-11のレビュー 高1)。
     /// 2回以上変わったマスは、フレームの差によらず候補にする。動画は毎フレーム広く変わるが、同じマスが何度も変わる。
     var maskBroad = 0.0
+    /// 外す候補を、直前との差がこの割合を超えた最後のフレームより後の観測だけで数える。後に変化が無ければ直近 maskWindow 秒の全体で数える。0なら常に全体で数える。
+    /// 試した理由: 送った直後に強制で保存すると、送りで変わった本文まで候補に入り、動く画像とつながって外れ続ける(2026-11-11の実画面の記録)。
+    var maskAfterBroad = 0.0
     /// 外したマスを、つながりごとに戻す。false なら、外したマスのどれかが動く限り全体を保つ(2026-11-11の最初の形)。
     var maskRegional = false
     /// 外したマスでも、動いている間に見なかった明るさで落ち着いたマスは、基準との比較に戻す。
@@ -83,13 +90,15 @@ struct DetectorParams: CustomStringConvertible, Hashable {
         if volatileSeconds > 0 { parts.append("volatile=\(volatileCount)/\(volatileSeconds)s+\(volatileRelease)s<=\(volatileFrameLimit)") }
         if recentEnabled {
             parts.append("P[K=\(recentCount == 0 ? "∞" : String(recentCount)) T=\(recentSeconds == 0 ? "∞" : String(format: "%g", recentSeconds))\(recentExtend ? " 延長" : "")"
-                         + (recentExact ? " 輝度が完全に一致" : recentSame > 0 ? String(format: " 同じ<=%g", recentSame) : "") + "]")
+                         + (recentExact ? " 輝度が完全に一致" : recentSame > 0 ? String(format: " 同じ<=%g", recentSame) : "")
+                         + (recentMaskLimit > 0 ? String(format: " 外すマスを掛ける<=%g", recentMaskLimit) : "") + "]")
         }
         if movingSeconds > 0 {
             if maskWindow > 0 {
                 var options = ""
                 if maskBox { options += " 長方形" }
                 if maskBroad > 0 { options += String(format: " 広い差>%g除く", maskBroad) }
+                if maskAfterBroad > 0 { options += String(format: " 広い差>%gより後", maskAfterBroad) }
                 if maskRegional { options += " 領域ごと" }
                 if maskNovel { options += " 見なかった明るさは比べる" }
                 parts.append(String(format: "Q[N=%g 外す=%d/%gs 戻す=%gs 広げる=%d", movingSeconds, maskCount, maskWindow, maskRelease, maskGrow) + options + "]")
@@ -143,6 +152,8 @@ final class ChangeDetector {
     private var nextHistoryID = 0
     /// 最新の観測と同じ画面の履歴の id。外すマスを掛けずに観測ごとに求める。
     private var latestMatches: Set<Int> = []
+    /// 案Pの比較に掛ける外すマス。空なら掛けない。
+    private var recentMask: [Bool] = []
     // 案Q・案R
     /// 落ち着いた状態から動き始めた時刻。動き続けて撮るたびに、その時刻へ進める。
     private var motionSince = -Double.infinity
@@ -166,7 +177,7 @@ final class ChangeDetector {
         latest = nil; saved = nil; lastMotion = -Double.infinity
         changeTimes = []; volatileUntil = []
         retryNotBefore = -Double.infinity; pending = []; latestDone = false
-        history = []; latestMatches = []
+        history = []; latestMatches = []; recentMask = []
         motionSince = -Double.infinity; moveFrames = []; maskRegion = []; regionLastChange = []
         recentThumbs = []; cellLastChange = []; rangeLow = []; rangeHigh = []
     }
@@ -220,11 +231,6 @@ final class ChangeDetector {
         }
         latest = (index, time, thumb)
         latestDone = false
-        if params.recentEnabled {
-            // 案P: 外すマスを掛けずに比べる。掛けると、全画面が外れたとき動画の各フレームが履歴の全画像と一致し、
-            // 動画の前の画面の「最後に見た時刻」まで延びる(2026-11-11のレビュー 高2)。
-            latestMatches = Set(history.filter { same($0.thumb, thumb) }.map(\.id))
-        }
         let stats = FrameStats(diffPrev: diffPrev, moving: moving, volatileCells: volatile.reduce(0) { $0 + ($1 ? 1 : 0) })
         return (stats, evaluate(now: time, volatile: volatile))
     }
@@ -263,6 +269,11 @@ final class ChangeDetector {
 
     private func evaluate(now: Double, volatile: [Bool]) -> SaveDecision? {
         guard let latest else { return nil }
+        if params.recentEnabled {
+            // 案P: 最新の観測と同じ画面の履歴を、今の外すマスで求め直す。外すマスは観測の間にも戻るので、刻みごとに求める。
+            recentMask = recentMaskUsable(volatile) ? volatile : []
+            latestMatches = Set(history.filter { same($0.thumb, latest.thumb) }.map(\.id))
+        }
         if params.recentEnabled, params.recentExtend {
             // 比べる範囲にある画像と同じ画面を見ている間は、最後に見た時刻を延ばす。範囲の外の画像は延ばさない。
             let eligible = eligibleIDs(now: now)
@@ -320,10 +331,18 @@ final class ChangeDetector {
         if history.count > 64 { history.removeLast(history.count - 64) }
     }
 
-    /// 案Pの「同じ画面」。外すマスは掛けない。
+    /// 案Pの「同じ画面」。`recentMaskLimit` が0なら外すマスを掛けない。
     private func same(_ a: Thumb, _ b: Thumb) -> Bool {
-        if params.recentExact { return considered(b).allSatisfy { a.luma[$0] == b.luma[$0] } }
-        return fraction(a, b, volatile: []) <= params.recentSameThreshold
+        if params.recentExact { return considered(b).allSatisfy { (!recentMask.isEmpty && recentMask[$0]) || a.luma[$0] == b.luma[$0] } }
+        return fraction(a, b, volatile: recentMask) <= params.recentSameThreshold
+    }
+
+    /// 案Pの比較に外すマスを掛けてよいか。外すマスが、比較に使うマスの `recentMaskLimit` 以下のとき。
+    private func recentMaskUsable(_ mask: [Bool]) -> Bool {
+        guard params.recentMaskLimit > 0, !mask.isEmpty, let latest else { return false }
+        let range = considered(latest.thumb)
+        let masked = range.reduce(0) { $0 + (mask[$1] ? 1 : 0) }
+        return masked > 0 && Double(masked) / Double(range.count) <= params.recentMaskLimit
     }
 
     /// 比べる範囲にある画像。最後に見た時刻の新しい順に recentCount 枚、かつ recentSeconds 秒以内。
@@ -355,7 +374,12 @@ final class ChangeDetector {
         let width = latest.thumb.width, height = latest.thumb.height
         var all = [Int](repeating: 0, count: width * height)
         var narrow = [Int](repeating: 0, count: width * height)
-        for frame in moveFrames where frame.time >= now - params.maskWindow {
+        var from = now - params.maskWindow
+        if params.maskAfterBroad > 0, let last = moveFrames.last(where: { $0.time >= from && $0.fraction > params.maskAfterBroad }),
+           moveFrames.contains(where: { $0.time > last.time && !$0.cells.isEmpty }) {
+            from = last.time + 0.0001
+        }
+        for frame in moveFrames where frame.time >= from {
             let broad = params.maskBroad > 0 && frame.fraction > params.maskBroad
             for cell in frame.cells { all[Int(cell)] += 1; if !broad { narrow[Int(cell)] += 1 } }
         }
@@ -381,6 +405,15 @@ final class ChangeDetector {
     private func applyMovingMask(_ mask: [Bool], now: Double) {
         guard let latest else { return }
         let (labels, count) = Self.label(mask, width: latest.thumb.width, height: latest.thumb.height)
+        if Self.debug {
+            let width = latest.thumb.width
+            let parts = (0..<count).map { region -> String in
+                let cells = labels.indices.filter { labels[$0] == region }
+                let xs = cells.map { $0 % width }, ys = cells.map { $0 / width }
+                return String(format: "%dマス x%d〜%d y%d〜%d", cells.count, xs.min() ?? -1, xs.max() ?? -1, ys.min() ?? -1, ys.max() ?? -1)
+            }
+            print(String(format: "  [Q] %.2f 外すマスを確定: ", now) + parts.joined(separator: " / "))
+        }
         maskRegion = labels
         regionLastChange = Array(repeating: now, count: params.maskRegional ? count : 1)
         if params.maskNovel {
@@ -451,6 +484,10 @@ final class ChangeDetector {
             for region in regionLastChange.indices where regionLastChange[region].isFinite && now - regionLastChange[region] >= params.maskRelease {
                 regionLastChange[region] = -Double.infinity
                 released = true
+                if Self.debug {
+                    let count = params.maskRegional ? maskRegion.filter { $0 == region }.count : maskRegion.filter { $0 >= 0 }.count
+                    print(String(format: "  [Q] %.2f 戻す: 領域%d %dマス", now, region, count))
+                }
             }
             if released {
                 for cell in maskRegion.indices where maskRegion[cell] >= 0 {
