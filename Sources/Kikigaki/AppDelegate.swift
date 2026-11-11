@@ -262,6 +262,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.onCancelAI = { session.cancelAI($0) }
         window.onOpenAIPane = { session.showAIPane() }
         window.onCaptureScreen = { session.captureScreenNow() }
+        // 録音中に替えた対象はこの会議にだけ効く。次の開始シートの前回値は書き換えない。
+        window.onSelectScreen = { session.selectScreen($0) }
         window.onRecreateAI = { session.recreateAI() }
         window.onRetryAISave = { session.retryAISaves() }
         window.onOpenMarkdown = {

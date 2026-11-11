@@ -34,6 +34,12 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let recordingRange = Washi.label(size: 11, color: Washi.muted)
     var onOpenAIPane: (() -> Void)?
     var onCaptureScreen: (() -> Void)?
+    /// フッターの画面のメニューで選んだ対象。nilは「撮らない」。
+    var onSelectScreen: ((ScreenDisplay?) -> Void)?
+    /// メニューを開いた時点でつながっているディスプレイ。検証で差し替える。
+    var connectedScreenDisplays: () -> [ScreenDisplay] = { ScreenDisplay.connected() }
+    /// 開いている画面のメニューに並べたディスプレイ。項目のtagはこの添字。
+    private var screenMenuDisplays: [ScreenDisplay] = []
     var onCancelAI: ((UUID) -> Void)?
     /// 失敗した依頼を送り直す。元requestを渡し、送信文・宛先・親・作業許可を戻したシートを開く。
     var onResendAI: ((UUID) -> Void)?
@@ -702,6 +708,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         compactFooter.manualDestination.callback = { [weak self] in self?.askPressed() }
         compactFooter.manualSend.callback = { [weak self] in self?.onSendManualDraft?() }
         compactFooter.more.callback = { [weak self] in self?.showFooterMenu() }
+        compactFooter.screen.callback = { [weak self] in self?.showScreenMenu() }
         compactFooter.minutesNotice.target = self; compactFooter.minutesNotice.action = #selector(toggleMinutes)
         let footer = compactFooter
         Washi.surface(footer)
@@ -854,8 +861,6 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         add("会話をコピー", #selector(copyPressed), enabled: snapshot.canCopy)
         menu.items.last?.toolTip = snapshot.handoffMessage
-        // 画面を撮る会議の録音中だけ出す。自動の判定が拾わない瞬間(動画の一場面など)を残す。
-        if snapshot.canCaptureScreenNow { add("いま撮る", #selector(captureScreenPressed)) }
         // AIの項目は使える時だけ出す。停止後などに押せない項目を並べて読み飛ばさせない。
         let panes = snapshot.ai?.canOpenPane == true, saveFailed = snapshot.ai?.saveFailed == true
         let recreate = snapshot.canSubmitAI && snapshot.ai?.canRecreate == true
@@ -872,6 +877,45 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     func footerMenuPosition(_ menu: NSMenu) -> NSPoint {
         NSPoint(x: compactFooter.more.bounds.maxX - menu.size.width,
                 y: compactFooter.more.bounds.maxY + menu.size.height + 6)
+    }
+
+    /// フッターの画面のメニュー。「撮らない」と、開いた時点でつながっているディスプレイ。最後に選んだ対象に印を付ける。
+    /// 画面収録の許可はここでは確かめない。ディスプレイを選んで撮り始める時点で確かめる。
+    func screenMenu() -> NSMenu {
+        let menu = NSMenu(); menu.autoenablesItems = false
+        guard let control = snapshot.screenControl else { return menu }
+        func add(_ title: String, _ action: Selector, checked: Bool = false, tag: Int = -1) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self; item.tag = tag; item.state = checked ? .on : .off
+            menu.addItem(item)
+        }
+        add("撮らない", #selector(screenDisplayPressed(_:)), checked: control.selected == nil)
+        let displays = connectedScreenDisplays()
+        screenMenuDisplays = displays
+        if !displays.isEmpty { menu.addItem(.separator()) }
+        // 番号は再起動や接続し直しで変わりうるが、開いている間の一覧の中では同じディスプレイを指す。
+        for (index, display) in displays.enumerated() {
+            add(display.name, #selector(screenDisplayPressed(_:)), checked: control.selected?.id == display.id, tag: index)
+        }
+        // 自動の判定が拾わない瞬間(動画の一場面など)を残す。選んだ対象を撮っている録音中だけ出す。
+        if snapshot.canCaptureScreenNow {
+            menu.addItem(.separator())
+            add("いま撮る", #selector(captureScreenPressed))
+        }
+        return menu
+    }
+    func screenMenuPosition(_ menu: NSMenu) -> NSPoint {
+        NSPoint(x: 0, y: compactFooter.screen.bounds.maxY + menu.size.height + 6)
+    }
+    private func showScreenMenu() {
+        let menu = screenMenu()
+        compactFooter.screen.menuOpen = true
+        defer { compactFooter.screen.menuOpen = false }
+        compactFooter.screen.popUpMenu(menu, at: screenMenuPosition(menu))
+    }
+    @objc private func screenDisplayPressed(_ item: NSMenuItem) {
+        let display = screenMenuDisplays.indices.contains(item.tag) ? screenMenuDisplays[item.tag] : nil
+        onSelectScreen?(display)
     }
     private var canFireAutomatic: Bool {
         snapshot.canFireAutomatic

@@ -123,6 +123,7 @@
   - 詳細: [システム音声の取り込み](system-audio.md)
 - **画面**: 開始時に `MeetingSession.pendingScreenDisplay` へ預け、選んだディスプレイ名を専用UserDefaultsキー `KikigakiScreenCaptureDisplay` へ保存する。「撮らない」は空文字。取消では保存しない
   - 名前で覚える理由: ディスプレイの番号は再起動や接続し直しで変わりうる
+  - 録音中にフッターで替えた対象は、その会議にだけ効く。`KikigakiScreenCaptureDisplay` を書き換えず、次の開始シートの初期値はこの表の決め方のまま
   - 置き場: システム音声とマイクの後。音の行の並びを分けない
   - 詳細: [画面の記録](screen-capture.md)
 - **話者判別**: 開始時に `setDiarizationEnabled` を呼ぶ。次回の既定にもなる。取消した選択は残らない

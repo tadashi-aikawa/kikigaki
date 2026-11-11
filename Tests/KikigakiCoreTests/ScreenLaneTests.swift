@@ -127,4 +127,15 @@ import Testing
         #expect(ScreenLane.sharedDisplayName([]) == nil)
         #expect(ScreenLane.caption("EV3895 · Keynote", sharedDisplay: nil) == "EV3895 · Keynote")
     }
+
+    @Test func ディスプレイが1つの会議は全部の題からディスプレイ名を省く() {
+        #expect(ScreenLane.captions(["EV3895 · Keynote「提案資料」", "EV3895", "EV3895 · Safari"]) == ["Keynote「提案資料」", "", "Safari"])
+        #expect(ScreenLane.captions(["Keynote「提案資料」"]) == ["Keynote「提案資料」"])
+        #expect(ScreenLane.captions([]) == [])
+    }
+
+    @Test func 録音中に替えた会議は直前と同じディスプレイの名前だけを省き_替えた直後の1枚に名前を残す() {
+        let labels = ["EV3895 · Keynote", "EV3895 · Safari", "内蔵 · Keynote", "内蔵", "EV3895 · Keynote"]
+        #expect(ScreenLane.captions(labels) == ["EV3895 · Keynote", "Safari", "内蔵 · Keynote", "", "EV3895 · Keynote"])
+    }
 }

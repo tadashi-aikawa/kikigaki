@@ -105,8 +105,12 @@ final class MeetingSession {
     private var typedEntries: [Utterance] = []
     /// 開始シートで選んだディスプレイ。次の録音の開始で使い、開始と同時に消す。音声ファイルとreplayでは撮らない。
     var pendingScreenDisplay: ScreenDisplay?
-    /// この会議の画面の記録。撮らない会議はnil。仕様は docs/screen-capture.md
+    /// この会議の画面の記録。録音できる会議では「撮らない」で始めても作り、録音中に対象を替える。
+    /// 音声ファイルの書き起こしとreplayはnil。仕様は docs/screen-capture.md
     private var screenRecorder: ScreenRecorder?
+    /// 録音中の画面の記録の対象と、フッターの表示。開始シートの選択も録音中の選び直しも `selectScreen` の1本の入口を通す。
+    /// 会議ごとの値で、次の開始シートへは引き継がない。設定ファイルにも書き戻さない。
+    private var screenTarget = ScreenTarget<ScreenDisplay>()
     private var screenHealth = ScreenCaptureHealth()
     /// 書き込みを終え、公開を待っている自動の画面。無音の間の画面はここに残し、話し始めに最後の1枚だけを出す。
     /// 会議ごとのメモリだけの値で、`screenRecorder` を替えるときに必ず捨てる。仕様は docs/screen-capture.md の「無音の間の保留」
@@ -408,6 +412,7 @@ final class MeetingSession {
         typedEntries = []; entryOrders = []
         screenRecorder?.invalidate(); screenRecorder = nil
         discardHeldScreens()
+        screenTarget = ScreenTarget()
         screenHealth = ScreenCaptureHealth()
         finalTokens = []
         speakerSegments = []
@@ -499,7 +504,7 @@ final class MeetingSession {
             } else {
                 startAutomaticSchedule()
                 startInterimSaves(intervalSeconds: meetingConfig.autoSaveIntervalSeconds)
-                startScreenCapture(markdownURL: markdownURL)
+                startScreenCapture(markdownURL: markdownURL, source: source)
             }
             emit()
             return true
@@ -755,6 +760,8 @@ final class MeetingSession {
             snapshot.state = .recording
             // 再開の直後に、一時停止の前と違えば1枚撮る。一時停止の間に変わった画面を取りこぼさない。
             if let screenRecorder, !screenRecorder.isUnavailable {
+                // 閉じたストリームを準備し直す間は「いま撮る」を出さない。世代は増やさず、比較の基準を保つ。
+                screenTarget.resume()
                 let epoch = screenRecorder.resumeCapturing()
                 enqueueScreen { await screenRecorder.start(epoch: epoch) }
             }
@@ -864,25 +871,75 @@ final class MeetingSession {
         return task
     }
 
-    private func startScreenCapture(markdownURL: URL) {
+    /// マイクの録音では、「撮らない」で始めても記録を作り、録音中に選び直せるようにする。
+    /// replayと音声ファイルの書き起こしは画面を撮らないので作らない。フッターの切り替えも出さない。
+    private func startScreenCapture(markdownURL: URL, source: AudioSource) {
         defer { pendingScreenDisplay = nil }
-        guard let display = pendingScreenDisplay else { return }
-        let recorder = makeScreenRecorder(display: display, markdownURL: markdownURL)
-        screenRecorder = recorder
-        let epoch = recorder.resumeCapturing()
-        enqueueScreen { await recorder.start(epoch: epoch) }
+        guard source is MicSource || source is MicAndSystemSource else { return }
+        screenRecorder = makeScreenRecorder(markdownURL: markdownURL)
+        if let display = pendingScreenDisplay { selectScreen(display) }
     }
 
-    private func makeScreenRecorder(display: ScreenDisplay, markdownURL: URL) -> ScreenRecorder {
+    private func makeScreenRecorder(markdownURL: URL) -> ScreenRecorder {
         let pause = self.pause
-        return ScreenRecorder(display: display, markdownURL: markdownURL, acceptedAudioTime: { pause.audioTime },
+        return ScreenRecorder(markdownURL: markdownURL, acceptedAudioTime: { pause.audioTime },
             publish: { [weak self] recorder, shot, url in self?.publishScreen(recorder, shot, url) ?? .rejected },
             discardUnpublished: { [weak self] url in
                 // 公開を拒んだ画像も、保留の破棄と同じ削除と消し直しへ渡す。会議が替わった後の古い保存も同じ。
                 if let self { self.removeUnpublishedScreen(url) } else { try? FileManager.default.removeItem(at: url) }
             },
             failed: { [weak self] recorder, reason in self?.screenSaveFailed(recorder, reason) },
-            becameUnavailable: { [weak self] recorder, reason in self?.screenBecameUnavailable(recorder, reason) })
+            becameUnavailable: { [weak self] recorder, reason, generation in self?.screenBecameUnavailable(recorder, reason, generation: generation) },
+            started: { [weak self] recorder, generation in self?.screenStarted(recorder, generation: generation) },
+            isCurrentTarget: { [weak self] generation in self?.screenTarget.isCurrent(generation) ?? false })
+    }
+
+    /// 画面の記録の対象を選ぶ。開始シートの選択も、録音中・一時停止中のフッターのメニューも、この1本の入口を通す。
+    /// いまの撮影を止めて、新しい対象で始め直す。仕様は docs/screen-capture.md の「録音中の切り替え」
+    /// - 止める: その場で撮影を止め、保留を一時停止と同じ境界で公開する。替える前に受け付けた保存は、後から届いても公開する
+    /// - 始め直す: 録音中ならすぐ、一時停止中なら再開から。フッターの表示は撮影を始められた時点で替わる
+    /// - 続けて選んだら、最後に選んだものだけが効く。前の開始は世代が変わって開かずに戻る
+    /// - 許可の確認はここで始める撮影の中で行う。メニューを開いた時点では行わない
+    func selectScreen(_ display: ScreenDisplay?) {
+        guard snapshot.state == .recording || snapshot.state == .paused, let recorder = screenRecorder else { return }
+        let action = screenTarget.select(display)
+        switch action {
+        case .keep:
+            return
+        case let .stop(recordStopped, generation):
+            _ = recorder.retarget(nil, generation: generation, capture: false)
+            enqueueScreen { await recorder.closeStream() }
+            // 撮影を止めた後に境界を引く。切る手前の最後の画面を、`記録を停止` の行より前に残す。
+            releaseHeldScreens()
+            // 自分で切った後は、撮れなかった理由を出し続けない。撮れなかった期間は行として本文に残る。
+            screenHealth = ScreenCaptureHealth()
+            snapshot.screenCaptureWarning = nil
+            if recordStopped, let event = try? Utterance(screenEvent: .stopped, at: pause.audioTime, postedAt: Date()) {
+                appendEntry(event)
+            }
+        case let .start(display, generation):
+            let epoch = recorder.retarget(display, generation: generation, capture: snapshot.state == .recording)
+            enqueueScreen { await recorder.closeStream() }
+            releaseHeldScreens()
+            if let epoch { enqueueScreen { await recorder.start(epoch: epoch) } }
+        }
+        refreshLive()
+        emit()
+    }
+
+    /// 選んだ対象で撮影を始められた。フッターの表示を替え、撮れなかった理由のヘッダーを消す。
+    /// 切った後に始めたなら `記録を再開` を残す。ストリームを動かす前に呼ばれるので、替えた先の最初の1枚より前に置く。
+    /// 古い対象の知らせは `ScreenTarget` が捨てる。
+    private func screenStarted(_ recorder: ScreenRecorder, generation: Int) {
+        guard recorder === screenRecorder, snapshot.state == .recording || snapshot.state == .paused,
+              let resumed = screenTarget.started(generation: generation) else { return }
+        screenHealth = ScreenCaptureHealth()
+        snapshot.screenCaptureWarning = nil
+        if resumed, let event = try? Utterance(screenEvent: .resumed, at: pause.audioTime, postedAt: Date()) {
+            appendEntry(event)
+            refreshLive()
+        }
+        emit()
     }
 
     /// 保存を終えた1枚を、公開する前に一体で確かめる。会議が同じで、無効にされておらず、受け付ける状態か。
@@ -927,9 +984,15 @@ final class MeetingSession {
         emit()
     }
 
-    /// 撮れなくなった。以後は撮らず、ヘッダーに1行を出し、取得不能のイベントの行を残す。再接続しても追わない。
-    private func screenBecameUnavailable(_ recorder: ScreenRecorder, _ reason: String) {
+    /// 撮れなくなった。以後は撮らず、ヘッダーに1行を出し、取得不能のイベントの行を残す。再接続しても自動では追わない。
+    /// 知らせが届くまでに別の対象を選んでいたら、古い対象の知らせとして `ScreenTarget` が捨て、何もしない。
+    /// 片付けは、撮れなくなった対象の世代で開いたストリームだけを閉じる。
+    private func screenBecameUnavailable(_ recorder: ScreenRecorder, _ reason: String, generation: Int) {
         guard recorder === screenRecorder, snapshot.state == .recording || snapshot.state == .paused else { return }
+        guard screenTarget.failed(generation: generation) else {
+            log("画面を記録できません(替える前の対象。取り合わない): \(reason)")
+            return
+        }
         log("画面を記録できません: \(reason)")
         screenHealth.becameUnavailable(reason)
         snapshot.screenCaptureWarning = screenHealth.warning
@@ -939,20 +1002,28 @@ final class MeetingSession {
             appendEntry(event)
         }
         // 撮影は知らせる前に止まっている。ストリームの片付けだけを流す。
-        enqueueScreen { await recorder.closeStream() }
+        enqueueScreen { await recorder.closeStream(target: generation) }
         refreshLive()
         emit()
     }
 
-    /// フッターの「…」の「いま撮る」。録音中だけ。押した時点で1枚取り、しきい値によらず保存する。
+    /// フッターの画面のメニューの「いま撮る」。録音中だけ。押した時点で1枚取り、しきい値によらず保存する。
     func captureScreenNow() {
         // 時刻・音声位置・受付は押した処理の中で確定する。撮影だけを後から流す。
-        guard snapshot.state == .recording, let screenRecorder, let request = screenRecorder.beginCapture() else { return }
+        guard canCaptureScreenNow, let screenRecorder, let request = screenRecorder.beginCapture() else { return }
         Task { await screenRecorder.capture(request) }
     }
 
+    /// 選んだ対象を撮っている録音中で、その撮影に要るものが揃っている間だけ。
+    /// 一時停止中・停止後・替える途中・再開でストリームを準備し直す間・撮れなくなった後は出さない。
     var canCaptureScreenNow: Bool {
-        snapshot.state == .recording && screenRecorder.map { !$0.isUnavailable } == true
+        screenTarget.canCaptureNow(recording: snapshot.state == .recording) && screenRecorder?.canCaptureNow == true
+    }
+
+    /// フッターの画面の操作。録音中と一時停止中で、画面を撮れる会議だけ。
+    private var screenControl: ScreenControlState? {
+        guard snapshot.state == .recording || snapshot.state == .paused, screenRecorder != nil else { return nil }
+        return ScreenControlState(display: screenTarget.display, selected: screenTarget.selected, paused: snapshot.state == .paused)
     }
 
     // MARK: - 無音の間の保留
@@ -1125,6 +1196,7 @@ final class MeetingSession {
     private func emit() {
         snapshot.nextDiarizationEnabled = nextDiarizationEnabled
         snapshot.canCaptureScreenNow = canCaptureScreenNow
+        snapshot.screenControl = screenControl
         refreshAudioSnapshot()
         snapshot.timeline = pause.timeline
         snapshot.aiRecoveryWarning = aiStore?.warnings.first
@@ -2056,15 +2128,28 @@ extension MeetingSession {
 #if DEBUG
     /// ストリームを開かずに、この会議の画面の記録を据える。フレームは `observeForTesting` で渡す。
     /// 前の記録があれば、録音の開始と同じく無効にして公開を待つ画面を捨てる。
-    func installScreenRecorderForTesting(display: ScreenDisplay, markdownURL: URL) -> ScreenRecorder {
+    /// display: nilなら撮らずに始めた会議。`selectScreen` で途中から選ぶ検証に使う
+    /// start: 選んだ後の開始。nilを返せば撮影を始められた、文字列なら取得不能の理由。ScreenCaptureKitには触れない
+    func installScreenRecorderForTesting(display: ScreenDisplay?, markdownURL: URL,
+                                         start: @escaping (ScreenDisplay) -> String? = { _ in nil }) -> ScreenRecorder {
         screenRecorder?.invalidate()
         discardHeldScreens()
-        let recorder = makeScreenRecorder(display: display, markdownURL: markdownURL)
+        screenTarget = ScreenTarget()
+        let recorder = makeScreenRecorder(markdownURL: markdownURL)
+        recorder.startForTesting = start
         screenRecorder = recorder
-        _ = recorder.resumeCapturing()
+        if let display {
+            // ストリームを開かずに撮影中にする。フッターの表示も撮っている状態にそろえる。
+            _ = screenTarget.select(display)
+            _ = recorder.retarget(display, generation: screenTarget.generation, capture: snapshot.state == .recording)
+            recorder.openForTesting()
+            _ = screenTarget.started(generation: screenTarget.generation)
+        }
         emit()
         return recorder
     }
+    /// 選び直した後の開始を待つ。開始は操作した順に1本で流れる。
+    func waitScreenOperationsForTesting() async { await screenOperation?.value }
     var screenEntriesForTesting: [Utterance] { typedEntries.filter { $0.kind == .screen } }
     var heldScreenCountForTesting: Int { screenHold.count }
     /// 声以外の行。公開の順と挿入の位置を確かめる。

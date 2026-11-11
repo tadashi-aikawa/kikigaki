@@ -21,7 +21,9 @@ extension TranscriptWindowController {
         guard utterances.contains(where: { $0.kind == .screen }) else {
             return ScreenLaneBuild(width: 0, assignment: .init(), items: { _ in [] })
         }
-        let shared = ScreenLane.sharedDisplayName(images.map(\.text))
+        // 題は画像の並びで決める。録音中に対象を替えた会議では、直前の画像と同じディスプレイの名前だけを省く。
+        let captions = Dictionary(zip(images.compactMap(\.imagePaths.first), ScreenLane.captions(images.map(\.text))),
+                                  uniquingKeysWith: { first, _ in first })
         let expanded = screenLaneExpanded
         return ScreenLaneBuild(width: ScreenLaneView.width, assignment: ScreenLane.assign(utterances)) { screens in
             ScreenLane.slots(screens, utterances: utterances, expanded: expanded).map { slot in
@@ -34,7 +36,7 @@ extension TranscriptWindowController {
                     let row = utterances[index]
                     let time = TranscriptRenderer.clock(for: row, timeline: timeline)
                     guard let path = row.imagePaths.first else { return .event(time: time, text: row.text) }
-                    return .image(path: path, time: time, caption: ScreenLane.caption(row.text, sharedDisplay: shared), label: row.text)
+                    return .image(path: path, time: time, caption: captions[path] ?? row.text, label: row.text)
                 }
             }
         }

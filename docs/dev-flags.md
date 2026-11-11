@@ -161,6 +161,8 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
     - `KIKIGAKI_UI_CAPTURE`: `HoverButtonTests` ・ `NarrowWindowTests` ・ `TranscriptTextScaleAppTests` ・ `TranscriptFilterWindowTests` ・ `ScreenLaneAppTests`
         - `ScreenLaneAppTests`: 画像レーンの1枚・2枚・畳んだ状態と開いた状態・イベントの行・文字200%・絞り込み・画面の行の無い会議を撮る
         - `KIKIGAKI_SCREEN_LANE_IMAGES=<画像のフォルダ>`: 生成した仮の画像の代わりに、そのフォルダの `.webp` と `.png` を名前順に9枚使う。試用の会議の `.captures/` を読むだけで、書き換えない
+    - `KIKIGAKI_UI_CAPTURE`: `ScreenTargetFooterTests`。フッターの画面の記録の操作を、記録中・撮らない・一時停止中・撮れなくなった状態・長い名前で、820ptと420ptの幅で撮る。撮れなくなった状態はウィンドウ全体も撮る。メニューは撮らない
+        - PNGは描画キャッシュの中間物とし、確認用に非可逆WebPへ変換する
     - `KIKIGAKI_TYPED_CAPTURE`: `TypedImageTests` ・ `TypedEntryTests`
     - `KIKIGAKI_MINUTES_CAPTURE`: `MinutesUpdateTests` ・ `MinutesPreviewTests` ・ `MinutesWebTests`。`KIKIGAKI_MINUTES_SAMPLE` を添えると `MinutesWebTests` が指定の議事録を撮る
     - `KIKIGAKI_EXCLUSION_CAPTURE`: `AudioExclusionAppTests`

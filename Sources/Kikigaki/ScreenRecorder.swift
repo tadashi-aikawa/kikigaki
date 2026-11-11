@@ -33,13 +33,19 @@ struct ScreenShot {
     /// 受付の番号。自動も「いま撮る」も、受け付けるときに同じロックの中で1つ取る。受け付けるまではnil。
     /// 新旧の順序はこの番号だけで比べる。保留の破棄の境界、判定器の比較の基準の新旧、行の挿入位置のどれも同じ。
     var order: Int?
+    /// 撮った対象の世代。録音中に対象を替えるたびに増える。替える前の画像を、替えた後の判定器の基準にしないため。
+    var target: Int
 }
 
 /// 1つの会議の画面の記録。SCStreamを1x寸法・1秒間隔で開き、判定・WebP保存・公開の依頼までを持つ。
-/// 仕様は [画面の記録](docs/screen-capture.md) の「撮影と保存」
+/// 仕様は [画面の記録](docs/screen-capture.md) の「撮影と保存」と「録音中の切り替え」
+///
+/// 録音できる会議ごとに1つ作り、撮る対象は録音中に `retarget` で替える。撮らない会議でも作り、対象をnilにしておく。
+/// - 理由: 受付の番号・受け付けた数・まだ届いていない数を会議の中で1本に保つ。替える前に受け付けた保存も、
+///   同じ番号の列で境界・行の位置が決まり、替えた後に届いても公開できる
 ///
 /// 撮るかどうかは、MainActorの操作が `lock` の下で即座に切り替える(撮影中かと世代)。
-/// - 一時停止・停止・取得不能は、ストリームの片付けを待たずに撮影を止める。片付けは後から順に流す
+/// - 一時停止・停止・取得不能・対象の切り替えは、ストリームの片付けを待たずに撮影を止める。片付けは後から順に流す
 /// - 判定とフレームは `queue` で扱い、世代が変わっていたら判定器の観測を数え直してから読む。比較の基準は引き継ぐ
 /// - 符号化と書き込みは `encodeQueue`。結果は成功も失敗も `DispatchQueue.main` の1本で順に返し、公開の可否はMainActorの `publish` が決める
 ///   - 無音の間の画面は、書き込みまで済ませてからMainActorが保留する。公開の契機で同期に出せるようにするため。
@@ -53,7 +59,6 @@ struct ScreenShot {
 final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     enum PublishResult { case published, rejected }
 
-    let display: ScreenDisplay
     let queue = DispatchQueue(label: "kikigaki.screen.capture")
     private let encodeQueue = DispatchQueue(label: "kikigaki.screen.encode")
     private let lock = NSLock()
@@ -65,24 +70,47 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     /// 公開しなかった画像を消す。保留の破棄と同じ削除と消し直しへ渡す。停止の期限を超えた保存と、無効にした後の保存も通る。
     private let discardUnpublished: @MainActor (URL) -> Void
     private let failed: @MainActor (ScreenRecorder, String) -> Void
-    private let becameUnavailable: @MainActor (ScreenRecorder, String) -> Void
+    /// 撮れなくなった。Int: 撮れなくなった対象の世代。いまの対象かは受け取った側が `ScreenTarget` で決める。
+    private let becameUnavailable: @MainActor (ScreenRecorder, String, Int) -> Void
+    /// 撮影を始められた。許可とディスプレイを確かめ、ストリームを開く直前にMainActorで呼ぶ。撮影の世代が今のときだけ。
+    /// Int: 始めた対象の世代。
+    private let started: @MainActor (ScreenRecorder, Int) -> Void
+    /// その対象の世代がいまの対象か。判定は `ScreenTarget` の1か所に置き、この型は世代を運ぶだけにする。
+    private let isCurrentTarget: @MainActor (Int) -> Bool
 
     // queue上だけで触る
-    private var detector: ScreenChangeDetector
+    private var detector = ScreenChangeDetector()
     private var seenEpoch = 0
+    /// 判定器を作った対象の世代。替わっていたら比較の基準を引き継がずに作り直す。
+    private var seenTarget = 0
     private var frameIndex = 0
     private var latest: ScreenShot?
     private var stream: SCStream?
     /// ストリームとタイマーを開いた世代。今の世代と一致する通知だけを判定へ渡す。
     private var streamEpoch = 0
-    private var filter: SCContentFilter?
+    /// ストリームを開いた対象。題と失敗の文言に使う。
+    private var streamDisplay: ScreenDisplay?
     private var timer: DispatchSourceTimer?
+
+    /// 開いたストリームの対象の世代と、「いま撮る」の撮影に要るフィルタ。ストリームを準備し終えてから持ち、閉じたら消す。
+    /// 「いま撮る」は受け付けた時点でこれを要求へ写し、以後は共有の状態を読まない。
+    struct CaptureSource {
+        let target: Int
+        /// 検証でストリームを開かないときはnil。
+        let filter: SCContentFilter?
+    }
 
     // lockで守る
     private var accepting = true
     private var invalidated = false
     private var capturing = false
     private var epoch = 0
+    /// 撮る対象。nilは撮らない。
+    private var target: ScreenDisplay?
+    /// 対象の世代。`retarget` で `ScreenTarget` の世代を受け取る。判定器・フィルタ・知らせに添えて運ぶ。
+    private var targetGeneration = 0
+    /// 撮影に要るもの。取得不能の片付けは、この世代のストリームだけを閉じる。
+    private var source: CaptureSource?
     private var pending = 0
     /// 受け付けた保存の数。自動と「いま撮る」を合わせ、次に振る受付の番号でもある。
     private var accepted = 0
@@ -90,19 +118,24 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private var automaticPending = 0
     private var reportedUnavailable = false
 
-    init(display: ScreenDisplay, markdownURL: URL, acceptedAudioTime: @escaping @Sendable () -> Double,
+    init(markdownURL: URL, acceptedAudioTime: @escaping @Sendable () -> Double,
          publish: @escaping @MainActor (ScreenRecorder, ScreenShot, URL) -> PublishResult,
          discardUnpublished: @escaping @MainActor (URL) -> Void,
          failed: @escaping @MainActor (ScreenRecorder, String) -> Void,
-         becameUnavailable: @escaping @MainActor (ScreenRecorder, String) -> Void) {
-        self.display = display
+         becameUnavailable: @escaping @MainActor (ScreenRecorder, String, Int) -> Void,
+         started: @escaping @MainActor (ScreenRecorder, Int) -> Void,
+         isCurrentTarget: @escaping @MainActor (Int) -> Bool) {
         capturesDirectory = ScreenCaptureFiles.directory(for: markdownURL)
         self.acceptedAudioTime = acceptedAudioTime
         self.publish = publish; self.discardUnpublished = discardUnpublished
         self.failed = failed; self.becameUnavailable = becameUnavailable
+        self.started = started; self.isCurrentTarget = isCurrentTarget
+    }
+
+    private static func detector(for display: ScreenDisplay?) -> ScreenChangeDetector {
         var parameters = ScreenChangeParameters()
-        parameters.excludedTopFraction = display.menuBarFraction
-        detector = ScreenChangeDetector(parameters: parameters)
+        parameters.excludedTopFraction = display?.menuBarFraction ?? 0
+        return ScreenChangeDetector(parameters: parameters)
     }
 
     var isInvalidated: Bool { lock.withLock { invalidated } }
@@ -123,8 +156,27 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     func resumeCapturing() -> Int {
         lock.withLock {
             epoch += 1
-            capturing = accepting && !invalidated && !reportedUnavailable
+            capturing = accepting && !invalidated && !reportedUnavailable && target != nil
             return epoch
+        }
+    }
+
+    /// 撮る対象を替える。録音中の切り替えの入口で、いまの撮影をその場で止め、新しい対象で始め直す。
+    /// - display: nilなら撮らない
+    /// - generation: `ScreenTarget` が振った対象の世代
+    /// - capture: すぐ撮り始めるか。一時停止中はfalseにし、再開の `resumeCapturing` で始める
+    /// - 返す値: 撮り始めるなら、`start` へ渡す撮影の世代
+    ///
+    /// 替える前に受け付けた保存は無効にしない。公開まで続け、受付の番号の順に並ぶ。
+    /// 撮れなくなった後でも、選び直せば撮り直す。判定器は次の観測で作り直し、比較の基準を引き継がない。
+    func retarget(_ display: ScreenDisplay?, generation: Int, capture: Bool) -> Int? {
+        lock.withLock {
+            epoch += 1
+            target = display
+            targetGeneration = generation
+            reportedUnavailable = false
+            capturing = capture && display != nil && accepting && !invalidated
+            return capturing ? epoch : nil
         }
     }
 
@@ -138,13 +190,15 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         lock.withLock { epoch += 1; capturing = false; accepting = false }
     }
 
-    /// 以後に公開を依頼された処理は弾かれ、書いた画像は消える。
-    func invalidate() {
+    /// 以後に公開を依頼された処理は弾かれ、書いた画像は消える。受付済みの「いま撮る」も撮影を始めない。
+    /// 無効の確定はMainActorで行う。「いま撮る」の確認から撮影APIの呼び出しまでの区間へ割り込ませないため。
+    @MainActor func invalidate() {
         lock.withLock { epoch += 1; capturing = false; accepting = false; invalidated = true }
     }
 
     /// 受付済みの処理が公開まで終わるのを待つ。上限を超えたら残りを無効にする。期限は単調時計で測る。
-    func drain(timeout: Duration) async {
+    /// 期限内は無効にしないので、受付済みの「いま撮る」は撮影できるまま保つ。
+    @MainActor func drain(timeout: Duration) async {
         let deadline = ContinuousClock.now + timeout
         while lock.withLock({ pending > 0 }), ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(50))
@@ -154,13 +208,42 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
 
     private func isCurrent(_ value: Int) -> Bool { lock.withLock { capturing && epoch == value } }
 
+    /// 今の世代の撮る対象と、その対象の世代。撮影中でなければnil。
+    private func current(_ value: Int) -> (display: ScreenDisplay, generation: Int)? {
+        lock.withLock {
+            guard capturing, epoch == value, let target else { return nil }
+            return (target, targetGeneration)
+        }
+    }
+
+    /// 今の撮影の世代なら、MainActorで撮影を始められたと知らせる。世代の確認と知らせを同じMainActorの番で行う。
+    private func announceStarted(epoch value: Int, target generation: Int) async -> Bool {
+        await MainActor.run {
+            guard isCurrent(value) else { return false }
+            started(self, generation)
+            return true
+        }
+    }
+
     // MARK: - ストリーム
 
     /// 撮れる状態か確かめてストリームを開く。撮れなければ取得不能として知らせる。
-    /// 待っている間に一時停止・停止・取得不能で世代が変わったら、開かずに戻る。
+    /// 待っている間に一時停止・停止・取得不能・切り替えで世代が変わったら、開かずに戻る。
     /// 許可は `CGPreflightScreenCaptureAccess` で決めない。許可した直後の同じプロセスでは古い値を返す。
+    /// 許可とディスプレイを確かめ、ストリームとフィルタを準備し終えたら、ストリームを動かす前に `started` で知らせる。
+    /// - 理由: 知らせた時点で「いま撮る」に要るものが揃っている。動かした直後に届く最初の1枚より前に、`記録を再開` の行とフッターの表示を置く
+    /// - 一時停止からの再開も同じ順で知らせる。閉じたストリームを準備し直している間は「いま撮る」を出さない
     func start(epoch value: Int) async {
-        guard isCurrent(value) else { return }
+        guard let (display, generation) = current(value) else { return }
+#if DEBUG
+        if let fake = startForTesting {
+            if let reason = fake(display) { reportUnavailable(reason, epoch: value); return }
+            // ストリームの代わりに、撮影に要るものだけを準備する。閉じ方と「いま撮る」の確かめ方を本番と同じにする。
+            queue.sync { streamEpoch = value; streamDisplay = display; lock.withLock { source = CaptureSource(target: generation, filter: nil) } }
+            if !(await announceStarted(epoch: value, target: generation)) { queue.sync { clearStream(target: generation) } }
+            return
+        }
+#endif
         let content: SCShareableContent
         do {
             content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
@@ -187,8 +270,14 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         queue.sync {
             self.stream = stream
             streamEpoch = value
-            self.filter = filter
+            streamDisplay = display
+            lock.withLock { source = CaptureSource(target: generation, filter: filter) }
             startTimer()
+        }
+        // 撮影に要るものが揃ってから知らせる。待つ間に一時停止・停止・切り替えたら、動かさずに外す。
+        guard await announceStarted(epoch: value, target: generation) else {
+            _ = queue.sync { detach(stream) }
+            return
         }
         do {
             try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
@@ -204,10 +293,12 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     }
 
     /// ストリームとタイマーを片付ける。撮影はその前に `pauseCapturing` などで止まっている。
-    func closeStream() async {
+    /// - target: その対象の世代で開いたストリームだけを閉じる。取得不能の片付けで使う。
+    ///   撮れなくなった知らせが届く前に別の対象を選ぶと、その間に開いた新しいストリームを閉じないため。nilなら今のものを閉じる
+    func closeStream(target: Int? = nil) async {
         let stream: SCStream? = queue.sync {
-            guard let stream = self.stream else { return nil }
-            return detach(stream) ? stream : nil
+            let stream = self.stream
+            return clearStream(target: target) ? stream : nil
         }
         try? await stream?.stopCapture()
     }
@@ -215,8 +306,23 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     /// queue上で、今のストリームなら外す。外したらtrue。
     private func detach(_ stream: SCStream) -> Bool {
         guard self.stream === stream else { return false }
+        return clearStream(target: nil)
+    }
+
+    /// queue上で、ストリーム・タイマー・撮影に要るものを一緒に外す。外したらtrue。
+    /// - target: その対象の世代で開いたものだけを外す。nilなら今のものを外す
+    /// 受付済みの「いま撮る」は、受け付けた時点で要るものを写しているので、外しても撮れる。
+    @discardableResult
+    private func clearStream(target: Int?) -> Bool {
+        let cleared: Bool = lock.withLock {
+            // ストリームと撮影に要るものは同じqueue.syncの中で一緒に置くので、`source` を見れば開いた世代が分かる。
+            guard let opened = source?.target, target.map({ $0 == opened }) ?? true else { return false }
+            source = nil
+            return true
+        }
+        guard cleared else { return false }
         timer?.cancel(); timer = nil
-        self.stream = nil
+        stream = nil
         return true
     }
 
@@ -238,36 +344,62 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     struct CaptureRequest {
         let pressedAt: Date
         let audioTime: Double
+        let display: ScreenDisplay
         let label: String
         /// 受付の番号。自動の保存と同じロックの中で取る。
         let order: Int
+        /// 押したときの対象の世代。
+        let target: Int
+        /// 押したときの対象のフィルタ。受け付けた時点で写し、撮影はこれで行う。一時停止でストリームを閉じても撮れる。
+        let filter: SCContentFilter?
 
         func shot(_ image: CGImage) -> ScreenShot {
-            ScreenShot(image: image, audioTime: audioTime, observedAt: pressedAt, label: label, frame: nil, order: order)
+            ScreenShot(image: image, audioTime: audioTime, observedAt: pressedAt, label: label, frame: nil, order: order, target: target)
         }
     }
 
-    /// 押した時点で処理を受け付け、停止のときに公開まで待つ対象にする。撮影中でなければnil。
+    /// 撮影中で、いまの対象の撮影に要るものが揃っているか。「いま撮る」を出せるのはこの間だけ。
+    var canCaptureNow: Bool {
+        lock.withLock { capturing && !reportedUnavailable && target != nil && source?.target == targetGeneration }
+    }
+
+    /// 押した時点で処理を受け付け、停止のときに公開まで待つ対象にする。撮影中でないか、撮影に要るものが揃っていなければnil。
+    /// 押した時点の対象の世代とフィルタを要求へ写す。以後は共有の状態を読まない。
     /// 時刻の例外: 音声位置と実時刻は押した時点に置く。`captureImage` は観測した時刻を返さないため。
     /// 新旧の順序は受付の番号で決める。完了した時点では決めない。
     func beginCapture() -> CaptureRequest? {
         let pressedAt = Date()
         let audioTime = acceptedAudioTime()
-        guard let order = begin(epoch: lock.withLock { epoch }, automatic: false) else { return nil }
-        return CaptureRequest(pressedAt: pressedAt, audioTime: audioTime, label: Self.label(display: display), order: order)
+        let (value, display, generation, source) = lock.withLock { (epoch, target, targetGeneration, self.source) }
+        guard let display, let source, source.target == generation,
+              let order = begin(epoch: value, automatic: false) else { return nil }
+        return CaptureRequest(pressedAt: pressedAt, audioTime: audioTime, display: display, label: Self.label(display: display),
+                              order: order, target: generation, filter: source.filter)
     }
 
     /// 受け付けた「いま撮る」の1枚を撮り、しきい値によらず保存する。結果は `complete` が必ず1回返す。
-    func capture(_ request: CaptureRequest) async {
-        guard let filter = queue.sync(execute: { self.filter }) else {
-            complete(frame: nil, result: .failure("いま撮るの撮影に失敗しました"))
+    /// MainActorの中断の無い1区間で、押した対象がいまの対象かを `ScreenTarget` で確かめてから撮影APIを呼ぶ。
+    /// 対象の切り替えはMainActorで行うので、確かめた後・撮影を始める前に切り替えが挟まらない。
+    /// - 押した後に替えた・切った、記録を無効にした(停止の待ちの期限切れ・会議の切替)なら、撮らずに失敗として終える
+    /// - 一時停止だけなら対象の世代は変わらないので、要求が持つフィルタで撮る。閉じたストリームの共有の状態は読まない
+    /// - 撮影を始めた後・保存を待っている画像は、この後に替えても公開する。利用者が押した時点に映していた画面のため
+    @MainActor func capture(_ request: CaptureRequest) async {
+        let fail = { self.complete(frame: nil, result: .failure("いま撮るの撮影に失敗しました")) }
+        // ここから撮影APIの呼び出しまで中断しない。無効の確定と対象の切り替えはどちらもMainActorなので割り込まない。
+        // 無効を先に見る。会議を替えると `ScreenTarget` の世代は振り直すので、古い記録の要求が同じ番号で世代の確認を通りうる。
+        guard !isInvalidated, isCurrentTarget(request.target) else { fail(); return }
+#if DEBUG
+        if let shoot = screenshotForTesting {
+            if let image = shoot(request.display) { save(request.shot(image)) } else { fail() }
             return
         }
+#endif
+        guard let filter = request.filter else { fail(); return }
         do {
-            let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: Self.configuration(display))
+            let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: Self.configuration(request.display))
             save(request.shot(image))
         } catch {
-            complete(frame: nil, result: .failure("いま撮るの撮影に失敗しました"))
+            fail()
         }
     }
 
@@ -275,8 +407,13 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
 
     /// queue上で世代を読む。変わっていたら判定器の観測を数え直す。撮影中ならtrue。
     /// - source: 通知元のストリームを開いた世代。今の世代と違えば、古いストリームの通知として捨てる
-    /// - 世代が変わるのは一時停止と再開、停止、取得不能。撮り直すのは再開だけなので、比較の基準は引き継いでよい
+    /// - 世代が変わるのは一時停止と再開、停止、取得不能、対象の切り替え
+    ///   - 一時停止と再開: 撮り直す対象は同じなので、比較の基準は引き継ぐ
+    ///   - 対象の切り替え: 判定器を作り直し、比較の基準を引き継がない。替えた先の最初の1枚は、録音の開始と同じく待たずに撮る
+    ///     - 理由: 替える前の画面と比べると、替えた先がたまたま似ていたときに撮らない。メニューバーの高さも対象ごとに違う
+    ///     - 替える前に決めた保存の結果は、新しい判定器では見つからず無視される
     private func syncEpoch(source: Int? = nil) -> Bool {
+        refreshTarget()
         let (current, value) = lock.withLock { (capturing, epoch) }
         if value != seenEpoch {
             seenEpoch = value
@@ -286,8 +423,17 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         return current && (source.map { $0 == value } ?? true)
     }
 
+    /// queue上で、対象が替わっていたら判定器を作り直す。
+    private func refreshTarget() {
+        let (display, generation) = lock.withLock { (target, targetGeneration) }
+        guard generation != seenTarget else { return }
+        seenTarget = generation
+        detector = Self.detector(for: display)
+        latest = nil
+    }
+
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .screen, stream === self.stream, syncEpoch(source: streamEpoch),
+        guard type == .screen, stream === self.stream, syncEpoch(source: streamEpoch), let display = streamDisplay,
               let attachments = (CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]])?.first,
               let raw = attachments[.status] as? Int, let status = SCFrameStatus(rawValue: raw) else { return }
         let now = Date()
@@ -311,9 +457,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         queue.async { [self] in
-            let opened = streamEpoch
+            let opened = streamEpoch, name = streamDisplay?.name ?? ""
             guard detach(stream) else { return }
-            reportUnavailable("ディスプレイ「\(display.name)」を取得できなくなりました", epoch: opened)
+            reportUnavailable("ディスプレイ「\(name)」を取得できなくなりました", epoch: opened)
         }
     }
 
@@ -321,7 +467,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private func observe(_ image: CGImage, observedAt: Date, now: Date, label: String) {
         guard let thumbnail = Self.thumbnail(image, width: detector.parameters.thumbnailWidth) else { return }
         let audioTime = ScreenCaptureClock.audioTime(acceptedAudioTime: acceptedAudioTime(), now: now, observedAt: observedAt)
-        let shot = ScreenShot(image: image, audioTime: audioTime, observedAt: observedAt, label: label, frame: frameIndex)
+        let shot = ScreenShot(image: image, audioTime: audioTime, observedAt: observedAt, label: label, frame: frameIndex, target: seenTarget)
         latest = shot
         // 観測の前後を「いま撮る」と比べるため、ここまでに受け付けた保存の数を受付と同じロックで読む。
         // 読むのはフレームを受け取って処理する時点。その間に押した「いま撮る」より後の観測とみなされ、使い終えずに残る側へ倒れる。
@@ -344,9 +490,21 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         reportUnavailable(reason, epoch: value ?? lock.withLock { epoch })
     }
     var pendingForTesting: Int { lock.withLock { pending } }
-    /// 受け付けた「いま撮る」を、撮った画像で同じ保存の経路へ渡す。完了を遅らせる検証で、渡す時点を決める。
-    func captureForTesting(_ request: CaptureRequest, image: CGImage) {
+    /// 受け付けた「いま撮る」を、撮影を終えた画像として保存の経路へ渡す。撮影を始める時点の確認は通らない。
+    /// 撮影済みで保存を待つ画像の扱いと、完了を遅らせる検証で使う。撮影を始める時点の確認は `capture(_:)` と `screenshotForTesting` で確かめる。
+    func deliverCapturedForTesting(_ request: CaptureRequest, image: CGImage) {
         save(request.shot(image))
+    }
+    /// 設定すると、`start` はScreenCaptureKitに触れずにこれを呼ぶ。nilを返せば撮影を始められた、文字列なら取得不能の理由。
+    /// 画面収録の許可の確認を検証から起こさないため。
+    var startForTesting: ((ScreenDisplay) -> String?)?
+    /// 設定すると、`capture(_:)` は撮影を始める時点の確認を通った後、ScreenCaptureKitの代わりにこれで撮る。nilなら撮影の失敗。
+    var screenshotForTesting: ((ScreenDisplay) -> CGImage?)?
+    /// 開いているストリームの対象の世代。閉じていればnil。
+    var openStreamTargetForTesting: Int? { lock.withLock { source?.target } }
+    /// ストリームを開かずに、いまの対象の撮影に要るものを揃える。開始を経ない検証で「いま撮る」を受け付けるため。
+    func openForTesting() {
+        queue.sync { lock.withLock { source = CaptureSource(target: targetGeneration, filter: nil) } }
     }
 #endif
 
@@ -426,14 +584,16 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
                 }
             }
             queue.async { [self] in
+                refreshTarget()
                 // 公開できなかった1枚は、判定器へ失敗として返し、比較の基準に残さない。
                 if let frame = shot?.frame ?? frame {
                     if published { detector.saveSucceeded(frame: frame) }
                     else { detector.saveFailed(frame: frame, at: Self.monotonic(Date())) }
-                } else if published, let shot, let order = shot.order,
+                } else if published, let shot, let order = shot.order, shot.target == seenTarget,
                           let thumbnail = Self.thumbnail(shot.image, width: detector.parameters.thumbnailWidth) {
                     // 「いま撮る」の1枚を、受付の番号の順で比較の基準にする。捨てた自動の保留を基準に残さず、
                     // 同じ画面を自動でもう1枚撮らない。後に受け付けた画像が基準なら替えない。
+                    // 対象を替えた後に届いた1枚は、替えた先の基準にしない。行としては公開する。
                     detector.adopt(order: order, thumbnail: thumbnail)
                 }
                 lock.withLock { pending -= 1 }
@@ -457,16 +617,17 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     }
 
     /// 撮れなくなった。その時点で撮影を止め、MainActorへ一度だけ知らせる。どのスレッドから呼んでもよい。
-    /// - epoch: 失敗が起きた開始・ストリームの世代。今の世代と違えば古い処理の失敗として無視する
+    /// - epoch: 失敗が起きた開始・ストリームの撮影の世代。今の世代と違えば古い処理の失敗として無視する
+    /// 知らせには、撮れなくなった対象の世代を添える。届くまでに別の対象を選んでいたら、受け取った側が `ScreenTarget` で捨てる。
     private func reportUnavailable(_ reason: String, epoch source: Int) {
-        let first = lock.withLock {
-            guard !reportedUnavailable, !invalidated, epoch == source else { return false }
+        let generation: Int? = lock.withLock {
+            guard !reportedUnavailable, !invalidated, epoch == source else { return nil }
             reportedUnavailable = true
             epoch += 1; capturing = false
-            return true
+            return targetGeneration
         }
-        guard first else { return }
-        DispatchQueue.main.async { [self] in MainActor.assumeIsolated { becameUnavailable(self, reason) } }
+        guard let generation else { return }
+        DispatchQueue.main.async { [self] in MainActor.assumeIsolated { becameUnavailable(self, reason, generation) } }
     }
 
     // MARK: - 補助

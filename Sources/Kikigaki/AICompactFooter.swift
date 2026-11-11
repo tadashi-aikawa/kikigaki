@@ -234,6 +234,8 @@ final class AICompactFooter: NSStackView {
     let warning = AIFooterButton(symbol: "exclamationmark.triangle", label: "警告")
     let more = AIFooterButton(symbol: "ellipsis", label: "その他の操作")
     let pin = AIFooterButton(symbol: "pin", label: "最前面に固定")
+    /// 画面の記録の状態と対象。ピンの隣に置き、録音中と一時停止中だけ出す。
+    let screen = ScreenTargetButton()
     var onSelect: ((String) -> Void)?
     private var state = SessionSnapshot()
     private var timer: Timer?
@@ -267,7 +269,7 @@ final class AICompactFooter: NSStackView {
         manualRow.widthAnchor.constraint(equalTo: destinations.widthAnchor).isActive = true
         destinations.setContentHuggingPriority(.init(200), for: .horizontal)
         destinations.setContentCompressionResistancePriority(.init(200), for: .horizontal)
-        for view in [destinations, rule, confirmation, warning, spacer, minutesNotice, pin, more] { addArrangedSubview(view) }
+        for view in [destinations, rule, confirmation, warning, spacer, minutesNotice, screen, pin, more] { addArrangedSubview(view) }
         pin.tint = Washi.muted
         pin.setAccessibilityValue("OFF")
         pin.callback = { [weak self] in
@@ -288,6 +290,7 @@ final class AICompactFooter: NSStackView {
     deinit { timer?.invalidate(); observers.forEach { NotificationCenter.default.removeObserver($0) } }
     func update(_ state: SessionSnapshot, reduceMotion: Bool, now: Date = Date()) {
         self.state = state
+        screen.update(state.screenControl)
         destinations.isHidden = state.ai == nil; rule.isHidden = destinations.isHidden
         spacer.isHidden = state.ai != nil
         automaticDestination.isEnabled = state.ai != nil

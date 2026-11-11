@@ -37,8 +37,10 @@ struct SessionSnapshot {
     var interimSaveWarning: String?
     /// 画面の記録の取得不能と、保存の3回連続の失敗。次に1枚保存できたら保存の失敗だけ消す。仕様は docs/screen-capture.md
     var screenCaptureWarning: String?
-    /// フッターの「いま撮る」を押せるか。画面を撮る会議の録音中だけ
+    /// フッターの画面のメニューの「いま撮る」を押せるか。選んだ対象を撮っている録音中だけ
     var canCaptureScreenNow = false
+    /// フッターの画面の操作。録音中と一時停止中で、画面を撮れる会議だけ持つ。仕様は docs/screen-capture.md の「録音中の切り替え」
+    var screenControl: ScreenControlState?
     /// ヘッダーの1行と赤で出すか。保存成功の通知は出さず、途中保存と画面の記録の失敗はほかの通知より先に置く
     var headerMessage: (text: String, isError: Bool) {
         var message = self.message ?? ""

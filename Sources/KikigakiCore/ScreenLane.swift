@@ -121,6 +121,22 @@ public enum ScreenLane {
         return separated ? name : nil
     }
 
+    /// 会議の画像の見出しから、サムネイルの下に添える題を並びの順に決める。
+    /// - ディスプレイが1つの会議: 全部の題からディスプレイ名を省く。毎枚同じ名前を重ねて言わない
+    /// - 録音中に対象を替えた会議: 直前の画像と同じディスプレイなら省き、違えば残す。最初の1枚も残す
+    ///   - 理由: 替えた直後の1枚で、どのディスプレイに替わったかが分かるようにする
+    public static func captions(_ labels: [String]) -> [String] {
+        if let shared = sharedDisplayName(labels) { return labels.map { caption($0, sharedDisplay: shared) } }
+        // ディスプレイ名と確かめられる見出しが1つも無ければ、今までどおり見出しのまま出す。
+        guard labels.contains(where: { $0.contains(displaySeparator) }) else { return labels }
+        var previous: String?
+        return labels.map { label in
+            let head = label.range(of: displaySeparator).map { String(label[..<$0.lowerBound]) } ?? label
+            defer { previous = head }
+            return head == previous ? caption(label, sharedDisplay: head) : label
+        }
+    }
+
     /// サムネイルの下に添える題。共通のディスプレイ名を省き、ウィンドウが無ければ空。
     public static func caption(_ label: String, sharedDisplay: String?) -> String {
         guard let display = sharedDisplay else { return label }
