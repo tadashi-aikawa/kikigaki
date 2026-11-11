@@ -24,6 +24,20 @@ struct TruthWindow: Codable {
     var min: Int
     var max: Int
     var label: String
+    /// 数え方(2026-11-11に足した)。nil は min〜max で合否を見る。
+    /// - transit: 送り・切替・スクロールの途中。保存の数を「途中」として別に数え、取りこぼしにも余分にも数えない
+    /// - return: 戻った画面。拾ったかを別に数え、取りこぼしにも余分にも数えない
+    /// - page: 交互・巡回の1回の表示。group と page で、ページごとに初回の取りこぼしと再保存を数える
+    var kind: String? = nil
+    var group: String? = nil
+    var page: Int? = nil
+    /// 区間の始まりから最初の保存を決めるまでの秒数を数える。
+    var latency: Bool? = nil
+
+    init(from: Double, to: Double, min: Int, max: Int, label: String, kind: String? = nil, group: String? = nil, page: Int? = nil, latency: Bool? = nil) {
+        self.from = from; self.to = to; self.min = min; self.max = max; self.label = label
+        self.kind = kind; self.group = group; self.page = page; self.latency = latency
+    }
 }
 
 final class RecordWriter {

@@ -112,6 +112,51 @@ enum SelfCheck {
         check(detector.tick(now: 10) == nil, "撮れない期間の後に古いフレームを保存した")
         check(detector.frame(index: 2, time: 11, thumb: thumb(50)).1?.reason == .first, "復帰した最初のフレームを保存しない")
 
+        // 案P: 2枚が交互に入れ替わる間は、2枚目より後を保存しない。範囲の秒数より後に戻れば保存する。
+        params.volatileSeconds = 0
+        var recent = params
+        recent.recentCount = 0; recent.recentSeconds = 15
+        detector = ChangeDetector(params: recent)
+        saves = 0
+        var time = 0.0
+        for step in 0..<10 {
+            if detector.frame(index: step, time: time, thumb: thumb(step % 2 == 0 ? 200 : 50)).1 != nil { saves += 1 }
+            for tick in 1...12 { if detector.tick(now: time + Double(tick) * 0.25) != nil { saves += 1 } }
+            time += 3
+        }
+        check(saves == 2, "交互の画面の保存が2枚でない: \(saves)")
+        _ = detector.frame(index: 10, time: time, thumb: thumb(120))
+        _ = detector.tick(now: time + 2)
+        check(detector.frame(index: 11, time: time + 30, thumb: thumb(200)).1 == nil && detector.tick(now: time + 32)?.frameTime == time + 30,
+              "範囲の秒数より後に戻った画面を保存しない")
+
+        // 案Q: 動き続けたら N 秒で1枚保存し、動いているマスを外した後は同じ動きで保存しない。
+        var moving = params
+        moving.movingSeconds = 5; moving.maskWindow = 5; moving.maskCount = 1; moving.maskRelease = 3; moving.maskBox = true
+        detector = ChangeDetector(params: moving)
+        _ = detector.frame(index: 0, time: 0, thumb: thumb(200))
+        var movingSaves: [Double] = []
+        for step in 1...30 {
+            if let decision = detector.frame(index: step, time: Double(step), thumb: thumb(200, patch: (20, step % 2 == 0 ? 0 : 255))).1 { movingSaves.append(decision.frameTime) }
+        }
+        check(movingSaves.count == 1 && movingSaves[0] >= 5, "動き続ける画面の保存が N 秒後の1枚でない: \(movingSaves)")
+
+        // 案Q: 外すマスは保存の成功で確定する。失敗したらマスを外さず、再試行の間隔の後にもう一度決める。
+        detector = ChangeDetector(params: moving)
+        detector.autoConfirm = false
+        if let first = detector.frame(index: 0, time: 0, thumb: thumb(200)).1 { detector.saveSucceeded(frameIndex: first.frameIndex, at: 0) }
+        var tries: [Double] = []
+        for step in 1...20 {
+            let time = Double(step)
+            let decision = detector.frame(index: step, time: time, thumb: thumb(200, patch: (20, step % 2 == 0 ? 0 : 255))).1
+            if let decision {
+                tries.append(time)
+                if tries.count == 1 { detector.saveFailed(frameIndex: decision.frameIndex, at: time) } else { detector.saveSucceeded(frameIndex: decision.frameIndex, at: time) }
+            }
+        }
+        check(tries.count == 2 && tries[1] - tries[0] >= moving.retryInterval && tries[1] - tries[0] < moving.retryInterval + 1.5,
+              "失敗の後に再試行の間隔で決め直さない: \(tries)")
+
         // 縮小の平均: 4x4の左半分が黒なら、2x2の左列が黒。
         let box = Thumbnail.boxAverage([0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255], width: 4, height: 4, to: 2)
         check(box.luma == [0, 255, 0, 255], "縮小の平均が違う: \(box.luma)")
@@ -131,6 +176,13 @@ let usage = """
   ScreenCaptureProbe synth --out <ディレクトリ> [--size 1920x1080] [--phases 0,0.37,0.71] [--snapshots 10,45]
   ScreenCaptureProbe sweep <記録のディレクトリ>... [--motion a,b] [--save a,b] [--settle a,b] [--cell a,b] [--width a,b] [--top a,b] [--volatile a,b] [--show 15] [--detail]
   ScreenCaptureProbe encode <画像> --out <x.webp> [--scale 0.5] [--quality 80] [--crop x,y,w,h]
+  ScreenCaptureProbe synth ... --scenario meeting|noise|anim|pages|switch|video|alternate|return [--interval min1]
+  ScreenCaptureProbe sweep ... [--recent-count a,b] [--recent-seconds a,b] [--recent-extend 0,1] [--recent-same a,b]
+                               [--moving a,b] [--mask-window a,b] [--mask-count a,b] [--mask-release a,b] [--mask-grow a,b]
+                               [--mask-box 0,1] [--mask-regional 0,1] [--mask-broad a,b] [--mask-novel 0,1] [--fail-every k]
+                               [--groups] [--summary] [--label 文字]
+  ScreenCaptureProbe import-captures <会議名>.captures --out <ディレクトリ>
+  ScreenCaptureProbe pair-diff <会議名>.captures [--width 128] [--cell 8] [--top 0.032]
 """
 
 var arguments = Arguments(Array(CommandLine.arguments.dropFirst()))
@@ -146,6 +198,8 @@ do {
     case "synth": try Synth.main(&arguments)
     case "sweep": try Sweep.main(&arguments)
     case "encode": try EncodeCommand.main(&arguments)
+    case "import-captures": try ImportCapturesCommand.main(&arguments)
+    case "pair-diff": try PairDiffCommand.main(&arguments)
     default: print(usage); exit(2)
     }
 } catch {

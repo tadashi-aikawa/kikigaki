@@ -16,7 +16,14 @@ import Foundation
 ///
 /// `--scenario noise` は、意味のある変化が無いのに画面が小さく動き続ける場面だけを長く流す。1時間あたりの余分を見積もる。
 /// - 0〜200 点滅するカーソルのある文書 / 200〜400 秒まで出す時計のあるスライド / 400〜600 小さく回り続ける印のあるスライド
+///
+/// 2026-11-11に足した「動き続ける画面」と「交互に変わる画面」の筋書きは `SynthMotion.swift`。
 enum Synth {
+    static let scenarios: [String: Scenario] = [
+        "meeting": meeting, "noise": noise,
+        "anim": anim, "video": fullVideo, "alternate": alternate, "return": returning, "pages": pages, "switch": switching,
+    ]
+
     struct Scenario {
         let duration: Double
         let truth: [TruthWindow]
@@ -67,9 +74,13 @@ enum Synth {
         guard size.count == 2 else { throw ProbeError.message("--size は 1920x1080 の形") }
         let phases = args.doubles("--phases") ?? [0, 0.37, 0.71]
         let snapshots = args.doubles("--snapshots") ?? []
+        let minimumOneSecond = args.string("--interval") == "min1"
         // --unit 1: 大きな画面でも文字を等倍で描く。横長の外部ディスプレイに小さな文字のウィンドウを出した場面
         fixedUnit = args.double("--unit").map { CGFloat($0) }
-        let scenario = args.string("--scenario") == "noise" ? noise : meeting
+        let name = args.string("--scenario") ?? "meeting"
+        guard let scenario = scenarios[name] else {
+            throw ProbeError.message("--scenario は \(scenarios.keys.sorted().joined(separator: " / ")) のどれか")
+        }
         let duration = scenario.duration
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         for (number, phase) in phases.enumerated() {
@@ -96,8 +107,14 @@ enum Synth {
                     try data.write(to: dir.appendingPathComponent(String(format: "snap-%05.1f.webp", time)))
                 }
                 // SCStreamの配送は位相が固定されない。±0.2秒揺らし、点滅と観測が同期したままにならないようにする。
+                // この揺らし方では隣の観測の間隔が0.6〜1.4秒になる。--interval min1 は、本体の minimumFrameInterval と同じく
+                // 間隔を1秒より短くしない。1.0〜1.4秒の間隔を積み重ねる(2026-11-11のレビュー 中6)。
                 step += 1
-                time = phase + Double(step) + Double(jitter.next() % 400) / 1000 - 0.2
+                if minimumOneSecond {
+                    time += 1 + Double(jitter.next() % 400) / 1000
+                } else {
+                    time = phase + Double(step) + Double(jitter.next() % 400) / 1000 - 0.2
+                }
             }
             writer.write(RecordLine(kind: "end", t: duration))
             writer.close()

@@ -191,6 +191,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 - [システム音声取り込みの実現性試作の検証記録](docs/records/system-audio-spike.md)
 - [画面の記録の試作の検証記録](docs/records/screen-capture-spike.md)
 - [無音の間の画面の保留の見積もり](docs/records/screen-silence-estimate.md)
+- [動き続ける画面と交互に変わる画面の規則の試作の検証記録](docs/records/screen-motion-alternation.md)
 - [音声ファイルの書き起こしの試作記録](docs/records/audio-file-spike.md)
 - [議事録プレビューの実装記録](docs/records/minutes-preview-implementation.md)
 - [会議参加モードの検証項目とステップ1〜5の実装記録](docs/records/ai-participant-implementation.md)

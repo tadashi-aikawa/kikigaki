@@ -110,7 +110,9 @@ final class Watcher: NSObject, SCStreamOutput, SCStreamDelegate {
         startMach = mach_absolute_time()
         startDate = Date()
         startCPU = Self.cpuSeconds()
-        events.write(["kind": "start", "display": display.name, "params": detector.params.description, "wall": ISO8601DateFormatter().string(from: startDate)])
+        // top: メニューバーを外す割合。sweep で当て直すときに同じ値を --top へ渡す。
+        events.write(["kind": "start", "display": display.name, "params": detector.params.description,
+                      "top": String(detector.params.excludeTopFraction), "wall": ISO8601DateFormatter().string(from: startDate)])
         let timer = DispatchSource.makeTimerSource(queue: queue)
         var lastSample = 0.0
         timer.schedule(deadline: .now() + Simulation.tickInterval, repeating: Simulation.tickInterval)
