@@ -48,6 +48,7 @@ enum ReplayExportCommand {
         params.recentCount = 0; params.recentSeconds = 12; params.recentExtend = true; params.recentSame = 0.000001; params.recentMaskLimit = 0.5
         params.movingSeconds = 12; params.maskWindow = 10; params.maskCount = 1; params.maskRelease = 3
         params.maskBox = true; params.maskGrow = 1; params.maskRegional = true
+        // 保存を省いて外すマスだけを確定する規則(`movingSame`)は入れない。試して、取りこぼしの反例が続いたのでやめた
         return params
     }
 

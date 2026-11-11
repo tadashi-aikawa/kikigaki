@@ -20,6 +20,10 @@ import Testing
         var video = false
         /// 描き込んだポインタ。題の下を1マスずつ動く。
         var pointer = false
+        /// 動く画像を、この番号の絵で止めて描く。
+        var frozen: Int? = nil
+        /// 動く画像の枠を左へ広げる。
+        var wide = false
     }
 
     static func draw(_ screen: Screen, frame: Int) -> ScreenThumbnail {
@@ -29,7 +33,7 @@ import Testing
             if screen.video { luma[cell] = UInt8(20 + (frame * 41 + x * 13 + y * 7) % 200); continue }
             if (2...5).contains(y), (2...30).contains(x) { luma[cell] = UInt8(50 + (screen.slide * 37 + x * 7 + y * 3) % 100) }
             if let panel = screen.panel, (10...21).contains(y), (2...20).contains(x) { luma[cell] = UInt8(30 + (panel * 53 + x * 11 + y * 5) % 150) }
-            if screen.animated, (12...21).contains(y), (26...37).contains(x) { luma[cell] = UInt8(20 + (frame * 41 + x * 13 + y * 7) % 200) }
+            if screen.animated, (12...21).contains(y), ((screen.wide ? 14 : 26)...37).contains(x) { luma[cell] = UInt8(20 + ((screen.frozen ?? frame) * 41 + x * 13 + y * 7) % 200) }
         } }
         if screen.pointer { luma[8 * width + 2 + frame % 30] = 0 }
         return ScreenThumbnail(width: width, height: height, luma: luma)
@@ -70,6 +74,84 @@ import Testing
         #expect(saves.last?.reason == .moving)
         // 外したのは動く画像の枠だけで、題は比べ続ける。
         #expect(detector.excludedCellCount > 0 && detector.excludedCellCount < 200)
+    }
+
+    /// 受け入れた限界: 録音の開始から、動く画像と入れ替わる図のスライドを映すと、開始の1枚の後、12秒たって動く画像だけが違う1枚を強制で撮る。
+    /// 2026-11-11の実機確認で、開始の1枚・動く画像だけが違う1枚・図が替わった1枚の3枚を撮った。強制の1枚は必ず撮る約束を保つ。
+    @Test func 受け入れた限界_動く画像のスライドを映したまま始めたら_動く画像だけが違う1枚も撮る() {
+        var detector = ScreenChangeDetector()
+        let saves = Self.run(until: 50, detector: &detector) { t in Screen(slide: 2, panel: Int(t / 3.5) % 2, animated: true) }
+        #expect(saves.first?.reason == .first)
+        #expect(saves.filter { $0.reason == .moving }.count == 1, "\(saves)")
+    }
+
+    /// 受け入れた限界: 動く画像が止まったスライドを1枚撮った後、動く画像だけが動き出すと、12秒後に強制で1枚撮る。
+    @Test func 受け入れた限界_止まっていた動く画像が動き出したら_強制で1枚撮る() {
+        var detector = ScreenChangeDetector()
+        let saves = Self.run(until: 60, detector: &detector) { t in
+            t < 10 ? Screen(slide: 1) : Screen(slide: 2, animated: true, frozen: t < 20 ? 0 : nil)
+        }
+        #expect(Self.count(saves, 10..<20) == 1)
+        #expect(saves.filter { (20..<61).contains(Double($0.frame)) }.map(\.reason) == [.moving], "\(saves)")
+    }
+
+    /// 0秒から毎秒観測し、0.25秒ごとに判定する。画面は秒ごとに `draw` で描く。保存の成功はその場で返す。
+    static func runLuma(until: Int, draw: (Int) -> [UInt8]) -> [Saved] {
+        var detector = ScreenChangeDetector()
+        var saves: [Saved] = []
+        func settle(_ decision: ScreenChangeDetector.Decision?, at time: Double) {
+            guard let decision else { return }
+            detector.accepted(frame: decision.frame, order: saves.count)
+            detector.saveSucceeded(frame: decision.frame, at: time)
+            saves.append(Saved(frame: decision.frame, reason: decision.reason, order: saves.count))
+        }
+        var tick = 0.25
+        for second in 0...until {
+            while tick < Double(second) { settle(detector.tick(at: tick), at: tick); tick += 0.25 }
+            settle(detector.observe(frame: second, at: Double(second), thumbnail: ScreenThumbnail(width: width, height: height, luma: draw(second))),
+                   at: Double(second))
+        }
+        return saves
+    }
+
+    /// 動く画像の隣や内側に、静止した注記が足される。注記の最後の中身を含む1枚を必ず撮る。
+    /// 2026-11-11のレビューで、保存を省いて外すマスだけを確定する経路の反例になった場面。その経路はやめた。
+    /// - 隣: 動く画像は x=20...27, y=12...19、注記は5秒から x=12...18, y=12...19。広げて長方形にした外す候補は注記までつながる
+    /// - 広げた所: 注記は5秒から x=19, y=12...19。動く画像を1マス広げた所に入る
+    /// - 長方形の内側: 動く画像はL字で、x=20...27, y=12...13 と x=20...21, y=12...19。注記は5秒から x=23...26, y=15...18。動く所を囲む長方形の内側
+    /// - 2回変わって止まる: 隣の位置で、5秒に輝度40で出て、6秒に80へ変わり、以後は止まる。フェードで出る注記や、出た直後に中身が変わる注記
+    @Test(arguments: ["隣", "広げた所", "長方形の内側", "2回変わって止まる"])
+    func 動く画像の近くに足された静止した注記は_最後の中身を含む1枚を撮る(place: String) {
+        let lastChange = place == "2回変わって止まる" ? 6 : 5
+        let saves = Self.runLuma(until: 40) { second in
+            var luma = [UInt8](repeating: 230, count: Self.width * Self.height)
+            func animate(_ x: Int, _ y: Int) { luma[y * Self.width + x] = UInt8(20 + (second * 41 + x * 13 + y * 7) % 200) }
+            if place == "長方形の内側" {
+                for y in 12...13 { for x in 20...27 { animate(x, y) } }
+                for y in 14...19 { for x in 20...21 { animate(x, y) } }
+            } else {
+                for y in 12...19 { for x in 20...27 { animate(x, y) } }
+            }
+            guard second >= 5 else { return luma }
+            let value: UInt8 = place == "2回変わって止まる" && second >= 6 ? 80 : 40
+            switch place {
+            case "広げた所": for y in 12...19 { luma[y * Self.width + 19] = value }
+            case "長方形の内側": for y in 15...18 { for x in 23...26 { luma[y * Self.width + x] = value } }
+            default: for y in 12...19 { for x in 12...18 { luma[y * Self.width + x] = value } }
+            }
+            return luma
+        }
+        #expect(saves.contains { $0.frame >= lastChange }, "注記の最後の中身を含む画面を一度も保存していない: \(saves)")
+    }
+
+    /// 外している間に動く画像の枠が広がったら、動く所の形が変わった別の中身として撮る。
+    @Test func 外している間に動く画像の枠が広がったら撮る() {
+        var detector = ScreenChangeDetector()
+        let saves = Self.run(until: 70, detector: &detector) { t in
+            t < 10 ? Screen(slide: 1) : Screen(slide: 2, animated: true, wide: t >= 40)
+        }
+        // 22秒ごろに動く画像を撮って外す。40秒から動く画像の枠が左へ広がる。外している間に広がったので、12秒後に撮る。
+        #expect(Self.count(saves, 40..<71) == 1, "\(saves)")
     }
 
     @Test func 交互に変わる2枚は1枚ずつだけ撮る() {

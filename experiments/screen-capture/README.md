@@ -71,9 +71,20 @@ swift build -c release
   - `--mask-broad <割合>`: 広い差のフレームでの1度だけの変化を候補から除く。測って入れなかった
   - `--mask-novel 0,1`: 外したマスでも、動く間に見なかった明るさで落ち着いたマスは比べる。測って入れなかった
   - `--mask-after-broad <割合>`: 外す候補を、直前との差がこの割合を超えた最後のフレームより後の観測だけで数える。測って入れなかった
+  - `--moving-same 0,1,2`: 強制で保存する時点で、動いている所を除けば最後に保存した画像と同じなら、保存せずに外すマスだけを確定する。同じ画面の直近の画面は最後に見た時刻を延ばす
+    - 試して入れなかった。推す組は0で、本体も入れていない。どの形も、足した注記を取りこぼす反例が出た。経緯は検証記録の「保存を省く経路をやめた」
+    - 0: 当てない。1: いつも当てる。2: 外しているマスが無いときだけ当てる
+    - 動いている所の上限は `--recent-mask` と同じ値を使う
+  - `--moving-same-repeat <回>` `--moving-same-grow <マス>` `--moving-same-box 0,1`: 保存を省く判定で除く、動いている所の決め方。`--moving-same` を付けたときだけ効く
+    - repeat 0: 外す候補をそのまま除き、差が `--save` 以下なら省く
+    - repeat 1以上: 直近 `--mask-window` 秒にこの回数以上変わったマスを grow マス広げ、box なら長方形で囲む。その外が全く同じときだけ省く
   - 外すマスは、撮った1枚の保存に成功してから確定する。`sweep` は決定のたびに成功を返し、`--fail-every k` で k 回に1回を失敗として返す
+    - 例外: `--moving-same` を付けると、保存せずにその場で確定することがある。推す組には付けない
 - 案R 動き続ける間は一定の間隔で撮る: `--moving <秒> --mask-window 0`
-- 筋書き: `--scenario anim|pages|switch|video|alternate|return|mixed|send`。中身と正解と数え方は `SynthMotion.swift` の冒頭
+- 筋書き: `--scenario anim|pages|switch|video|alternate|return|mixed|send|wake|note`。中身と正解と数え方は `SynthMotion.swift` の冒頭
+  - `wake` は、動く画像のスライドを映したまま録音を始める場面と、止まっていた動く画像が動き出す場面。実機確認で出た1件を写した
+    - 推す組では、開始から映す区間で3枚、動き出した区間で1枚を撮り、正解の枠に対して余分になる。受け入れた限界
+  - `note` は、動く画像の隣に静止した注記が足される場面。注記の入った1枚を撮らなければ取りこぼし
   - `mixed` は、動く画像と入れ替わる図が同じスライドにある場面。実画面の記録 `real-obs-01` の13ページを写した
   - `send` は、静止したスライドから1回送って `mixed` と同じスライドへ着く場面。送る何秒前から画面が動き始めるかを、区間ごとに0〜7秒で変える
     - 送った後の区間は、図の2つの絵の両方を要る枚数にした。1枚なら取りこぼし1
@@ -94,7 +105,7 @@ swift build -c release
 W=work/r10
 P=.build/release/ScreenCaptureProbe
 # 筋書きごとに、1920×1080を3本、横長に等倍の文字を2本、観測の間隔を1秒以上にしたものを2本
-for s in meeting noise anim pages switch video alternate return mixed send; do
+for s in meeting noise anim pages switch video alternate return mixed send wake note; do
   g=$s; [ $s = meeting ] && g=meet; [ $s = alternate ] && g=alt; [ $s = return ] && g=ret; [ $s = mixed ] && g=mix
   ph=0,0.37,0.71; [ $s = noise ] && ph=0,0.5
   $P synth --out $W/$g-1080 --scenario $s --phases $ph
@@ -107,18 +118,23 @@ $P synth --out $W/noise-uw --scenario noise --size 3840x1600 --phases 0,0.5
 
 S=($(ls -d $W/*/phase*))
 C=(--width 128 --cell 8 --motion 0.0002 --save 0.001 --settle 1.5 --top 0.0223)
-Q=(--moving 12 --mask-window 10 --mask-count 1 --mask-release 3 --mask-box 1 --mask-grow 1 --mask-regional 1)
-# 外す候補を集める秒数を除いた案Q。秒数を振るときに使う
-QB=(--moving 12 --mask-count 1 --mask-release 3 --mask-box 1 --mask-grow 1 --mask-regional 1)
 PP=(--recent-count 0 --recent-seconds 12 --recent-same 0.000001 --recent-mask 0.5)
 P0=(--recent-count 0 --recent-seconds 12 --recent-same 0.000001)
+# 案Qの土台。外す候補を集める秒数を除いたもの。振るときは後ろに足す
+QB=(--moving 12 --mask-count 1 --mask-release 3 --mask-box 1 --mask-grow 1 --mask-regional 1)
+# 推す組。本体と同じ決定を出す
+Q=($QB --mask-window 10)
+# 試して入れなかった、保存を省いて外すマスだけを確定する形の比べ方
+# --moving-same は0が入れない形、1がいつも当てる、2が外していないときだけ。--moving-same-repeat 0 は外す候補で同じかを決める形
+$P sweep $S $C $PP $QB --mask-window 10 --moving-same 0,1,2 --moving-same-repeat 0,2 --moving-same-grow 1 --moving-same-box 1 --groups
 # 外す候補を集める秒数。-1 は --moving と同じ12秒
 $P sweep $S $C $PP $QB --mask-window -1,10,8,6 --groups
 # send の区間ごとの枚数。1行が1本で、並びは送る0・0.25・0.5・0.75・1・1.5・2・3・4・5・6・7秒前から動く区間
 for w in -1 10 8 6; do echo "== $w"; for f in $(ls -d $W/send-*/phase*); do
   $P sweep $f $C $PP $QB --mask-window $w --label 動いた後 | grep '^  \[' | tr '/' '\n' | grep -o '保存[0-9]* 期待' | grep -o '[0-9]*' | tr '\n' ' '; echo
 done; done
-# 初期値と各案の表。P0 は外すマスを掛けない案P。前回の表の案Qは --mask-window -1 で測った
+# 初期値と各案の表。P0 は外すマスを掛けない案P
+# 記録の前の表は、そのときの組で測った。案Qは --mask-window -1
 $P sweep $S $C --groups
 $P sweep $S $C $P0 --groups
 $P sweep $S $C $Q --groups

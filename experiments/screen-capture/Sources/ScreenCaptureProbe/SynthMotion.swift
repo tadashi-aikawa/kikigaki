@@ -28,6 +28,8 @@ import Foundation
 ///   - 0〜10 静止 / 10〜16 1秒ごとに送る(途中) / 16〜76 M1 / 76〜82 静止B / 82〜86 M1へ6秒後に戻る / 86〜122 Bを36秒
 ///   - 122〜182 M2: M1と同じスライドへ36秒後に戻る / 182〜200 静止C / 200〜260 M3: 動画の小窓と5秒おきの図 / 260〜270 静止D
 /// - send(720秒): 静止したスライドから1回送って `mixed` と同じスライドへ着く。送る何秒前から動き始めるかを区間ごとに変える。中身は `sendOnce`
+/// - wake(110秒): 動く画像のスライドを映したまま始める場面と、止まっていた動く画像が動き出す場面。中身は `wake`
+/// - note(140秒): 動く画像の隣に、静止した注記が足される場面。中身は `note`
 extension Synth {
     static func need(_ from: Double, _ to: Double, _ label: String, latency: Bool = false, max: Int = 1) -> TruthWindow {
         TruthWindow(from: from, to: to, min: 1, max: max, label: label, latency: latency ? true : nil)
@@ -220,6 +222,60 @@ extension Synth {
         case 182..<200: canvas.plainSlide(title: "次の話題", bullets: ["動画の小窓"], page: 15)
         case 200..<260: mixedSlide(200, interval: 5, panels: (4, 6), page: 16, video: true)
         default: canvas.plainSlide(title: "まとめ", bullets: ["入れ替わる図は1枚ずつ"], page: 17)
+        }
+        canvas.menuBar(t: t)
+    }
+
+    /// 動く画像のスライドを映したまま録音を始める場面と、止まっていた動く画像が動き出す場面(2026-11-11の実機確認)。
+    /// - 0〜40 W1: `mixed` と同じ動く画像と3.5秒おきの図を、録音の開始から映す。正解は1〜2枚
+    /// - 40〜50 W2: 静止したスライド
+    /// - 50〜60 W3: 動く画像が止まったままのスライド。正解は1枚
+    /// - 60〜100 W4: 同じスライドで動く画像が動き出す。ほかは変わらないので、撮らないのが正解
+    /// - 100〜110 W5: 静止したスライド
+    static let wake = Scenario(duration: 110, truth: [
+        need(0, 40, "W1 動く画像のスライドで始める", max: 2),
+        need(40, 50, "W2 静止"),
+        need(50, 60, "W3 止まった動く画像"),
+        TruthWindow(from: 60, to: 100, min: 0, max: 0, label: "W4 動き出した動く画像"),
+        need(100, 110, "W5 静止"),
+    ]) { canvas, t in
+        switch t {
+        case ..<40: canvas.mixedSlide(t: t, from: 0, interval: 3.5, panels: (1, 3), page: 13, video: false)
+        case 40..<50: canvas.plainSlide(title: "次の話題", bullets: ["動く画像が止まっているスライドへ"], page: 14)
+        case 50..<100:
+            canvas.panelSlide(title: "話者名の推定", panel: 4, page: 15)
+            canvas.cartoonAnimation(t: t < 60 ? 50 : t, canvas.areaBox(0.15), seed: 41)
+        default: canvas.plainSlide(title: "まとめ", bullets: ["動き出しても撮らない"], page: 16)
+        }
+        canvas.menuBar(t: t)
+    }
+
+    /// 動く画像の隣に、静止した注記が足される場面(2026-11-11のレビュー 高1)。注記は動く画像の枠のすぐ左に出て、そのまま残る。
+    /// 注記の入った画面を1枚も撮らないのは取りこぼし。
+    /// - 0〜5 N0: 動く画像のスライドを録音の開始から映す / 5〜60 N1: 注記が出る。正解は1〜2枚
+    /// - 60〜70 静止 / 70〜85 N2: 動く画像が止まったスライド。80秒に動き出す / 85〜130 N3: 注記が出る。正解は1〜2枚 / 130〜140 静止
+    static let note = Scenario(duration: 140, truth: [
+        need(0, 5, "N0 動く画像のスライドで始める"),
+        need(5, 60, "N1 動く画像の隣に注記", max: 2),
+        need(60, 70, "N 静止"),
+        need(70, 85, "N2 止まった動く画像が動き出す"),
+        need(85, 130, "N3 動き出した動く画像の隣に注記", max: 2),
+        need(130, 140, "N 静止のまとめ"),
+    ]) { canvas, t in
+        func slide(page: Int, gif: Double, note: Bool) {
+            canvas.panelSlide(title: "話者名の推定", panel: 1, page: page)
+            let b = canvas.areaBox(0.15)
+            canvas.cartoonAnimation(t: gif, b, seed: 51)
+            if note {
+                canvas.box(b.x - 280, b.top + 20, 260, b.h * 0.5, CGColor(gray: 1, alpha: 1))
+                canvas.text("注: 動く画像の見方", x: b.x - 268, top: b.top + 40, size: 22, bold: true)
+            }
+        }
+        switch t {
+        case ..<60: slide(page: 13, gif: t, note: t >= 5)
+        case 60..<70: canvas.plainSlide(title: "次の話題", bullets: ["止まった動く画像へ"], page: 14)
+        case 70..<130: slide(page: 15, gif: t < 80 ? 70 : t, note: t >= 85)
+        default: canvas.plainSlide(title: "まとめ", bullets: ["注記も残る"], page: 16)
         }
         canvas.menuBar(t: t)
     }

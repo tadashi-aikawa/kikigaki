@@ -181,6 +181,10 @@ enum Sweep {
         var maskBoxes = [false]
         var maskBroads = [0.0]
         var maskAfterBroads = [0.0]
+        var movingSames = [0]
+        var movingSameRepeats = [0]
+        var movingSameGrows = [0]
+        var movingSameBoxes = [false]
         var maskRegionals = [false]
         var maskNovels = [false]
 
@@ -210,7 +214,7 @@ enum Sweep {
             let masked = moving > 0 && window != 0
             for maskCount in (masked ? maskCounts : [2]) { for maskRelease in (masked ? maskReleases : [4]) {
             for grow in (masked ? maskGrows : [0]) { for box in (masked ? maskBoxes : [false]) {
-            for broad in (masked ? maskBroads : [0]) { for afterBroad in (masked ? maskAfterBroads : [0]) { for regional in (masked ? maskRegionals : [false]) {
+            for broad in (masked ? maskBroads : [0]) { for afterBroad in (masked ? maskAfterBroads : [0]) { for movingSame in (masked ? movingSames : [0]) { for sameRepeat in (masked && movingSame > 0 ? movingSameRepeats : [0]) { for sameGrow in (masked && movingSame > 0 ? movingSameGrows : [0]) { for sameBox in (masked && movingSame > 0 ? movingSameBoxes : [false]) { for regional in (masked ? maskRegionals : [false]) {
             for novel in (masked ? maskNovels : [false]) {
                 var params = base
                 params.maskNovel = novel
@@ -219,10 +223,12 @@ enum Sweep {
                 params.recentCount = recentCount; params.recentSeconds = recentSecond; params.recentExtend = extend; params.recentSame = same
                 params.movingSeconds = moving; params.maskCount = maskCount; params.maskRelease = maskRelease; params.maskGrow = grow
                 params.maskBox = box; params.maskBroad = broad; params.maskAfterBroad = afterBroad; params.maskRegional = regional
+                params.movingSame = movingSame > 0; params.movingSameFirstOnly = movingSame == 2
+                params.movingSameRepeat = sameRepeat; params.movingSameGrow = sameGrow; params.movingSameBox = sameBox
                 // 外すマスを数える秒数を負にすると、動き続けて撮るまでの秒数と同じにする。
                 params.maskWindow = window < 0 ? moving : window
                 if !result.contains(params) { result.append(params) }
-            } } } } } } } } } } } } } } } }
+            } } } } } } } } } } } } } } } } } } } }
             return result
         }
     }
@@ -253,6 +259,11 @@ enum Sweep {
         if let list = args.doubles("--mask-box") { grid.maskBoxes = list.map { $0 != 0 } }
         if let list = args.doubles("--mask-broad") { grid.maskBroads = list }
         if let list = args.doubles("--mask-after-broad") { grid.maskAfterBroads = list }
+        // 0: 撮る、1: 同じなら撮らない、2: 外していなければ同じなら撮らない
+        if let list = args.doubles("--moving-same") { grid.movingSames = list.map { Int($0) } }
+        if let list = args.doubles("--moving-same-repeat") { grid.movingSameRepeats = list.map { Int($0) } }
+        if let list = args.doubles("--moving-same-grow") { grid.movingSameGrows = list.map { Int($0) } }
+        if let list = args.doubles("--moving-same-box") { grid.movingSameBoxes = list.map { $0 != 0 } }
         if let list = args.doubles("--mask-regional") { grid.maskRegionals = list.map { $0 != 0 } }
         if let list = args.doubles("--mask-novel") { grid.maskNovels = list.map { $0 != 0 } }
         let failEvery = args.int("--fail-every") ?? 0

@@ -81,6 +81,20 @@ struct DetectorParams: CustomStringConvertible, Hashable {
     var maskNovel = false
     /// 保存に失敗してから、次の保存を決めるまでの秒数。本体と同じ5秒。
     var retryInterval = 5.0
+    /// 案Q: 動き続けて撮る時点で、外す候補を除けば最後に保存した画像と同じなら、保存せずに外すマスだけを確定する。
+    /// 同じ画面の直近の画面は、最後に見た時刻を今に延ばす。候補が `recentMaskLimit` を超えるときは除かずに比べる。
+    /// 理由: 動く画像のスライドを映したまま録音を始めると、開始の1枚と動く画像だけが違う1枚を12秒後に撮った(2026-11-11の実機確認)。
+    var movingSame = false
+    /// `movingSame` を、外しているマスが無いときだけにする。外している間に動く所が広がったときは、今までどおり保存する。
+    var movingSameFirstOnly = false
+    /// `movingSame` で保存を省く判定に使う、動いている所の決め方。0なら外す候補(広げて長方形にしたもの)をそのまま使う。
+    /// 1以上なら、直近 maskWindow 秒の観測でこの回数以上変わったマスだけを動いている所とし、`movingSameGrow` マス広げる。
+    /// それ以外のマスが全て基準と同じ(差が cellDelta 以下)ときだけ省く。
+    /// 理由: 広げた長方形は、動く画像の隣に足された静止した注記まで含み、一度も保存せずに外した(2026-11-11のレビュー 高1)。
+    var movingSameRepeat = 0
+    var movingSameGrow = 0
+    /// 繰り返し変わったマスを広げた後、つながりごとに外接する長方形まで埋める。動く画像の通り道から枠を囲む。
+    var movingSameBox = false
 
     var recentEnabled: Bool { recentCount != 1 || recentSeconds > 0 }
 
@@ -99,6 +113,8 @@ struct DetectorParams: CustomStringConvertible, Hashable {
                 if maskBox { options += " 長方形" }
                 if maskBroad > 0 { options += String(format: " 広い差>%g除く", maskBroad) }
                 if maskAfterBroad > 0 { options += String(format: " 広い差>%gより後", maskAfterBroad) }
+                if movingSame { options += movingSameFirstOnly ? " 外していなければ同じなら撮らない" : " 同じなら撮らない" }
+                if movingSame, movingSameRepeat > 0 { options += " 動く所=\(movingSameRepeat)回以上+\(movingSameGrow)" + (movingSameBox ? "長方形" : "") }
                 if maskRegional { options += " 領域ごと" }
                 if maskNovel { options += " 見なかった明るさは比べる" }
                 parts.append(String(format: "Q[N=%g 外す=%d/%gs 戻す=%gs 広げる=%d", movingSeconds, maskCount, maskWindow, maskRelease, maskGrow) + options + "]")
@@ -303,6 +319,24 @@ final class ChangeDetector {
         // 動き続けている。案Q・案R: 動き始めてから movingSeconds 秒たったら、その時点の1枚を試す。
         guard params.movingSeconds > 0, now - motionSince >= params.movingSeconds else { return nil }
         motionSince = now
+        if params.movingSame, params.maskWindow > 0, pending.isEmpty, maskRegion.isEmpty || !params.movingSameFirstOnly,
+           let candidate = movingMaskCandidate(now: now),
+           let moving = params.movingSameRepeat > 0 ? stillMoving(now: now) : candidate,
+           recentMaskUsable(moving),
+           params.movingSameRepeat > 0 ? countChanged(saved, latest.thumb, excluding: moving) == 0 : fraction(saved, latest.thumb, volatile: candidate) <= params.save {
+            // 外す候補を除けば最後に保存した画像と同じ。保存せずに外すマスだけを確定し、同じ画面の最後に見た時刻を延ばす(2026-11-11の実機確認)。
+            // 候補が比較に使うマスの上限を超えるときは除かない。全画面の動画で最初の1枚を撮れなくなるため。
+            if Self.debug { print(String(format: "  [Q] %.2f 動いている所を除けば基準と同じ。保存せずに外すマスを確定する", now)) }
+            applyMovingMask(candidate, now: now)
+            if params.recentEnabled {
+                // 延ばさないと、最後に保存した画面は直近の範囲から外れたままになり、入れ替わる図がその画面へ戻ったときに撮り直す。
+                let previous = recentMask
+                recentMask = moving
+                for offset in history.indices where same(history[offset].thumb, latest.thumb) { history[offset].lastSeen = now }
+                recentMask = previous
+            }
+            return nil
+        }
         // 比べるのは今の外すマスでの基準。候補のマスで比べると、全画面の動画が丸ごと外れて保存しない。
         let diffSaved = fraction(saved, latest.thumb, volatile: compared)
         guard diffSaved > params.save, !seenRecently(now: now) else { return nil }
@@ -400,6 +434,33 @@ final class ChangeDetector {
         }
         guard any else { return nil }
         return params.maskBox ? Self.boxes(mask, width: width, height: height) : mask
+    }
+
+    /// 直近 maskWindow 秒の観測で `movingSameRepeat` 回以上変わったマスを、`movingSameGrow` マス広げたもの。無ければnil。
+    private func stillMoving(now: Double) -> [Bool]? {
+        guard let latest else { return nil }
+        let width = latest.thumb.width, height = latest.thumb.height
+        var counts = [Int](repeating: 0, count: width * height)
+        for frame in moveFrames where frame.time >= now - params.maskWindow { for cell in frame.cells { counts[Int(cell)] += 1 } }
+        var mask = [Bool](repeating: false, count: width * height)
+        var any = false
+        let grow = params.movingSameGrow
+        for cell in considered(latest.thumb) where counts[cell] >= params.movingSameRepeat {
+            any = true
+            let x = cell % width, y = cell / width
+            for dy in -grow...grow { for dx in -grow...grow {
+                let nx = x + dx, ny = y + dy
+                guard nx >= 0, nx < width, ny >= excludedRows, ny < height else { continue }
+                mask[ny * width + nx] = true
+            } }
+        }
+        guard any else { return nil }
+        return params.movingSameBox ? Self.boxes(mask, width: width, height: height) : mask
+    }
+
+    /// 外すマスを除いて、輝度の差が cellDelta を超えるマスの数。
+    private func countChanged(_ a: Thumb, _ b: Thumb, excluding mask: [Bool]) -> Int {
+        considered(b).reduce(0) { $0 + ((!mask[$1] && Self.changed(a.luma[$1], b.luma[$1], params.cellDelta)) ? 1 : 0) }
     }
 
     private func applyMovingMask(_ mask: [Bool], now: Double) {

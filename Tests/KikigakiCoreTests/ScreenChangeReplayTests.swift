@@ -135,11 +135,26 @@ import Testing
     /// - mixed: `mix-1080m1/phase0`。外すマスが動く画像の全体を覆わない漏れが出る
     /// - mixed-phase1: `mix-1080/phase1`。結果を遅らせると、起点を書けた時刻にした形では試作から食い違う
     /// - anim: `anim-1080/phase0`。描き込んだポインタ・止まる動く画像・通知
-    static let fixtures = ["screen-replay-mixed", "screen-replay-mixed-phase1", "screen-replay-anim"]
+    /// - wake: `wake-1080/phase0`。動く画像のスライドを映したまま始める。止まっていた動く画像が動き出す
+    /// - note: `note-1080/phase0`。動く画像の隣に、静止した注記が足される
+    static let fixtures = ["screen-replay-mixed", "screen-replay-mixed-phase1", "screen-replay-anim", "screen-replay-wake", "screen-replay-note"]
 
     @Test(arguments: fixtures)
     func 試作と同じ観測の列で同じ時刻に同じ理由で保存を決める(name: String) throws {
         try Self.expectSameDecisions(try Self.load(name))
+    }
+
+    /// 合成の `wake` と `note` の、いまの振る舞いを固定する。区間は `SynthMotion.swift` の冒頭。
+    /// - wake の開始から映す0〜40秒は3枚。開始の1枚、動く画像だけが違う強制の1枚、図が替わった1枚。受け入れた限界
+    /// - wake の動き出した60〜100秒は、強制の1枚だけ。受け入れた限界
+    /// - note の注記が出る5〜60秒と85〜130秒は、どちらも注記の入った1枚を撮る
+    @Test func 動く画像のスライドで始める場面と注記が足される場面のいまの枚数() throws {
+        let wake = try Self.replay(try Self.load("screen-replay-wake"))
+        #expect(wake.filter { $0.decidedAt < 40 }.count == 3, "\(wake)")
+        #expect(wake.filter { (60..<100).contains($0.decidedAt) }.map(\.reason) == ["moving"], "\(wake)")
+        let note = try Self.replay(try Self.load("screen-replay-note"))
+        #expect(note.contains { (5..<60).contains($0.decidedAt) }, "\(note)")
+        #expect(note.contains { (85..<130).contains($0.decidedAt) }, "\(note)")
     }
 
     /// 決定の3回に1回を失敗として返す。続けて失敗する場面も含め、試作と同じ時刻に同じ理由で決め直す。
