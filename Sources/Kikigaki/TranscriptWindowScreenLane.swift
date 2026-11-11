@@ -5,9 +5,14 @@ import Quartz
 /// 画像レーンの組み立てとQuick Look。割り当てはCoreの `ScreenLane` が行の並びから毎回導く。
 /// 表示専用で、保存するMarkdown・コピー・AIへ渡す会話は変えない。仕様は docs/screen-capture.md の「表示」
 extension TranscriptWindowController {
-    /// 1回の行の組み立てで使う、レーンの幅・割り当て・枠の作り方。
+    /// 1回の行の組み立てで使う、レーンの出し方・割り当て・枠の作り方。
     struct ScreenLaneBuild {
-        let width: CGFloat
+        /// 画面の行があればレーンを出す。
+        let shown: Bool
+        /// 画像があれば境目をつかめる。イベントの行だけの会議ではつかめない。
+        let hasImages: Bool
+        /// 出すレーンの幅。会話側の幅で決まるので、レーンの出入りでウィンドウを直した後に `minutesSplit` から入れる。
+        var width: CGFloat = 0
         let assignment: ScreenLane.Assignment
         let items: ([Int]) -> [ScreenLaneView.Item]
     }
@@ -19,13 +24,13 @@ extension TranscriptWindowController {
         let images = utterances.filter { $0.kind == .screen && !$0.imagePaths.isEmpty }
         screenPreview.update(images.compactMap(\.imagePaths.first))
         guard utterances.contains(where: { $0.kind == .screen }) else {
-            return ScreenLaneBuild(width: 0, assignment: .init(), items: { _ in [] })
+            return ScreenLaneBuild(shown: false, hasImages: false, assignment: .init(), items: { _ in [] })
         }
         // 題は画像の並びで決める。録音中に対象を替えた会議では、直前の画像と同じディスプレイの名前だけを省く。
         let captions = Dictionary(zip(images.compactMap(\.imagePaths.first), ScreenLane.captions(images.map(\.text))),
                                   uniquingKeysWith: { first, _ in first })
         let expanded = screenLaneExpanded
-        return ScreenLaneBuild(width: ScreenLaneView.width, assignment: ScreenLane.assign(utterances)) { screens in
+        return ScreenLaneBuild(shown: true, hasImages: !images.isEmpty, assignment: ScreenLane.assign(utterances)) { screens in
             ScreenLane.slots(screens, utterances: utterances, expanded: expanded).map { slot in
                 switch slot {
                 case let .folded(indices):
@@ -39,6 +44,42 @@ extension TranscriptWindowController {
                     return .image(path: path, time: time, caption: captions[path] ?? row.text, label: row.text)
                 }
             }
+        }
+    }
+
+    /// レーンを出している間に幅だけが変わった。境目のドラッグ・ウィンドウの伸縮・議事録の区切り線が当たる。
+    /// 行の中身は作り直さず、幅を渡して高さを測り直す。出入りは `updateRows` が受け持つ。
+    func applyScreenLaneWidth() {
+        let width = minutesSplit.laneWidth
+        guard transcriptDocument.laneWidth > 0, width > 0, width != transcriptDocument.laneWidth else { return }
+        let anchor = transcriptDocument.anchor()
+        transcriptDocument.laneWidth = width
+        for row in rows.values { row.updateLane(row.lane.items, width: width) }
+        tentativeRow.updateLane(tentativeRow.lane.items, width: width)
+        screenLaneTrailing.lane.setLaneWidth(width)
+        transcriptDocument.reflow(anchor: anchor)
+        scrolled()
+    }
+
+    /// 発言の列と画像レーンの境目のドラッグ。幅の範囲と発言の列に残す幅は `ScreenLaneLayout` が決める。
+    /// ドラッグの間は縮小画像を新しく読まず、離してから今の幅に合う大きさで読む。
+    func dragScreenLane(_ drag: TranscriptDocument.LaneDrag) {
+        let dx: CGFloat
+        switch drag {
+        case .began:
+            screenLaneDragStart = minutesSplit.laneWidth
+            ScreenThumbnailLoader.shared.defersLoads = true
+            return
+        case let .changed(value), let .ended(value): dx = value
+        }
+        guard let start = screenLaneDragStart else { return }
+        let ended: Bool
+        if case .ended = drag { ended = true } else { ended = false }
+        let width = ScreenLaneLayout.dragged(from: Double(start), by: Double(dx), pane: Double(minutesSplit.left.frame.width))
+        minutesSplit.dragLane(to: CGFloat(width), commit: ended)
+        if ended {
+            screenLaneDragStart = nil
+            ScreenThumbnailLoader.shared.defersLoads = false
         }
     }
 

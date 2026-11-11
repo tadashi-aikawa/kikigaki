@@ -40,7 +40,50 @@ final class TranscriptDocument: NSView {
     var followsBottom = true
     var rows: [any DocumentRow] = []
     /// 右端の画像レーンの幅。0ならレーンを出さない。仕様は docs/screen-capture.md の「表示」
-    var laneWidth: CGFloat = 0
+    var laneWidth: CGFloat = 0 { didSet { if laneWidth != oldValue { window?.invalidateCursorRects(for: self) } } }
+    /// 画像レーンに画像があるか。無ければ境目をつかめない。
+    var laneHasImages = false { didSet { if laneHasImages != oldValue { window?.invalidateCursorRects(for: self) } } }
+    enum LaneDrag { case began, changed(CGFloat), ended(CGFloat) }
+    /// 発言の列と画像レーンの境目のドラッグ。値はポインタが右へ動いた量。
+    var onLaneDrag: ((LaneDrag) -> Void)?
+    private var laneDragStart: CGFloat?
+    /// 境目をつかめる範囲。線や取っ手は描かず、範囲とカーソルだけを置く。
+    private var laneGrip: ClosedRange<CGFloat>? {
+        ScreenLaneLayout.grip(documentWidth: Double(bounds.width), laneWidth: Double(laneWidth), hasImages: laneHasImages)
+            .map { CGFloat($0.lowerBound)...CGFloat($0.upperBound) }
+    }
+    /// 境目の上では行より先にこのビューが受ける。行の文字やレーンの余白にクリックを渡さないため。
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if let grip = laneGrip, let superview {
+            let local = convert(point, from: superview)
+            if bounds.contains(local), grip.contains(local.x) { return self }
+        }
+        return super.hitTest(point)
+    }
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        guard let grip = laneGrip else { return }
+        addCursorRect(NSRect(x: grip.lowerBound, y: 0, width: grip.upperBound - grip.lowerBound, height: bounds.height), cursor: .resizeLeftRight)
+    }
+    override func mouseDown(with event: NSEvent) {
+        guard let grip = laneGrip, grip.contains(convert(event.locationInWindow, from: nil).x) else { super.mouseDown(with: event); return }
+        // ウィンドウの座標で測る。ドラッグの間に文書の幅や位置が変わっても、ポインタの移動量だけを渡すため。
+        laneDragStart = event.locationInWindow.x
+        // 境目より先にポインタが動いても、離すまで左右のカーソルを保つ。
+        NSCursor.resizeLeftRight.push()
+        onLaneDrag?(.began)
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = laneDragStart else { super.mouseDragged(with: event); return }
+        onLaneDrag?(.changed(event.locationInWindow.x - start))
+    }
+    override func mouseUp(with event: NSEvent) {
+        guard let start = laneDragStart else { super.mouseUp(with: event); return }
+        laneDragStart = nil
+        NSCursor.pop()
+        onLaneDrag?(.ended(event.locationInWindow.x - start))
+        window?.invalidateCursorRects(for: self)
+    }
     private(set) var rangeMarkers: [(row: NSView, view: AIRangeBoundaryView)] = []
     func setRangeBoundaries(_ boundaries: AIRangeBoundaries, utteranceRows: [NSView]) {
         // 絞り込みで畳んだ行は枠が古いまま残るので、その行の印は出さない。
@@ -115,6 +158,8 @@ final class TranscriptDocument: NSView {
         let oldWidth = frame.width
         let before = anchor()
         super.setFrameSize(newSize)
+        // 境目の位置は幅で決まる。つかめる範囲のカーソルも置き直す。
+        if oldWidth != newSize.width { window?.invalidateCursorRects(for: self) }
         if oldWidth != newSize.width && !layingOut { reflow(anchor: before) }
     }
     func reflow(anchor: Anchor) {

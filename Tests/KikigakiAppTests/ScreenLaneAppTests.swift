@@ -13,6 +13,8 @@ extension AppKitTests {
 @Suite(.serialized) @MainActor struct ScreenLaneAppTests {
     static let screen = NSRect(x: 0, y: 0, width: 2400, height: 1400)
     private let started = Date(timeIntervalSince1970: 1_788_759_600)
+    /// 既定のレーンの幅。
+    private let lane = CGFloat(ScreenLaneLayout.defaultWidth)
 
     private struct Fixture {
         let controller: TranscriptWindowController
@@ -37,8 +39,9 @@ extension AppKitTests {
     }
 
     /// 画像のパス。撮影の指定があれば実画像、無ければ使い捨ての仮の画像を作る。
-    private func images(_ count: Int) throws -> [String] {
-        if let folder = ProcessInfo.processInfo.environment["KIKIGAKI_SCREEN_LANE_IMAGES"] {
+    /// - size: 仮の画像の画素の寸法。指定すれば撮影の指定があっても仮の画像を作る。縦横比を確かめるテストのため
+    private func images(_ count: Int, size custom: NSSize? = nil) throws -> [String] {
+        if custom == nil, let folder = ProcessInfo.processInfo.environment["KIKIGAKI_SCREEN_LANE_IMAGES"] {
             let names = try FileManager.default.contentsOfDirectory(atPath: folder).filter { $0.hasSuffix(".webp") || $0.hasSuffix(".png") }.sorted()
             try #require(names.count >= count)
             return names.prefix(count).map { URL(fileURLWithPath: folder).appendingPathComponent($0).path }
@@ -46,7 +49,7 @@ extension AppKitTests {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("screen-lane-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return try (0..<count).map { index in
-            let size = NSSize(width: 640, height: 360)
+            let size = custom ?? NSSize(width: 640, height: 360)
             let image = NSImage(size: size, flipped: false) { rect in
                 NSColor(calibratedHue: CGFloat(index) / CGFloat(max(count, 1)), saturation: 0.25, brightness: 0.95, alpha: 1).setFill()
                 rect.fill()
@@ -55,7 +58,15 @@ extension AppKitTests {
                 return true
             }
             let url = folder.appendingPathComponent(String(format: "%02d.png", index))
-            let data = try #require(image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:))?.representation(using: .png, properties: [:]))
+            // 画素の寸法を指定どおりにする。画面の倍率で2倍の画素にしない。
+            let bitmap = try #require(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width), pixelsHigh: Int(size.height),
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+            bitmap.size = size
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+            image.draw(in: NSRect(origin: .zero, size: size))
+            NSGraphicsContext.restoreGraphicsState()
+            let data = try #require(bitmap.representation(using: .png, properties: [:]))
             try data.write(to: url)
             return url.path
         }
@@ -106,8 +117,10 @@ extension AppKitTests {
     private func capture(_ name: String, _ controller: TranscriptWindowController, scrollTo row: NSView? = nil) async throws {
         guard let output = ProcessInfo.processInfo.environment["KIKIGAKI_UI_CAPTURE"],
               let content = controller.window?.contentView else { return }
-        // 縮小画像は裏で読むので、撮る前に読み終えておく。
-        await ScreenThumbnailLoader.shared.preload(controller.screenPreview.paths)
+        // 縮小画像は裏で読むので、撮る前に今のレーンの幅に合う大きさで読み終えておく。
+        let thumbnail = ScreenLaneLayout.thumbnailWidth(laneWidth: Double(controller.minutesSplit.laneWidth))
+        await ScreenThumbnailLoader.shared.preload(controller.screenPreview.paths,
+                                                   pixels: ScreenLaneLayout.decodePixels(thumbnailWidth: thumbnail))
         content.layoutSubtreeIfNeeded()
         if let row {
             controller.transcriptDocument.scroll(NSPoint(x: 0, y: max(0, row.frame.minY - 8)))
@@ -128,7 +141,7 @@ extension AppKitTests {
         controller.apply(try meeting())
         controller.window!.contentView!.layoutSubtreeIfNeeded()
         #expect(voiceRows(controller).map { $0.utterance!.kind } == [.voice, .voice, .voice, .voice])
-        #expect(controller.transcriptDocument.laneWidth == ScreenLaneView.width)
+        #expect(controller.transcriptDocument.laneWidth == lane)
         #expect(try row(controller, "では").lane.thumbnailViews.count == 1)
         #expect(try row(controller, "資料").lane.thumbnailViews.count == 2)
         // 沈黙の間の22秒の画面は次の発言へ。4枚なので最初と最後を出し、間の2枚を畳む。
@@ -214,7 +227,10 @@ extension AppKitTests {
         let first = try row(controller, "資料").lane
         first.layoutSubtreeIfNeeded()
         let before = first.thumbnailViews.map(\.frame.size)
-        #expect(before == [ScreenLaneView.thumbnail, ScreenLaneView.thumbnail])
+        if ProcessInfo.processInfo.environment["KIKIGAKI_SCREEN_LANE_IMAGES"] == nil {
+            // 仮の画像は16:9。
+            #expect(before == [NSSize(width: 152, height: 86), NSSize(width: 152, height: 86)])
+        }
         controller.setTextScale(TranscriptTextScale(savedValue: 200))
         controller.window!.contentView!.layoutSubtreeIfNeeded()
         let lane = try row(controller, "資料").lane
@@ -239,8 +255,8 @@ extension AppKitTests {
         var withLane = try meeting()
         withLane.timeline = MeetingTimeline(startedAt: started.addingTimeInterval(3600))
         controller.apply(withLane)
-        #expect(controller.window!.frame.width == 700 + ScreenLaneView.width)
-        #expect(controller.window!.minSize.width == 420 + ScreenLaneView.width)
+        #expect(controller.window!.frame.width == 700 + lane)
+        #expect(controller.window!.minSize.width == 420 + lane)
         // 戻ると元の幅へ。保存する希望幅にはレーンの分を入れない。
         plain.timeline = MeetingTimeline(startedAt: started.addingTimeInterval(7200))
         controller.apply(plain)
@@ -257,10 +273,10 @@ extension AppKitTests {
         let rightBefore = split.preview.frame.width
         controller.apply(try meeting())
         controller.window!.contentView!.layoutSubtreeIfNeeded()
-        #expect(split.left.frame.width == 700 + ScreenLaneView.width)
+        #expect(split.left.frame.width == 700 + lane)
         #expect(split.preview.frame.width == rightBefore)
         controller.toggleMinutes()
-        #expect(controller.window!.frame.width == 700 + ScreenLaneView.width)
+        #expect(controller.window!.frame.width == 700 + lane)
         #expect(MinutesLayout.load(fixture.defaults).leftWidth == 700)
     }
 
@@ -355,10 +371,10 @@ extension AppKitTests {
         final class Counter: @unchecked Sendable { let lock = NSLock(); var count = 0 }
         let counter = Counter()
         let path = try images(1)[0]
-        let loader = ScreenThumbnailLoader { path in
+        let loader = ScreenThumbnailLoader { path, pixels in
             counter.lock.withLock { counter.count += 1 }
             Thread.sleep(forTimeInterval: 0.2)
-            return ScreenThumbnailLoader.decodeFile(path)
+            return ScreenThumbnailLoader.decodeFile(path, pixels: pixels)
         }
         var called = 0
         let started = Date()
@@ -438,7 +454,7 @@ extension AppKitTests {
         controller.apply(try meeting())
         let split = try #require(controller.minutesSplit)
         let minimum = split.splitView(split, constrainMinCoordinate: 0, ofSubviewAt: 0)
-        #expect(minimum - ScreenLaneView.width >= MinutesLayout.minimumLeft)
+        #expect(minimum - lane >= MinutesLayout.minimumLeft)
     }
 
     @Test func 画面の行を飛ばしてもマイク切替をAIの行より前に置く() throws {
@@ -493,6 +509,263 @@ extension AppKitTests {
         controller.refreshSearch(reset: true, reveal: false)
         #expect(controller.searchHits.isEmpty)
         controller.closeSearch(nil)
+    }
+
+    // MARK: - 枠の縦横比と題の間隔
+
+    @Test func 枠を画像の縦横比に合わせ_題は画像のすぐ下で次の画像より近くに置く() throws {
+        let fixture = try fixture()
+        defer { fixture.close() }
+        let controller = fixture.controller
+        // 横長の画面(2.4:1)と縦長の画面。固定の16:9の枠では、横長の画像の下に23ptの余りが出て、題が次の画像のものに見えた。
+        let wide = try images(1, size: NSSize(width: 960, height: 400))[0]
+        let tall = try images(1, size: NSSize(width: 360, height: 640))[0]
+        var state = SessionSnapshot(state: .idle, utterances: [
+            Utterance(speaker: 0, start: 0, end: 30, text: "横長と縦長の画面です。"),
+            try screen(wide, at: 3), try screen(tall, at: 10)
+        ], timeline: MeetingTimeline(startedAt: started), names: SpeakerNames([0: "田中"]))
+        state.markdownURL = URL(fileURLWithPath: "/tmp/kikigaki-screen-lane-aspect.md")
+        state.elapsed = 40
+        controller.apply(state)
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let lane = try row(controller, "横長").lane
+        lane.layoutSubtreeIfNeeded()
+        let thumbnails = lane.thumbnailViews
+        #expect(thumbnails.map(\.frame.size) == [NSSize(width: 152, height: 63), NSSize(width: 152, height: 152)])
+        let captions = lane.subviews.compactMap { $0 as? NSTextField }.sorted { $0.frame.minY < $1.frame.minY }
+        try #require(captions.count == 2)
+        let gapBelowImage = captions[0].frame.minY - thumbnails[0].frame.maxY
+        let gapToNext = thumbnails[1].frame.minY - captions[0].frame.maxY
+        #expect(gapBelowImage == 3)
+        #expect(gapToNext == 12)
+        #expect(gapToNext > gapBelowImage * 2)
+        #expect(captions[1].frame.minY == thumbnails[1].frame.maxY + 3)
+    }
+
+    // MARK: - レーンの幅
+
+    @Test func 境目をドラッグするとウィンドウの幅を保ってレーンが広がり_発言の列に最小幅を残す() throws {
+        let fixture = try fixture(width: 640)
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try meeting())
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let window = try #require(controller.window)
+        #expect(window.frame.width == 640 + lane)
+        let document = controller.transcriptDocument
+        controller.dragScreenLane(.began)
+        #expect(ScreenThumbnailLoader.shared.defersLoads)
+        controller.dragScreenLane(.changed(-120))
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        #expect(document.laneWidth == 300)
+        #expect(window.frame.width == 640 + lane)
+        let wide = try row(controller, "資料").lane
+        wide.layoutSubtreeIfNeeded()
+        #expect(wide.thumbnailViews.allSatisfy { $0.frame.width == 272 })
+        // 会話側820pt。発言の列に420ptを残す400ptで止まる。
+        controller.dragScreenLane(.changed(-1000))
+        #expect(document.laneWidth == 400)
+        #expect(controller.minutesSplit.left.frame.width - document.laneWidth == MinutesLayout.minimumLeft)
+        // 右へ動かすと最小幅で止まる。
+        controller.dragScreenLane(.changed(1000))
+        #expect(document.laneWidth == 180)
+        controller.dragScreenLane(.ended(-80))
+        #expect(document.laneWidth == 260)
+        #expect(!ScreenThumbnailLoader.shared.defersLoads)
+        #expect(window.frame.width == 640 + lane)
+        // 幅と、そのときの発言の列の幅を保存する。
+        let saved = MinutesLayout.load(fixture.defaults)
+        #expect(saved.screenLaneWidth == 260)
+        // 会話側820pt - レーン260pt。
+        #expect(saved.leftWidth == CGFloat(560))
+    }
+
+    @Test func 変えた幅は次の会議と次の起動でも使い_ウィンドウの幅は変えない() throws {
+        let fixture = try fixture(width: 900)
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try meeting())
+        let window = try #require(controller.window)
+        let width = window.frame.width
+        controller.dragScreenLane(.began)
+        controller.dragScreenLane(.ended(-300))
+        #expect(controller.transcriptDocument.laneWidth == 480)
+        // レーンの無い会議では、広げたレーンの分だけ縮む。
+        var plain = try meeting()
+        plain.utterances.removeAll { $0.kind == .screen }
+        plain.timeline = MeetingTimeline(startedAt: started.addingTimeInterval(3600))
+        controller.apply(plain)
+        #expect(window.frame.width == width - 480)
+        #expect(controller.transcriptDocument.laneWidth == 0)
+        // 次の画像のある会議では同じ幅で出し、ウィンドウも元の幅へ戻る。
+        var next = try meeting()
+        next.timeline = MeetingTimeline(startedAt: started.addingTimeInterval(7200))
+        controller.apply(next)
+        #expect(controller.transcriptDocument.laneWidth == 480)
+        #expect(window.frame.width == width)
+        // 次の起動: 同じ保存先で作り直したウィンドウも同じ幅で出す。
+        let reopened = TranscriptWindowController(shouldReduceMotion: { true }, minutesDefaults: fixture.defaults, textDefaults: fixture.defaults)
+        reopened.minutesSplit.visibleScreen = { _ in Self.screen }
+        defer { reopened.minutesSplit.preview.stop() }
+        reopened.window!.setFrameAutosaveName("")
+        reopened.window!.setFrame(NSRect(x: 0, y: 100, width: 600, height: 900), display: false)
+        reopened.apply(try meeting())
+        #expect(reopened.transcriptDocument.laneWidth == 480)
+        #expect(reopened.window!.frame.width == width)
+        // 後ろに発言が無い画面の末尾の行も同じ幅で出す。
+        #expect(reopened.transcriptDocument.rows.last === reopened.screenLaneTrailing)
+        #expect(reopened.screenLaneTrailing.lane.laneWidth == 480)
+        #expect(try row(reopened, "資料").lane.laneWidth == 480)
+    }
+
+    @Test func 会話側が狭まると発言の列より先にレーンが譲り_広げると希望の幅へ戻る() throws {
+        let fixture = try fixture(width: 900)
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try meeting())
+        controller.dragScreenLane(.began)
+        controller.dragScreenLane(.ended(-300))
+        let window = try #require(controller.window)
+        // 最小幅には最小のレーンの分だけを足す。
+        #expect(window.minSize.width == 420 + lane)
+        window.setFrame(NSRect(x: 0, y: 100, width: 700, height: 900), display: false)
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        #expect(controller.transcriptDocument.laneWidth == 280)
+        window.setFrame(NSRect(x: 0, y: 100, width: 1400, height: 900), display: false)
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        #expect(controller.transcriptDocument.laneWidth == 480)
+        #expect(MinutesLayout.load(fixture.defaults).screenLaneWidth == 480)
+    }
+
+    @Test(arguments: [false, true])
+    func ウィンドウを狭めたリサイズの終わりに_希望のレーンの幅で広げ直さない(minutes: Bool) throws {
+        let fixture = try fixture(width: 900)
+        defer { fixture.close() }
+        let controller = fixture.controller
+        if minutes { controller.toggleMinutes() }
+        controller.apply(try meeting())
+        controller.dragScreenLane(.began)
+        controller.dragScreenLane(.ended(-300))
+        #expect(controller.transcriptDocument.laneWidth == 480)
+        let window = try #require(controller.window)
+        let split = try #require(controller.minutesSplit)
+        // ライブリサイズ: 枠が変わるたびに幅を覚え、終わりに画面へ合わせ直す。
+        func liveResize(to width: CGFloat) {
+            window.setFrame(NSRect(x: 0, y: 100, width: width, height: 900), display: false)
+            window.contentView!.layoutSubtreeIfNeeded()
+            split.rememberWidths()
+            controller.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification, object: window))
+            window.contentView!.layoutSubtreeIfNeeded()
+        }
+        // 会話側を700ptまで狭める。議事録を開いていれば、右ペインが最小幅の320ptになるまで狭める。
+        let narrow: CGFloat = minutes ? 700 + 1 + MinutesLayout.minimumRight : 700
+        liveResize(to: narrow)
+        #expect(window.frame.width == narrow)
+        #expect(split.left.frame.width == 700)
+        #expect(controller.transcriptDocument.laneWidth == 280)
+        let saved = MinutesLayout.load(fixture.defaults)
+        #expect(saved.leftWidth == CGFloat(420))
+        // レーンの希望の幅は保つ。会話側を広げれば戻る。
+        #expect(saved.screenLaneWidth == 480)
+        // 広げる。議事録を開いている間の手動の伸縮は右ペインが受けるので、レーンは変わらない。
+        let wide: CGFloat = minutes ? 1500 : 1200
+        liveResize(to: wide)
+        #expect(window.frame.width == wide)
+        #expect(controller.transcriptDocument.laneWidth == (minutes ? 280 : 480))
+    }
+
+    @Test func 議事録を開いている間は議事録ペインの幅を保ち_会話側の中で分け合う() throws {
+        let fixture = try fixture(width: 700)
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.toggleMinutes()
+        controller.apply(try meeting())
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let split = try #require(controller.minutesSplit)
+        let left = split.left.frame.width, right = split.preview.frame.width, window = controller.window!.frame.width
+        controller.dragScreenLane(.began)
+        controller.dragScreenLane(.ended(-100))
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        #expect(controller.transcriptDocument.laneWidth == 280)
+        #expect(split.left.frame.width == left)
+        #expect(split.preview.frame.width == right)
+        #expect(controller.window!.frame.width == window)
+    }
+
+    @Test func 境目の上ではポインタのドラッグでレーンの幅が変わり_画像の無い会議ではつかめない() throws {
+        let fixture = try fixture(width: 640)
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try meeting())
+        let window = try #require(controller.window)
+        window.contentView!.layoutSubtreeIfNeeded()
+        let document = controller.transcriptDocument
+        // 境目は発言の列の右端。最初の発言の行の高さで押す。
+        let local = NSPoint(x: document.bounds.width - document.laneWidth + 1, y: voiceRows(controller)[0].frame.midY)
+        #expect(document.hitTest(document.convert(local, to: document.superview)) === document)
+        // サムネイルの上は行のまま。押すとQuick Lookで開く。
+        let onThumbnail = NSPoint(x: document.bounds.width - document.laneWidth + 20, y: local.y)
+        #expect(document.hitTest(document.convert(onThumbnail, to: document.superview)) !== document)
+        func event(_ type: NSEvent.EventType, x: CGFloat) -> NSEvent {
+            let point = document.convert(NSPoint(x: x, y: local.y), to: nil)
+            return NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: 0,
+                                      windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        document.mouseDown(with: event(.leftMouseDown, x: local.x))
+        document.mouseDragged(with: event(.leftMouseDragged, x: local.x - 100))
+        #expect(document.laneWidth == 280)
+        document.mouseUp(with: event(.leftMouseUp, x: local.x - 60))
+        #expect(document.laneWidth == 240)
+        #expect(MinutesLayout.load(fixture.defaults).screenLaneWidth == 240)
+        // イベントの行だけの会議ではレーンを出すが、境目はつかめない。
+        var events = try meeting()
+        events.utterances.removeAll { $0.kind == .screen && !$0.imagePaths.isEmpty }
+        events.timeline = MeetingTimeline(startedAt: started.addingTimeInterval(3600))
+        controller.apply(events)
+        window.contentView!.layoutSubtreeIfNeeded()
+        #expect(document.laneWidth > 0 && !document.laneHasImages)
+        let grip = NSPoint(x: document.bounds.width - document.laneWidth + 1, y: voiceRows(controller)[0].frame.midY)
+        #expect(document.hitTest(document.convert(grip, to: document.superview)) !== document)
+    }
+
+    @Test func ドラッグの間は縮小画像を新しく読まず_離してから読む() async throws {
+        final class Counter: @unchecked Sendable { let lock = NSLock(); var count = 0 }
+        let counter = Counter()
+        let path = try images(1, size: NSSize(width: 640, height: 360))[0]
+        let loader = ScreenThumbnailLoader { path, pixels in
+            counter.lock.withLock { counter.count += 1 }
+            return ScreenThumbnailLoader.decodeFile(path, pixels: pixels)
+        }
+        await loader.preload([path])
+        #expect(counter.count == 1)
+        loader.defersLoads = true
+        var redraws = 0
+        #expect(loader.image(at: path, pixels: 608) { redraws += 1 } == nil)
+        // 読めている小さい画像で代わりに描く。
+        #expect(loader.anyLoaded(at: path) != nil)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(counter.count == 1)
+        loader.defersLoads = false
+        #expect(redraws == 1)
+        await loader.preload([path], pixels: 608)
+        #expect(counter.count == 2)
+        // 縦横比はファイルの頭から読む。
+        #expect(loader.pixelSize(at: path) == NSSize(width: 640, height: 360))
+    }
+
+    @Test func レーンの幅を変えて撮る() async throws {
+        let fixture = try fixture(width: 760)
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try meeting())
+        let target = try row(controller, "資料")
+        try await capture("width-180", controller, scrollTo: target)
+        for width in [300, 480] {
+            controller.dragScreenLane(.began)
+            controller.dragScreenLane(.ended(controller.transcriptDocument.laneWidth - CGFloat(width)))
+            #expect(controller.transcriptDocument.laneWidth == CGFloat(width))
+            try await capture("width-\(width)", controller, scrollTo: try row(controller, "資料"))
+        }
     }
 
     // MARK: - 開閉の入れ替わりとスクロール

@@ -269,6 +269,7 @@ final class TranscriptRow: NSView, DocumentRow {
     /// 画像レーンの幅と中身。どちらも変わらなければ再計測しない。
     func updateLane(_ items: [ScreenLaneView.Item], width: CGFloat) {
         guard items != lane.items || width != laneWidth else { return }
+        if width > 0 { lane.setLaneWidth(width) }
         lane.update(items)
         laneWidth = width
         measuredWidth = -1
@@ -484,7 +485,7 @@ final class TranscriptRow: NSView, DocumentRow {
         // 更新の点灯は発言の文字の部分だけ。画像は声の本文や話者の変化と関係しない。
         flash.frame = NSRect(x: 12, y: 2, width: max(0, bounds.width - laneWidth - 24), height: textHeight - 4)
         lane.isHidden = laneWidth == 0 || lane.isEmpty
-        lane.frame = ScreenLaneView.frame(in: bounds, height: lane.contentHeight)
+        lane.frame = lane.frame(in: bounds)
         // アバター内のイニシャルも同じ倍率で描く。外側の紙の余白は固定する。
         avatar.frame = NSRect(x: 20, y: 8, width: 25 * textScale, height: 26 * textScale)
         // 太字の字形が計測幅の右端へ届くため、端数の丸めと描画の余白を確保する。

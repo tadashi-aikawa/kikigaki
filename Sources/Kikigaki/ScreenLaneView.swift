@@ -16,12 +16,10 @@ final class ScreenLaneView: NSView {
         case collapse(paths: [String])
     }
 
-    /// レーンの幅。発言の列はこの分だけウィンドウを広げて保つ。
-    static let width: CGFloat = 180
-    /// サムネイルの枠。文字の倍率を掛けない。16:9の画面を枠いっぱいに出し、ほかの縦横比は枠の中へ収める。
-    nonisolated static let thumbnail = NSSize(width: 152, height: 86)
-    /// 枠と枠の間。題の行と次のサムネイルを離して、どの題がどの画像かを読み分ける。
-    static let spacing: CGFloat = 10
+    /// 枠と枠の間。題と次のサムネイルを、画像と題の間より広く離す。どの題がどの画像かを間隔だけで読み分ける。
+    static let spacing = CGFloat(ScreenLaneLayout.blockSpacing)
+    /// 画像と題の間。
+    static let captionGap = CGFloat(ScreenLaneLayout.captionGap)
 
     override var isFlipped: Bool { true }
     var onOpen: ((String) -> Void)?
@@ -29,6 +27,9 @@ final class ScreenLaneView: NSView {
     var onToggle: ((ScreenLaneFoldButton) -> Void)?
     private(set) var items: [Item] = []
     private(set) var textScale: CGFloat = 1
+    /// レーンの幅。サムネイルの幅はここから左右の余白を引く。文字の倍率を掛けない。
+    private(set) var laneWidth = CGFloat(ScreenLaneLayout.defaultWidth)
+    var thumbnailWidth: CGFloat { CGFloat(ScreenLaneLayout.thumbnailWidth(laneWidth: Double(laneWidth))) }
     private var blocks: [(item: Item, views: [NSView], height: CGFloat)] = []
     /// イベントの行は3行まで折り返す。撮れなかった理由は倍率を上げても読めるようにする。
     /// 画像の題は1行で末尾を省く。全文はツールチップで読め、サムネイルの縦の並びを崩さないため。
@@ -50,11 +51,17 @@ final class ScreenLaneView: NSView {
         textScale = scale
         rebuild()
     }
+    /// 幅だけが変わったときは枠を作り直さず、高さを測り直す。境目のドラッグで毎回ビューを作らないため。
+    func setLaneWidth(_ width: CGFloat) {
+        guard width != laneWidth else { return }
+        laneWidth = width
+        blocks = blocks.map { ($0.item, $0.views, height(of: $0.item, views: $0.views)) }
+        needsLayout = true
+    }
     private func rebuild() {
         blocks.flatMap(\.views).forEach { $0.removeFromSuperview() }
         blocks = items.map { item in
             let views: [NSView]
-            let height: CGFloat
             switch item {
             case let .image(path, time, caption, label):
                 let thumbnail = ScreenThumbnailView(path: path)
@@ -62,28 +69,40 @@ final class ScreenLaneView: NSView {
                 thumbnail.setAccessibilityLabel("画面 \(time) \(label)")
                 thumbnail.onClick = { [weak self] in self?.onOpen?(path) }
                 views = [thumbnail, captionLabel(time: time, text: caption, tooltip: "\(time) \(label)", lines: 1)]
-                height = Self.thumbnail.height + 3 + lineHeight
             case let .event(time, text):
-                let label = captionLabel(time: time, text: text, tooltip: "\(time) \(text)", lines: Self.eventLines)
-                let measured = label.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: Self.thumbnail.width,
-                                                                      height: .greatestFiniteMagnitude)).height ?? lineHeight
-                views = [label]
-                height = min(CGFloat(Self.eventLines) * lineHeight, max(lineHeight, ceil(measured)))
+                views = [captionLabel(time: time, text: text, tooltip: "\(time) \(text)", lines: Self.eventLines)]
             case let .folded(paths):
                 let button = ScreenLaneFoldButton(paths: paths, collapses: false, scale: textScale)
                 button.onPress = { [weak self, weak button] in if let button { self?.onToggle?(button) } }
                 views = [button]
-                height = lineHeight + 4
             case let .collapse(paths):
                 let button = ScreenLaneFoldButton(paths: paths, collapses: true, scale: textScale)
                 button.onPress = { [weak self, weak button] in if let button { self?.onToggle?(button) } }
                 views = [button]
-                height = lineHeight + 4
             }
             views.forEach(addSubview)
-            return (item, views, height)
+            return (item, views, height(of: item, views: views))
         }
         needsLayout = true
+    }
+    private func height(of item: Item, views: [NSView]) -> CGFloat {
+        switch item {
+        case .image:
+            return thumbnailSize(views[0]).height + Self.captionGap + lineHeight
+        case .event:
+            let measured = (views[0] as? NSTextField)?.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: thumbnailWidth,
+                                                                                         height: .greatestFiniteMagnitude)).height ?? lineHeight
+            return min(CGFloat(Self.eventLines) * lineHeight, max(lineHeight, ceil(measured)))
+        case .folded, .collapse:
+            return lineHeight + 4
+        }
+    }
+    /// 画像の縦横比に合わせた枠。縦横比はファイルの頭から読む。
+    private func thumbnailSize(_ view: NSView) -> NSSize {
+        let pixels = (view as? ScreenThumbnailView).flatMap { $0.loader.pixelSize(at: $0.path) }
+        let size = ScreenLaneLayout.thumbnailSize(laneWidth: Double(laneWidth), pixelWidth: pixels.map { Double($0.width) },
+                                                  pixelHeight: pixels.map { Double($0.height) })
+        return NSSize(width: size.width, height: size.height)
     }
     private func captionLabel(time: String, text: String, tooltip: String, lines: Int) -> NSTextField {
         let paragraph = NSMutableParagraphStyle()
@@ -110,8 +129,10 @@ final class ScreenLaneView: NSView {
         for block in blocks {
             switch block.item {
             case .image:
-                block.views[0].frame = NSRect(origin: NSPoint(x: 0, y: y), size: Self.thumbnail)
-                block.views[1].frame = NSRect(x: 0, y: y + Self.thumbnail.height + 3, width: bounds.width, height: lineHeight)
+                // 題は画像のすぐ下。枠の高さは画像に合わせてあるので、枠の下端が画像の下端になる。
+                let size = thumbnailSize(block.views[0])
+                block.views[0].frame = NSRect(origin: NSPoint(x: 0, y: y), size: size)
+                block.views[1].frame = NSRect(x: 0, y: y + size.height + Self.captionGap, width: bounds.width, height: lineHeight)
             case .event:
                 block.views[0].frame = NSRect(x: 0, y: y, width: bounds.width, height: block.height)
             case .folded, .collapse:
@@ -162,61 +183,111 @@ final class ScreenLaneFoldButton: HoverButton {
 /// - 読み込みとデコードはメインスレッドで行わない。展開や速いスクロールで何枚も初めて出しても、UIを待たせないため
 /// - 同じパスの読み込みが重なれば1回にまとめ、待っている全員へ知らせる
 /// - 読めなかった画像も覚え、描くたびに読み直さない
+/// - 読む大きさはサムネイルの幅の刻みで決める(`ScreenLaneLayout.decodePixels`)。広げたレーンでぼやけないため
+///   - 境目のドラッグの間は新しく読まず、読めている別の大きさで描く。離してから読む
+/// - 縦横比はファイルの頭だけをメインスレッドで読み、パスごとに覚える。枠の高さを読み込みの前に決め、
+///   読み終えた後に行の高さを変えないため。デコードはしない。実測で1枚0.2ms(初回)、0.06ms(2回目以降)
 @MainActor final class ScreenThumbnailLoader {
     static let shared = ScreenThumbnailLoader()
     enum State: Equatable { case loaded(NSImage), missing }
     private final class Entry { let image: NSImage?; init(_ image: NSImage?) { self.image = image } }
+    private final class Size { let value: NSSize?; init(_ value: NSSize?) { self.value = value } }
     private let cache = NSCache<NSString, Entry>()
+    private let sizes = NSCache<NSString, Size>()
+    /// パスごとに、読めている大きさ。読み直しの間に描く代わりの画像を探すのに使う。
+    private var loadedPixels: [String: Set<Int>] = [:]
     private var waiting: [String: [() -> Void]] = [:]
+    private var deferred: [() -> Void] = []
     private let queue = DispatchQueue(label: "kikigaki.screen-thumbnail", qos: .userInitiated)
-    private let decode: @Sendable (String) -> CGImage?
+    private let decode: @Sendable (String, Int) -> CGImage?
+    /// 既定の幅のサムネイルを読む大きさ。
+    nonisolated static let defaultPixels = ScreenLaneLayout.decodePixels(thumbnailWidth: ScreenLaneLayout.thumbnailWidth(laneWidth: ScreenLaneLayout.defaultWidth))
 
-    init(decode: @escaping @Sendable (String) -> CGImage? = ScreenThumbnailLoader.decodeFile) {
+    init(decode: @escaping @Sendable (String, Int) -> CGImage? = ScreenThumbnailLoader.decodeFile) {
         self.decode = decode
     }
 
-    /// 画面は1x寸法で保存している。枠の2倍まで縮めて、Retinaでも文字の形が分かる程度に保つ。
-    nonisolated static func decodeFile(_ path: String) -> CGImage? {
+    /// 画面は1x寸法で保存している。長辺を `pixels` まで縮める。
+    nonisolated static func decodeFile(_ path: String, pixels: Int) -> CGImage? {
         CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil).flatMap {
             CGImageSourceCreateThumbnailAtIndex($0, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceThumbnailMaxPixelSize: Int(ScreenLaneView.thumbnail.width * 2),
+                kCGImageSourceThumbnailMaxPixelSize: pixels,
                 kCGImageSourceCreateThumbnailWithTransform: true
             ] as CFDictionary)
         }
     }
 
+    /// 画像の画素の寸法。ファイルの頭だけを読む。読めなければnil。
+    func pixelSize(at path: String) -> NSSize? {
+        if let size = sizes.object(forKey: path as NSString) { return size.value }
+        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        let properties = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, options)
+            .flatMap { CGImageSourceCopyPropertiesAtIndex($0, 0, options) as? [CFString: Any] }
+        var value: NSSize?
+        if let width = properties?[kCGImagePropertyPixelWidth] as? Int, let height = properties?[kCGImagePropertyPixelHeight] as? Int {
+            // 回転の指定があれば縦横を入れ替える。縮小画像は回転を適用して読むため。
+            let rotated = ((properties?[kCGImagePropertyOrientation] as? Int) ?? 1) >= 5
+            value = rotated ? NSSize(width: height, height: width) : NSSize(width: width, height: height)
+        }
+        sizes.setObject(Size(value), forKey: path as NSString)
+        return value
+    }
+
+    /// 境目のドラッグの間は真。新しい大きさを読まず、離したときに待っていた枠へ描き直しを知らせる。
+    var defersLoads = false {
+        didSet {
+            guard oldValue, !defersLoads else { return }
+            let callbacks = deferred
+            deferred = []
+            for callback in callbacks { callback() }
+        }
+    }
+
     /// 読めていればその状態、まだならnilを返し、読み終えたら `whenLoaded` を呼ぶ。待たない。
-    func image(at path: String, whenLoaded: @escaping () -> Void) -> State? {
-        if let entry = cache.object(forKey: path as NSString) { return entry.image.map(State.loaded) ?? .missing }
-        if waiting[path] != nil { waiting[path]?.append(whenLoaded); return nil }
-        waiting[path] = [whenLoaded]
+    func image(at path: String, pixels: Int = ScreenThumbnailLoader.defaultPixels, whenLoaded: @escaping () -> Void) -> State? {
+        let key = "\(pixels)|\(path)"
+        if let entry = cache.object(forKey: key as NSString) { return entry.image.map(State.loaded) ?? .missing }
+        if defersLoads { deferred.append(whenLoaded); return nil }
+        if waiting[key] != nil { waiting[key]?.append(whenLoaded); return nil }
+        waiting[key] = [whenLoaded]
         let decode = decode
         queue.async { [weak self] in
-            let image = decode(path)
-            DispatchQueue.main.async { MainActor.assumeIsolated { self?.finish(path, image) } }
+            let image = decode(path, pixels)
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.finish(path, pixels, image) } }
         }
         return nil
     }
 
-    private func finish(_ path: String, _ image: CGImage?) {
+    /// 読めている別の大きさの画像。大きいものを先に返す。読み直しの間とドラッグの間に、枠を空にしないため。
+    func anyLoaded(at path: String) -> NSImage? {
+        for pixels in (loadedPixels[path] ?? []).sorted(by: >) {
+            if let image = cache.object(forKey: "\(pixels)|\(path)" as NSString)?.image { return image }
+        }
+        return nil
+    }
+
+    private func finish(_ path: String, _ pixels: Int, _ image: CGImage?) {
+        let key = "\(pixels)|\(path)"
         cache.setObject(Entry(image.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }),
-                        forKey: path as NSString)
-        for callback in waiting.removeValue(forKey: path) ?? [] { callback() }
+                        forKey: key as NSString)
+        if image != nil { loadedPixels[path, default: []].insert(pixels) }
+        for callback in waiting.removeValue(forKey: key) ?? [] { callback() }
     }
 
     /// 全部を読み終えるまで待つ。撮影とテストで、描く前に画像を揃えるため。
-    func preload(_ paths: [String]) async {
+    func preload(_ paths: [String], pixels: Int = ScreenThumbnailLoader.defaultPixels) async {
         for path in paths {
             await withCheckedContinuation { continuation in
-                if image(at: path, whenLoaded: { continuation.resume() }) != nil { continuation.resume() }
+                if image(at: path, pixels: pixels, whenLoaded: { continuation.resume() }) != nil { continuation.resume() }
             }
         }
     }
 }
 
-/// 画面の1枚。枠の中へ縦横比を保って収め、画像の輪郭に罫を引く。押すとQuick Lookで原寸を開く。
-/// 縮小画像は `ScreenThumbnailLoader` が裏で読む。読み終えるまでは罫の枠だけを描き、枠の大きさは変えない。
+/// 画面の1枚。枠は画像の縦横比に合わせてあり、縦長の画面だけ枠の中へ縦横比を保って収める。画像の輪郭に罫を引く。
+/// 押すとQuick Lookで原寸を開く。
+/// 縮小画像は `ScreenThumbnailLoader` が裏で読む。読み終えるまでは、読めている別の大きさか罫の枠だけを描き、枠の大きさは変えない。
 final class ScreenThumbnailView: NSView {
     let path: String
     var onClick: (() -> Void)?
@@ -237,8 +308,11 @@ final class ScreenThumbnailView: NSView {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 
     override func draw(_ dirtyRect: NSRect) {
-        let state = loader.image(at: path) { [weak self] in self?.needsDisplay = true }
-        guard case let .loaded(image) = state, image.size.width > 0, image.size.height > 0 else {
+        let pixels = ScreenLaneLayout.decodePixels(thumbnailWidth: Double(bounds.width))
+        let state = loader.image(at: path, pixels: pixels) { [weak self] in self?.needsDisplay = true }
+        let shown: NSImage?
+        if case let .loaded(image) = state { shown = image } else if state == nil { shown = loader.anyLoaded(at: path) } else { shown = nil }
+        guard let image = shown, image.size.width > 0, image.size.height > 0 else {
             // 読み込み中と読めない画像は罫の枠だけにする。読めない画像は、押せば保存先のパスをQuick Lookが案内する。
             Washi.rule.setStroke()
             let frame = NSBezierPath(rect: bounds.insetBy(dx: 0.25, dy: 0.25))
@@ -271,13 +345,13 @@ final class ScreenLaneRow: NSView, DocumentRow {
     func height(for width: CGFloat) -> CGFloat { lane.isEmpty ? 0 : 8 + lane.contentHeight + 8 }
     override func layout() {
         super.layout()
-        lane.frame = ScreenLaneView.frame(in: bounds, height: lane.contentHeight)
+        lane.frame = lane.frame(in: bounds)
     }
 }
 
 extension ScreenLaneView {
     /// 行の中のレーンの位置。上端は発言の名前の行に揃え、右端はスクローラーの分を空ける。
-    static func frame(in bounds: NSRect, height: CGFloat) -> NSRect {
-        NSRect(x: bounds.width - width + 8, y: 8, width: thumbnail.width, height: height)
+    func frame(in bounds: NSRect) -> NSRect {
+        NSRect(x: bounds.width - laneWidth + CGFloat(ScreenLaneLayout.leadingInset), y: 8, width: thumbnailWidth, height: contentHeight)
     }
 }

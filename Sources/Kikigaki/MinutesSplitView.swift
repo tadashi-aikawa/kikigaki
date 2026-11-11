@@ -1,4 +1,5 @@
 import AppKit
+import KikigakiCore
 
 struct MinutesLayout: Codable, Equatable {
     static let minimumLeft: CGFloat = 420
@@ -6,7 +7,13 @@ struct MinutesLayout: Codable, Equatable {
     var visible = false
     var leftWidth: CGFloat = 600
     var rightWidth: CGFloat = 1199
+    /// 画像レーンの希望の幅。境目のドラッグで変え、次の会議と次の起動でも使う。仕様は docs/screen-capture.md の「表示」
+    var screenLaneWidth = CGFloat(ScreenLaneLayout.defaultWidth)
+    /// `leftWidth` を保存したときに出していた画像レーンの幅。ウィンドウを合わせ直すとき、`leftWidth` にこの幅を足す。
+    /// 希望の幅 `screenLaneWidth` と分けるのは、狭めたウィンドウでレーンが譲った分まで、合わせ直しで広げないため。
+    var screenLaneShownWidth = CGFloat(ScreenLaneLayout.defaultWidth)
     static let key = "KikigakiMinutesLayout"
+    private enum CodingKeys: String, CodingKey { case visible, leftWidth, rightWidth, screenLaneWidth, screenLaneShownWidth }
     static func constrained(frame: NSRect, screen: NSRect, fullScreen: Bool) -> Bool {
         if fullScreen { return true }
         return abs(frame.height - screen.height) < 3 &&
@@ -18,11 +25,12 @@ struct MinutesLayout: Codable, Equatable {
               state.leftWidth.isFinite, state.rightWidth.isFinite, state.leftWidth >= 420, state.rightWidth >= 320 else { return Self() }
         return state
     }
-    /// - lane: 会話側に足す画像レーンの幅。`leftWidth` はレーンを含まない発言の列の希望幅で、
+    /// - lane: 会話側に足す画像レーンの希望の幅。`leftWidth` はレーンを含まない発言の列の希望幅で、
     ///   レーンが出ればその分だけウィンドウを広げ、発言の列を狭めない。仕様は docs/screen-capture.md の「表示」
-    func fitting(frame: NSRect, screen: NSRect, divider: CGFloat, lane: CGFloat = 0) -> NSRect {
+    /// - laneMinimum: 最小幅に足すレーンの幅。省けば `lane`。広げたレーンは狭い画面で最小幅まで譲るので、最小幅には最小のレーンを足す
+    func fitting(frame: NSRect, screen: NSRect, divider: CGFloat, lane: CGFloat = 0, laneMinimum: CGFloat? = nil) -> NSRect {
         let desired = leftWidth + lane + (visible ? rightWidth + divider : 0)
-        let minimum: CGFloat = (visible ? 420 + 320 + divider : 420) + lane
+        let minimum: CGFloat = (visible ? 420 + 320 + divider : 420) + (laneMinimum ?? lane)
         var result = frame
         let available = screen.maxX - max(screen.minX, frame.minX)
         result.size.width = min(desired, max(min(minimum, screen.width), available))
@@ -54,6 +62,20 @@ struct MinutesLayout: Codable, Equatable {
         let available = max(0, total - divider)
         let column = min(minimumLeft, max(0, available - lane) * 0.57).rounded(.up)
         return min(column + lane, leftUpperBound(total: total, divider: divider))
+    }
+}
+
+extension MinutesLayout {
+    /// 画像レーンの幅を足す前に保存した値も読む。無ければ既定の幅。
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        visible = try container.decode(Bool.self, forKey: .visible)
+        leftWidth = try container.decode(CGFloat.self, forKey: .leftWidth)
+        rightWidth = try container.decode(CGFloat.self, forKey: .rightWidth)
+        let lane = try container.decodeIfPresent(CGFloat.self, forKey: .screenLaneWidth) ?? CGFloat(ScreenLaneLayout.defaultWidth)
+        screenLaneWidth = CGFloat(ScreenLaneLayout.clamp(Double(lane)))
+        let shown = try container.decodeIfPresent(CGFloat.self, forKey: .screenLaneShownWidth) ?? screenLaneWidth
+        screenLaneShownWidth = CGFloat(ScreenLaneLayout.clamp(Double(shown)))
     }
 }
 
@@ -136,9 +158,7 @@ final class MinutesToggleButton: HoverButton {
         // どちらも開閉の途中の幅は取らない。
         let fullScreen = window?.styleMask.contains(.fullScreen) == true
         let remember = visible ? window != nil && !constrainedWindow : !fullScreen
-        if remember && transition == nil {
-            preference.leftWidth = max(MinutesLayout.minimumLeft, left.frame.width - laneWidth)
-        }
+        if remember && transition == nil { rememberColumnWidth() }
         let fromLeft = preference.visible || transition != nil ? left.frame.width : bounds.width
         let closingWidth = preview.frame.width
         // 開く途中で閉じたら、開く前の枠へ戻す。途中の会話幅は閉じる直前の幅ではない。
@@ -154,7 +174,7 @@ final class MinutesToggleButton: HoverButton {
         let target: NSRect
         if visible {
             target = constrainedWindow ? window.frame
-                : preference.fitting(frame: window.frame, screen: screen, divider: dividerThickness, lane: laneWidth)
+                : preference.fitting(frame: window.frame, screen: screen, divider: dividerThickness, lane: laneFit, laneMinimum: laneMinimum)
         } else if let openedFrom, !fullScreen {
             target = openedFrom
         } else {
@@ -162,7 +182,7 @@ final class MinutesToggleButton: HoverButton {
         }
         if animates() {
             let total = bounds.width + target.width - window.frame.width
-            let toLeft = visible ? MinutesLayout.leftWidth(total: total, divider: dividerThickness, preferred: preferredLeft, lane: laneWidth) : total
+            let toLeft = visible ? MinutesLayout.leftWidth(total: total, divider: dividerThickness, preferred: preferredLeft, lane: laneMinimum) : total
             preview.isHidden = false
             transition = Transition(fromFrame: window.frame, toFrame: target, fromLeft: fromLeft, toLeft: toLeft,
                 previewWidth: visible ? max(0, total - toLeft - dividerThickness) : closingWidth, started: CACurrentMediaTime())
@@ -216,29 +236,62 @@ final class MinutesToggleButton: HoverButton {
         return MinutesLayout.constrained(frame: window.frame, screen: screen, fullScreen: window.styleMask.contains(.fullScreen))
     }
     private func applyMinimumWidth(screen: NSRect) {
-        window?.minSize.width = min(screen.width, (preference.visible ? 740 + dividerThickness : 420) + laneWidth)
+        window?.minSize.width = min(screen.width, (preference.visible ? 740 + dividerThickness : 420) + laneMinimum)
     }
     /// 会話側の希望幅。保存する `leftWidth` は発言の列だけの幅で、画像レーンの分はここで足す。
     /// レーンの無い会議へ移ったときに、前の会議のレーンの分だけ広いまま残さないため。
-    private var preferredLeft: CGFloat { preference.leftWidth + laneWidth }
-    /// 画像レーンの幅。表示中の会議に画面の行があれば `ScreenLaneView.width`、無ければ0。
+    private var preferredLeft: CGFloat { preference.leftWidth + laneFit }
+    /// 表示中の会議に画面の行があるか。あれば画像レーンを出す。
+    private(set) var laneShown = false
+    /// ウィンドウを合わせ直すときに `leftWidth` へ足すレーンの幅。`leftWidth` を保存したときに出していた幅で、希望の幅を超えない。
+    /// 希望の幅を足すと、狭めたウィンドウでレーンが譲った分だけ、リサイズの終わりの合わせ直しで広がってしまう。
+    private var laneFit: CGFloat {
+        guard laneShown else { return 0 }
+        let preferred = ScreenLaneLayout.clamp(Double(preference.screenLaneWidth))
+        return CGFloat(min(preferred, ScreenLaneLayout.clamp(Double(preference.screenLaneShownWidth))))
+    }
+    /// 発言の列の希望幅と、そのとき出していたレーンの幅を一緒に取る。2つを足すと、いまの会話側の幅になる。
+    private func rememberColumnWidth() {
+        preference.leftWidth = max(MinutesLayout.minimumLeft, left.frame.width - laneWidth)
+        if laneShown { preference.screenLaneShownWidth = laneWidth }
+    }
+    /// 最小幅と議事録の区切り線の下限に足すレーンの幅。広げたレーンは会話側が狭まると最小幅まで譲る。
+    private var laneMinimum: CGFloat { laneShown ? CGFloat(ScreenLaneLayout.minimumWidth) : 0 }
+    /// 出している画像レーンの幅。希望の幅を、会話側の幅で発言の列の最小幅を残せる分までに抑える。出さなければ0。
+    /// 会話側の幅を決めるたびに `layoutPanes` で決め直す。
     private(set) var laneWidth: CGFloat = 0
     /// レーンの出入りで、発言の列の幅を保ったままウィンドウを広げる・縮める。
     /// タイル・全画面などウィンドウの幅を変えられないときは、議事録を開いていれば右ペインから、閉じていれば発言の列から譲る。
-    func setLaneWidth(_ width: CGFloat) {
-        guard width != laneWidth else { return }
+    func setLaneShown(_ shown: Bool) {
+        guard shown != laneShown else { return }
         finishTransition()
         // レーンを足す直前だけ、開閉と同じくライブリサイズ以外で変わった幅も希望幅として取る。
         // 外すときは取らない。画面の右端などで伸ばせなかった幅からレーンの分を引くと、
         // レーンを足す前の希望幅より狭い値を保存してしまうため。レーンの出ている間の手動の変更は
         // ライブリサイズで `rememberWidths` が取る。
-        if laneWidth == 0, window != nil, !constrainedWindow, left.frame.width > 0 {
+        if shown, window != nil, !constrainedWindow, left.frame.width > 0 {
             preference.leftWidth = max(MinutesLayout.minimumLeft, left.frame.width)
-            persist()
         }
-        laneWidth = width
+        // 出すときは希望の幅の分だけ広げる。前に狭めたウィンドウで譲った幅は引き継がない。
+        if shown { preference.screenLaneShownWidth = preference.screenLaneWidth }
+        if shown { persist() }
+        laneShown = shown
         fitWindow()
         layoutPanes(leftWidth: preferredLeft)
+    }
+    /// 境目のドラッグ。ウィンドウと議事録ペインの幅は変えず、会話側の中で発言の列とレーンが分け合う。
+    /// - commit: 離したとき真。レーンの幅と、そのときの発言の列の幅を希望幅として保存する。
+    ///   列の幅も取るのは、次の会議や次の起動で、広げたレーンの分だけウィンドウが広がらないようにするため
+    ///   - 例外: タイル・全画面では列の幅を取らない。開閉と同じく、制約された幅は希望幅ではない
+    func dragLane(to width: CGFloat, commit: Bool) {
+        guard laneShown else { return }
+        finishTransition()
+        preference.screenLaneWidth = CGFloat(ScreenLaneLayout.clamp(Double(width)))
+        layoutPanes(leftWidth: preference.visible ? left.frame.width : preferredLeft)
+        guard commit else { return }
+        preference.screenLaneWidth = laneWidth
+        if !constrainedWindow { rememberColumnWidth() }
+        persist()
     }
     func fitWindow() {
         finishTransition()
@@ -247,7 +300,8 @@ final class MinutesToggleButton: HoverButton {
         applyMinimumWidth(screen: screen)
         guard !constrainedWindow else { return }
         adjusting = true
-        window.setFrame(preference.fitting(frame: window.frame, screen: screen, divider: dividerThickness, lane: laneWidth), display: true)
+        window.setFrame(preference.fitting(frame: window.frame, screen: screen, divider: dividerThickness,
+                                           lane: laneFit, laneMinimum: laneMinimum), display: true)
         adjusting = false
     }
     private func persist() { if let bytes = try? JSONEncoder().encode(preference) { defaults.set(bytes, forKey: MinutesLayout.key) } }
@@ -259,12 +313,18 @@ final class MinutesToggleButton: HoverButton {
             preview.frame = NSRect(x: width + dividerThickness, y: 0, width: current.previewWidth, height: bounds.height)
         } else if preference.visible {
             let available = max(0, bounds.width - dividerThickness)
-            let width = MinutesLayout.leftWidth(total: bounds.width, divider: dividerThickness, preferred: leftWidth, lane: laneWidth)
+            let width = MinutesLayout.leftWidth(total: bounds.width, divider: dividerThickness, preferred: leftWidth, lane: laneMinimum)
             left.frame = NSRect(x: 0, y: 0, width: width, height: bounds.height)
             preview.frame = NSRect(x: width + dividerThickness, y: 0, width: max(0, available - width), height: bounds.height)
         } else { left.frame = bounds }
+        updateLaneWidth()
         adjusting = false
         onLayout?()
+    }
+    /// 会話側の幅から、出す画像レーンの幅を決め直す。
+    private func updateLaneWidth() {
+        laneWidth = laneShown
+            ? CGFloat(ScreenLaneLayout.width(preferred: Double(preference.screenLaneWidth), pane: Double(left.frame.width))) : 0
     }
     func splitView(_ splitView: NSSplitView, resizeSubviewsWithOldSize oldSize: NSSize) {
         layoutPanes(leftWidth: preference.visible && left.frame.width > 0 ? left.frame.width : preferredLeft)
@@ -272,13 +332,13 @@ final class MinutesToggleButton: HoverButton {
     }
     func rememberWidths() {
         guard !adjusting, transition == nil, !constrainedWindow else { return }
-        preference.leftWidth = max(MinutesLayout.minimumLeft, left.frame.width - laneWidth)
+        rememberColumnWidth()
         if preference.visible { preference.rightWidth = max(MinutesLayout.minimumRight, preview.frame.width) }
         persist()
     }
     // ドラッグの両端は配置と同じ計算にする。AppKitが上下限と丸めをどちらの順で適用しても、位置は整数のまま範囲に収まる。
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        MinutesLayout.leftLowerBound(total: bounds.width, divider: dividerThickness, lane: laneWidth)
+        MinutesLayout.leftLowerBound(total: bounds.width, divider: dividerThickness, lane: laneMinimum)
     }
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
         MinutesLayout.leftUpperBound(total: bounds.width, divider: dividerThickness)
@@ -287,6 +347,8 @@ final class MinutesToggleButton: HoverButton {
     func splitView(_ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { proposedPosition.rounded() }
     func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool { false }
     func splitViewDidResizeSubviews(_ notification: Notification) {
+        // 議事録の区切り線のドラッグは `layoutPanes` を通らずに会話側の幅を変える。
+        if !adjusting { updateLaneWidth() }
         guard !adjusting, preference.visible, NSApp.currentEvent?.type == .leftMouseDragged else { onLayout?(); return }
         rememberWidths(); onLayout?()
     }

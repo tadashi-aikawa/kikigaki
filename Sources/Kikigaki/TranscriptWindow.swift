@@ -74,7 +74,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private let emptyView = NSStackView()
     private let emptyLabel = Washi.label(size: 13, color: Washi.muted)
     private var renamePopover: SpeakerPopover?
-    private let tentativeRow = TranscriptRow(tentative: true)
+    let tentativeRow = TranscriptRow(tentative: true)
     let avatars: AvatarStore
     private let shouldReduceMotion: () -> Bool
     // 話者での絞り込み。TranscriptWindowFilter.swift も読む。表示だけを絞り、会議ごとに解除から始める
@@ -106,6 +106,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     // 画像レーン。TranscriptWindowScreenLane.swift も読む。割り当ては毎回導き、ここには表示の状態だけを持つ
     /// 「+N枚」を押して開いた画像のパス。会議が変わると閉じる。
     var screenLaneExpanded: Set<String> = []
+    /// 境目のドラッグを始めた時点のレーンの幅。ドラッグの間だけ持つ。
+    var screenLaneDragStart: CGFloat?
     /// 後ろに発言がまだ無い画面を、聞き取り中の行が無いときに出す末尾の行。
     let screenLaneTrailing = ScreenLaneRow()
     /// Quick Lookへ渡す会議の全画像。パネルのデータ源とデリゲートはこのオブジェクトで、コントローラー自身は渡さない。
@@ -157,7 +159,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         minutesSplit.onLayout = { [weak self] in
             guard let self else { return }; self.updateHeader(width: self.minutesSplit.left.frame.width)
+            self.applyScreenLaneWidth()
         }
+        transcriptDocument.onLaneDrag = { [weak self] in self?.dragScreenLane($0) }
         minutesSplit.onVisibility = { [weak self] _ in self?.refreshMinutes() }
         // 見えていないウィンドウや視差効果を減らす設定では、開閉を一瞬で切り替える。
         minutesSplit.animates = { [weak self] in
@@ -511,12 +515,15 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             screenLaneExpanded.removeAll()
             anchor = .init(candidates: [], y: 0, atBottom: true)
         }
-        let lane = screenLane()
-        if lane.width != transcriptDocument.laneWidth {
-            transcriptDocument.laneWidth = lane.width
-            minutesSplit.setLaneWidth(lane.width)
+        var lane = screenLane()
+        if lane.shown != minutesSplit.laneShown {
+            minutesSplit.setLaneShown(lane.shown)
             window?.contentView?.layoutSubtreeIfNeeded()
         }
+        // 幅は会話側の幅で決まるので、レーンの出入りでウィンドウを直した後に読む。
+        lane.width = minutesSplit.laneWidth
+        transcriptDocument.laneWidth = lane.width
+        transcriptDocument.laneHasImages = lane.hasImages
         // AIの追加・状態変化も発話と同じ追従規則にする。上へスクロール中はanchor、
         // 検索中はfollowsBottomが末尾移動を抑え、読んでいる位置を保つ。
         // 位置はCoreの純関数が決める。AIはUtteranceにしないので併合結果へは混ぜない。
@@ -613,6 +620,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             tentativeRow.updateLane([], width: lane.width)
             configureLane(screenLaneTrailing.lane, row: screenLaneTrailing)
             screenLaneTrailing.lane.setTextScale(CGFloat(textScale.multiplier))
+            screenLaneTrailing.lane.setLaneWidth(lane.width)
             screenLaneTrailing.lane.update(trailing)
             displayed.append(screenLaneTrailing)
         }

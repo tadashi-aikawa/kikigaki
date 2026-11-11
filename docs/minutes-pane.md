@@ -71,7 +71,7 @@
     - 理由: Retinaのドラッグは0.5pt単位で届く。そのまま1倍の画面へ移すと、議事録ペインのWKWebViewが隣の画素へ割れて本文全体がぼやける。
 - 再ONは保存した左右の幅を復元する。初期値、明示的なドラッグ、ウィンドウリサイズの扱いを純粋な幅計算へ分離する。左の最小幅420pt、右320pt。ON中の `minSize` は両者と区切り線の合計にする。
 - 切替・画面変更ごとに現在の `NSScreen.visibleFrame` を取り直す。まず右側の追加幅を画面右端まで縮め、必要なら左端を画面内へ移動する。それでも両ペインの最小幅が収まらない画面では画面内に収めることを優先する。
-- UserDefaultsの1キー `KikigakiMinutesLayout` に `{visible, leftWidth, rightWidth}` を保存する。起動時のframe autosaveから採るのは位置と高さだけで、幅はこの1キーから再計算する。利用者のリサイズは `inLiveResize` で判別し、画面制約による一時的な縮小を希望幅へ上書きしない。
+- UserDefaultsの1キー `KikigakiMinutesLayout` に `{visible, leftWidth, rightWidth, screenLaneWidth, screenLaneShownWidth}` を保存する。後ろの2つは画像レーンの希望の幅と、`leftWidth` を取ったときに出していたレーンの幅。詳細は [画面の記録](screen-capture.md) の「レーンの幅」。起動時のframe autosaveから採るのは位置と高さだけで、幅はこの1キーから再計算する。利用者のリサイズは `inLiveResize` で判別し、画面制約による一時的な縮小を希望幅へ上書きしない。
 - フルスクリーン・タイル中にONにするときはウィンドウ幅を変えず、分割だけを切り替える。希望幅は保存しない。
 - OFFはタイル中でも左ペイン幅まで縮める。タイルの状態から外れることは受け入れる。
     - 例外: ネイティブのフルスクリーン(`styleMask` の `.fullScreen`)はウィンドウ幅を変えられないので、分割だけを外して会話が全幅に広がる。希望幅も保存しない
