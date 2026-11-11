@@ -84,25 +84,27 @@ import Testing
     @Test func 開いた画像はパスで覚え_後から最後の画像が増えても開いたまま保つ() {
         var rows = [image(1), image(2), image(3)]
         let expanded: Set<String> = ["/tmp/会議.captures/2.webp"]
-        // 開いた連なりの頭に「畳む」を置く。「+N枚」があった位置。
-        #expect(ScreenLane.slots([0, 1, 2], utterances: rows, expanded: expanded) == [.screen(0), .expanded([1]), .screen(1), .screen(2)])
+        // 開いた連なりの頭と末尾に「畳む」を置く。頭は「+N枚」があった位置。
+        #expect(ScreenLane.slots([0, 1, 2], utterances: rows, expanded: expanded)
+                == [.screen(0), .expanded([1]), .screen(1), .expandedEnd([1]), .screen(2)])
         // 3枚目が最後でなくなると畳む対象に入るが、開いていない分だけ新しく畳む。
         rows.append(image(4))
         #expect(ScreenLane.slots([0, 1, 2, 3], utterances: rows, expanded: expanded)
-                == [.screen(0), .expanded([1]), .screen(1), .folded([2]), .screen(3)])
+                == [.screen(0), .expanded([1]), .screen(1), .expandedEnd([1]), .folded([2]), .screen(3)])
     }
 
-    @Test func 開いた連なりは畳むを頭に付けて並べ_開いた覚えを消すと元の枚数の行に戻る() {
+    @Test func 開いた連なりは畳むを頭と末尾に付けて並べ_開いた覚えを消すと元の枚数の行に戻る() {
         let rows = [image(1), image(2), image(3), image(4), image(5)]
         let all: Set<String> = ["/tmp/会議.captures/2.webp", "/tmp/会議.captures/3.webp", "/tmp/会議.captures/4.webp"]
         #expect(ScreenLane.slots(Array(rows.indices), utterances: rows, expanded: all)
-                == [.screen(0), .expanded([1, 2, 3]), .screen(1), .screen(2), .screen(3), .screen(4)])
+                == [.screen(0), .expanded([1, 2, 3]), .screen(1), .screen(2), .screen(3), .expandedEnd([1, 2, 3]), .screen(4)])
         #expect(ScreenLane.slots(Array(rows.indices), utterances: rows, expanded: all.subtracting(all))
                 == [.screen(0), .folded([1, 2, 3]), .screen(4)])
         // 開いた後に間へ届いた画像は、開いた連なりとは別に畳む。
         let partial: Set<String> = ["/tmp/会議.captures/2.webp", "/tmp/会議.captures/4.webp"]
         #expect(ScreenLane.slots(Array(rows.indices), utterances: rows, expanded: partial)
-                == [.screen(0), .expanded([1]), .screen(1), .folded([2]), .expanded([3]), .screen(3), .screen(4)])
+                == [.screen(0), .expanded([1]), .screen(1), .expandedEnd([1]), .folded([2]),
+                    .expanded([3]), .screen(3), .expandedEnd([3]), .screen(4)])
     }
 
     @Test func イベントの行は畳まず_挟まれた画像は前後で別の連なりに畳む() {

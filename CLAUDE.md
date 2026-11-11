@@ -31,6 +31,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `ScreenCapture.swift`: 画面の記録の置き場とファイル名、見出し、保存の失敗の数え方、観測した瞬間の音声位置
   - `ScreenLane.swift`: 画面の行を書き起こしウィンドウの画像レーンへ割り当てる置き場と畳み方。仕様は [画面の記録](docs/screen-capture.md) の「表示」
   - `ScreenLaneLayout.swift`: 画像レーンの幅の範囲、境目のドラッグ、サムネイルの枠と縮小画像を読む大きさ。仕様は [画面の記録](docs/screen-capture.md) の「レーンの幅」
+  - `ScreenLaneTransition.swift`: 画像レーンの「+N枚」「畳む」で枠を伸び縮みさせる突き合わせと進み具合、トレイの中の間隔。仕様は [画面の記録](docs/screen-capture.md) の「1つの発言に何枚もあるとき」
   - `ScreenTarget.swift`: 録音中の画面の記録の対象、フッターの表示、`記録を停止` と `記録を再開` の行を出す判定。仕様は [画面の記録](docs/screen-capture.md) の「録音中の切り替え」
   - `LexicalPath.swift`: 保存先 `outputDir` の字句上の正規化。ファイルの有無を見ない。仕様は [AIへの受け渡し](docs/ai-handoff.md) の「画像の参照」
   - `UtterancePlayback.swift`: 発言の行から元の音声を流す区間。仕様は [発言ごとの音声再生](docs/utterance-playback.md)

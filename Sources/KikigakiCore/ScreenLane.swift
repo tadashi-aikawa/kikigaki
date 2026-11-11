@@ -60,9 +60,11 @@ public enum ScreenLane {
         case screen(Int)
         /// 畳んだ画像の連なり。押すとその場で開く。
         case folded([Int])
-        /// 開いた画像の連なりの頭に置く「畳む」。続けて連なりの各画像を `screen` で並べる。
+        /// 開いた画像の連なりの頭に置く「畳む」。続けて連なりの各画像を `screen` で並べ、末尾に `expandedEnd` を置く。
         /// 「+N枚」があった位置に替わって出し、開いた場所と閉じる場所を同じにする。
         case expanded([Int])
+        /// 開いた画像の連なりの末尾に置く「畳む」。長い連なりを下まで読んだ所から、上へ戻らずに閉じられるようにする。
+        case expandedEnd([Int])
     }
 
     /// 1つの発言の横に出す枠。画像が2枚までなら全部、3枚以上なら最初と最後を出し、間を畳む。
@@ -70,7 +72,7 @@ public enum ScreenLane {
     /// - イベントの行(停止・再開・取得不能)は畳まない。撮れなかった期間を見落とさないため。
     ///   イベントの行を挟んだ間の画像は、イベントの行の前後で別の連なりに畳む
     /// - `expanded`: 押して開いた画像のパス。割り当て先が変わっても開いたまま保つため、発言ではなく画像で覚える
-    ///   - 間の画像のうち、開いた画像の連なりは「畳む」を頭に付けて全部出す。開いた後に届いて間に入った画像は、
+    ///   - 間の画像のうち、開いた画像の連なりは「畳む」を頭と末尾に付けて全部出す。開いた後に届いて間に入った画像は、
     ///     開いた連なりとは別の「+N枚」に畳む
     public static func slots(_ screens: [Int], utterances: [Utterance], expanded: Set<String>) -> [Slot] {
         let images = screens.filter { !utterances[$0].imagePaths.isEmpty }
@@ -79,7 +81,9 @@ public enum ScreenLane {
         var opened: [Int] = []
         func flush() {
             if !folded.isEmpty { result.append(.folded(folded)) }
-            if !opened.isEmpty { result.append(.expanded(opened)); result += opened.map(Slot.screen) }
+            if !opened.isEmpty {
+                result.append(.expanded(opened)); result += opened.map(Slot.screen); result.append(.expandedEnd(opened))
+            }
             folded = []; opened = []
         }
         for index in screens {

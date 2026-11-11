@@ -264,15 +264,23 @@ final class TranscriptRow: NSView, DocumentRow {
         playButton.isHidden = true
         content.addSubview(playButton)
         addSubview(lane)
+        lane.onContentHeightChange = { [weak self] in self?.laneHeightChanged() }
         applyOpacity()
     }
     /// 画像レーンの幅と中身。どちらも変わらなければ再計測しない。
-    func updateLane(_ items: [ScreenLaneView.Item], width: CGFloat) {
+    /// - animated: 「+N枚」「畳む」を押した並べ直しだけ真。レーンの中の枠を伸び縮みさせる
+    func updateLane(_ items: [ScreenLaneView.Item], width: CGFloat, animated: Bool = false) {
         guard items != lane.items || width != laneWidth else { return }
         if width > 0 { lane.setLaneWidth(width) }
-        lane.update(items)
+        lane.update(items, animated: animated)
         laneWidth = width
         measuredWidth = -1
+        needsLayout = true
+    }
+    /// 伸び縮みでレーンの高さだけが変わった。本文は測り直さず、行の高さだけを決め直す。1コマごとに呼ばれるため。
+    private func laneHeightChanged() {
+        guard measuredWidth >= 0 else { return }
+        measuredHeight = max(measuredTextHeight, lane.isEmpty || laneWidth == 0 ? 0 : 8 + lane.contentHeight + 8)
         needsLayout = true
     }
     required init?(coder: NSCoder) { fatalError() }

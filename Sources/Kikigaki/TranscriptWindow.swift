@@ -76,7 +76,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     private var renamePopover: SpeakerPopover?
     let tentativeRow = TranscriptRow(tentative: true)
     let avatars: AvatarStore
-    private let shouldReduceMotion: () -> Bool
+    let shouldReduceMotion: () -> Bool
     // 話者での絞り込み。TranscriptWindowFilter.swift も読む。表示だけを絞り、会議ごとに解除から始める
     enum FilterRowKey: Hashable { case utterance(RowID), ai(String), microphone(UUID) }
     var filterSelection: Set<TranscriptFilter.Subject> = []
@@ -108,6 +108,16 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     var screenLaneExpanded: Set<String> = []
     /// 境目のドラッグを始めた時点のレーンの幅。ドラッグの間だけ持つ。
     var screenLaneDragStart: CGFloat?
+    /// 「+N枚」「畳む」を押した並べ直しの間だけ真。レーンの枠を伸び縮みさせる。
+    var screenLaneAnimates = false
+    /// 伸び縮みしているレーン。1コマごとに進め、文書を1回だけ並べ直す。
+    var screenLaneTransitions: [ScreenLaneView] = []
+    var screenLaneTimer: Timer?
+    /// 末尾の「畳む」で畳んでいる間、トレイの下端を合わせる画面上の位置と、そのトレイの画像のパス。
+    /// 押した末尾の行も持ち、伸び縮みの間はそのいまの下端を合わせる。消え終えたら畳んだ頭のトレイへ引き継ぐ。
+    var screenLaneEndAnchor: (paths: Set<String>, bottom: CGFloat, pressed: ScreenLaneFoldButton)?
+    /// 伸び縮みの時刻。テストは差し替えて任意の時点を再現する。
+    var screenLaneClock: () -> CFTimeInterval = { CACurrentMediaTime() }
     /// 後ろに発言がまだ無い画面を、聞き取り中の行が無いときに出す末尾の行。
     let screenLaneTrailing = ScreenLaneRow()
     /// Quick Lookへ渡す会議の全画像。パネルのデータ源とデリゲートはこのオブジェクトで、コントローラー自身は渡さない。
@@ -382,7 +392,11 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         rows.values.forEach { $0.stopSpeakerReveal() }
     }
 
-    deinit { pendingSpeakerReveals.forEach { $0.timer.invalidate() } }
+    deinit {
+        pendingSpeakerReveals.forEach { $0.timer.invalidate() }
+        // 繰り返しのタイマーはRunLoopが持ち続ける。弱参照で何もしなくなっても、止めないと残る。
+        screenLaneTimer?.invalidate()
+    }
 
     private func reconcilePendingSpeakerReveals(previous: SessionSnapshot) {
         guard previous.timeline.startedAt == snapshot.timeline.startedAt,
@@ -511,6 +525,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         if !sameMeeting {
             // 別の会議へ移る行に、前の会議の返答到着の点灯を持ち越さない。
             for row in aiRows.values { (row as? AIReplyRow)?.stopArrival() }
+            finishScreenLaneTransitions(reflow: false)
             rows.removeAll(); aiRows.removeAll(); aiProgress.removeAll(); microphoneRows.removeAll(); gapRows.removeAll()
             screenLaneExpanded.removeAll()
             anchor = .init(candidates: [], y: 0, atBottom: true)
@@ -595,7 +610,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
                                playing: player.playingID == AnyHashable(id))
             row.onPlay = { [weak self] in self?.togglePlayback(id: id, utterance: utterance) }
             configureLane(row.lane, row: row)
-            row.updateLane(utterance.kind == .voice ? lane.items(lane.assignment.beside[index] ?? []) : [], width: lane.width)
+            row.updateLane(utterance.kind == .voice ? lane.items(lane.assignment.beside[index] ?? []) : [], width: lane.width,
+                           animated: screenLaneAnimates)
             next[id] = row
             ordered.append(FilterEntry(row: row, key: .utterance(id), subject: TranscriptFilter.subject(for: utterance)))
             for item in attached[index, default: []] { appendAI(item) }
@@ -612,7 +628,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             tentativeRow.updateTentative(tentative)
             tentativeRow.updateExclusion(snapshot.tentativeExcluded)
             // 後ろに発言がまだ無い画面は、いま話している発言の横に置く。確定すればその行へ移る。
-            tentativeRow.updateLane(trailing, width: lane.width)
+            tentativeRow.updateLane(trailing, width: lane.width, animated: screenLaneAnimates)
             displayed.append(tentativeRow)
         } else if !trailing.isEmpty {
             // 次の発言がまだ無い。発言の列は空けたまま、末尾にレーンだけを出す。
@@ -621,7 +637,7 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
             configureLane(screenLaneTrailing.lane, row: screenLaneTrailing)
             screenLaneTrailing.lane.setTextScale(CGFloat(textScale.multiplier))
             screenLaneTrailing.lane.setLaneWidth(lane.width)
-            screenLaneTrailing.lane.update(trailing)
+            screenLaneTrailing.lane.update(trailing, animated: screenLaneAnimates)
             displayed.append(screenLaneTrailing)
         }
         rows = next
@@ -1026,7 +1042,8 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         }
         return true
     }
-    @objc private func latestPressed() {
+    @objc func latestPressed() {
+        finishScreenLaneTransitions()
         transcriptDocument.scroll(NSPoint(x: 0, y: max(0, transcriptDocument.frame.height - scrollView.contentSize.height)))
         latestButton.isHidden = true
     }
@@ -1040,8 +1057,9 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
         latestButton.isHidden = transcriptDocument.anchor().atBottom || (snapshot.utterances.isEmpty && snapshot.tentativeText == nil)
         for row in aiRows.values { (row as? AIReplyRow)?.progressView.updateVisibility() }
     }
-    @objc private func motionChanged() {
+    @objc func motionChanged() {
         if shouldReduceMotion() {
+            finishScreenLaneTransitions()
             for id in pendingSpeakerReveals.map(\.id) { finishPendingSpeakerReveals(id: id) }
             rows.values.forEach { $0.stopAnimations() }
             speakerRevealBanner.stopAnimations()

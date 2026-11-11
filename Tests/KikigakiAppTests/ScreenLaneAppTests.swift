@@ -16,18 +16,35 @@ extension AppKitTests {
     /// 既定のレーンの幅。
     private let lane = CGFloat(ScreenLaneLayout.defaultWidth)
 
+    /// 伸び縮みの時計。押した時点を1000秒にし、テストが進める。
+    private final class Clock { var now: CFTimeInterval = 1000 }
+    /// 視差効果を減らす設定。途中で切り替えるテストのため、値を後から変えられるようにする。
+    private final class Motion { var reduce: Bool; init(_ reduce: Bool) { self.reduce = reduce } }
     private struct Fixture {
         let controller: TranscriptWindowController
         let defaults: UserDefaults
         let suite: String
-        @MainActor func close() { defaults.removePersistentDomain(forName: suite); controller.minutesSplit.preview.stop() }
+        let clock: Clock
+        let motion: Motion
+        @MainActor func close() {
+            defaults.removePersistentDomain(forName: suite); controller.minutesSplit.preview.stop()
+            controller.finishScreenLaneTransitions(reflow: false)
+        }
+        /// 伸び縮みを終わりまで進める。動かしていなければ何もしない。
+        @MainActor func settle() {
+            clock.now += 1
+            controller.stepScreenLaneTransitions()
+        }
     }
 
-    private func fixture(width: CGFloat = 640, height: CGFloat = 900) throws -> Fixture {
+    /// - reduceMotion: 視差効果を減らす設定。既定は真で、伸び縮みせずに切り替える
+    private func fixture(width: CGFloat = 640, height: CGFloat = 900, reduceMotion: Bool = true) throws -> Fixture {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let suite = "screen-lane-" + UUID().uuidString
         let defaults = try #require(UserDefaults(suiteName: suite))
-        let controller = TranscriptWindowController(shouldReduceMotion: { true }, minutesDefaults: defaults, textDefaults: defaults)
+        let motion = Motion(reduceMotion), clock = Clock()
+        let controller = TranscriptWindowController(shouldReduceMotion: { motion.reduce }, minutesDefaults: defaults, textDefaults: defaults)
+        controller.screenLaneClock = { clock.now }
         controller.minutesSplit.visibleScreen = { _ in Self.screen }
         controller.presentScreenPreview = {}
         let window = try #require(controller.window)
@@ -35,7 +52,7 @@ extension AppKitTests {
         window.setFrameOrigin(NSPoint(x: 0, y: 100))
         window.setFrame(NSRect(x: 0, y: 100, width: width, height: height), display: false)
         controller.windowDidResize(Notification(name: NSWindow.didResizeNotification, object: window))
-        return Fixture(controller: controller, defaults: defaults, suite: suite)
+        return Fixture(controller: controller, defaults: defaults, suite: suite, clock: clock, motion: motion)
     }
 
     /// 画像のパス。撮影の指定があれば実画像、無ければ使い捨ての仮の画像を作る。
@@ -168,16 +185,25 @@ extension AppKitTests {
         let expanded = try row(controller, "なるほど")
         expanded.lane.layoutSubtreeIfNeeded()
         #expect(expanded.lane.thumbnailViews.count == 4)
-        // 「+2枚」があった位置に、同じ見た目の「畳む」が替わって出る。
-        #expect(expanded.lane.foldButtons.map(\.title) == ["畳む"])
+        // 「+2枚」があった位置に「畳む」が替わって出る。開いた分の末尾にも「畳む」を置く。
+        #expect(expanded.lane.foldButtons.map(\.title) == ["畳む", "畳む"])
+        #expect(expanded.lane.foldButtons.map(\.isEnd) == [false, true])
         #expect(expanded.lane.foldButtons[0].frame.minY == foldY)
         #expect(expanded.lane.foldButtons[0].toolTip == "間の2枚を畳む")
         try await capture("expanded", controller, scrollTo: expanded)
     }
 
-    @Test func 畳むは開いた覚えを消して同じ位置に枚数の行を戻し_Quick_Lookには触れない() throws {
+    /// 押して、伸び縮みを終わりまで進める。視差効果を減らす設定では押すだけ。
+    /// 開閉のスクロールの約束を、伸び縮みの有無の両方で確かめるために使う。
+    private func press(_ button: NSButton, _ fixture: Fixture) {
+        button.performClick(nil)
+        fixture.settle()
+    }
+
+    @Test(arguments: [true, false])
+    func 畳むは開いた覚えを消して同じ位置に枚数の行を戻し_Quick_Lookには触れない(reduceMotion: Bool) throws {
         // 文書の末尾が表示域に入ると、縮んだ分はスクロールの上限で詰まる。下に内容が残る高さで確かめる。
-        let fixture = try fixture(height: 460)
+        let fixture = try fixture(height: 460, reduceMotion: reduceMotion)
         defer { fixture.close() }
         let controller = fixture.controller
         controller.apply(try meeting())
@@ -187,7 +213,7 @@ extension AppKitTests {
         func screenY(_ view: NSView) -> CGFloat {
             view.convert(view.bounds, to: document).minY - controller.scrollView.contentView.bounds.minY
         }
-        try lane().foldButtons[0].performClick(nil)
+        press(try lane().foldButtons[0], fixture)
         #expect(controller.screenLaneExpanded.count == 2)
         let previewPaths = controller.screenPreview.paths
         _ = controller.screenPreview.select(previewPaths[3])
@@ -198,7 +224,7 @@ extension AppKitTests {
         let collapse = try lane().foldButtons[0]
         let before = screenY(collapse)
         #expect(before >= 0)
-        collapse.performClick(nil)
+        press(collapse, fixture)
         controller.window!.contentView!.layoutSubtreeIfNeeded()
         let restored = try lane().foldButtons[0]
         #expect(restored.title == "+2枚")
@@ -207,13 +233,13 @@ extension AppKitTests {
         #expect(controller.screenPreview.paths == previewPaths && controller.screenPreview.index == 3)
         #expect(try lane().thumbnailViews.count == 2)
         // 「畳む」が表示域の上へ出ている: 畳んだ後の「+2枚」を表示域の上端へ寄せる。
-        try lane().foldButtons[0].performClick(nil)
+        press(try lane().foldButtons[0], fixture)
         controller.window!.contentView!.layoutSubtreeIfNeeded()
         let hidden = try lane().foldButtons[0]
         document.scroll(NSPoint(x: 0, y: hidden.convert(hidden.bounds, to: document).minY + 120))
         controller.scrolled()
         #expect(screenY(hidden) < 0)
-        hidden.performClick(nil)
+        press(hidden, fixture)
         controller.window!.contentView!.layoutSubtreeIfNeeded()
         #expect(abs(screenY(try lane().foldButtons[0]) - 8) < 0.5)
         #expect(controller.screenLaneExpanded.isEmpty)
@@ -530,16 +556,18 @@ extension AppKitTests {
         controller.window!.contentView!.layoutSubtreeIfNeeded()
         let lane = try row(controller, "横長").lane
         lane.layoutSubtreeIfNeeded()
-        let thumbnails = lane.thumbnailViews
-        #expect(thumbnails.map(\.frame.size) == [NSSize(width: 152, height: 63), NSSize(width: 152, height: 152)])
-        let captions = lane.subviews.compactMap { $0 as? NSTextField }.sorted { $0.frame.minY < $1.frame.minY }
+        #expect(lane.thumbnailViews.map(\.frame.size) == [NSSize(width: 152, height: 63), NSSize(width: 152, height: 152)])
+        // 枠ごとの入れ物に載っているので、レーンの中の位置へ直して比べる。
+        let thumbnails = lane.thumbnailViews.map { $0.convert($0.bounds, to: lane) }
+        let captions = lane.subviews.flatMap(\.subviews).compactMap { $0 as? NSTextField }
+            .map { $0.convert($0.bounds, to: lane) }.sorted { $0.minY < $1.minY }
         try #require(captions.count == 2)
-        let gapBelowImage = captions[0].frame.minY - thumbnails[0].frame.maxY
-        let gapToNext = thumbnails[1].frame.minY - captions[0].frame.maxY
+        let gapBelowImage = captions[0].minY - thumbnails[0].maxY
+        let gapToNext = thumbnails[1].minY - captions[0].maxY
         #expect(gapBelowImage == 3)
         #expect(gapToNext == 12)
         #expect(gapToNext > gapBelowImage * 2)
-        #expect(captions[1].frame.minY == thumbnails[1].frame.maxY + 3)
+        #expect(captions[1].minY == thumbnails[1].maxY + 3)
     }
 
     // MARK: - レーンの幅
@@ -768,6 +796,570 @@ extension AppKitTests {
         }
     }
 
+    // MARK: - 「+N枚」「畳む」のボタンと伸び縮み
+
+    /// 時計を差し替え、押した時点を0秒にする。
+    private func animated(_ height: CGFloat = 900) throws -> (Fixture, Clock) {
+        let fixture = try fixture(height: height, reduceMotion: false)
+        return (fixture, fixture.clock)
+    }
+
+    @Test func トレイの行は左右へ6ptはみ出し_文字の倍率を掛けず_読み上げで開閉の状態を伝える() throws {
+        let fixture = try fixture()
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try meeting())
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let lane = try row(controller, "なるほど").lane
+        try row(controller, "なるほど").layoutSubtreeIfNeeded()
+        let fold = try #require(lane.foldButtons.first)
+        #expect(fold.title == "+2枚")
+        #expect(fold.frame == NSRect(x: -6, y: 0, width: lane.bounds.width + 12, height: ScreenLaneFoldButton.height))
+        #expect(fold.isAccessibilityExpanded() == false)
+        #expect(fold.accessibilityValue() as? String == "畳んでいます")
+        // 畳んだ画像の小さな見本。
+        #expect(fold.miniCount == 2)
+        // 文字の倍率を上げても行の高さは変わらない。レーンを広げると行はレーンの幅に合わせる。
+        controller.setTextScale(TranscriptTextScale(savedValue: 200))
+        controller.dragScreenLane(.began)
+        controller.dragScreenLane(.ended(-120))
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let wide = try row(controller, "なるほど").lane
+        try row(controller, "なるほど").layoutSubtreeIfNeeded()
+        let scaled = try #require(wide.foldButtons.first)
+        #expect(scaled.frame.height == ScreenLaneFoldButton.height)
+        #expect(scaled.frame.width == wide.bounds.width + 12 && wide.bounds.width == 272)
+        scaled.performClick(nil)
+        let opened = try row(controller, "なるほど").lane.foldButtons
+        #expect(opened.map(\.title) == ["畳む", "畳む"])
+        #expect(opened.allSatisfy { $0.isAccessibilityExpanded() == true })
+        #expect(opened.allSatisfy { $0.accessibilityValue() as? String == "開いています" })
+        #expect(opened.allSatisfy { $0.toolTip == "間の2枚を畳む" })
+    }
+
+    @Test func トレイは畳むと頭の行だけで_開くと末尾の畳むまでを縁で囲み_中の画像は今までどおり開ける() throws {
+        let fixture = try fixture()
+        defer { fixture.close() }
+        let controller = fixture.controller
+        var opened: [String] = []
+        controller.presentScreenPreview = { opened.append(controller.screenPreview.paths[controller.screenPreview.index]) }
+        controller.apply(try meeting())
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        func lane() throws -> ScreenLaneView {
+            let row = try row(controller, "なるほど")
+            row.layoutSubtreeIfNeeded()
+            return row.lane
+        }
+        let head = try #require(try lane().foldButtons.first)
+        let closed = try #require(try lane().trayFrame(containing: head))
+        #expect(closed.height == ScreenLaneFoldButton.height)
+        // 畳んだ状態では、見本の上もトレイの一部として押せる。
+        let onMini = head.convert(NSPoint(x: 20, y: 14), to: head.superview)
+        #expect(head.hitTest(onMini) === head)
+        head.performClick(nil)
+        let open = try lane()
+        let buttons = open.foldButtons
+        let tray = try #require(open.trayFrame(containing: buttons[0]))
+        let inside = open.thumbnailViews.filter { thumbnail in
+            let frame = thumbnail.convert(thumbnail.bounds, to: open)
+            return frame.minY > tray.minY && frame.maxY < tray.maxY
+        }
+        // 頭の行・中の2枚・末尾の行。頭と末尾の行は縁にそろえる。
+        #expect(inside.count == 2)
+        #expect(buttons[0].convert(buttons[0].bounds, to: open).minY == tray.minY)
+        #expect(buttons[1].convert(buttons[1].bounds, to: open).maxY == tray.maxY)
+        // 頭の行と最初の画像、最後の画像と末尾の行の間は2pt。
+        #expect(inside[0].convert(inside[0].bounds, to: open).minY - (tray.minY + ScreenLaneFoldButton.height) == 2)
+        // 中の画像は今までどおりQuick Lookで開く。
+        inside[0].onClick?()
+        #expect(opened == [inside[0].path])
+    }
+
+    @Test(arguments: [true, false])
+    func 末尾の畳むで畳むと畳んだトレイを押した行の位置に置き_頭へフォーカスを移す(reduceMotion: Bool) throws {
+        var paths: [String: String] = [:]
+        let fixture = try fixture(height: 500, reduceMotion: reduceMotion)
+        defer { fixture.close() }
+        let controller = fixture.controller
+        let window = try #require(controller.window)
+        controller.apply(try laneMeeting([(0, [2, 4, 6, 8])], paths: &paths))
+        press(try button(controller, collapses: false, containing: paths["0-4"]!), fixture)
+        let end = try #require(buttons(controller).first { $0.isEnd && $0.paths.contains(paths["0-4"]!) })
+        // 開いた分を下まで読んで、末尾の「畳む」が表示域の下の方に見えている。
+        scroll(controller, toScreenY: 360, end)
+        let pressedBottom = screenY(controller, end) + end.bounds.height
+        try #require(window.makeFirstResponder(end))
+        end.performClick(nil)
+        // 伸び縮みの間も、トレイの下端は押した行の下端に保つ。
+        for step in 1...6 {
+            fixture.clock.now += 0.04
+            controller.stepScreenLaneTransitions()
+            let head = try button(controller, collapses: false, containing: paths["0-4"]!)
+            let lane = try #require(head.superview?.superview as? ScreenLaneView)
+            let tray = try #require(lane.trayFrame(containing: head))
+            let bottom = lane.convert(tray, to: controller.transcriptDocument).maxY - controller.scrollView.contentView.bounds.minY
+            #expect(abs(bottom - pressedBottom) < 0.5, "\(step)")
+        }
+        fixture.settle()
+        let head = try button(controller, collapses: false, containing: paths["0-4"]!)
+        #expect(abs(screenY(controller, head) + head.bounds.height - pressedBottom) < 0.5)
+        #expect(window.firstResponder === head)
+        #expect(controller.screenLaneEndAnchor == nil)
+    }
+
+    @Test func 手前のトレイと合流する末尾の畳むでも_押した直後から押した行の位置を保ち_終わりで合流先へ引き継ぐ() throws {
+        var paths: [String: String] = [:]
+        let fixture = try fixture(height: 500, reduceMotion: false)
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try laneMeeting([(0, [2, 4, 6]), (1, [2, 4, 6])], paths: &paths))
+        press(try button(controller, collapses: false, containing: paths["1-4"]!), fixture)
+        // 話者の付け替えで2発言が1つに併合された。画像 → +3枚 → [畳む → 画像 → 畳む] → 画像。
+        controller.apply(try laneMeeting([(0, [2, 4, 6]), (1, [2, 4, 6])], merged: true, paths: &paths))
+        #expect(try button(controller, collapses: false, containing: paths["0-4"]!).paths.count == 3)
+        let end = try #require(buttons(controller).first { $0.isEnd && $0.paths.contains(paths["1-4"]!) })
+        scroll(controller, toScreenY: 300, end)
+        let pressedBottom = screenY(controller, end) + end.bounds.height
+        let lane = try #require(end.superview?.superview as? ScreenLaneView)
+        /// 押した末尾の行の、いま見えている下端の画面上の位置。縮む途中の行は入れ物で切り取られている。
+        func visibleBottom() throws -> CGFloat {
+            let bottom = try #require(lane.visibleBottom(of: end))
+            return lane.convert(NSPoint(x: 0, y: bottom), to: controller.transcriptDocument).y - controller.scrollView.contentView.bounds.minY
+        }
+        end.performClick(nil)
+        // 押した直後は、まだ縮んでいないので動かない。
+        #expect(abs(try visibleBottom() - pressedBottom) < 0.5)
+        for _ in 1...4 {
+            fixture.clock.now += 0.04
+            controller.stepScreenLaneTransitions()
+            if controller.screenLaneTransitions.isEmpty { break }
+            controller.window!.contentView!.layoutSubtreeIfNeeded()
+            #expect(abs(try visibleBottom() - pressedBottom) < 0.5)
+        }
+        fixture.settle()
+        // 終わりで合流先の「+4枚」へ引き継ぐ。
+        let merged = try button(controller, collapses: false, containing: paths["1-4"]!)
+        #expect(merged.paths.count == 4)
+        #expect(abs(screenY(controller, merged) + merged.bounds.height - pressedBottom) < 0.5)
+    }
+
+    @Test(arguments: [true, false])
+    func 画面より長いトレイで頭が画面の外にあっても_末尾の畳むで畳んだトレイが押した所に収まる(reduceMotion: Bool) throws {
+        var paths: [String: String] = [:]
+        let fixture = try fixture(height: 500, reduceMotion: reduceMotion)
+        defer { fixture.close() }
+        let controller = fixture.controller
+        // 間に8枚。
+        controller.apply(try laneMeeting([(0, (0..<10).map { Double($0) * 2 + 1 })], paths: &paths))
+        press(try button(controller, collapses: false, containing: paths["0-3"]!), fixture)
+        let head = try button(controller, collapses: true, containing: paths["0-3"]!)
+        let end = try #require(buttons(controller).first { $0.isEnd && $0.paths.contains(paths["0-3"]!) })
+        scroll(controller, toScreenY: 380, end)
+        // 頭の「畳む」は画面の上の外。
+        #expect(screenY(controller, head) < 0)
+        let pressedBottom = screenY(controller, end) + end.bounds.height
+        end.performClick(nil)
+        #expect(abs(screenY(controller, end) + end.bounds.height - pressedBottom) < 0.5 || reduceMotion)
+        fixture.settle()
+        let closed = try button(controller, collapses: false, containing: paths["0-3"]!)
+        #expect(closed.paths.count == 8)
+        #expect(abs(screenY(controller, closed) + closed.bounds.height - pressedBottom) < 0.5)
+    }
+
+    @Test func 見本の濃さは押した直後も反転の前後も途切れない() throws {
+        let (fixture, clock) = try animated()
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try meeting())
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let head = try #require(try row(controller, "なるほど").lane.foldButtons.first)
+        // 開き始めは濃さ1から。
+        head.performClick(nil)
+        #expect(head.minisAlpha == 1)
+        clock.now = 1000.01
+        controller.stepScreenLaneTransitions()
+        let fading = head.minisAlpha
+        #expect(fading > 0 && fading < 1)
+        // 途中で畳む。いまの濃さから濃くしていく。
+        head.performClick(nil)
+        #expect(head.minisAlpha == fading)
+        clock.now = 1000.02
+        controller.stepScreenLaneTransitions()
+        #expect(head.minisAlpha >= fading && head.minisAlpha < fading + 0.2)
+        fixture.settle()
+        #expect(head.minisAlpha == 1)
+        // 開いて終えた後の、通常の閉じ始めは0から。
+        head.performClick(nil)
+        fixture.settle()
+        head.performClick(nil)
+        #expect(head.minisAlpha == 0)
+        clock.now += 0.01
+        controller.stepScreenLaneTransitions()
+        #expect(head.minisAlpha == 0)
+    }
+
+    @Test func 開き始めの見本と枚数の文言は重ならない() throws {
+        let (fixture, clock) = try animated()
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try meeting())
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let head = try #require(try row(controller, "なるほど").lane.foldButtons.first)
+        head.performClick(nil)
+        for step in 0...3 {
+            clock.now = 1000 + Double(step) * 0.02
+            controller.stepScreenLaneTransitions()
+            head.layoutSubtreeIfNeeded()
+            let minis = head.subviews.compactMap { $0 as? ScreenThumbnailView }.filter { !$0.isHidden && $0.alphaValue > 0 }
+            if let last = minis.last { #expect(head.countX >= last.frame.maxX, "\(step)") }
+        }
+    }
+
+    @Test(arguments: [10, 100])
+    func 桁の多い枚数でも枚数の表示は右端の山形と畳むに重ならない(count: Int) throws {
+        var paths: [String: String] = [:]
+        let fixture = try fixture(height: 500, reduceMotion: false)
+        defer { fixture.close() }
+        let controller = fixture.controller
+        // 180ptのレーン。間に count 枚。
+        controller.apply(try laneMeeting([(0, (0..<(count + 2)).map { Double($0) * 0.25 + 0.5 })], paths: &paths))
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let head = try #require(buttons(controller).first)
+        head.layoutSubtreeIfNeeded()
+        #expect(head.title == "+\(count)枚")
+        // 畳んだ状態: 「+N枚」と山形。
+        #expect(head.countMaxX <= head.rightControlsX - 4)
+        // 開き始め: 見本が残っている間の「N枚」と「畳む」。
+        head.performClick(nil)
+        for step in 0...3 {
+            fixture.clock.now = 1000 + Double(step) * 0.02
+            controller.stepScreenLaneTransitions()
+            head.layoutSubtreeIfNeeded()
+            #expect(head.countMaxX <= head.rightControlsX - 4, "\(step)")
+            let minis = head.subviews.compactMap { $0 as? ScreenThumbnailView }.filter { !$0.isHidden && $0.alphaValue > 0 }
+            if let last = minis.last { #expect(head.countX >= last.frame.maxX, "\(step)") }
+        }
+    }
+
+    @Test func 開く途中で見本を薄くして消し_畳む途中で濃くして出す() throws {
+        let (fixture, clock) = try animated()
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try meeting())
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let head = try #require(try row(controller, "なるほど").lane.foldButtons.first)
+        head.performClick(nil)
+        // 頭の行は作り直さず、文言と山形を押した時点で替える。
+        #expect(head.title == "畳む" && head.collapses)
+        #expect(head.miniCount == 2)
+        clock.now = 1000.01
+        controller.stepScreenLaneTransitions()
+        #expect(head.minisAlpha > 0.5)
+        clock.now = 1000.06
+        controller.stepScreenLaneTransitions()
+        #expect(head.minisAlpha == 0)
+        fixture.settle()
+        #expect(head.miniCount == 0)
+        head.performClick(nil)
+        #expect(head.title == "+2枚" && head.miniCount == 2)
+        clock.now += 0.01
+        controller.stepScreenLaneTransitions()
+        #expect(head.minisAlpha == 0)
+        fixture.settle()
+        #expect(head.minisAlpha == 1)
+    }
+
+    @Test func 見本は3枚までで_狭いレーンでは文言と重ならない分だけ出す() throws {
+        var paths: [String: String] = [:]
+        let fixture = try fixture(height: 500)
+        defer { fixture.close() }
+        let controller = fixture.controller
+        // 間に10枚。
+        controller.apply(try laneMeeting([(0, (0..<12).map { Double($0) * 2 + 1 })], paths: &paths))
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let head = try #require(buttons(controller).first)
+        head.superview?.superview?.superview?.layoutSubtreeIfNeeded()
+        head.layoutSubtreeIfNeeded()
+        #expect(head.title == "+10枚")
+        #expect(head.miniCount == 3)
+        let shown = head.subviews.compactMap { $0 as? ScreenThumbnailView }.filter { !$0.isHidden }
+        // 180ptのレーン: 3枚と「+10枚」と山形が152ptに収まる。
+        #expect(shown.count == 3)
+        #expect(shown.allSatisfy { $0.frame.maxX < head.bounds.width - 6 - 40 })
+    }
+
+    @Test func 開くと約0秒2で伸び_押したボタンの位置は動かず_終わりは即時の切り替えと同じ高さ() throws {
+        let (fixture, clock) = try animated()
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try meeting())
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let row = try row(controller, "なるほど")
+        let lane = row.lane
+        let collapsedHeight = lane.contentHeight
+        let open = try #require(lane.foldButtons.first)
+        scroll(controller, toScreenY: 120, open)
+        let before = screenY(controller, open)
+        open.performClick(nil)
+        // 押した直後は始まりの高さのまま。増える2枚と末尾の「畳む」は見えていない。
+        #expect(lane.isTransitioning)
+        #expect(lane.contentHeight == collapsedHeight)
+        #expect(lane.blockVisibles.filter { $0 == 0 }.count == 3)
+        let close = try button(controller, collapses: true, containing: open.paths[0])
+        #expect(abs(screenY(controller, close) - before) < 0.5)
+        var heights: [CGFloat] = [lane.contentHeight]
+        for step in 1...4 {
+            clock.now = 1000 + Double(step) * 0.05
+            controller.stepScreenLaneTransitions()
+            heights.append(lane.contentHeight)
+            #expect(abs(screenY(controller, close) - before) < 0.5)
+        }
+        // 0.2秒で終わる。途中は単調に伸びる。
+        #expect(!lane.isTransitioning)
+        #expect(controller.screenLaneTimer == nil)
+        #expect(zip(heights, heights.dropFirst()).allSatisfy { $0 < $1 })
+        let expandedHeight = lane.contentHeight
+        #expect(lane.thumbnailViews.count == 4)
+        // 即時の並べ直しでも同じ高さ。行の高さもレーンに合っている。
+        controller.refreshRows()
+        #expect(lane.contentHeight == expandedHeight)
+        #expect(row.frame.height >= 8 + expandedHeight + 8)
+        #expect(controller.transcriptDocument.rows.contains { $0 === row })
+    }
+
+    @Test func 伸びている途中で畳むと最後の操作の状態で終わり_連打しても崩れない() throws {
+        let (fixture, clock) = try animated()
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try meeting())
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let lane = try row(controller, "なるほど").lane
+        let collapsedHeight = lane.contentHeight
+        let path = try #require(lane.foldButtons.first?.paths.first)
+        try button(controller, collapses: false, containing: path).performClick(nil)
+        clock.now = 1000.08
+        controller.stepScreenLaneTransitions()
+        let midway = lane.contentHeight
+        #expect(midway > collapsedHeight)
+        // 途中で「畳む」を押す。その時点の高さから縮み始める。
+        try button(controller, collapses: true, containing: path).performClick(nil)
+        #expect(lane.contentHeight == midway)
+        // さらに連打する。
+        try button(controller, collapses: false, containing: path).performClick(nil)
+        try button(controller, collapses: true, containing: path).performClick(nil)
+        clock.now = 1000.5
+        controller.stepScreenLaneTransitions()
+        #expect(!lane.isTransitioning)
+        #expect(lane.foldButtons.map(\.title) == ["+2枚"])
+        #expect(lane.thumbnailViews.count == 2)
+        #expect(lane.contentHeight == collapsedHeight)
+        #expect(lane.blockVisibles.allSatisfy { $0 == 1 })
+        #expect(controller.screenLaneExpanded.isEmpty)
+    }
+
+    @Test func 伸び縮みの途中で行の追加_幅のドラッグ_絞り込みが重なっても崩れない() throws {
+        let (fixture, clock) = try animated()
+        defer { fixture.close() }
+        let controller = fixture.controller
+        var state = try meeting()
+        state.state = .recording
+        controller.apply(state)
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let lane = try row(controller, "なるほど").lane
+        let path = try #require(lane.foldButtons.first?.paths.first)
+        try button(controller, collapses: false, containing: path).performClick(nil)
+        clock.now = 1000.05
+        controller.stepScreenLaneTransitions()
+        // 録音中に発言が届く。このレーンの並びは同じなので、伸び縮みは続く。
+        state.utterances.append(Utterance(speaker: 0, start: 80, end: 84, text: "追加の発言です。"))
+        controller.apply(state)
+        #expect(lane.isTransitioning)
+        // 境目をドラッグする。高さは新しい幅で測り直し、伸び縮みは続く。
+        controller.dragScreenLane(.began)
+        controller.dragScreenLane(.changed(-60))
+        #expect(lane.isTransitioning)
+        clock.now = 1000.1
+        controller.stepScreenLaneTransitions()
+        controller.dragScreenLane(.ended(-60))
+        // 絞り込みで佐藤だけにする。田中の行は畳まれるが、レーンは終わりまで進む。
+        controller.setFilter([.speaker(1)])
+        clock.now = 1000.3
+        controller.stepScreenLaneTransitions()
+        #expect(!lane.isTransitioning)
+        #expect(controller.screenLaneTimer == nil)
+        controller.setFilter([])
+        let shown = try row(controller, "なるほど").lane
+        shown.layoutSubtreeIfNeeded()
+        #expect(shown.thumbnailViews.count == 4)
+        #expect(shown.thumbnailViews.allSatisfy { $0.frame.width == 212 })
+        #expect(shown.blockVisibles.allSatisfy { $0 == 1 })
+    }
+
+    @Test func 視差効果を減らす設定では伸び縮みせずに切り替える() throws {
+        let fixture = try fixture()
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try meeting())
+        let lane = try row(controller, "なるほど").lane
+        try #require(lane.foldButtons.first).performClick(nil)
+        #expect(!lane.isTransitioning)
+        #expect(controller.screenLaneTimer == nil)
+        #expect(lane.thumbnailViews.count == 4)
+    }
+
+    /// クロディーヌのモックと同じ会議。`KIKIGAKI_SCREEN_LANE_IMAGES` に、2026-11-11 21:45の会議の `.captures` を渡したときだけ撮る。
+    private func mockMeeting(_ folder: String) throws -> SessionSnapshot {
+        let base = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 11, hour: 21, minute: 46, second: 0))!
+        // ファイル名は時分秒。21:46:00からの秒にする。
+        func at(_ name: String) -> Double { Double((Int(name.dropFirst(2).prefix(2))! - 46) * 60 + Int(name.suffix(2))!) }
+        func shot(_ name: String) throws -> Utterance {
+            try Utterance(screenLabel: "DELL U3818DW · Google Chrome「KIKIGAKI — 声をすべてドキュメントに」",
+                          imagePath: folder + "/\(name).webp", at: at(name), postedAt: base.addingTimeInterval(at(name)))
+        }
+        let rows: [Utterance] = [
+            Utterance(speaker: 1, start: 33, end: 37, text: "その次は Google Meetとの違いについてです。"),
+            try shot("214633"),
+            Utterance(speaker: 0, start: 38, end: 95, text: "議事録ができるタイミングがまず1つ目の話題ですね。Google Meetはミーティングが終わるまで議事録を確認できないと思うんですけど、KIKIGAKIは最中から確認できます。"),
+            try shot("214638"), try shot("214644"), try shot("214653"), try shot("214720"), try shot("214729"),
+            Utterance(speaker: 1, start: 106, end: 115, text: "で、もっかい戻ります。"),
+            try shot("214753")
+        ]
+        var state = SessionSnapshot(state: .idle, utterances: rows.sorted { $0.start < $1.start },
+                                    timeline: MeetingTimeline(startedAt: base), names: SpeakerNames([0: "田中", 1: "佐藤"]))
+        state.markdownURL = URL(fileURLWithPath: "/tmp/kikigaki-screen-lane-tray.md")
+        state.elapsed = 120
+        return state
+    }
+
+    @Test(arguments: [180, 300])
+    func トレイをモックと同じ会議で撮る(width: Int) async throws {
+        guard ProcessInfo.processInfo.environment["KIKIGAKI_UI_CAPTURE"] != nil,
+              let folder = ProcessInfo.processInfo.environment["KIKIGAKI_SCREEN_LANE_IMAGES"],
+              FileManager.default.fileExists(atPath: folder + "/214644.webp") else { return }
+        // 発言の列に420ptを残してレーンを広げられる幅にする。
+        let fixture = try fixture(width: CGFloat(max(520, 420 + width - 180 + 20)), height: 1300, reduceMotion: false)
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try mockMeeting(folder))
+        if width != 180 {
+            controller.dragScreenLane(.began)
+            controller.dragScreenLane(.ended(CGFloat(180 - width)))
+        }
+        #expect(controller.transcriptDocument.laneWidth == CGFloat(width))
+        let first = { try self.row(controller, "その次は") }
+        let head = { try #require(try self.row(controller, "議事録が").lane.foldButtons.first) }
+        try await capture("tray-\(width)-closed", controller, scrollTo: try first())
+        try head().showsHoverForCapture = true
+        try await capture("tray-\(width)-hover", controller, scrollTo: try first())
+        try head().showsHoverForCapture = false
+        try head().performClick(nil)
+        // 開く途中。モックと同じく、中の画像が半分見えている時点(進み具合0.5)を撮る。
+        fixture.clock.now = 1000 + ScreenLaneTransition.duration * (1 - pow(0.5, 1.0 / 3))
+        controller.stepScreenLaneTransitions()
+        try await capture("tray-\(width)-opening", controller)
+        fixture.settle()
+        // 開いた状態は末尾の「畳む」まで入るよう、トレイのある発言から撮る。
+        try await capture("tray-\(width)-open", controller, scrollTo: try row(controller, "議事録が"))
+    }
+
+    @Test func 一方の行の伸び縮みの途中で別の行を開いても_先の行は跳ねずに進む() throws {
+        var paths: [String: String] = [:]
+        let (fixture, clock) = try animated()
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try laneMeeting([(0, [2, 4, 6]), (1, [2, 4, 6])], paths: &paths))
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let first = try row(controller, "発言0").lane, second = try row(controller, "発言1").lane
+        try button(controller, collapses: false, containing: paths["0-4"]!).performClick(nil)
+        clock.now = 1000.1
+        controller.stepScreenLaneTransitions()
+        let midway = first.contentHeight, visibles = first.blockVisibles
+        // 先の行の途中で、後の行を開く。後の行だけが0秒から始まる。
+        try button(controller, collapses: false, containing: paths["1-4"]!).performClick(nil)
+        #expect(first.contentHeight == midway)
+        var previous = midway
+        for step in 1...5 {
+            clock.now = 1000.1 + Double(step) * 0.04
+            controller.stepScreenLaneTransitions()
+            #expect(first.contentHeight >= previous)
+            previous = first.contentHeight
+        }
+        #expect(zip(first.blockVisibles, visibles).allSatisfy { $0 >= $1 })
+        #expect(!first.isTransitioning && !second.isTransitioning)
+        // 先の行は1000秒から、後の行は1000.1秒から0.2秒。1000.3秒で両方終わる。
+        #expect(controller.screenLaneTimer == nil)
+    }
+
+    @Test func 伸び縮みの途中で最新の発言へを押すと確定して末尾へ移り_次の発言にも追従する() throws {
+        var paths: [String: String] = [:]
+        let (fixture, clock) = try animated(460)
+        defer { fixture.close() }
+        let controller = fixture.controller
+        var state = try laneMeeting([(0, [2, 4, 6, 8, 10])], paths: &paths)
+        state.state = .recording
+        controller.apply(state)
+        let document = controller.transcriptDocument
+        let open = try button(controller, collapses: false, containing: paths["0-4"]!)
+        scroll(controller, toScreenY: 80, open)
+        open.performClick(nil)
+        clock.now = 1000.05
+        controller.stepScreenLaneTransitions()
+        controller.latestPressed()
+        #expect(document.anchor().atBottom)
+        #expect(controller.screenLaneTimer == nil)
+        // 残りの伸び縮みは確定済みなので、末尾から離れない。
+        clock.now = 1000.3
+        controller.stepScreenLaneTransitions()
+        #expect(document.anchor().atBottom)
+        // 新しい発言が届くと末尾へ追従する。
+        state.utterances.append(Utterance(speaker: 1, start: 500, end: 505, text: "新しい発言です。"))
+        state.elapsed = 510
+        controller.apply(state)
+        #expect(document.anchor().atBottom)
+        #expect(abs(controller.scrollView.contentView.bounds.maxY - document.frame.height) < 0.5)
+    }
+
+    @Test func 伸び縮みの途中で視差効果を減らす設定にすると最後の状態でそろう() throws {
+        let (fixture, clock) = try animated()
+        defer { fixture.close() }
+        let controller = fixture.controller
+        controller.apply(try meeting())
+        controller.window!.contentView!.layoutSubtreeIfNeeded()
+        let row = try row(controller, "なるほど")
+        try #require(row.lane.foldButtons.first).performClick(nil)
+        clock.now = 1000.05
+        controller.stepScreenLaneTransitions()
+        #expect(row.lane.isTransitioning)
+        fixture.motion.reduce = true
+        controller.motionChanged()
+        #expect(!row.lane.isTransitioning)
+        #expect(controller.screenLaneTimer == nil)
+        #expect(row.lane.blockVisibles.allSatisfy { $0 == 1 })
+        #expect(row.lane.thumbnailViews.count == 4)
+        // 行の高さも最後の状態に合っている。
+        let height = row.frame.height
+        controller.refreshRows()
+        #expect(row.frame.height == height)
+    }
+
+    @Test func 伸び縮みの途中でウィンドウを解放するとタイマーを止める() throws {
+        weak var timer: Timer?
+        weak var released: TranscriptWindowController?
+        try autoreleasepool {
+            let fixture = try fixture(reduceMotion: false)
+            fixture.controller.apply(try meeting())
+            try #require(try row(fixture.controller, "なるほど").lane.foldButtons.first).performClick(nil)
+            timer = fixture.controller.screenLaneTimer
+            #expect(timer?.isValid == true)
+            released = fixture.controller
+            // 後片付けで伸び縮みを確定しない。解放だけでタイマーが止まることを確かめる。
+            fixture.defaults.removePersistentDomain(forName: fixture.suite)
+            fixture.controller.minutesSplit.preview.stop()
+        }
+        #expect(released == nil)
+        #expect(timer?.isValid != true)
+    }
+
     // MARK: - 開閉の入れ替わりとスクロール
 
     /// 発言の前後に画像の無い発言を並べ、開閉で縮んでもスクロールの上限で詰まらない会議。
@@ -826,15 +1418,16 @@ extension AppKitTests {
         controller.scrolled()
     }
 
-    @Test func 併合で手前の枚数の行と1つにまとまっても_入れ替わった枚数の行を押した位置に置く() throws {
+    @Test(arguments: [true, false])
+    func 併合で手前の枚数の行と1つにまとまっても_入れ替わった枚数の行を押した位置に置く(reduceMotion: Bool) throws {
         // 画像3枚ずつの2発言で、それぞれ中央を開く。
         var paths: [String: String] = [:]
-        let fixture = try fixture(height: 500)
+        let fixture = try fixture(height: 500, reduceMotion: reduceMotion)
         defer { fixture.close() }
         let controller = fixture.controller
         controller.apply(try laneMeeting([(0, [2, 4, 6]), (1, [2, 4, 6])], paths: &paths))
-        try button(controller, collapses: false, containing: paths["0-4"]!).performClick(nil)
-        try button(controller, collapses: false, containing: paths["1-4"]!).performClick(nil)
+        press(try button(controller, collapses: false, containing: paths["0-4"]!), fixture)
+        press(try button(controller, collapses: false, containing: paths["1-4"]!), fixture)
         // 話者の付け替えで2発言が1つに併合された。画像1 → 畳む → 画像2 → +2枚 → 畳む → 画像5 → 画像6。
         controller.apply(try laneMeeting([(0, [2, 4, 6]), (1, [2, 4, 6])], merged: true, paths: &paths))
         let later = try button(controller, collapses: true, containing: paths["1-4"]!)
@@ -842,7 +1435,7 @@ extension AppKitTests {
         // 表示域の中で押す。
         scroll(controller, toScreenY: 200, later)
         let before = screenY(controller, later)
-        later.performClick(nil)
+        press(later, fixture)
         let restored = try button(controller, collapses: false, containing: paths["1-4"]!)
         #expect(restored.paths.count == 3)
         #expect(abs(screenY(controller, restored) - before) < 0.5)
@@ -855,13 +1448,14 @@ extension AppKitTests {
         #expect(hidden.paths == [paths["1-4"]!])
         scroll(controller, toScreenY: -150, hidden)
         #expect(screenY(controller, hidden) < 0)
-        hidden.performClick(nil)
+        press(hidden, fixture)
         #expect(abs(screenY(controller, try button(controller, collapses: false, containing: paths["1-4"]!)) - 8) < 0.5)
     }
 
-    @Test func キーボードで開閉すると入れ替わったボタンへフォーカスを移し_続けて開閉できる() throws {
+    @Test(arguments: [true, false])
+    func キーボードで開閉すると入れ替わったボタンへフォーカスを移し_続けて開閉できる(reduceMotion: Bool) throws {
         var paths: [String: String] = [:]
-        let fixture = try fixture(height: 500)
+        let fixture = try fixture(height: 500, reduceMotion: reduceMotion)
         defer { fixture.close() }
         let controller = fixture.controller
         let window = try #require(controller.window)
@@ -869,25 +1463,26 @@ extension AppKitTests {
         let open = try button(controller, collapses: false, containing: paths["0-4"]!)
         scroll(controller, toScreenY: 200, open)
         try #require(window.makeFirstResponder(open))
-        open.performClick(nil)
+        press(open, fixture)
         let close = try button(controller, collapses: true, containing: paths["0-4"]!)
         #expect(window.firstResponder === close)
-        close.performClick(nil)
+        press(close, fixture)
         let reopened = try button(controller, collapses: false, containing: paths["0-4"]!)
         #expect(window.firstResponder === reopened)
         // マウスで押した場合(フォーカスが別にある)は動かさない。
         window.makeFirstResponder(controller.searchField)
-        reopened.performClick(nil)
+        press(reopened, fixture)
         #expect(!(window.firstResponder is ScreenLaneFoldButton))
     }
 
-    @Test func 開いた後の画像の追加と割り当て先の変更を挟んでも畳め_会議を切り替えると閉じる() throws {
+    @Test(arguments: [true, false])
+    func 開いた後の画像の追加と割り当て先の変更を挟んでも畳め_会議を切り替えると閉じる(reduceMotion: Bool) throws {
         var paths: [String: String] = [:]
-        let fixture = try fixture(height: 500)
+        let fixture = try fixture(height: 500, reduceMotion: reduceMotion)
         defer { fixture.close() }
         let controller = fixture.controller
         controller.apply(try laneMeeting([(0, [2, 5, 8])], paths: &paths))
-        try button(controller, collapses: false, containing: paths["0-5"]!).performClick(nil)
+        press(try button(controller, collapses: false, containing: paths["0-5"]!), fixture)
         // 画像が増え、最後だった8秒の画像が間に入る。開いた5秒の画像は開いたまま、新しく間に入った画像は別に畳む。
         controller.apply(try laneMeeting([(0, [2, 5, 8, 9])], paths: &paths))
         #expect(try button(controller, collapses: true, containing: paths["0-5"]!).paths == [paths["0-5"]!])
@@ -902,10 +1497,10 @@ extension AppKitTests {
         #expect(moved.paths == [paths["0-5"]!])
         scroll(controller, toScreenY: 160, moved)
         let before = screenY(controller, moved)
-        moved.performClick(nil)
+        press(moved, fixture)
         #expect(!controller.screenLaneExpanded.contains(paths["0-5"]!))
         #expect(abs(screenY(controller, try button(controller, collapses: false, containing: paths["0-5"]!)) - before) < 0.5)
-        // 会議を切り替えると開いた覚えを捨てる。
+        // 会議を切り替えると開いた覚えを捨てる。伸び縮みの途中で切り替えても、前の会議の伸び縮みは残らない。
         try button(controller, collapses: false, containing: paths["0-8"]!).performClick(nil)
         #expect(!controller.screenLaneExpanded.isEmpty)
         var next = try laneMeeting([(0, [2, 5, 8, 9])], paths: &paths)
@@ -913,12 +1508,14 @@ extension AppKitTests {
         controller.apply(next)
         #expect(controller.screenLaneExpanded.isEmpty)
         #expect(buttons(controller).allSatisfy { !$0.collapses })
+        #expect(controller.screenLaneTimer == nil && controller.screenLaneTransitions.isEmpty)
     }
 
-    @Test func 末尾を読んでいても開閉で末尾へ飛ばず_末尾が見えていて縮むときは上限で詰まる() throws {
+    @Test(arguments: [true, false])
+    func 末尾を読んでいても開閉で末尾へ飛ばず_末尾が見えていて縮むときは上限で詰まる(reduceMotion: Bool) throws {
         var paths: [String: String] = [:]
         // 末尾まで下ろしたままで「+1枚」が表示域に入る高さにする。
-        let fixture = try fixture(height: 800)
+        let fixture = try fixture(height: 800, reduceMotion: reduceMotion)
         defer { fixture.close() }
         let controller = fixture.controller
         controller.apply(try laneMeeting([(0, [2, 4, 6])], trailing: 1, paths: &paths))
@@ -931,7 +1528,7 @@ extension AppKitTests {
         let clipHeight = controller.scrollView.contentView.bounds.height
         try #require(before >= 0 && before < clipHeight)
         #expect(document.anchor().atBottom && document.followsBottom)
-        open.performClick(nil)
+        press(open, fixture)
         let close = try button(controller, collapses: true, containing: paths["0-4"]!)
         #expect(abs(screenY(controller, close) - before) < 0.5)
         #expect(!document.anchor().atBottom)
@@ -939,16 +1536,17 @@ extension AppKitTests {
         document.scroll(NSPoint(x: 0, y: document.frame.height))
         controller.scrolled()
         let atEnd = screenY(controller, close)
-        close.performClick(nil)
+        press(close, fixture)
         let restored = try button(controller, collapses: false, containing: paths["0-4"]!)
         let clip = controller.scrollView.contentView.bounds
         #expect(abs(clip.maxY - document.frame.height) < 0.5)
         #expect(screenY(controller, restored) > atEnd)
     }
 
-    @Test func 検索中と絞り込み中も同じ位置で開閉する() throws {
+    @Test(arguments: [true, false])
+    func 検索中と絞り込み中も同じ位置で開閉する(reduceMotion: Bool) throws {
         var paths: [String: String] = [:]
-        let fixture = try fixture(height: 500)
+        let fixture = try fixture(height: 500, reduceMotion: reduceMotion)
         defer { fixture.close() }
         let controller = fixture.controller
         controller.apply(try laneMeeting([(0, [2, 4, 6])], paths: &paths))
@@ -958,7 +1556,7 @@ extension AppKitTests {
         let open = try button(controller, collapses: false, containing: paths["0-4"]!)
         scroll(controller, toScreenY: 180, open)
         let before = screenY(controller, open)
-        open.performClick(nil)
+        press(open, fixture)
         let close = try button(controller, collapses: true, containing: paths["0-4"]!)
         #expect(abs(screenY(controller, close) - before) < 0.5)
         #expect(controller.searchOpen && !controller.searchHits.isEmpty)
@@ -968,7 +1566,7 @@ extension AppKitTests {
         let filtered = try button(controller, collapses: true, containing: paths["0-4"]!)
         scroll(controller, toScreenY: 120, filtered)
         let filteredBefore = screenY(controller, filtered)
-        filtered.performClick(nil)
+        press(filtered, fixture)
         #expect(abs(screenY(controller, try button(controller, collapses: false, containing: paths["0-4"]!)) - filteredBefore) < 0.5)
         #expect(controller.filterSelection == [.speaker(0)])
     }
