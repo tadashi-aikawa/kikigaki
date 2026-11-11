@@ -183,6 +183,7 @@ let usage = """
                                [--groups] [--summary] [--label 文字]
   ScreenCaptureProbe import-captures <会議名>.captures --out <ディレクトリ>
   ScreenCaptureProbe pair-diff <会議名>.captures [--width 128] [--cell 8] [--top 0.032]
+  ScreenCaptureProbe export-replay <記録のディレクトリ> --out <JSON> [--top <割合>]
 """
 
 var arguments = Arguments(Array(CommandLine.arguments.dropFirst()))
@@ -200,6 +201,7 @@ do {
     case "encode": try EncodeCommand.main(&arguments)
     case "import-captures": try ImportCapturesCommand.main(&arguments)
     case "pair-diff": try PairDiffCommand.main(&arguments)
+    case "export-replay": try ReplayExportCommand.main(&arguments)
     default: print(usage); exit(2)
     }
 } catch {

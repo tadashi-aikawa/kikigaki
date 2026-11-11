@@ -242,6 +242,59 @@ scenes $PP $Q              # 推す組
 - 2026-11-11の `real-obs-01` は、元のリポジトリの `experiments/screen-capture/work/real-obs-01` にある。`D` をそこへ向ける
   - 場面の区間と、場面ごとの数え方は検証記録の「実画面の記録」
 
+## 本体の判定器と突き合わせる
+
+本体の `ScreenChangeDetector` は、試作の判定器の推す組と同じ入力で同じ決定を出す。`Tests/KikigakiCoreTests/ScreenChangeReplayTests.swift` が、観測の列を両方へ流して固定する。
+
+リポジトリに置くのは合成の筋書きの3本だけ。
+
+```bash
+P=/private/tmp/kikigaki-screen-lane/experiments/screen-capture/.build/release/ScreenCaptureProbe
+F=/private/tmp/kikigaki-screen-lane/Tests/KikigakiCoreTests/Fixtures
+# 合成の筋書き。外すマスの漏れの出る mixed、保存の結果を遅らせると起点の違いが出る mixed-phase1、ポインタや止まる動く画像の出る anim
+$P export-replay work/r10/mix-1080m1/phase0 --top 0.0223 --out $F/screen-replay-mixed.json
+$P export-replay work/r10/mix-1080/phase1 --top 0.0223 --out $F/screen-replay-mixed-phase1.json
+$P export-replay work/r10/anim-1080/phase0 --top 0.0223 --out $F/screen-replay-anim.json
+# 本体で当てる
+swift test --package-path /private/tmp/kikigaki-screen-lane --filter ScreenChangeReplayTests
+```
+
+実画面の記録は、手元で書き出して環境変数で渡す。リポジトリには置かない。
+
+- 理由: 公開リポジトリで、書き出したファイルは利用者の画面に映ったものの縮小画像を含む
+- 書き出し先は `work/` の下にする。gitで無視される
+
+```bash
+P=/private/tmp/kikigaki-screen-lane/experiments/screen-capture/.build/release/ScreenCaptureProbe
+L=/private/tmp/kikigaki-screen-lane/experiments/screen-capture/work/r10/screen-replay-real-obs-01.json
+# --top は記録の events.jsonl の開始の行の値を読む
+$P export-replay ~/git/github.com/tadashi-aikawa/kikigaki/experiments/screen-capture/work/real-obs-01 --out $L
+KIKIGAKI_SCREEN_REPLAY_FIXTURE=$L swift test --package-path /private/tmp/kikigaki-screen-lane --filter ScreenChangeReplayTests
+```
+
+- 環境変数を渡すと、試作と同じ時刻に同じ理由で保存を決めるかを確かめる。real-obs-01 なら、保存が12枚で、13ページの2回の区間がどちらも1〜2枚かも確かめる
+- 渡さなければ、手元の記録のテスト2件は飛ばす
+
+- `export-replay`: 縮小画像を幅128へ縮めた輝度と、観測・idle・撮れない期間・終わりの時刻だけを書き出す。画像そのものは書かない
+  - 輝度は全フレームをつないでlzmaで縮める。実画面の記録で約470KB、合成の3本で約190KB
+  - 期待の決定は、推す組の値で試作の判定器に当てた結果。値は `ReplayExport.swift` の `recommended`
+  - 決定の3回に1回を保存の失敗として返したときの決定も書く。本体の失敗の扱いが試作と一致するかを見る
+
+保存の結果を遅らせて返したときに、試作の決定と食い違う数を、起点の形ごとに測る。手元で多くの筋書きを書き出し、ディレクトリを渡す。
+
+```bash
+mkdir -p work/r10/replay
+for s in send-1080/phase0 send-1080/phase1 send-1080/phase2 video-1080/phase0 video-1080m1/phase0 alt-1080/phase0 ret-1080/phase0 \
+  pages-1080/phase0 switch-1080/phase0 meet-1080/phase0 mix-1080/phase0 mix-1080/phase1 mix-uw1/phase0 anim-1080/phase1 anim-uw1/phase0 noise-1080/phase0; do
+  $P export-replay work/r10/$s --top 0.0223 --out work/r10/replay/$(echo $s | tr / -).json
+done
+KIKIGAKI_SCREEN_REPLAY_DIR=$PWD/work/r10/replay swift test --package-path /private/tmp/kikigaki-screen-lane --filter 手元の観測の列で保存の完了の遅れ
+```
+
+- 出力は `[遅れ]` の行。デバッグビルドで約10分かかる
+- 結果は [画面の記録](../../docs/screen-capture.md) の「動き続ける画面」
+- 試作の判定器を変えて本体と食い違ったら、どちらに合わせるかを決めてから書き出し直す
+
 ## 実画面を監視する
 
 ```bash

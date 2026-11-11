@@ -21,6 +21,8 @@ enum Simulation {
         /// 遅れを数える区間の数。保存が無かった区間も含む。
         var latencyWindows = 0
         var failures = 0
+        /// 失敗として返した決定も含む、全部の決定。決めた順。
+        var attempts: [SaveDecision] = []
     }
 
     final class Source {
@@ -56,11 +58,13 @@ enum Simulation {
         detector.autoConfirm = false
         let thumbs = source.thumbs(width: params.thumbWidth)
         var saves: [SaveDecision] = []
+        var attempts: [SaveDecision] = []
         var decisions = 0, failures = 0
         // 保存の結果は決めた直後に返す。本体は符号化と書き込みの分だけ遅れて返す。
         func settle(_ decision: SaveDecision?) {
             guard let decision else { return }
             decisions += 1
+            attempts.append(decision)
             if failEvery > 0, decisions % failEvery == 0 {
                 failures += 1
                 detector.saveFailed(frameIndex: decision.frameIndex, at: decision.decidedAt)
@@ -96,6 +100,7 @@ enum Simulation {
         }
         var run = score(saves, truth: source.truth)
         run.failures = failures
+        run.attempts = attempts
         return run
     }
 

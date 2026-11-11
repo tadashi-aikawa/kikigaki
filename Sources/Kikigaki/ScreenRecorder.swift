@@ -49,7 +49,8 @@ struct ScreenShot {
 /// - 判定とフレームは `queue` で扱い、世代が変わっていたら判定器の観測を数え直してから読む。比較の基準は引き継ぐ
 /// - 符号化と書き込みは `encodeQueue`。結果は成功も失敗も `DispatchQueue.main` の1本で順に返し、公開の可否はMainActorの `publish` が決める
 ///   - 無音の間の画面は、書き込みまで済ませてからMainActorが保留する。公開の契機で同期に出せるようにするため。
-///     この型は保留を知らず、保留を受け付けたことも `published` として受け取る
+///     この型は保留を持たず、保留を受け付けたことを `held` として受け取る。保留の公開と破棄は `heldScreen(order:published:)` で受け取り、判定器へ渡す
+///     - 判定器は、保留も比較の基準に入れ、直近に公開した画面として比べるのは公開を知らせた後だけにする
 /// - 停止は `stopAccepting` で新しい保存を止め、`drain` で受付済みの処理を待ち、`invalidate` で残りを無効にする
 ///
 /// 順序の物差しは受付の番号1本にそろえる。
@@ -57,7 +58,12 @@ struct ScreenShot {
 /// - 使う所: 保留の破棄と公開の境界(`ScreenSilenceHold`)、判定器の比較の基準の新旧(`ScreenChangeDetector`)、行の挿入位置(`MeetingSession`)。どれもこの番号で比べる
 /// - フレームの番号は、判定器の中で観測を見分けるためだけに使う。新旧の比較には使わない
 final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    enum PublishResult { case published, rejected }
+    /// 公開の結果。その場で決まった行き先で、判定器へは保存の結果と一緒に1回で渡す。
+    /// - published: その場で行を足した
+    /// - held: 無音の間なので保留へ入れた。公開か破棄は、後から `heldScreen(order:published:)` で受付の番号で知らせる
+    /// - discarded: 届いた時点で、公開せずに捨てた。画像は捨てた側が片付けた。保存の失敗とは分ける
+    /// - rejected: 公開を拒んだ。書いた画像は消し、判定器へは保存の失敗として返す
+    enum PublishResult { case published, held, discarded, rejected }
 
     let queue = DispatchQueue(label: "kikigaki.screen.capture")
     private let encodeQueue = DispatchQueue(label: "kikigaki.screen.encode")
@@ -79,6 +85,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private let isCurrentTarget: @MainActor (Int) -> Bool
 
     // queue上だけで触る
+    /// 判定器へ渡す今の時刻。保存の結果・失敗・定期の判定で読む。観測の時刻はフレームの `displayTime` から求める。
+    private var clock: () -> Date = { Date() }
     private var detector = ScreenChangeDetector()
     private var seenEpoch = 0
     /// 判定器を作った対象の世代。替わっていたら比較の基準を引き継がずに作り直す。
@@ -506,6 +514,25 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     func openForTesting() {
         queue.sync { lock.withLock { source = CaptureSource(target: targetGeneration, filter: nil) } }
     }
+    /// 判定器へ渡す今の時刻を差し替える。観測の時刻と、保存の結果・失敗の時刻を同じ時計にそろえる検証で使う。
+    func setClockForTesting(_ clock: @escaping @Sendable () -> Date) {
+        queue.sync { self.clock = clock }
+    }
+    /// 判定器の今の状態。queue上で写す。
+    var detectorForTesting: ScreenChangeDetector { queue.sync { detector } }
+    /// trueの間、受け付けた自動の保存を符号化へ渡さずに持つ。後に受け付けた「いま撮る」を先に届ける検証で使う。
+    private var deferAutomaticSaves = false
+    private var deferredSaves: [ScreenShot] = []
+    func deferAutomaticSavesForTesting() { queue.sync { deferAutomaticSaves = true } }
+    /// 持っていた自動の保存を、受け付けた順に符号化へ渡す。
+    func releaseAutomaticSavesForTesting() {
+        queue.sync {
+            deferAutomaticSaves = false
+            let shots = deferredSaves
+            deferredSaves = []
+            shots.forEach(save)
+        }
+    }
 #endif
 
     private func startTimer() {
@@ -515,7 +542,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         timer.schedule(deadline: .now() + 0.25, repeating: 0.25)
         let opened = streamEpoch
         timer.setEventHandler { [weak self] in
-            guard let self, self.syncEpoch(source: opened), let decision = self.detector.tick(at: Self.monotonic(Date())) else { return }
+            guard let self, self.syncEpoch(source: opened), let decision = self.detector.tick(at: Self.monotonic(self.clock())) else { return }
             self.decide(decision)
         }
         timer.resume()
@@ -524,7 +551,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
 
     private func decide(_ decision: ScreenChangeDetector.Decision) {
         guard var shot = latest, shot.frame == decision.frame, let order = begin(epoch: seenEpoch, automatic: true) else {
-            detector.saveFailed(frame: decision.frame, at: Self.monotonic(Date()))
+            detector.saveFailed(frame: decision.frame, at: Self.monotonic(clock()))
             return
         }
         // 判定器にも同じ受付の番号を渡す。比較の基準の新旧はこの番号で比べる。
@@ -553,6 +580,11 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private enum Outcome { case success(URL), failure(String) }
 
     private func save(_ shot: ScreenShot) {
+#if DEBUG
+        // 自動の保存を止めておく検証では、符号化へ渡さずに持つ。queue上でだけ触る。
+        // 自動の保存はqueue上の判定から呼ばれる。「いま撮る」はMainActorから呼ばれるので、先に自動かを見て持ち物に触れない。
+        if shot.frame != nil, deferAutomaticSaves { deferredSaves.append(shot); return }
+#endif
         encodeQueue.async { [self] in
             do {
                 let data = try WebPEncoder.encode(shot.image)
@@ -568,36 +600,56 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private func complete(shot: ScreenShot? = nil, frame: Int? = nil, result: Outcome) {
         // 成功も失敗も同じ順序付きの1本でMainActorへ返す。保存の順と、ヘッダーの失敗の数え方の順を揃える。
         DispatchQueue.main.async { [self] in
-            let published: Bool = MainActor.assumeIsolated {
+            let published: PublishResult = MainActor.assumeIsolated {
                 // 自動の保存は、MainActorが結果を扱う前に「届いていない」数から外す。保留はこの数で、まだ届く保存があるかを知る。
                 if (shot?.frame ?? frame) != nil { lock.withLock { automaticPending -= 1 } }
                 switch result {
                 case let .success(url):
-                    guard let shot, !isInvalidated, publish(self, shot, url) == .published else {
+                    guard let shot, !isInvalidated else {
                         discardUnpublished(url)
-                        return false
+                        return .rejected
                     }
-                    return true
+                    let outcome = publish(self, shot, url)
+                    if outcome == .rejected { discardUnpublished(url) }
+                    return outcome
                 case let .failure(reason):
                     failed(self, reason)
-                    return false
+                    return .rejected
                 }
             }
             queue.async { [self] in
                 refreshTarget()
+                let now = Self.monotonic(clock())
                 // 公開できなかった1枚は、判定器へ失敗として返し、比較の基準に残さない。
+                // そのほかは保存の成功として、その場で決まった行き先を添えて1回で返す。直近に公開した画面として比べるのは、公開してから。
                 if let frame = shot?.frame ?? frame {
-                    if published { detector.saveSucceeded(frame: frame) }
-                    else { detector.saveFailed(frame: frame, at: Self.monotonic(Date())) }
-                } else if published, let shot, let order = shot.order, shot.target == seenTarget,
+                    switch published {
+                    case .rejected: detector.saveFailed(frame: frame, at: now)
+                    // 直近の画面と外すマスの起点は、保存を決めた時刻のまま。書けた時刻にすると、試作の決定から外れる。
+                    case .published: detector.saveSucceeded(frame: frame, outcome: .published)
+                    case .held: detector.saveSucceeded(frame: frame, outcome: .held)
+                    case .discarded: detector.saveSucceeded(frame: frame, outcome: .discarded)
+                    }
+                } else if published != .rejected, let shot, let order = shot.order, shot.target == seenTarget,
                           let thumbnail = Self.thumbnail(shot.image, width: detector.parameters.thumbnailWidth) {
                     // 「いま撮る」の1枚を、受付の番号の順で比較の基準にする。捨てた自動の保留を基準に残さず、
                     // 同じ画面を自動でもう1枚撮らない。後に受け付けた画像が基準なら替えない。
                     // 対象を替えた後に届いた1枚は、替えた先の基準にしない。行としては公開する。
-                    detector.adopt(order: order, thumbnail: thumbnail)
+                    detector.adopt(order: order, thumbnail: thumbnail, at: now)
                 }
                 lock.withLock { pending -= 1 }
             }
+        }
+    }
+
+    /// 保留へ入れた自動の1枚を、後から公開した・捨てた。MainActorから受付の番号で知らせる。
+    /// 判定器は、公開した画面だけを直近の画面として比べる。捨てた画面へ戻ったら撮れるようにする。
+    /// 知らせるのは、保存の結果を `held` で返した画像だけ。届いた時点で行き先が決まった画像は、結果に添えて返すので知らせない。
+    /// 結果はこの知らせより先に判定器へ届く。どちらもMainActorから同じ順序付きのqueueへ流し、結果は保留へ入れた番で、知らせはその後の番で流すため。
+    func heldScreen(order: Int, published: Bool) {
+        queue.async { [self] in
+            refreshTarget()
+            if published { detector.published(order: order) } else { detector.discarded(order: order) }
         }
     }
 

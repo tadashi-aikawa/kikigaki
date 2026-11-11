@@ -951,18 +951,25 @@ final class MeetingSession {
               let entry = try? Utterance(screenLabel: shot.label, imagePath: url.path, at: shot.audioTime, postedAt: shot.observedAt)
         else { return .rejected }
         let published: Bool
+        let result: ScreenRecorder.PublishResult
         if shot.frame != nil {
             // 自動の1枚は、話している間なら決まった時点で出し、無音の間なら保留する。保留も判定器には保存の成功として返す。
             // 行き先は届いた順ではなく受付の番号の順で決める。境界より前に受け付けた保存は、境界の後に届いても境界の扱いになる。
             screenHold.receive(HeldScreen(entry: entry, url: url, order: order), at: shot.audioTime, sequence: order)
-            published = advanceHeldScreens()
+            let outcome = advanceHeldScreenOutcome()
+            // この1枚のその場の行き先は、判定器へ保存の結果と一緒に返す。後から知らせるのは、保留へ入れた画像の公開と破棄だけ。
+            published = outcome.map { applyHeldScreens($0, arrived: order) } ?? false
+            if outcome?.publish.contains(where: { $0.order == order }) == true { result = .published }
+            else if outcome?.discard.contains(where: { $0.order == order }) == true { result = .discarded }
+            else { result = .held }
         } else {
             // 「いま撮る」は保留を通さない。受付の番号がこれより小さい自動の保留は、それより古いので捨てる。
             // 後に受け付けた保留は、手動の完了が遅れて後から届いても残す。
-            for old in screenHold.supersede(below: order) { removeUnpublishedScreen(old.url) }
+            for old in screenHold.supersede(below: order) { discardHeldScreen(old) }
             // 境界より前に押して境界の後に届いた1枚も、境界の後の行より前へ置く。
             insertScreen(HeldScreen(entry: entry, url: url, order: order))
             published = true
+            result = .published
         }
         screenHealth.saved()
         if snapshot.state != .finishing {
@@ -970,7 +977,7 @@ final class MeetingSession {
             if published { refreshLive() }
         }
         emit()
-        return .published
+        return result
     }
 
     private func screenSaveFailed(_ recorder: ScreenRecorder, _ reason: String) {
@@ -1036,9 +1043,14 @@ final class MeetingSession {
     /// まだ届いていない自動の保存は、受け付けた数と届いた数を持つ `ScreenRecorder` のロックから読む。こちらに数を写さない。
     @discardableResult
     private func advanceHeldScreens() -> Bool {
-        guard !screenHold.isEmpty else { return false }
-        return applyHeldScreens(screenHold.advance(levels: audioLevelMeter?.track().levels ?? [], voice: voiceActivity,
-                                                   outstanding: screenRecorder?.hasAutomaticSavesInFlight ?? false))
+        advanceHeldScreenOutcome().map { applyHeldScreens($0) } ?? false
+    }
+
+    /// 届いた音量で行き先を決めた結果。公開を待つ画面が無ければnil。
+    private func advanceHeldScreenOutcome() -> ScreenSilenceHold<HeldScreen>.Outcome? {
+        guard !screenHold.isEmpty else { return nil }
+        return screenHold.advance(levels: audioLevelMeter?.track().levels ?? [], voice: voiceActivity,
+                                  outstanding: screenRecorder?.hasAutomaticSavesInFlight ?? false)
     }
 
     /// 公開を待つ画面を全部出す。送信とコピーの値を取る前、一時停止と取得不能のイベントの行の前、停止の待ちの中で呼ぶ。
@@ -1052,11 +1064,24 @@ final class MeetingSession {
         if published, snapshot.state == .recording || snapshot.state == .paused { refreshLive() }
     }
 
-    private func applyHeldScreens(_ outcome: ScreenSilenceHold<HeldScreen>.Outcome) -> Bool {
+    /// - arrived: いま届いた1枚の受付の番号。その1枚の行き先は保存の結果と一緒に判定器へ返すので、ここでは知らせない
+    private func applyHeldScreens(_ outcome: ScreenSilenceHold<HeldScreen>.Outcome, arrived: Int? = nil) -> Bool {
         // 捨てた画面は公開していないので、行も会議Markdownも指していない。画像ファイルだけを片付ける。
-        for item in outcome.discard { removeUnpublishedScreen(item.url) }
-        for item in outcome.publish { insertScreen(item) }
+        for item in outcome.discard { discardHeldScreen(item, notify: item.order != arrived) }
+        for item in outcome.publish {
+            insertScreen(item)
+            // 判定器は、公開した画面だけを直近の画面として比べる。保留へ入れていた画像の公開だけを知らせる。
+            if item.order != arrived { screenRecorder?.heldScreen(order: item.order, published: true) }
+        }
         return !outcome.publish.isEmpty
+    }
+
+    /// 自動の画面を、公開せずに捨てる。画像を片付ける。
+    /// - notify: 保留へ入れていた画像なら、判定器の直近の画面からも抜く。抜かないと、捨てた画面へ戻ったときに同じ画面とみなし、
+    ///   会議Markdownにも画像レーンにも1度も出ない。届いた時点で捨てた画像は、保存の結果の `discarded` で判定器へ返す
+    private func discardHeldScreen(_ item: HeldScreen, notify: Bool = true) {
+        removeUnpublishedScreen(item.url)
+        if notify { screenRecorder?.heldScreen(order: item.order, published: false) }
     }
 
     /// 公開する画面を、受付の番号の順の位置へ置く。自分より後に受け付けた画面と、受け付けた後に足した手入力・イベントの行より前。

@@ -126,15 +126,20 @@ private extension ScreenChangeDetector {
         if let (count, value) = patch { for cell in 0..<count { luma[cell * 7 % 100] = value } }
         return ScreenThumbnail(width: 10, height: 10, luma: luma)
     }
+    /// 比較の基準と受付の番号の契約だけを見るので、動き続ける画面と直近の画面の規則は切る。
+    /// 2つの規則を入れた振る舞いは `ScreenChangeMotionTests` で確かめる。
     private var parameters: ScreenChangeParameters {
         var value = ScreenChangeParameters()
         value.motion = 0.02; value.save = 0.05; value.cellDelta = 10
+        value.movingSeconds = 0; value.recentSeconds = 0
         return value
     }
 
     @Test func 既定値は検証記録の初期値() {
         let value = ScreenChangeParameters()
         #expect(value.thumbnailWidth == 128 && value.cellDelta == 8 && value.motion == 0.0002 && value.save == 0.001 && value.settle == 1.5)
+        #expect(value.movingSeconds == 12 && value.excludeWindow == 10 && value.excludeGrow == 1 && value.excludeRelease == 3)
+        #expect(value.recentSeconds == 12 && value.recentExcludeLimit == 0.5)
     }
 
     @Test func 最初は待たずに保存し落ち着いたページ送りを観測したフレームで保存する() {

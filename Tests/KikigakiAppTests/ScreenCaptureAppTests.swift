@@ -3,6 +3,15 @@ import Testing
 import KikigakiCore
 @testable import Kikigaki
 
+/// 判定器へ渡す今の時刻を、検証が進める時計。観測の時刻と保存の結果の時刻を同じ時計にそろえる。
+final class TestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var date: Date
+    init(_ date: Date) { self.date = date }
+    var now: Date { lock.withLock { date } }
+    func set(_ value: Date) { lock.withLock { date = value } }
+}
+
 extension AppKitTests {
 /// 画面の記録の保存と公開の境界。ストリームは開かず、観測した1枚を同じ経路へ渡す。
 @Suite(.timeLimit(.minutes(1))) @MainActor struct ScreenCaptureAppTests {
@@ -51,8 +60,10 @@ extension AppKitTests {
     /// 判定器に画面を保存させる。最初の1枚の後は落ち着きを待つので、同じ画面を2秒あけて2回観測する。
     /// 観測の時刻は先の時刻にし、音声位置は受け付けた位置に置く。
     /// - pending: 待ち終える受付済みの保存の数。未完了の「いま撮る」を残したまま呼ぶときは、その数を渡す
+    /// - clock: 渡すと、判定器へ渡す今の時刻を2回目の観測の時刻に進める。保存の結果と観測を同じ時計にそろえる
     private func show(_ recorder: ScreenRecorder, _ value: CGFloat, label: String, at offset: Double, from base: Date,
-                      pending: Int = 0, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+                      pending: Int = 0, clock: TestClock? = nil, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        clock?.set(base.addingTimeInterval(offset + 2))
         recorder.observeForTesting(try image(value), observedAt: base.addingTimeInterval(offset), label: label)
         recorder.observeForTesting(try image(value), observedAt: base.addingTimeInterval(offset + 2), label: label)
         await wait({ recorder.pendingForTesting == pending }, sourceLocation: sourceLocation)
@@ -158,6 +169,65 @@ extension AppKitTests {
         // 話している間の画面は保留せずに公開する。
         try await show(recorder, 0.2, label: "話しながら見せる画面", at: 20, from: base)
         #expect(session.screenEntriesForTesting.map(\.text) == ["見つけた画面", "話しながら見せる画面"])
+    }
+
+    /// 判定器は、公開した画面だけを直近の画面として比べる。保留は公開を受付の番号で知らせてから比べる。
+    /// 仕様は docs/screen-capture.md の「直近に公開した画面」
+    /// 観測・判定・保存の結果を同じ時計にそろえ、同じ観測の列で、保留したCを公開した場合と捨てた場合を比べる。
+    /// - 公開した: 4秒後にCへ戻っても撮らない
+    /// - 捨てた: Cへ戻ったら撮る
+    @Test(arguments: [true, false])
+    func 保留から公開した画面へ戻っても撮らず_保留のまま捨てた画面へ戻れば撮る(publishHeld: Bool) async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root, voiced: false)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        let base = Date(), clock = TestClock(base)
+        recorder.setClockForTesting { clock.now }
+        // 無音の中のCを保留する。
+        try await show(recorder, 0.5, label: "C", at: 0, from: base, clock: clock)
+        #expect(session.heldScreenCountForTesting == 1)
+        // 公開する場合は話し始めてからDへ替える。Dは話している間の画面なのでその場で公開する。
+        // 捨てる場合は黙ったままDへ替え、DでCを置き換えて捨てる。
+        if publishHeld { session.acceptAudioForTesting(audio(seconds: 0.5, voiced: true)) }
+        try await show(recorder, 0.65, label: "D", at: 4, from: base, clock: clock)
+        #expect(session.screenEntriesForTesting.map(\.text) == (publishHeld ? ["C", "D"] : []))
+        // Cを最後に見てから4秒でCへ戻る。どちらの場合も、Cはまだ12秒の範囲にある。
+        try await show(recorder, 0.5, label: "Cへ戻る", at: 8, from: base, clock: clock)
+        #expect(recorder.detectorForTesting.recentScreenCount.held == (publishHeld ? 0 : 1))
+        session.acceptAudioForTesting(audio(seconds: 0.5, voiced: true))
+        #expect(session.screenEntriesForTesting.map(\.text) == (publishHeld ? ["C", "D"] : ["Cへ戻る"]))
+    }
+
+    /// 自動の保存Aを受け付けた後、後から受け付けた「いま撮る」Bが先に公開される。無音の中のAは届いた時点で捨てる。
+    /// Aの行き先は保存の結果と一緒に「捨てた」として判定器へ返す。直近の画面に登録せず、Aが動き続けて撮った1枚でも外すマスを確定しない。
+    @Test func いま撮るより後に届いて捨てた自動の画面は_直近の画面にも外すマスにも入れない() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root, voiced: false)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        let base = Date(), clock = TestClock(base)
+        recorder.setClockForTesting { clock.now }
+        recorder.observeForTesting(try image(0.1), observedAt: base, label: "最初の画面")
+        await wait { recorder.pendingForTesting == 0 }
+        // 画面が毎秒変わり続ける。12秒たったら、動き続けて撮るAを決める。Aは符号化へ渡さずに持つ。
+        // 観測の時刻は実時計との差で単調な秒へ写すので、ちょうど12秒は誤差で届かないことがある。1秒長く観測する。
+        recorder.deferAutomaticSavesForTesting()
+        for second in 1...14 {
+            clock.set(base.addingTimeInterval(Double(second)))
+            recorder.observeForTesting(try image(second % 2 == 0 ? 0.3 : 0.7), observedAt: base.addingTimeInterval(Double(second)), label: "動き続ける画面")
+        }
+        #expect(recorder.pendingForTesting == 1)
+        // 後から受け付けた「いま撮る」Bを先に公開する。
+        let request = try #require(recorder.beginCapture())
+        recorder.deliverCapturedForTesting(request, image: try image(0.9))
+        await wait { recorder.pendingForTesting == 1 }
+        #expect(session.screenEntriesForTesting.map(\.text) == [request.label])
+        // Aが届く。Bより前に受け付けた無音の中の画面なので、その場で捨てる。
+        recorder.releaseAutomaticSavesForTesting()
+        await wait { recorder.pendingForTesting == 0 }
+        #expect(session.heldScreenCountForTesting == 0 && session.screenEntriesForTesting.map(\.text) == [request.label] && captures(url).count == 1)
+        let detector = recorder.detectorForTesting
+        #expect(detector.recentScreenCount.held == 0)
+        #expect(detector.excludedCellCount == 0)
     }
 
     @Test func 音量が観測位置まで届く前は無音と決めない() async throws {

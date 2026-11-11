@@ -59,7 +59,9 @@ let package = Package(
                 "KikigakiCore",
                 .product(name: "Testing", package: "swift-testing"),
             ],
-            path: "Tests/KikigakiCoreTests"
+            path: "Tests/KikigakiCoreTests",
+            // 画面の記録の判定器を試作と突き合わせる観測の列。テストがソースの位置から読む。
+            exclude: ["Fixtures"]
         ),
     ]
 )
