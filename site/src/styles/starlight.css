@@ -251,7 +251,8 @@
   --shot-bg: #fbf5ea;
 }
 
-.sl-markdown-content video[src$="/transcription.mp4"] {
+.sl-markdown-content video[src$="/transcription.mp4"],
+.sl-markdown-content img[src$="/screen-lane.webp"] {
   --shot-width: 600px;
 }
 
