@@ -438,8 +438,15 @@ extension AppKitTests {
         defer { fixture.close() }
         let controller = fixture.controller
         let window = try #require(controller.window)
+        // 利用者がライブリサイズで700ptにした扱い。プログラムで変えた幅は希望幅に入らない。
+        controller.minutesSplit.rememberWidths()
+        #expect(MinutesLayout.load(fixture.defaults).leftWidth == 700)
         window.setFrame(NSRect(x: Self.screen.maxX - 700, y: 100, width: 700, height: 900), display: false)
         controller.windowDidResize(Notification(name: NSWindow.didResizeNotification, object: window))
+        // 右端へ動かして実機の画面から外れるかは、実行機の画面の配置で決まる。外れると画面の変更が届き、
+        // ウィンドウを希望幅へ合わせ直す。どちらの実行機でも同じ経路を通るよう、ここで送る。
+        controller.windowDidChangeScreen(Notification(name: NSWindow.didChangeScreenNotification, object: window))
+        #expect(window.frame == NSRect(x: Self.screen.maxX - 700, y: 100, width: 700, height: 900))
         controller.apply(try meeting())
         #expect(window.frame.width == 700)
         var plain = try meeting()
