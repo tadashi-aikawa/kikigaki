@@ -517,6 +517,10 @@ extension AppKitTests {
         <svg xmlns="http://www.w3.org/2000/svg" width="240" height="70"><circle cx="35" cy="35" r="25" fill="purple"/><text x="75" y="40">受付</text></svg>
         ~~~
 
+        <svg width="240" height="70">
+          <rect width="240" height="70" fill="teal"/><text x="20" y="40">退場&nbsp;&copy;</text>
+        </svg>
+
         <script>window.INJECTED = true</script>
         """
         try Data(fixture.utf8).write(to: file)
@@ -557,8 +561,10 @@ extension AppKitTests {
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.footnotes').length") as? Int == 1)
         #expect(try await web.evaluateJavaScript("window.INJECTED === undefined") as? Bool == true)
         try await wait {
-            try await web.evaluateJavaScript("[...document.querySelectorAll('main img')].length === 3 && [...document.querySelectorAll('main img')].every(i => i.complete && i.naturalWidth > 0)") as? Bool == true
+            try await web.evaluateJavaScript("[...document.querySelectorAll('main img')].length === 4 && [...document.querySelectorAll('main img')].every(i => i.complete && i.naturalWidth > 0)") as? Bool == true
         }
+        // xmlnsが無くHTMLだけの実体参照を含む図も、XMLへ書き直して画像として読める。
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('main .image-error').length === 0 && decodeURIComponent(document.querySelectorAll('main img')[3].src).includes('退場\\u00a0©')") as? Bool == true)
         let state = try await web.evaluateJavaScript("window.minutes.state()") as? [String: Any]
         #expect(try #require(state?["width"] as? Double) > 720)
         let search = try await web.evaluateJavaScript("window.minutes.search('説明と体験')") as? [String: Int]

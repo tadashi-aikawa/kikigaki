@@ -416,10 +416,12 @@ window.minutes = {
     for (const pre of [...root.querySelectorAll('.svg-source')]) {
       const clean = DOMPurify.sanitize(pre.textContent, { USE_PROFILES: { svg: true, svgFilters: true },
         FORBID_TAGS: ['foreignObject', 'script', 'image', 'use', 'a', 'style', 'animate', 'set'],
-        FORBID_ATTR: ['href', 'xlink:href', 'style'] });
-      if (!clean.startsWith('<svg')) continue;
+        FORBID_ATTR: ['href', 'xlink:href', 'style'], RETURN_DOM: true }).firstChild;
+      if (clean?.namespaceURI !== 'http://www.w3.org/2000/svg' || clean.localName !== 'svg') continue;
+      // 原文はHTMLとして読んだが、<img>はXMLとして読む。xmlnsが無い図や&nbsp;のようなHTMLだけの
+      // 実体参照を含む図も描けるよう、名前空間を付けて実体を文字へ戻したXMLへ書き直す。
       const image = new Image(); image.alt = 'SVG図';
-      image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(clean);
+      image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(clean));
       pre.replaceWith(image);
     }
     // 画像要求が即完了しても取りこぼさないよう、本文へ接続した直後に登録する。
