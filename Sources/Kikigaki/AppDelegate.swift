@@ -132,6 +132,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var manualSendHotkey: (hotkey: GlobalHotkey, registration: GlobalHotkeyRegistration)?
     private var statusItem: StatusItem?
     private var window: TranscriptWindowController?
+    /// 撮っているディスプレイの上のバッジと知らせ。
+    private lazy var screenIndicator = ScreenIndicatorOverlay()
     private var session: MeetingSession?
     private var config: ResolvedConfig?
     /// 話者判別モデルの先読み。開始操作を待たせないよう起動直後に走らせる
@@ -295,6 +297,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.statusItem?.update(state: snapshot.state, elapsed: snapshot.elapsed, transcribingFile: snapshot.transcribingFile,
                                     reviewingFile: snapshot.reviewingFile)
             self.window?.apply(snapshot)
+            // 撮れなくなったディスプレイが外れていたら、書き起こしウィンドウのある画面へ知らせを出す。
+            self.screenIndicator.update(snapshot.screenIndicator, fallback: self.window?.window?.screen)
             #if DEBUG
             if self.replayURL != nil, let window = self.window,
                let directory = ProcessInfo.processInfo.environment["KIKIGAKI_DEBUG_AI_PROGRESS_REPLAY"] {

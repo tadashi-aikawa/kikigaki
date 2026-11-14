@@ -1222,6 +1222,7 @@ final class MeetingSession {
         snapshot.nextDiarizationEnabled = nextDiarizationEnabled
         snapshot.canCaptureScreenNow = canCaptureScreenNow
         snapshot.screenControl = screenControl
+        snapshot.screenIndicator = ScreenIndicator(target: screenControl == nil ? nil : screenTarget, paused: snapshot.state == .paused)
         refreshAudioSnapshot()
         snapshot.timeline = pause.timeline
         snapshot.aiRecoveryWarning = aiStore?.warnings.first

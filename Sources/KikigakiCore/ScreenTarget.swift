@@ -97,6 +97,9 @@ public struct ScreenTarget<Target: Equatable & Sendable>: Equatable, Sendable {
         return true
     }
 
+    /// いまの世代の開始を待っている。一時停止からの再開でストリームを準備し直している間も含む。
+    public var isStarting: Bool { starting }
+
     public var isFailed: Bool {
         if case .failed = display { return true }
         return false

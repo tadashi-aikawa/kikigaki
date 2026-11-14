@@ -33,6 +33,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `ScreenLaneLayout.swift`: 画像レーンの幅の範囲、境目のドラッグ、サムネイルの枠と縮小画像を読む大きさ。仕様は [画面の記録](docs/screen-capture.md) の「レーンの幅」
   - `ScreenLaneTransition.swift`: 画像レーンの「+N枚」「畳む」で枠を伸び縮みさせる突き合わせと進み具合、トレイの中の間隔。仕様は [画面の記録](docs/screen-capture.md) の「1つの発言に何枚もあるとき」
   - `ScreenTarget.swift`: 録音中の画面の記録の対象、フッターの表示、`記録を停止` と `記録を再開` の行を出す判定。仕様は [画面の記録](docs/screen-capture.md) の「録音中の切り替え」
+  - `ScreenIndicator.swift`: 撮っているディスプレイに出すバッジと、切り替えた瞬間の知らせの判定と置き場。仕様は [画面の記録](docs/screen-capture.md) の「撮っている画面の印」
   - `LexicalPath.swift`: 保存先 `outputDir` の字句上の正規化。ファイルの有無を見ない。仕様は [AIへの受け渡し](docs/ai-handoff.md) の「画像の参照」
   - `UtterancePlayback.swift`: 発言の行から元の音声を流す区間。仕様は [発言ごとの音声再生](docs/utterance-playback.md)
   - `AudioFile.swift`: 音声ファイルの書き起こしの音源。録音日時の選び方と、開始シート・ヘッダーの表記。仕様は [音声ファイルの書き起こし](docs/audio-file.md)
@@ -53,6 +54,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `StartSheet.swift`: 録音開始シート。会議ごとの話者判別・画面の記録・議事録・自動送信を `session.start` の前に決める
   - `ScreenRecorder.swift` / `WebPEncoder.swift`: 画面の記録の撮影・保存・公開。ScreenCaptureKitのストリーム、録音中の対象の差し替え、「いま撮る」、libwebpでの符号化
   - `ScreenTargetButton.swift`: フッターの画面の記録の操作の描画
+  - `ScreenIndicatorOverlay.swift`: 撮っているディスプレイの上のバッジと知らせのパネル
   - `TranscriptWindow.swift` / `StatusItem.swift` / `AppDelegate.swift`
   - `ScreenLaneView.swift` / `TranscriptWindowScreenLane.swift`: 書き起こしウィンドウの画像レーンの描画と組み立て、開閉、Quick Look
   - `AI*.swift` / `Minutes*.swift`: AI参加のherdr接続・会議の記録・進行表示と、議事録ペイン
@@ -159,7 +161,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | [Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md) | 依存、モデル、区間化、失敗の扱い、8枠、保存互換 | `SpeakerDiarizer` ・ `SpeakerRuns` ・FluidAudioを変える前 |
 | [話者判別の切替](docs/diarization-toggle.md) | 話者判別のオン・オフ、無効時の行分割 | 話者判別の有効・無効の経路を変える前 |
 | [システム音声の取り込み](docs/system-audio.md) | 開始シートの3択、出力判定、同時取り込みと混合、失敗時の扱い | 音源・混合・システム音声の許可を変える前 |
-| [画面の記録](docs/screen-capture.md) | 画面の行の形、保存とAIへの行、声以外の行の経路ごとの扱い、画像レーンの表示とレーンの幅とウィンドウの幅、撮影と保存と公開の順序、録音中の切り替え、撮る契機の判定、無音の間の保留 | `Utterance.Kind` に触れる・声以外の行の扱いを変える・画面の撮影や画像レーン・フッターの画面の操作を変える前 |
+| [画面の記録](docs/screen-capture.md) | 画面の行の形、保存とAIへの行、声以外の行の経路ごとの扱い、画像レーンの表示とレーンの幅とウィンドウの幅、撮影と保存と公開の順序、録音中の切り替え、撮っている画面の印、撮る契機の判定、無音の間の保留 | `Utterance.Kind` に触れる・声以外の行の扱いを変える・画面の撮影や画像レーン・フッターの画面の操作・撮っている画面の印を変える前 |
 | [話者の手動統合](docs/speaker-mapping.md) | 統合先の指定と解除、使用枠 | 統合・枠の数え方を変える前 |
 | [小音量発話の除外](docs/audio-exclusion.md) | 除外の判定、操作、保存・コピー・AI送信への適用 | 除外の判定や適用先を変える前 |
 | [小音量発話の計測](docs/audio-levels.md) | 音量トラックと診断表示、`.levels.json` | 音量の計測・保存を変える前 |
