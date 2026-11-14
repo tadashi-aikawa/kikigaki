@@ -67,6 +67,21 @@ final class StartSheet: NSObject, NSTextViewDelegate {
     static let systemAudioDefaultsKey = "KikigakiSystemAudioMode"
     /// 画面を記録するディスプレイの名前。空文字は「撮らない」。番号は再起動で変わりうるので名前で覚える。
     static let screenDefaultsKey = "KikigakiScreenCaptureDisplay"
+    /// 最後にディスプレイを選んで始めたときの名前。「撮らない」では書き換えない。
+    /// 撮らずに始めた会議で、グローバルキーで初めて入れる先に使う。シートの初期値には使わない
+    static let lastScreenDisplayDefaultsKey = "KikigakiScreenCaptureLastDisplay"
+
+    /// 開始で選んだディスプレイを2つのキーへ覚える。nilは「撮らない」。
+    /// `lastScreenDisplayDefaultsKey` がまだ無ければ、上書きする前の `screenDefaultsKey` の名前を移す。
+    /// 理由: このキーを足す前に選んだディスプレイを、更新後に「撮らない」で始めた最初の会議でも入れ直す先にする
+    static func rememberScreenDisplay(_ name: String?, in defaults: UserDefaults) {
+        if defaults.string(forKey: lastScreenDisplayDefaultsKey) == nil,
+           let previous = defaults.string(forKey: screenDefaultsKey), !previous.isEmpty {
+            defaults.set(previous, forKey: lastScreenDisplayDefaultsKey)
+        }
+        defaults.set(name ?? "", forKey: screenDefaultsKey)
+        if let name { defaults.set(name, forKey: lastScreenDisplayDefaultsKey) }
+    }
     private let screenDisplays: [ScreenDisplay]
     let screenNone = NSButton(radioButtonWithTitle: "撮らない", target: nil, action: nil)
     private(set) var screenRadios: [NSButton] = []

@@ -33,6 +33,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `ScreenLaneLayout.swift`: 画像レーンの幅の範囲、境目のドラッグ、サムネイルの枠と縮小画像を読む大きさ。仕様は [画面の記録](docs/screen-capture.md) の「レーンの幅」
   - `ScreenLaneTransition.swift`: 画像レーンの「+N枚」「畳む」で枠を伸び縮みさせる突き合わせと進み具合、トレイの中の間隔。仕様は [画面の記録](docs/screen-capture.md) の「1つの発言に何枚もあるとき」
   - `ScreenTarget.swift`: 録音中の画面の記録の対象、フッターの表示、`記録を停止` と `記録を再開` の行を出す判定。仕様は [画面の記録](docs/screen-capture.md) の「録音中の切り替え」
+  - `ScreenHotkey.swift`: グローバルキーで画面の記録を止めるか、どのディスプレイで入れ直すかの判定。仕様は [画面の記録](docs/screen-capture.md) の「グローバルキー」
   - `ScreenIndicator.swift`: 撮っているディスプレイに出すバッジと、切り替えた瞬間の知らせの判定と置き場。仕様は [画面の記録](docs/screen-capture.md) の「撮っている画面の印」
   - `LexicalPath.swift`: 保存先 `outputDir` の字句上の正規化。ファイルの有無を見ない。仕様は [AIへの受け渡し](docs/ai-handoff.md) の「画像の参照」
   - `UtterancePlayback.swift`: 発言の行から元の音声を流す区間。仕様は [発言ごとの音声再生](docs/utterance-playback.md)
@@ -95,6 +96,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 - 廃止して戻さないと決めたもの: 詳細は各リンク先
   - 録音の開始・停止・一時停止のグローバルショートカット。[録音開始シート](docs/start-sheet.md)
     - 例外: 手動宛先へ送るキー `manualSendHotkey` は持つ。[AIへの定期自動送信](docs/ai-scheduled.md) の「グローバルキー」
+    - 例外: 画面の記録を止める・入れ直すキー `screenCaptureHotkey` は持つ。[画面の記録](docs/screen-capture.md) の「グローバルキー」
   - アプリを開くURLスキーム。[録音開始シート](docs/start-sheet.md)
   - 短い別話者区間をフレーズの多数派へ吸収する補正。[話者の割当と固定](docs/speaker-assignment.md)
   - 稼働中のherdrペインへ接続する `attach` / `displayAgent` と、会議に紐づかない準備済みAIセッション。[AI設定の複数プロファイル](docs/ai-profiles.md)

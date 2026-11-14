@@ -130,6 +130,7 @@ struct ReplayDebugOptions {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var voiceCueNotification: VoiceCueNotification?
     private var manualSendHotkey: (hotkey: GlobalHotkey, registration: GlobalHotkeyRegistration)?
+    private var screenCaptureHotkey: (hotkey: GlobalHotkey, registration: GlobalHotkeyRegistration)?
     private var statusItem: StatusItem?
     private var window: TranscriptWindowController?
     /// 撮っているディスプレイの上のバッジと知らせ。
@@ -278,7 +279,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         session.notifyVoiceCue = { [weak self] in self?.voiceCueNotification?.post($0) }
         session.notifyHotkey = { [weak self] in self?.voiceCueNotification?.post($0, title: "KIKIGAKI · グローバルキー") }
-        registerManualSendHotkey(config)
+        session.notifyScreenHotkey = { [weak self] in self?.voiceCueNotification?.post(title: "KIKIGAKI · グローバルキー", body: $0) }
+        registerHotkeys(config)
 
         let statusItem = StatusItem()
         statusItem.onStartStop = { [weak self] in self?.toggleRecording() }
@@ -447,7 +449,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // 音声ファイルのシートはシステム音声を出さないので、録音の前回値を書き換えない。
             if options.audioFile == nil {
                 UserDefaults.standard.set(options.systemAudioMode.rawValue, forKey: StartSheet.systemAudioDefaultsKey)
-                UserDefaults.standard.set(options.screenDisplay?.name ?? "", forKey: StartSheet.screenDefaultsKey)
+                StartSheet.rememberScreenDisplay(options.screenDisplay?.name, in: .standard)
             }
             self?.startSheet = nil
             Task { await self?.startRecording(options: options) }
@@ -700,27 +702,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.config = config
         session?.update(config: config)
-        registerManualSendHotkey(config)
+        registerHotkeys(config)
         Self.log("設定を再読込した")
     }
 
     /// AI設定と違い、キーは会議に属さないので再読込ですぐ差し替える。
-    /// 録音外でも登録したままにし、押されたら送れない理由を返す(押して何も起きない、を作らない)
-    private func registerManualSendHotkey(_ config: ResolvedConfig) {
+    /// 録音外でも登録したままにし、押されたら効かない理由を返す(押して何も起きない、を作らない)
+    private func registerHotkeys(_ config: ResolvedConfig) {
         // replayは利用者が起動中の本体とキーを奪い合わないよう登録しない
-        guard replayURL == nil, config.manualSendHotkey != manualSendHotkey?.hotkey else { return }
-        manualSendHotkey?.registration.unregister()
-        manualSendHotkey = nil
-        guard let hotkey = config.manualSendHotkey else { return }
-        guard let registration = GlobalHotkeyRegistration(hotkey, handler: { [weak self] in
-            self?.session?.sendManualDraft(trigger: .hotkey(hotkey))
-        }) else {
+        guard replayURL == nil else { return }
+        let manualChanged = config.manualSendHotkey != manualSendHotkey?.hotkey
+        let screenChanged = config.screenCaptureHotkey != screenCaptureHotkey?.hotkey
+        // 替わる方を先に全部外してから登録する。再読込で2つのキーを入れ替えても、外す前の自分のキーとぶつからない
+        if manualChanged { manualSendHotkey?.registration.unregister(); manualSendHotkey = nil }
+        if screenChanged { screenCaptureHotkey?.registration.unregister(); screenCaptureHotkey = nil }
+        if manualChanged, let hotkey = config.manualSendHotkey {
+            manualSendHotkey = registerHotkey(hotkey, key: "manualSendHotkey") { [weak self] in
+                self?.session?.sendManualDraft(trigger: .hotkey(hotkey))
+            }
+        }
+        if screenChanged, let hotkey = config.screenCaptureHotkey {
+            screenCaptureHotkey = registerHotkey(hotkey, key: "screenCaptureHotkey") { [weak self] in
+                self?.session?.toggleScreenCapture(hotkey: hotkey)
+            }
+        }
+    }
+
+    private func registerHotkey(_ hotkey: GlobalHotkey, key: String,
+                                handler: @escaping () -> Void) -> (hotkey: GlobalHotkey, registration: GlobalHotkeyRegistration)? {
+        guard let registration = GlobalHotkeyRegistration(hotkey, handler: handler) else {
             Self.log("グローバルキー \(hotkey.display) を登録できない")
             showAlert("グローバルキー \(hotkey.display) を登録できません",
-                      detail: "他のアプリが同じキーを使っています。設定の manualSendHotkey を別のキーにしてください。")
-            return
+                      detail: "他のアプリが同じキーを使っています。設定の \(key) を別のキーにしてください。")
+            return nil
         }
-        manualSendHotkey = (hotkey, registration)
+        return (hotkey, registration)
     }
 
     private func showAlert(_ message: String, detail: String) {

@@ -854,6 +854,134 @@ extension AppKitTests {
         #expect(started.count == 2 && session.snapshot.screenControl?.display == .off)
     }
 
+    /// グローバルキーの入れ直す先を決める材料をそろえる。音と通知の本文を捕捉する。
+    private func hotkeyed(_ session: MeetingSession, sheet: String? = nil) -> (sounds: () -> [Bool], notices: () -> [String]) {
+        var sounds: [Bool] = []
+        var notices: [String] = []
+        session.connectedScreenDisplays = { [display, other] }
+        session.mainScreenDisplayID = { other.id }
+        session.lastSheetScreenDisplayName = { sheet }
+        session.playAutoSendSound = { sounds.append($0) }
+        session.notifyScreenHotkey = { notices.append($0) }
+        return ({ sounds }, { notices })
+    }
+
+    @Test func グローバルキーで切ると記録を停止を残し_もう一度押すと直前に撮っていたディスプレイで再開する() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        var started: [String] = []
+        let (session, _, recorder) = recordingWithoutScreen(root) { started.append($0.name); return nil }
+        let (sounds, notices) = hotkeyed(session, sheet: other.name)
+        let hotkey = try #require(GlobalHotkey("ctrl+alt+cmd+s"))
+        session.selectScreen(display)
+        await session.waitScreenOperationsForTesting()
+        recorder.observeForTesting(try image(0.2), label: "EV3895 · 資料")
+        await wait { session.screenEntriesForTesting.count == 1 }
+        #expect(session.toggleScreenCapture(hotkey: hotkey))
+        #expect(session.snapshot.screenControl?.display == .off)
+        // 開始シートの前回値やメインより、この会議で直前に撮っていたディスプレイを選ぶ。
+        #expect(session.toggleScreenCapture(hotkey: hotkey))
+        await session.waitScreenOperationsForTesting()
+        #expect(started == ["EV3895", "EV3895"] && session.snapshot.screenControl?.display == .on(display))
+        #expect(session.entriesForTesting.map(\.text) == ["EV3895 · 資料", "記録を停止", "記録を再開"])
+        // 録音中は撮っている画面の印の知らせで結果が見えるので、音も通知も出さない。
+        #expect(sounds().isEmpty && notices().isEmpty)
+    }
+
+    @Test func 撮らずに始めた会議でグローバルキーを押すと開始シートで最後に選んだディスプレイ_無ければメインで撮り始める() async throws {
+        var started: [String] = []
+        let (session, _, _) = recordingWithoutScreen(try directory()) { started.append($0.name); return nil }
+        let hotkey = try #require(GlobalHotkey("f18"))
+        _ = hotkeyed(session, sheet: display.name)
+        #expect(session.toggleScreenCapture(hotkey: hotkey))
+        await session.waitScreenOperationsForTesting()
+        #expect(started == ["EV3895"])
+        // 撮らずに始めて初めて撮り始めたときは、フッターと同じく行を出さない。
+        #expect(session.entriesForTesting.isEmpty)
+        var fallback: [String] = []
+        let (main, _, _) = recordingWithoutScreen(try directory()) { fallback.append($0.name); return nil }
+        _ = hotkeyed(main, sheet: "外したディスプレイ")
+        #expect(main.toggleScreenCapture(hotkey: hotkey))
+        await main.waitScreenOperationsForTesting()
+        #expect(fallback == ["Built-in Retina Display"])
+    }
+
+    @Test func 一時停止中にグローバルキーを押すと再開から効き_通知で知らせる() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        var started: [String] = []
+        let (session, _, _) = recordingWithoutScreen(root) { started.append($0.name); return nil }
+        let (sounds, notices) = hotkeyed(session)
+        let hotkey = try #require(GlobalHotkey("ctrl+alt+cmd+s"))
+        session.togglePause()
+        #expect(session.toggleScreenCapture(hotkey: hotkey))
+        await session.waitScreenOperationsForTesting()
+        #expect(started.isEmpty && session.snapshot.screenControl?.selected == other)
+        session.togglePause()
+        await session.waitScreenOperationsForTesting()
+        #expect(started == ["Built-in Retina Display"])
+        session.togglePause()
+        #expect(session.toggleScreenCapture(hotkey: hotkey))
+        #expect(session.entriesForTesting.map(\.text) == ["記録を停止"])
+        #expect(notices() == ["再開するとBuilt-in Retina Displayの記録を始めます（⌃⌥⌘S）", "画面の記録を停止しました（⌃⌥⌘S）"])
+        #expect(sounds().isEmpty)
+    }
+
+    @Test func 撮れなくなった後にグローバルキーで撮り直す途中にもう一度押すと止める() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        var allowed = false
+        var started: [String] = []
+        let (session, _, _) = recordingWithoutScreen(root) { started.append($0.name); return allowed ? nil : "「画面収録」の許可がありません" }
+        _ = hotkeyed(session)
+        let hotkey = try #require(GlobalHotkey("f18"))
+        session.selectScreen(display)
+        await session.waitScreenOperationsForTesting()
+        await wait { session.snapshot.screenControl?.display == .failed(display) }
+        allowed = true
+        // 撮り直しを頼んだ直後、始められる前にもう一度押す。フッターはまだ撮れないままだが、止める向きにする。
+        #expect(session.toggleScreenCapture(hotkey: hotkey))
+        #expect(session.toggleScreenCapture(hotkey: hotkey))
+        await session.waitScreenOperationsForTesting()
+        #expect(session.snapshot.screenControl?.display == .off && session.snapshot.screenControl?.selected == nil)
+        // 一時停止中に2回押しても同じく止める。再開しても撮り始めない。
+        let (paused, _, _) = recordingWithoutScreen(try directory()) { _ in "「画面収録」の許可がありません" }
+        _ = hotkeyed(paused)
+        paused.selectScreen(display)
+        await paused.waitScreenOperationsForTesting()
+        await wait { paused.snapshot.screenControl?.display == .failed(display) }
+        paused.togglePause()
+        #expect(paused.toggleScreenCapture(hotkey: hotkey) && paused.toggleScreenCapture(hotkey: hotkey))
+        paused.togglePause()
+        await paused.waitScreenOperationsForTesting()
+        #expect(paused.snapshot.screenControl?.display == .off && paused.snapshot.screenControl?.selected == nil)
+    }
+
+    @Test func 開始シートの前回値は撮らないで始めても入れ直す先を残し_足す前に選んだ名前も移す() throws {
+        let defaults = try #require(UserDefaults(suiteName: "ScreenCaptureAppTests.\(UUID())"))
+        // このキーを足す前に外部ディスプレイを選んでいた。更新後の最初の会議は「撮らない」で始める。
+        defaults.set("EV3895", forKey: StartSheet.screenDefaultsKey)
+        StartSheet.rememberScreenDisplay(nil, in: defaults)
+        #expect(defaults.string(forKey: StartSheet.screenDefaultsKey) == "")
+        #expect(defaults.string(forKey: StartSheet.lastScreenDisplayDefaultsKey) == "EV3895")
+        StartSheet.rememberScreenDisplay("Built-in Retina Display", in: defaults)
+        StartSheet.rememberScreenDisplay(nil, in: defaults)
+        #expect(defaults.string(forKey: StartSheet.lastScreenDisplayDefaultsKey) == "Built-in Retina Display")
+    }
+
+    @Test func 録音外と画面を撮らない会議ではグローバルキーを断る() throws {
+        let hotkey = try #require(GlobalHotkey("f18"))
+        let idle = MeetingSession(config: ResolvedConfig(config: KikigakiConfig(outputDir: try directory().path)),
+                                  models: { throw CancellationError() }, log: { _ in })
+        let (idleSounds, idleNotices) = hotkeyed(idle)
+        #expect(!idle.toggleScreenCapture(hotkey: hotkey))
+        #expect(idleSounds() == [false])
+        #expect(idleNotices() == ["画面の記録を切り替えられませんでした。録音中・一時停止中だけ切り替えられます（F18）"])
+        // 音声ファイルの書き起こしとreplayは画面の記録を持たない。
+        let (session, _) = recording(try directory())
+        let (sounds, notices) = hotkeyed(session)
+        #expect(!session.toggleScreenCapture(hotkey: hotkey))
+        #expect(sounds() == [false])
+        #expect(notices() == ["画面の記録を切り替えられませんでした。この会議では画面を記録しません（F18）"])
+    }
+
     @Test func 無音の間の保留は切り替えと切る操作の手前で公開し_替えた後に捨てない() async throws {
         let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
         let (session, _, recorder) = recordingWithoutScreen(root, voiced: false)

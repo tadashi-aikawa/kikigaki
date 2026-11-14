@@ -56,6 +56,8 @@ participantsKey = "participants"
 autoSendPhrases = ["アバンティ", "アヴァンティ"]
 # どのアプリが前面でも、会議の手動宛先へ下書きを送るキー。既定: 未割り当て
 manualSendHotkey = "cmd+shift+space"
+# どのアプリが前面でも、録音中の画面の記録を止める・入れ直すキー。既定: 未割り当て
+screenCaptureHotkey = "ctrl+alt+cmd+s"
 # 録音中に会議Markdownへ途中の記録を書く間隔(秒)。10〜3600。既定: 60
 autoSaveIntervalSeconds = 60
 
@@ -106,6 +108,7 @@ autoSendPhrases = ["アバンティ", "アヴァンティ"]
 | `participantsKey` | `participants` | 話者名の候補の「参加者」を読む、議事録のfrontmatterのキー。空白・`:`・`#`・引用符・`[]{},` を含む値、空文字、`-` 始まりは設定エラー。読み方は [書き起こしウィンドウ](transcript-window.md) の「候補の出どころ」 |
 | `autoSendPhrases` | `["アバンティ", "アヴァンティ"]` | プロファイルで未指定の場合に使う共通の声の合図。空配列は無効。最大20要素、各64文字まで。文字列以外、正規化後の空要素・重複は設定エラー。次の会議から効く。詳細は [声の合図](ai-scheduled.md#声の合図) |
 | `manualSendHotkey` | 未割り当て | どのアプリが前面でも、会議の手動宛先へ下書きを送るキー。`modifier+key` 形式で、修飾は `ctrl` `alt` `shift` `cmd` と別名の `control` `option` `command` `meta`。ctrl・alt・cmdのどれかが要る。F1〜F20だけは単独可。キー本体は英数字・`space`・`enter`・`tab`・`escape`・`f1`〜`f20`。空文字は未割り当て。書式違いは設定エラー。再読込ですぐ効く。詳細は [グローバルキー](ai-scheduled.md#グローバルキー) |
+| `screenCaptureHotkey` | 未割り当て | どのアプリが前面でも、録音中・一時停止中の画面の記録を止める・入れ直すキー。書式・空文字・再読込は `manualSendHotkey` と同じ。`manualSendHotkey` と同じキーは設定エラー。詳細は [画面の記録](screen-capture.md) の「グローバルキー」 |
 | `autoSaveIntervalSeconds` | `60` | 録音中に会議Markdownへ途中の記録を書く間隔 (秒)。10〜3600の整数。範囲外と整数以外は設定エラー。次の会議から効く。詳細は下の「録音中の途中保存」 |
 
 `outputDir` は Codex の書き込み許可にも追加する。議事録を書けるようにするためで、許可の範囲と受け入れたリスクは [議事録プレビューの設計](minutes-preview.md) の「Skillの規則と書き込み許可」を参照する。

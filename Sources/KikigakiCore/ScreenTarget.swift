@@ -39,6 +39,8 @@ public struct ScreenTarget<Target: Equatable & Sendable>: Equatable, Sendable {
     public private(set) var selected: Target?
     /// 対象の世代。選び直して止めるか始め直すたびに増える。
     public private(set) var generation = 0
+    /// この会議で最後に撮影を始められた対象。「撮らない」・撮れなくなった後も消さない。グローバルキーで入れ直す先
+    public private(set) var lastCaptured: Target?
     /// いまの世代の開始を待っている。
     private var starting = false
     /// 切った後に、まだ撮影を始めていない。次に始めたら `記録を再開` を残す。
@@ -83,6 +85,7 @@ public struct ScreenTarget<Target: Equatable & Sendable>: Equatable, Sendable {
     public mutating func started(generation value: Int) -> Bool? {
         guard isCurrent(value), let selected else { return nil }
         display = .on(selected)
+        lastCaptured = selected
         starting = false
         defer { cut = false }
         return cut
@@ -104,6 +107,11 @@ public struct ScreenTarget<Target: Equatable & Sendable>: Equatable, Sendable {
         if case .failed = display { return true }
         return false
     }
+
+    /// 撮っているか、撮り始めるのを待っている。グローバルキーはこの間なら止め、それ以外なら入れ直す。
+    /// 一時停止中も、選んだ対象があれば含める。撮れなくなった後は含めない。
+    /// 例外: 撮れなくなった後に選び直して開始を待つ間は含める。フッターの表示は始められるまで撮れないままだが、止める向きにする
+    public var isEngaged: Bool { selected != nil && (starting || !isFailed) }
 
     /// 「いま撮る」を出すか。録音中で、いまの世代の開始を終えて選んだ対象を撮っているときだけ。
     /// 替える途中・撮れなくなった後は出さない。替えた後に元の対象へ戻した場合も、戻した開始を終えるまで出さない。

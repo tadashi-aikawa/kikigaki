@@ -130,4 +130,26 @@ import Testing
         #expect(target.display == .off)
         #expect(choose(&target, "EV3895") == true)
     }
+
+    @Test func 最後に撮り始めた対象は撮らないや撮れなくなった後も残し_グローバルキーの向きを決める() {
+        var target = ScreenTarget<String>()
+        #expect(target.lastCaptured == nil && !target.isEngaged)
+        // 選んだだけでは撮っていない。始めるのを待つ間は止める向き。
+        _ = target.select("EV3895")
+        #expect(target.lastCaptured == nil && target.isEngaged)
+        #expect(target.started(generation: 1) == false)
+        #expect(target.lastCaptured == "EV3895")
+        _ = target.select(nil)
+        #expect(target.lastCaptured == "EV3895" && !target.isEngaged)
+        choose(&target, "内蔵")
+        let failed = target.failed(generation: 3)
+        #expect(failed)
+        // 撮れなくなった後は入れ直す向き。
+        #expect(target.lastCaptured == "内蔵" && !target.isEngaged)
+        // 選び直して開始を待つ間は、表示が撮れないままでも止める向き。
+        #expect(target.select("内蔵") == .start("内蔵", generation: 4))
+        #expect(target.isFailed && target.isEngaged)
+        #expect(target.select(nil) == .stop(recordStopped: false, generation: 5))
+        #expect(!target.isEngaged)
+    }
 }

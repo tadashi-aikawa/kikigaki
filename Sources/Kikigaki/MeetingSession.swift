@@ -204,6 +204,14 @@ final class MeetingSession {
     }
     var notifyVoiceCue: (VoiceCueFeedback) -> Void = { _ in }
     var notifyHotkey: (VoiceCueFeedback) -> Void = { _ in }
+    /// 画面の記録のグローバルキーの通知の本文。表題は手動送信のキーと同じ
+    var notifyScreenHotkey: (String) -> Void = { _ in }
+    /// グローバルキーで入れ直す先を決める材料。検証で差し替える
+    var connectedScreenDisplays: () -> [ScreenDisplay] = { ScreenDisplay.connected() }
+    var mainScreenDisplayID: () -> CGDirectDisplayID? = { CGMainDisplayID() }
+    var lastSheetScreenDisplayName: () -> String? = {
+        UserDefaults.standard.string(forKey: StartSheet.lastScreenDisplayDefaultsKey)
+    }
     /// 合図の音は返事のnotifySoundと独立。テストでは音を捕捉する。
     var playAutoSendSound: (Bool) -> Void = { sent in
         NSSound(named: sent ? "Pop" : "Basso")?.play()
@@ -925,6 +933,41 @@ final class MeetingSession {
         }
         refreshLive()
         emit()
+    }
+
+    /// グローバルキーで画面の記録を止める・入れ直す。仕様は docs/screen-capture.md の「グローバルキー」
+    /// 中身はフッターのメニューと同じ `selectScreen` を通す。行き先は `ScreenHotkeyChoice` が決める。
+    /// - 録音中: 結果は撮っている画面の印の知らせで見えるので、通知は出さない
+    /// - 一時停止中: 印を出さないので、通知で結果を知らせる。入れ直しはフッターと同じく再開から効く
+    /// - 切り替えられない: ウィンドウが見えないまま押すので、手動送信のキーと同じく `Basso` と通知で断る
+    @discardableResult
+    func toggleScreenCapture(hotkey: GlobalHotkey) -> Bool {
+        let refuse = { [self] (reason: String) -> Bool in
+            playAutoSendSound(false)
+            notifyScreenHotkey("画面の記録を切り替えられませんでした。\(reason)（\(hotkey.display)）")
+            return false
+        }
+        guard snapshot.state == .recording || snapshot.state == .paused else {
+            return refuse("録音中・一時停止中だけ切り替えられます")
+        }
+        guard screenRecorder != nil else { return refuse("この会議では画面を記録しません") }
+        let displays = connectedScreenDisplays()
+        let key = { (display: ScreenDisplay) in ScreenHotkeyChoice.Display(id: display.id, name: display.name) }
+        let choice = ScreenHotkeyChoice.choose(engaged: screenTarget.isEngaged, lastCaptured: screenTarget.lastCaptured.map(key),
+                                               sheetName: lastSheetScreenDisplayName(), connected: displays.map(key),
+                                               mainID: mainScreenDisplayID())
+        let paused = snapshot.state == .paused
+        switch choice {
+        case .stop:
+            selectScreen(nil)
+            if paused { notifyScreenHotkey("画面の記録を停止しました（\(hotkey.display)）") }
+        case let .start(index):
+            selectScreen(displays[index])
+            if paused { notifyScreenHotkey("再開すると\(displays[index].name)の記録を始めます（\(hotkey.display)）") }
+        case .noDisplay:
+            return refuse("つながっているディスプレイがありません")
+        }
+        return true
     }
 
     /// 選んだ対象で撮影を始められた。フッターの表示を替え、撮れなかった理由のヘッダーを消す。

@@ -41,6 +41,29 @@ import Testing
     @Test func 設定の書式違いは設定エラーにする() {
         for text in ["a", "shift+a", "cmd+left"] {
             #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "manualSendHotkey = \"\(text)\"") }
+            #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "screenCaptureHotkey = \"\(text)\"") }
         }
+    }
+
+    @Test func 画面の記録のキーも既定で未割り当てで_手動送信のキーと同じなら設定エラー() throws {
+        #expect(ResolvedConfig(config: try ConfigLoader.parse(toml: "")).screenCaptureHotkey == nil)
+        #expect(ResolvedConfig(config: try ConfigLoader.parse(toml: #"screenCaptureHotkey = """#)).screenCaptureHotkey == nil)
+        let config = try ConfigLoader.parse(toml: """
+            manualSendHotkey = "cmd+shift+space"
+            screenCaptureHotkey = "ctrl+alt+cmd+s"
+            """)
+        #expect(ResolvedConfig(config: config).screenCaptureHotkey == GlobalHotkey("ctrl+alt+cmd+s"))
+        // 書き方が違っても同じキーなら重なる。2つ目の登録が必ず失敗するので、読み込みで断る。
+        #expect(throws: ConfigError.invalid(description: "screenCaptureHotkey must differ from manualSendHotkey (got: ⇧⌘Space)")) {
+            try ConfigLoader.parse(toml: """
+                manualSendHotkey = "cmd+shift+space"
+                screenCaptureHotkey = "Shift + Command + SPACE"
+                """)
+        }
+        // 両方とも未割り当てなら重ならない。
+        _ = try ConfigLoader.parse(toml: """
+            manualSendHotkey = ""
+            screenCaptureHotkey = ""
+            """)
     }
 }
