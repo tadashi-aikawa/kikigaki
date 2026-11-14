@@ -26,12 +26,16 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     public var speakers: [Speaker]?
     /// 配列の `[[ai]]`
     public var ai: AIProfileList?
+    /// CLIごとの送信キー。キー設定はCLIの性質なので、宛先の `[[ai]]` ではなくCLI単位で書く
+    public var aiSubmitKeys: AISubmitKeysConfig?
 
     public init(outputDir: String? = nil, saveRecording: Bool? = nil,
                 speakers: [Speaker]? = nil, ai: AIProfileList? = nil, measureAudioLevels: Bool? = nil,
                 participantsKey: String? = nil, autoSendPhrases: [String]? = nil, manualSendHotkey: String? = nil,
-                autoSaveIntervalSeconds: Int? = nil, screenCaptureHotkey: String? = nil) {
+                autoSaveIntervalSeconds: Int? = nil, screenCaptureHotkey: String? = nil,
+                aiSubmitKeys: AISubmitKeysConfig? = nil) {
         self.outputDir = outputDir
+        self.aiSubmitKeys = aiSubmitKeys
         self.screenCaptureHotkey = screenCaptureHotkey
         self.saveRecording = saveRecording
         self.measureAudioLevels = measureAudioLevels
@@ -109,7 +113,8 @@ public struct ResolvedConfig: Equatable, Sendable {
         aiProfiles = (config.ai?.profiles ?? []).enumerated().map { index, profile in
             var inherited = profile
             if inherited.herdrCommand == nil { inherited.herdrCommand = sharedHerdr }
-            return ResolvedAIConfig(config: inherited, home: home, slot: index + 1)
+            let submitKeys = AISubmitKeys.afterPrompt(config.aiSubmitKeys?.keys(for: inherited.cli ?? .codex))
+            return ResolvedAIConfig(config: inherited, home: home, slot: index + 1, submitKeys: submitKeys)
         }
     }
 
@@ -158,6 +163,7 @@ public enum ConfigLoader {
 
     private static func validate(_ config: KikigakiConfig) throws {
         try config.ai?.validate()
+        try config.aiSubmitKeys?.validate()
         if let phrases = config.autoSendPhrases {
             try AutoSendPhrase.validate(phrases)
         }

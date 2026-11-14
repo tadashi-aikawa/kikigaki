@@ -139,13 +139,30 @@ struct AIHerdr: Sendable {
         let ready = status == .idle && agent.interactive_ready != false && (target.provider == .codex || !(session ?? "").isEmpty)
         return AIHerdrObservation(status: status, ready: ready, sessionID: session, terminalID: agent.terminal_id)
     }
-    func prompt(_ target: AIHerdrConnection, text: String, allowsWorking: Bool = false, beforeSend: @Sendable () async throws -> Void = {}) async throws {
+    /// `submitKeys` は `agent prompt` の締めのEnterに続けて送るキー。空なら今までどおりEnterだけで確定する。
+    /// `agent prompt` は本文の貼り付け方とEnterまでの間合いをherdrが決めるので、送信キーを変えた利用者でも
+    /// 本文はこの経路で送り、Enterが改行になった後で確定のキーだけを足す。本文の末尾には改行が1つ残る。
+    /// 間を置かずに送ってよい(実測: herdr 0.9.5、Codex 0.167.2)。
+    func prompt(_ target: AIHerdrConnection, text: String, submitKeys: [String] = [], allowsWorking: Bool = false,
+                beforeSend: @Sendable () async throws -> Void = {}) async throws {
+        // 本文だけが入力欄に残らないよう、送れないキーは本文を送る前に断る
+        guard submitKeys.allSatisfy(AISubmitKeys.valid) else { throw AIProcessError.invalidInput }
         let observation = try await observe(target)
         guard observation.ready || (allowsWorking && observation.status == .working) else { throw AIHerdrError.notReady }
         try Task.checkCancellation()
         try await beforeSend()
         try Task.checkCancellation()
-        _ = try await call(["agent", "prompt", target.paneID, text], as: Empty.self)
+        guard !submitKeys.isEmpty else {
+            _ = try await call(["agent", "prompt", target.paneID, text], as: Empty.self)
+            return
+        }
+        // 本文と確定のキーは一続きで送る。途中で取り消しが伝わると、子プロセスが止まって本文だけが入力欄に残る。
+        // 取り消しを継がない別のTaskで送り、最後の取り消し確認より後は送り切る
+        let paneID = target.paneID
+        try await Task {
+            _ = try await call(["agent", "prompt", paneID, text], as: Empty.self)
+            _ = try await call(["agent", "send-keys", paneID] + submitKeys, as: Empty.self)
+        }.value
     }
     func show(_ target: AIHerdrConnection) async throws { _ = try await call(["workspace", "focus", target.workspaceID], as: Empty.self) }
     /// 会議の後片付けでペインごと閉じる。既に無いworkspaceは閉じ終わったものとして扱う。

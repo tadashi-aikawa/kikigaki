@@ -76,6 +76,29 @@
         }
       }
     },
+    "aiSubmitKeys": {
+      "description": "AIエージェントの送信キーをCLIのキー設定で変えたときに、CLIごとに書く。KIKIGAKIは本文の後にEnterを送り、続けてこのキーを送る。\n\n任意 · 既定: Enterだけで送信",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "codex": {
+          "description": "Codexの送信キー。1要素に1打鍵で、修飾キーは ctrl・shift・alt・cmd を + でつなぐ。1〜4打鍵。\n\n任意 · 既定: Enterだけで送信",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "type": "string", "pattern": "^[!-,.-~][!-~]*$" },
+          "examples": [["ctrl+enter"], ["shift+enter"]]
+        },
+        "claude": {
+          "description": "Claude Codeの送信キー。書式は codex と同じ。2打鍵の組は [\"ctrl+x\", \"ctrl+s\"] のように書く。\n\n任意 · 既定: Enterだけで送信",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "type": "string", "pattern": "^[!-,.-~][!-~]*$" },
+          "examples": [["shift+enter"], ["ctrl+x", "ctrl+s"]]
+        }
+      }
+    },
     "ai": {
       "description": "AI参加の宛先。[[ai]] で書き、1つ目が既定。省略時はAI機能が無効。名前の重複、autoStartの複数指定、herdrCommandの不一致はアプリで検証する。\n\n任意 · 既定: 無効",
       "type": "array",

@@ -295,6 +295,18 @@ kikigaki-cli next remove <登録時に表示されたid>
 
 設定の `command` と `herdrCommand` に、絶対パスを書きます。
 
+### 送った文が入力欄に残ったまま止まる
+
+Claude CodeやCodexの送信キーを、Enter以外に変えていませんか。
+変えている場合は、そのキーを設定の `[aiSubmitKeys]` に書きます。
+
+```toml
+[aiSubmitKeys]
+claude = ["shift+enter"]
+```
+
+書き方は [送信キー `[aiSubmitKeys]`](../configuration/#送信キー-aisubmitkeys) を参照してください。
+
 ### 送れなかった
 
 送れなかった依頼には、朱色で理由が出ます。

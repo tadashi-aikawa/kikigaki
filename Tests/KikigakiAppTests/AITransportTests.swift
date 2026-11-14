@@ -240,6 +240,44 @@ import TOMLKit
         #expect(symlink(folder.path, root.appendingPathComponent("alias").path) == 0)
         #expect(throws: AIError.unsafeFile) { try store.read(["alias", "one"]) }
     }
+    @Test func 本文を送り始めた後の取り消しでも確定のキーまで送り切る() async throws {
+        actor Gate {
+            var commands: [[String]] = []
+            private var reached: CheckedContinuation<Void, Never>?
+            private var release: CheckedContinuation<Void, Never>?
+            private var didReach = false
+            func record(_ args: [String]) { commands.append(args) }
+            func pausePrompt() async {
+                didReach = true; reached?.resume(); reached = nil
+                await withCheckedContinuation { release = $0 }
+            }
+            func waitUntilPrompt() async {
+                if didReach { return }
+                await withCheckedContinuation { reached = $0 }
+            }
+            func resume() { release?.resume(); release = nil }
+        }
+        let gate = Gate()
+        let adapter = AIHerdr(run: { args, _ in
+            await gate.record(args)
+            if args.prefix(2) == ["agent", "get"] {
+                let agent: [String: Any] = ["workspace_id": "w", "pane_id": "p", "agent": "codex", "agent_status": "idle"]
+                return AIProcessOutput(status: 0, stdout: try JSONSerialization.data(withJSONObject: ["result": ["agent": agent]]), stderr: Data())
+            }
+            if args.prefix(2) == ["agent", "prompt"] { await gate.pausePrompt() }
+            // 本番の子プロセスは取り消しを受けると止まる。それをここで再現する
+            try Task.checkCancellation()
+            return AIProcessOutput(status: 0, stdout: Data(), stderr: Data())
+        }, log: { _ in })
+        let sending = Task {
+            try await adapter.prompt(.init(workspaceID: "w", paneID: "p", provider: .codex), text: "本文", submitKeys: ["ctrl+enter"])
+        }
+        await gate.waitUntilPrompt()
+        sending.cancel()
+        await gate.resume()
+        try await sending.value
+        #expect(await gate.commands.suffix(2) == [["agent", "prompt", "p", "本文"], ["agent", "send-keys", "p", "ctrl+enter"]])
+    }
     @Test func 起動経路と準備状態と接続先を照合する() async throws {
         let fake = FakeHerdr(), adapter = AIHerdr(run: { try await fake.run($0, $1) })
         let target = try await adapter.create(cwd: URL(fileURLWithPath: "/tmp"), label: "会議", provider: .codex)
@@ -253,6 +291,16 @@ import TOMLKit
         await fake.setStatuses(["working"])
         await #expect(throws: AIHerdrError.notReady) { try await adapter.prompt(target, text: "質問") }
         #expect(await fake.commands.filter { $0.prefix(2) == ["agent", "prompt"] }.isEmpty)
+        await fake.setStatuses(["idle"])
+        try await adapter.prompt(target, text: "既定")
+        #expect(await fake.commands.last == ["agent", "prompt", "p", "既定"])
+        // 送信キーを変えた利用者では、herdrの締めのEnterが改行になった後に確定のキーを送る
+        try await adapter.prompt(target, text: "変更", submitKeys: ["ctrl+x", "ctrl+s"])
+        #expect(await fake.commands.suffix(2) == [["agent", "prompt", "p", "変更"], ["agent", "send-keys", "p", "ctrl+x", "ctrl+s"]])
+        // 引数として読まれる形は、設定の検証を経ずに渡されても送らず、本文も入力欄へ残さない
+        let before = await fake.commands.count
+        await #expect(throws: AIProcessError.invalidInput) { try await adapter.prompt(target, text: "不正", submitKeys: ["--help"]) }
+        #expect(await fake.commands.count == before)
         var pinned = target; pinned.sessionID = "old"
         await fake.setStatuses(["idle"])
         #expect(try await adapter.observe(pinned).status == .unknown)

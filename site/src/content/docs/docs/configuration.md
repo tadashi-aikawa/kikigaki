@@ -169,6 +169,31 @@ avatar = "~/Pictures/avatars/tanaka.png"
 | `notifySound` | 人が待つ返事だけ | この宛先から返事が届いたときに通知音を鳴らす。省略時は、手動の依頼への返事と確認質問で鳴らし、自動送信への通常の返事では鳴らさない。`true` か `false` を書くと、手動・自動送信を問わずその値に従う。詳しくは [返事が届いたら音と通知で知らせる](../ai-participant/#返事が届いたら音と通知で知らせる) |
 | `notifyBanner` | 人が待つ返事だけ | この宛先から返事が届いたときにOSの通知を出す。本文は返事の冒頭。省略時と書いたときの効き方は `notifySound` と同じ |
 
+### 送信キー `[aiSubmitKeys]`
+
+Claude CodeやCodexの送信キーをEnter以外に変えているときだけ書きます。
+宛先の `[[ai]]` ではなく、CLIごとに書きます。同じCLIの宛先すべてに効きます。
+
+```toml
+[aiSubmitKeys]
+codex = ["ctrl+enter"]
+claude = ["ctrl+x", "ctrl+s"]
+```
+
+| キー | 既定 | 説明 |
+| --- | --- | --- |
+| `codex` | Enterだけで送信 | Codexの送信キー。KIKIGAKIは本文の後にEnterを送り、続けてこのキーを送る |
+| `claude` | Enterだけで送信 | Claude Codeの送信キー。効き方は `codex` と同じ |
+
+- 1打鍵を1つの文字列で書き、2打鍵の組は `["ctrl+x", "ctrl+s"]` のように並べます。4打鍵まで
+- 修飾キーは `ctrl` `shift` `alt` `cmd` を `+` でつなぎます。キーは `enter` `space` `tab` `esc` `backspace` `up` `down` `left` `right` `f1`〜`f20`、または英数字・記号の1文字です
+- 空の配列と書き方の誤りは設定エラーになります。次の会議から効きます
+- 本文の末尾には改行が1つ付いて届きます
+
+:::caution
+`cmd` を使う組は、多くの端末でAIエージェントまで届きません。Claude Codeでは、どの端末でも届く `ctrl+x ctrl+s` を使えます。
+:::
+
 ### 自動送信
 
 | キー | 既定 | 説明 |

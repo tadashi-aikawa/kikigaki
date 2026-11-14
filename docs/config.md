@@ -60,6 +60,9 @@ manualSendHotkey = "cmd+shift+space"
 screenCaptureHotkey = "ctrl+alt+cmd+s"
 # 録音中に会議Markdownへ途中の記録を書く間隔(秒)。10〜3600。既定: 60
 autoSaveIntervalSeconds = 60
+# AIエージェントの送信キーをCLIのキー設定で変えたときだけ書く。既定: Enterだけで送信
+# [aiSubmitKeys]
+# claude = ["ctrl+x", "ctrl+s"]
 
 # 話者候補とアバター。省略可
 [[speakers]]
@@ -109,6 +112,7 @@ autoSendPhrases = ["アバンティ", "アヴァンティ"]
 | `autoSendPhrases` | `["アバンティ", "アヴァンティ"]` | プロファイルで未指定の場合に使う共通の声の合図。空配列は無効。最大20要素、各64文字まで。文字列以外、正規化後の空要素・重複は設定エラー。次の会議から効く。詳細は [声の合図](ai-scheduled.md#声の合図) |
 | `manualSendHotkey` | 未割り当て | どのアプリが前面でも、会議の手動宛先へ下書きを送るキー。`modifier+key` 形式で、修飾は `ctrl` `alt` `shift` `cmd` と別名の `control` `option` `command` `meta`。ctrl・alt・cmdのどれかが要る。F1〜F20だけは単独可。キー本体は英数字・`space`・`enter`・`tab`・`escape`・`f1`〜`f20`。空文字は未割り当て。書式違いは設定エラー。再読込ですぐ効く。詳細は [グローバルキー](ai-scheduled.md#グローバルキー) |
 | `screenCaptureHotkey` | 未割り当て | どのアプリが前面でも、録音中・一時停止中の画面の記録を止める・入れ直すキー。書式・空文字・再読込は `manualSendHotkey` と同じ。`manualSendHotkey` と同じキーは設定エラー。詳細は [画面の記録](screen-capture.md) の「グローバルキー」 |
+| `aiSubmitKeys` | Enterだけで送信 | AIエージェントの送信キーをCLIのキー設定で変えたときに、`codex` `claude` ごとに `["ctrl+enter"]` のような打鍵の配列で書く。本文の後のEnterに続けてこのキーを送る。1〜4打鍵。空配列と書式違いは設定エラー。次の会議から効く。詳細は [AI参加者の設計](ai-participant.md) の「送信キー」 |
 | `autoSaveIntervalSeconds` | `60` | 録音中に会議Markdownへ途中の記録を書く間隔 (秒)。10〜3600の整数。範囲外と整数以外は設定エラー。次の会議から効く。詳細は下の「録音中の途中保存」 |
 
 `outputDir` は Codex の書き込み許可にも追加する。議事録を書けるようにするためで、許可の範囲と受け入れたリスクは [議事録プレビューの設計](minutes-preview.md) の「Skillの規則と書き込み許可」を参照する。

@@ -263,12 +263,16 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
     public let autoIntervalMinutes: Int
     public let autoStart: Bool
     public let autoSendPhrases: [String]?
+    /// herdrの `agent prompt` が締めに送るEnterに続けて送るキー。空なら既定のEnterだけで確定する。
+    /// 値は `[aiSubmitKeys]` のうち、この宛先のCLIの分
+    public let submitKeys: [String]
     public var participantName: String { address.hasSuffix("へ") ? String(address.dropLast()) : address }
     /// 起動引数へ翻訳した effort
     public var effortArguments: [String] { AIEffort.arguments(effort, provider: cli) }
 
-    public init(config: AIConfig, home: URL, slot: Int = 1) {
+    public init(config: AIConfig, home: URL, slot: Int = 1, submitKeys: [String] = []) {
         self.slot = slot
+        self.submitKeys = submitKeys
         name = config.resolvedName
         cli = config.cli ?? .codex; command = config.command; herdrCommand = config.herdrCommand; model = config.model
         effort = config.effort
@@ -295,7 +299,7 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         case autoIntervalMinutes, board, boardPrompt, boardLocation
         case initialPrompt = "autoPrompt"
         case slot, name, effort, autoStart, avatar, identifySpeakers
-        case autoSendPhrases
+        case autoSendPhrases, submitKeys
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -324,6 +328,9 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         effort = try values.decodeIfPresent(String.self, forKey: .effort)
         autoStart = try values.contains(.autoStart) ? values.decode(Bool.self, forKey: .autoStart) : false
         autoSendPhrases = try values.decodeIfPresent([String].self, forKey: .autoSendPhrases)
+        // 送信キーより前の会議はEnterだけで送っていた
+        submitKeys = try values.decodeIfPresent([String].self, forKey: .submitKeys) ?? []
+        if !submitKeys.isEmpty { try AISubmitKeys.validate(submitKeys, label: "submitKeys") }
         let fallbackName = address.hasSuffix("へ") ? String(address.dropLast()) : address
         name = try values.contains(.name) ? values.decode(String.self, forKey: .name) : fallbackName
         guard slot > 0, !name.isEmpty else { throw AIError.invalid("profile slot/name") }
@@ -333,6 +340,69 @@ public struct ResolvedAIConfig: Codable, Equatable, Sendable {
         try AIConfig(name: name == fallbackName ? nil : name, cli: cli, effort: effort, avatar: avatar,
                      initialPrompt: initialPrompt, autoIntervalMinutes: autoIntervalMinutes, board: board, boardPrompt: boardPrompt,
                      boardLocation: boardLocation, autoSendPhrases: autoSendPhrases).validate()
+    }
+}
+
+/// `[aiSubmitKeys]`。利用者がCLIのキー設定で送信のキーを変えたときに書く。
+/// 未知のCLI名は他の未知キーと同じくアプリでは無視し、スキーマでエディタに指摘させる。
+public struct AISubmitKeysConfig: Codable, Equatable, Sendable {
+    public var codex: [String]?
+    public var claude: [String]?
+    public init(codex: [String]? = nil, claude: [String]? = nil) { self.codex = codex; self.claude = claude }
+    public func keys(for provider: AIProvider) -> [String]? { provider == .codex ? codex : claude }
+    func validate() throws {
+        for case let (cli, keys?) in [("codex", codex), ("claude", claude)] {
+            try AISubmitKeys.validate(keys, label: "aiSubmitKeys.\(cli)")
+        }
+    }
+}
+
+/// 送信キーの書式。herdrの `agent send-keys` へそのまま渡すので、herdrが読める書き方の一部だけを受け付ける。
+///
+/// - herdrの `agent prompt` は本文の後に必ずEnterを送る。送信キーを変えた利用者ではそのEnterが改行になり、
+///   続けてこのキーを送ると確定する(実測: herdr 0.9.5、Codex 0.167.2のCtrl+EnterとShift+Enter)
+/// - 2打鍵以上の組 (例: Claude Codeの `ctrl+x ctrl+s`) は1要素に1打鍵ずつ書く
+/// - 名前の範囲: herdrの `parse_key_combo` が読む名前のうち、送信に割り当てうるもの。先頭の `-` は
+///   コマンドの引数として読まれるので拒む
+public enum AISubmitKeys {
+    public static let maxKeys = 4
+    static let modifiers: Set<String> = ["ctrl", "control", "shift", "alt", "option", "meta", "cmd", "command", "super"]
+    static let namedKeys: Set<String> = ["enter", "return", "space", "tab", "esc", "escape", "backspace",
+                                         "up", "down", "left", "right",
+                                         "plus", "minus", "comma", "period", "slash", "backslash", "quote",
+                                         "double_quote", "double-quote", "semicolon", "colon", "percent", "ampersand", "backtick"]
+
+    public static func valid(_ key: String) -> Bool {
+        guard !key.hasPrefix("-"), key.unicodeScalars.allSatisfy({ (33...126).contains($0.value) }) else { return false }
+        // herdrと同じく、`+` 単独と末尾の `++` は `+` のキーとして読む
+        if key == "+" { return true }
+        let literalPlus = key.hasSuffix("++")
+        let tokens = (literalPlus ? String(key.dropLast(2)) : key)
+            .split(separator: "+", omittingEmptySubsequences: false).map { $0.lowercased() }
+        guard !tokens.contains(where: \.isEmpty), tokens.count == Set(tokens).count else { return false }
+        let bodies = tokens.filter { !modifiers.contains($0) }
+        if literalPlus { return bodies.isEmpty }
+        guard bodies.count == 1, let body = bodies.first else { return false }
+        if namedKeys.contains(body) || body.count == 1 { return true }
+        guard body.hasPrefix("f"), let number = Int(body.dropFirst()), String(number) == body.dropFirst() else { return false }
+        return (1...20).contains(number)
+    }
+
+    static func validate(_ keys: [String], label: String) throws {
+        // 空配列は「Enterも送らない」と読めてしまう。既定へ戻すなら書かない
+        guard (1...maxKeys).contains(keys.count) else {
+            throw ConfigError.invalid(description: "\(label) must have 1...\(maxKeys) keys; omit it to submit with Enter")
+        }
+        if let key = keys.first(where: { !valid($0) }) {
+            throw ConfigError.invalid(description:
+                "\(label) must be keys like ctrl+enter, shift+enter or ctrl+x (got: \(key))")
+        }
+    }
+
+    /// `agent prompt` の締めのEnterに続けて送るキー。Enterだけの指定は既定と同じで、重ねて送らない
+    public static func afterPrompt(_ keys: [String]?) -> [String] {
+        guard let keys, !(keys.count == 1 && ["enter", "return"].contains(keys[0].lowercased())) else { return [] }
+        return keys
     }
 }
 

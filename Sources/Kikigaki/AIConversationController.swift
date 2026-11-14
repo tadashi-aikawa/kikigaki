@@ -228,7 +228,7 @@ final class AIConversationController {
         try files.write(bytes, to: base + ["requests", "\(id.uuidString).appendix.\(appendix.number).json"], replacing: false)
         try change(id) { try $0.addAppendix(appendix) }
         if conversation.questions.first(where: { $0.request.id == id })?.result != nil { return }
-        do { try await herdr.prompt(target, text: appendix.prompt(for: original.request), allowsWorking: true) }
+        do { try await herdr.prompt(target, text: appendix.prompt(for: original.request), submitKeys: config.submitKeys, allowsWorking: true) }
         catch { channel.warning = "追記の送達を確認できません。返事の後に送り直します"; throw error }
     }
 
@@ -481,7 +481,7 @@ final class AIConversationController {
         try Task.checkCancellation()
         guard channel.connectionStatus == .idle, let target = channel.connection else { throw AIHerdrError.notReady }
         do {
-            try await herdr.prompt(target, text: text) { @MainActor [self] in
+            try await herdr.prompt(target, text: text, submitKeys: config.submitKeys) { @MainActor [self] in
                 // 最後の生存確認中の取消まで反映し、prompt直前に送信試行を保存する。
                 try willBeginSending?()
                 let sentAt = Date()

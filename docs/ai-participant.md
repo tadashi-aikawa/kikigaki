@@ -355,6 +355,29 @@ Codexのnotifyの項目とClaudeのStop本文は公式資料に記載がある�
    - `kikigaki=<meeting_id>` のtokenは、parliamentがKIKIGAKIの起こしたセッションだと見分ける唯一の根拠である。parliamentはworkspaceラベルの接頭辞などから推定しない。値は会議UUIDを `uuidString` の大文字表記で渡し、`.kikigaki-context/<meeting_id>/` と揃える。
 4. command未指定なら `agent start <name> --kind codex|claude --pane <pane> -- <CLI引数>`、指定時だけ下記のpane run経路で起動し、pane IDを送信先として保持する。入力準備完了は上限30秒の状態観測で確認し、固定秒数のsleepで代用しない。期限切れでも接続を保持し、利用者の初回承認後に同じペインを再確認する。
 5. `agent get` で期待する接続先・CLI種別と送信可能状態を確認し、`agent prompt <target> <envelopeを含む全文>` を一回実行する。`--wait` は通常付けず、Process側の期限と受領イベントで追跡する。`--timeout`だけを付けない。
+   - 宛先のCLIに `[aiSubmitKeys]` があれば、続けて `agent send-keys <target> <キー...>` を間を置かずに一回実行する。下の「送信キー」を参照する。
+
+### 送信キー
+
+herdrの `agent prompt` は、本文を貼り付けた後に必ず修飾キーなしのEnterを送る。Claude Code (`~/.claude/keybindings.json` の `chat:submit`) とCodex (`tui.keymap.composer`) は送信と改行のキーを入れ替えられ、Enterを改行にした利用者では本文が入力欄に残って確定しない。
+
+```toml
+[aiSubmitKeys]
+codex = ["ctrl+enter"]
+claude = ["ctrl+x", "ctrl+s"]   # 2打鍵の組は1要素に1打鍵ずつ書く
+```
+
+- 単位: CLIごと。キー設定はCLIの性質で、宛先 `[[ai]]` の性質ではないため。同じCLIの宛先すべてに効く
+- 送り方: 本文は `agent prompt` のまま送り、Enterが改行になった後に設定したキーを `agent send-keys` で送る。本文の貼り付け方とEnterまでの間合いはherdrに任せる
+    - 結果: 本文の末尾に改行が1つ付いて届く
+    - 実測: herdr 0.9.5とCodex 0.167.2で、Ctrl+EnterとShift+Enterのどちらでも、間を置かずに送って確定した
+- 既定: 書かなければEnterだけで送る。`["enter"]` と `["return"]` も同じ扱いで、Enterを重ねて送らない
+- 検証: 1〜4打鍵。1打鍵は修飾キー `ctrl` `control` `shift` `alt` `option` `meta` `cmd` `command` `super` を `+` でつないだ後にキーを1つ置く。キーは `enter` `return` `space` `tab` `esc` `escape` `backspace` `up` `down` `left` `right` `f1`〜`f20`、記号の名前 `plus` `minus` `comma` `period` `slash` `backslash` `quote` `double_quote` `semicolon` `colon` `percent` `ampersand` `backtick`、またはASCIIの1文字。`+` のキーは herdrと同じく `+` 単独か、`ctrl++` のように末尾の `++` で書く。空配列・書式違い・`-` 始まりは設定エラー
+    - 理由: herdrの `send-keys` が読む名前のうち、送信に割り当てうるものだけを受け付ける。`-` 始まりはコマンドの引数として読まれる
+    - 未知のCLI名は、他の未知キーと同じくアプリでは無視し、スキーマでエディタに指摘させる
+- 固定: 録音開始時に宛先の設定と一緒に会議へ固定し、会議の管理状態に保存する。送信キーを持たない旧会議はEnterだけで送る
+- 送信キーが送れないと分かっている場合は、本文も送らずに断る。本文だけが入力欄に残るのを防ぐため
+- 保証しないこと: 端末がキーの修飾を伝えられるか。`cmd` は多くの端末で届かない。Claude Codeの公式資料は、端末を問わず届く組として `ctrl+x ctrl+s` を示している
 
 KIKIGAKIのProcess起動は実行ファイルと引数の配列を使い、`sh -c` やログインシェルを経由しない。**KIKIGAKIが起動する外部プロセスへ渡す環境から、名前が `HERDR_` で始まる項目を全て除く。** workspaceに持ち込む環境も同じにする。herdrが作成先paneのために正しく付与する新しい環境まで除く意味ではない。親paneの名義やsessionを継がせない。
 
