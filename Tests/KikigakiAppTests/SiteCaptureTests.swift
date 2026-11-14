@@ -10,6 +10,7 @@ extension AppKitTests {
 /// - `KIKIGAKI_SITE_AVATARS=<フォルダ>`: 宛先のアバター。`相談.webp` と `議事録.webp` を読む。無ければアバターなしで撮る
 /// - `KIKIGAKI_SITE_SLIDES=<フォルダ>`: 画像レーンに写す画面。無ければ画像レーンは撮らない
 /// - ディスプレイ名は利用者の環境に依らない内蔵ディスプレイの名前にする。実機の外付けディスプレイの型番を写さない
+/// - `KIKIGAKI_SITE_MENU=1`: 画面の記録のメニューも撮る。本物のメニューを画面に出すので、撮る間はMacへ触らない
 /// - 切り出しとWebPへの変換は撮影の後に行う。手順は docs/dev-flags.md の「テスト」
 @Suite(.serialized, .timeLimit(.minutes(1))) @MainActor struct SiteCaptureTests {
     private let display = ScreenDisplay(id: 1, name: "Built-in Retina Display", points: CGSize(width: 1512, height: 982), menuBarFraction: 0.03)
@@ -104,6 +105,65 @@ extension AppKitTests {
     /// 画像レーン。勉強会の資料を流しながら話している録音中の会議。間の2枚はトレイに畳む。
     /// - `KIKIGAKI_SITE_SLIDES=<フォルダ>`: 写す画面の画像。`.webp` を名前順に6枚使う。公開してよい画像だけを置く
     @Test func 画像レーン() async throws {
+        try await studyLane(name: "screen-lane", size: NSSize(width: 479, height: 820))
+    }
+
+    /// 画像レーンの「+2枚」を押して、間の2枚を開いた形。同じ会議を、開いたトレイが収まる高さで撮る。
+    @Test func 画像レーンを開いた形() async throws {
+        try await studyLane(name: "screen-lane-expanded", size: NSSize(width: 479, height: 1040), expanded: true)
+    }
+
+    /// 発言と画像の境目を左へドラッグして、画像を大きくした形。同じ会議を、広げた幅が収まるウィンドウで撮る。
+    @Test func 画像レーンを広げた形() async throws {
+        try await studyLane(name: "screen-lane-wide", size: NSSize(width: 860, height: 820), laneWidth: 400)
+    }
+
+    /// フッターの画面の記録のメニュー。本物のメニューを画面に一瞬出し、メニューのウィンドウだけを `screencapture -l` で撮って閉じる。
+    /// - ディスプレイの一覧は差し替え、実機のディスプレイの型番を写さない
+    /// - 撮る間はMacへ触らない。メニューは画面に出さないと描けず、操作が入るとメニューが閉じる
+    /// - 画面に出すので、`KIKIGAKI_SITE_MENU=1` を添えたときだけ撮る。ほかの撮影と一緒に流したときに不意に出さない
+    @Test func 画面の記録のメニュー() async throws {
+        guard let output, ProcessInfo.processInfo.environment["KIKIGAKI_SITE_MENU"] == "1" else { return }
+        NSApplication.shared.setActivationPolicy(.accessory)
+        let suite = "SiteCaptureTests.\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = TranscriptWindowController(shouldReduceMotion: { true }, minutesDefaults: defaults, textDefaults: defaults)
+        let external = ScreenDisplay(id: 2, name: "External Display", points: CGSize(width: 2560, height: 1440), menuBarFraction: 0.02)
+        controller.connectedScreenDisplays = { [display, external] }
+        var state = SessionSnapshot(ai: AIViewState(conversation: AIConversation(meetingID: UUID())), state: .recording,
+            utterances: [.init(speaker: 0, start: 0, end: 1, text: "資料を映しますね。")])
+        state.screenControl = ScreenControlState(display: .on(display), selected: display, paused: false)
+        state.canCaptureScreenNow = true
+        controller.apply(state)
+        let menu = controller.screenMenu()
+        let image = output.appendingPathComponent("screen-menu.png")
+        try? FileManager.default.removeItem(at: image)
+        // タイマーはメニューの追跡の中で動くので、失敗はここに残し、popUp から戻った後に確かめる。
+        var failure: String?
+        let timer = Timer(timeInterval: 0.6, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                defer { menu.cancelTracking() }
+                let windows = NSApp.windows.filter { $0.isVisible && String(describing: type(of: $0)).contains("Menu") }
+                guard let window = windows.first else { failure = "メニューのウィンドウが見つからない"; return }
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                process.arguments = ["-x", "-o", "-l\(window.windowNumber)", image.path]
+                do { try process.run() } catch { failure = "screencapture を起動できない: \(error)"; return }
+                process.waitUntilExit()
+                if process.terminationStatus != 0 { failure = "screencapture が \(process.terminationStatus) で終わった" }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        menu.popUp(positioning: nil, at: NSPoint(x: 400, y: 600), in: nil)
+        timer.invalidate()
+        if let failure { Issue.record(Comment(rawValue: failure)); return }
+        // 画面収録の許可が無いと、screencapture は成功で終わっても画像を書かない。
+        #expect(FileManager.default.fileExists(atPath: image.path), "画像が書かれていない。端末の画面収録の許可を確かめる")
+    }
+
+    /// 画像レーンの3枚に共通の会議。`expanded` で間の2枚を開き、`laneWidth` でレーンの幅をドラッグしたのと同じに広げる。
+    private func studyLane(name: String, size: NSSize, expanded: Bool = false, laneWidth: CGFloat? = nil) async throws {
         guard output != nil, let folder = ProcessInfo.processInfo.environment["KIKIGAKI_SITE_SLIDES"] else { return }
         NSApplication.shared.setActivationPolicy(.prohibited)
         let names = try FileManager.default.contentsOfDirectory(atPath: folder).filter { $0.hasSuffix(".webp") }.sorted()
@@ -118,7 +178,7 @@ extension AppKitTests {
         controller.presentScreenPreview = {}
         let window = try #require(controller.window)
         window.setFrameAutosaveName("")
-        window.setFrame(NSRect(x: 0, y: 100, width: 479, height: 820), display: false)
+        window.setFrame(NSRect(x: 0, y: 100, width: size.width, height: size.height), display: false)
         controller.windowDidResize(Notification(name: NSWindow.didResizeNotification, object: window))
 
         let started = try #require(Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: 10, minute: 2, second: 10)))
@@ -144,6 +204,15 @@ extension AppKitTests {
         state.manualDraftSendState = .ready(appendix: false)
         state.screenControl = ScreenControlState(display: .on(display), selected: display, paused: false)
         controller.apply(state)
+        // 別の会議へ移る並べ直しで開いた覚えは消えるので、apply の後に開いて並べ直す。
+        if expanded {
+            controller.screenLaneExpanded = [paths[2], paths[3]]
+            controller.refreshRows()
+        }
+        if let laneWidth {
+            controller.minutesSplit.dragLane(to: laneWidth, commit: true)
+            controller.applyScreenLaneWidth()
+        }
         let content = try #require(window.contentView)
         let thumbnail = ScreenLaneLayout.thumbnailWidth(laneWidth: Double(controller.minutesSplit.laneWidth))
         await ScreenThumbnailLoader.shared.preload(controller.screenPreview.paths,
@@ -152,7 +221,7 @@ extension AppKitTests {
         content.layoutSubtreeIfNeeded()
         controller.transcriptDocument.scroll(NSPoint(x: 0, y: 0)); controller.scrolled()
         content.layoutSubtreeIfNeeded(); content.displayIfNeeded()
-        try write(content, rect: content.bounds, name: "screen-lane")
+        try write(content, rect: content.bounds, name: name)
     }
 
     /// フッター。前回と同じく、自動は送らない、手動は「相談」が実行中。画面の操作は内蔵ディスプレイを記録中。

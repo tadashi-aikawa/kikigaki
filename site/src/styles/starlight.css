@@ -252,8 +252,20 @@
 }
 
 .sl-markdown-content video[src$="/transcription.mp4"],
-.sl-markdown-content img[src$="/screen-lane.webp"] {
+.sl-markdown-content img[src$="/screen-lane.webp"],
+.sl-markdown-content img[src$="/screen-lane-expanded.webp"] {
   --shot-width: 600px;
+}
+
+/* 広げた画像レーンは、画像が大きくなったと分かるよう本文の幅いっぱいまで出す */
+.sl-markdown-content img[src$="/screen-lane-wide.webp"] {
+  --shot-width: 720px;
+}
+
+/* メニューは撮った画素の半分の幅で出す。角の透明な所に、ほかのキャプチャと同じ紙の色を敷く */
+.sl-markdown-content img[src$="/screen-menu.webp"] {
+  --shot-width: 173px;
+  --shot-pad: 12px;
 }
 
 .sl-markdown-content img[src$="/footer.webp"] {

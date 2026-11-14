@@ -150,12 +150,19 @@ KIKIGAKI_DEBUG_DIARIZATION=on KIKIGAKI_DEBUG_REPLAY_REALTIME=1 \
     - 解像度: 1ptあたり1pxと2pxで撮る。2xの画像名には `-2x` を付ける。
     - 幅: 親窓を420pt・600ptにする。開始シート自体は仕様どおり640pt固定。
     - 内容: 自動の返事待ち、要返答・警告あり、手動の返事待ち、両方未指定、停止後の2段フッター。準備中と両方の返事待ちも撮る。開始シートは予約と手動宛先ありを撮る。
-- 利用者向けサイトの画像は `KIKIGAKI_SITE_CAPTURE=<出力先> swift test --filter SiteCaptureTests` で撮る。開始シート・フッター・画像レーンを2倍の画素のPNGへ書き出す。
+- 利用者向けサイトの画像は `KIKIGAKI_SITE_CAPTURE=<出力先> swift test --filter SiteCaptureTests` で撮る。開始シート・フッター・画像レーン・画面の記録のメニューを2倍の画素のPNGへ書き出す。
     - 入力: `KIKIGAKI_SITE_AVATARS=<フォルダ>` に宛先のアバター `相談.webp` `議事録.webp`、`KIKIGAKI_SITE_SLIDES=<フォルダ>` に画像レーンへ写す画面の `.webp` を名前順に6枚置く。写す画面は公開してよいものだけにする
     - ディスプレイ名: 内蔵ディスプレイの `Built-in Retina Display` に固定する。実機の外付けディスプレイの型番を写さない
     - 開始シートのラジオとチェックは、アプリを前面に出さずに操作中の青で描く。撮影の指定があるときだけ、開始シートのウィンドウのクラスでキーの判定を差し替える
-    - 切り出し: 開始シートは四辺を32px切る。`earphones.webp` はその上端から524px。フッターは幅479ptで撮り、左12px・上2pxから934×100px。画像レーンは切らない
+    - 画像レーンは同じ会議を3つの形で撮る。畳んだ形 `screen-lane`、「+2枚」を開いた形 `screen-lane-expanded`、レーンを広げた形 `screen-lane-wide`
+    - 画面の記録のメニュー `screen-menu` は、`KIKIGAKI_SITE_MENU=1` を添えたときだけ撮る。本物のメニューを画面に一瞬出して `screencapture -l` で撮るので、撮る間はMacへ触らない
+        - 理由: メニューは画面に出さないと描けない。操作が入るとメニューが閉じる
+        - 実行する端末に画面収録の許可が要る
+    - 切り出し: 開始シートは四辺を32px切る。`earphones.webp` はその上端から524px。フッターは幅479ptで撮り、左12px・上2pxから934×100px。`screen-lane` とメニューは切らない
+        - `screen-lane-expanded`: 上350pxから1318×1082px。森の発言から、開いたトレイの次の画像まで
+        - `screen-lane-wide`: 上端から2080×1178px。「+2枚」のトレイまでで、下の「最新の発言へ」を写さない
     - 変換: `cwebp -q 92 -m 6 -sharp_yuv`。`site/public/captures/` へ置く
+        - メニューは `-exact` を足し、角の透明な所を保つ
 - `KIKIGAKI_PROMPT_HINT_HOVER=1 swift test --filter PromptHintHoverTests`: 本物の書き起こし窓へシートを付け、実カーソルを移動して毎回付く指示の標準ツールチップを確かめる。
     - 対象: 開始シートの自動送信と手動送信、手動実行シート、自動実行シート。非アクティブ・非キーの窓で修正前の非表示、修正後の長文表示と画面内配置を検査する。
     - 実行: 修正前後の条件をDEBUG版の別プロセスで確認する。
