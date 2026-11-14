@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - run: npm install --global pnpm@11.17.0
+      - run: npm install --global pnpm@12.18.0
       - run: pnpm install --frozen-lockfile
         working-directory: site
       - run: pnpm build

@@ -266,3 +266,6 @@ semantic-release が前回のタグ以降の Conventional Commits から次の�
 - tap 更新には repo secret `TAP_GITHUB_TOKEN` (homebrew-tap への Contents: Read and write 権限の fine-grained PAT) を使います
 - `Resources/Info.plist` の追跡中のバージョンは `0.0.0-development` のまま維持し、リリースバージョンは配布 ZIP 内にだけ埋め込みます
 - Cask の本文は `scripts/render_cask.sh <バージョン> <sha256>` が書き出します。tap へ push する前に、この出力を手元の tap へ置いて `brew audit --cask` と導入・削除を確認できます
+- semantic-release とプラグインは `.github/release/` の `package.json` と `pnpm-lock.yaml` で、推移的な依存まで固定します。workflow は `pnpm install --frozen-lockfile` で入れます
+  - 理由: 署名の証明書と `TAP_GITHUB_TOKEN` と同じジョブで動くため、実行のたびに新しいバージョンを取ってこない
+  - 上げるとき: `package.json` のバージョンを変え、`pnpm install --dir .github/release` で lockfile を作り直してコミットします

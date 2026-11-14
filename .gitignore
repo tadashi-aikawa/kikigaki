@@ -5,3 +5,4 @@ dist/
 /web/minutes/node_modules/
 /site/node_modules/
 /site/.astro/
+/.github/release/node_modules/
