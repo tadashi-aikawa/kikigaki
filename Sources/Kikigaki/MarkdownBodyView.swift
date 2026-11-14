@@ -20,7 +20,8 @@ final class MarkdownBodyView: NSTextView {
 
     init() {
         let storage = NSTextStorage()
-        let manager = NSLayoutManager()
+        // 箇条書きの行頭のラベルの塗りと、短いラベルを折り返さない判定を持つ。
+        let manager = BulletLabelLayoutManager()
         let container = NSTextContainer(size: NSSize(width: 1, height: CGFloat.greatestFiniteMagnitude))
         storage.addLayoutManager(manager)
         manager.addTextContainer(container)
@@ -40,6 +41,27 @@ final class MarkdownBodyView: NSTextView {
         setAccessibilityLabel("AIの返事")
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    /// 箇条書きのラベルを含む選択をリッチテキストで写すときは、見せ方の属性を本文の字へ戻す。
+    /// 文字列で写す経路は字そのものが `理由: …` なので変えない。
+    override func writeSelection(to pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        let rtf = Self.rtfTypes.contains(type), rtfd = Self.rtfdTypes.contains(type)
+        guard rtf || rtfd, let storage = textStorage,
+              selectedRanges.count == 1, let range = selectedRanges.first?.rangeValue, range.length > 0,
+              BulletLabelStyle.touches(storage, range) else {
+            return super.writeSelection(to: pboard, type: type)
+        }
+        let copy = BulletLabelStyle.copyable(storage)
+        let data = rtf ? copy.rtf(from: range, documentAttributes: [:]) : copy.rtfd(from: range, documentAttributes: [:])
+        guard let data else { return false }
+        return pboard.setData(data, forType: type)
+    }
+
+    /// ⌘Cは旧形式の名前で書く(`writablePasteboardTypes` の実測)ので、新旧の両方を受ける。
+    private static let rtfTypes: Set<NSPasteboard.PasteboardType> = [
+        .rtf, NSPasteboard.PasteboardType("NeXT Rich Text Format v1.0 pasteboard type")]
+    private static let rtfdTypes: Set<NSPasteboard.PasteboardType> = [
+        .rtfd, NSPasteboard.PasteboardType("com.apple.flat-rtfd"), NSPasteboard.PasteboardType("NeXT RTFD pasteboard type")]
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
@@ -175,7 +197,9 @@ enum MarkdownBodyRenderer {
                 result.addAttribute(.paragraphStyle, value: style, range: range)
             }
         }
-        return TranscriptTypography.scaled(result, by: scale)
+        let scaled = NSMutableAttributedString(attributedString: TranscriptTypography.scaled(result, by: scale))
+        BulletLabelStyle.space(scaled)
+        return scaled
     }
 
     /// admonitionの本文は外側の器を持ったまま再帰で描く。1つのtextStorageのままにして、
@@ -257,9 +281,21 @@ enum MarkdownBodyRenderer {
                 let markerWidth = ceil((marker as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 15)]).width)
                 style.firstLineHeadIndent = indent
                 style.headIndent = indent + markerWidth + 7
-                style.tabStops = [NSTextTab(textAlignment: .left, location: style.headIndent)]
+                let label = MarkdownBulletLabel.split(item.content)
+                // 塗りの左の余白は、1行目の本文の開始位置を余白ぶん右へ送って作る。
+                // 折り返した行は headIndent のままなので、2行目以降の本文の位置は変わらない。
+                style.tabStops = [NSTextTab(textAlignment: .left,
+                                            location: style.headIndent + (label == nil ? 0 : BulletLabelStyle.padding(base: 15)))]
                 let start = result.length
-                append([.init(marker + "\t")] + item.content, paragraph: style)
+                let lead = marker + "\t"
+                if let label {
+                    append([.init(lead + label.label + ":")] + label.rest, paragraph: style)
+                    BulletLabelStyle.apply(to: result, at: start + (lead as NSString).length,
+                                           length: (label.label as NSString).length,
+                                           nested: item.depth > 0, long: label.long)
+                } else {
+                    append([.init(lead)] + item.content, paragraph: style)
+                }
                 result.addAttribute(.foregroundColor, value: Washi.muted,
                                     range: NSRange(location: start, length: (marker as NSString).length))
             case .quote(let lines):

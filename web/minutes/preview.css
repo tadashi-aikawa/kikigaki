@@ -19,6 +19,14 @@ a { color:var(--accent); text-underline-offset:3px; }
 a.wiki { text-decoration:underline; cursor:pointer; }
 ul,ol { padding-left:26px; margin:8px 0; } li > ul,li > ol { margin:4px 0; }
 li > p { margin:4px 0; } .task-list-item { list-style:none; }
+/* 箇条書きの行頭の「ラベル: 」(renderer.jsの bullet_label)。1段目は墨の塗りに和紙の色で抜いた字、
+   2段目以降は淡い塗りに本文の字の色。親だけを縦に拾うときに子の塗りで目が止まらないよう、子を淡くする。
+   考え方はparliamentの docs/thread-bullet-label.md。`:` は字として残し、大きさ0で見せない。
+   12字までは折り返さず、`pre` でコピー時に連続した空白を畳まない。13字以上は折り返し、行ごとに角丸と余白を付ける。 */
+.bullet-label { margin-right:.2em; padding:1px .45em; border-radius:4px; background:var(--muted); color:var(--paper); font-size:.86em; font-weight:600; letter-spacing:.03em; white-space:pre; }
+.bullet-label.is-nested { background:color-mix(in srgb,var(--muted) 24%,var(--paper)); color:var(--ink); }
+.bullet-label.is-long { white-space:pre-wrap; overflow-wrap:anywhere; -webkit-box-decoration-break:clone; box-decoration-break:clone; }
+.bullet-label-colon { font-size:0; }
 .task-list-item-checkbox { appearance:none; display:inline-block; position:relative; width:18px; height:18px; margin:0 8px 0 -26px; border:2px solid var(--accent); border-radius:50%; background:var(--paper); vertical-align:-3px; opacity:1; }
 .task-list-item-checkbox:checked { background:var(--accent); }
 .task-list-item-checkbox:checked::after { content:""; position:absolute; left:3px; top:4px; width:8px; height:4px; border-left:2px solid white; border-bottom:2px solid white; transform:rotate(-45deg); }

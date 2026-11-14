@@ -222,6 +222,98 @@ extension AppKitTests {
         #expect(try #require(heights[510]).first! == #require(heights[810]).first!)
     }
 
+    @Test func 箇条書きの行頭のラベルを塗りで描き選んだ文字列は元の字のまま() throws {
+        _ = NSApplication.shared
+        let source = """
+        - 案H: 段階的に強める
+            - 理由: 一度に変えると戻せない
+            - **長所**: 比べやすい
+        - 決定事項として明記した内容のまとめ: 自動判定しない
+        1. 0: 番号への回答
+        - 推奨はA。理由: 文の途中は拾わない
+        - `swift test`: コードで始まる行は拾わない
+        理由: 地の文は拾わない
+        """
+        for scale in [CGFloat(1), 2] {
+            let body = MarkdownBodyView()
+            body.setTextScale(scale)
+            body.update(source)
+            let storage = try #require(body.textStorage)
+            let labels = labelRanges(storage).map { (storage.string as NSString).substring(with: $0.range) }
+            #expect(labels == ["案H", "理由", "長所", "決定事項として明記した内容のまとめ", "0"])
+            #expect(labelRanges(storage).map(\.mark.nested) == [false, true, true, false, false])
+            #expect(labelRanges(storage).map(\.mark.long) == [false, false, false, true, false])
+            // 字は消さない。太字だった `**長所**` もコピーではラベルと `:` に戻る。
+            #expect(storage.string.contains("\t理由: 一度に変えると戻せない"))
+            #expect(storage.string.contains("\t長所: 比べやすい"))
+            // `:` は見せないだけで字として残り、大きさを潰して透明にする。
+            let colon = NSMaxRange(labelRanges(storage)[1].range)
+            #expect((storage.string as NSString).substring(with: NSRange(location: colon, length: 1)) == ":")
+            #expect(storage.attribute(.foregroundColor, at: colon, effectiveRange: nil) as? NSColor == .clear)
+            for width in [CGFloat(260), 510] {
+                body.setFrameSize(NSSize(width: width, height: body.frame.height))
+                body.frame = NSRect(x: 0, y: 0, width: width, height: body.height(for: width))
+                try assertFits(body)
+                try capture("bullet-label-\(Int(width))-\(Int(scale * 100))", view: canvas(body, width: width))
+            }
+        }
+    }
+
+    @Test func リッチテキストで写したラベルは本文の字の色と見える大きさのコロンになる() throws {
+        _ = NSApplication.shared
+        let body = MarkdownBodyView()
+        body.update("- 理由: 本文\n    - 長所: 比べやすい")
+        // ⌘Cと同じ型の並びで書く。RTFは旧形式の名前で並ぶ。型の並びは選択があるときだけ返る。
+        func copy(_ range: NSRange) throws -> NSAttributedString {
+            body.setSelectedRange(range)
+            let types = body.writablePasteboardTypes
+            let rtfType = try #require(types.first { $0 == .rtf || $0.rawValue == "NeXT Rich Text Format v1.0 pasteboard type" })
+            let board = NSPasteboard(name: NSPasteboard.Name("kikigaki-test-\(UUID().uuidString)"))
+            defer { board.releaseGlobally() }
+            board.clearContents()
+            #expect(body.writeSelection(to: board, types: types))
+            let rtf = try #require(board.data(forType: rtfType))
+            return try NSAttributedString(data: rtf, options: [.documentType: NSAttributedString.DocumentType.rtf],
+                                          documentAttributes: nil)
+        }
+        let whole = try copy(NSRange(location: 0, length: (body.string as NSString).length))
+        let label = (whole.string as NSString).range(of: "理由:")
+        let color = try #require(whole.attribute(.foregroundColor, at: label.location, effectiveRange: nil) as? NSColor)
+        #expect(color.usingColorSpace(.sRGB)?.redComponent ?? 1 < 0.3)
+        #expect(try #require(whole.attribute(.font, at: label.location + 2, effectiveRange: nil) as? NSFont).pointSize > 10)
+        // `:` から始まる選択でも、見える大きさのコロンで写る。
+        let colon = (body.string as NSString).range(of: ": 本文")
+        let fromColon = try copy(colon)
+        #expect(fromColon.string.hasPrefix(": 本文"))
+        #expect(try #require(fromColon.attribute(.font, at: 0, effectiveRange: nil) as? NSFont).pointSize > 10)
+        // 表示側の文字列は変えない。
+        #expect((body.textStorage?.attribute(.foregroundColor, at: (body.string as NSString).range(of: "理由").location,
+                                              effectiveRange: nil) as? NSColor) == Washi.paper)
+    }
+
+    @Test func 短いラベルは狭い幅でも途中で折り返さない() throws {
+        _ = NSApplication.shared
+        let body = MarkdownBodyView()
+        body.update("- 未対応で受け入れるリスク: 小さい")
+        // ラベルの途中で折り返すような狭さでも、ラベルは1行に収まる。
+        body.setFrameSize(NSSize(width: 200, height: body.frame.height))
+        body.frame = NSRect(x: 0, y: 0, width: 200, height: body.height(for: 200))
+        let manager = try #require(body.layoutManager), storage = try #require(body.textStorage)
+        let label = try #require(labelRanges(storage).first).range
+        let glyphs = manager.glyphRange(forCharacterRange: label, actualCharacterRange: nil)
+        var lines = 0
+        manager.enumerateLineFragments(forGlyphRange: glyphs) { _, _, _, _, _ in lines += 1 }
+        #expect(lines == 1)
+    }
+
+    private func labelRanges(_ storage: NSTextStorage) -> [(range: NSRange, mark: BulletLabelStyle.Mark)] {
+        var result: [(NSRange, BulletLabelStyle.Mark)] = []
+        storage.enumerateAttribute(.markdownBulletLabel, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            if let mark = value as? BulletLabelStyle.Mark { result.append((range, mark)) }
+        }
+        return result
+    }
+
     @Test func 列幅の配分は収まる表を変えず超える表だけ広い列から詰める() {
         // 収まるなら自然幅のまま。
         #expect(MarkdownBodyView.fit([24, 120, 40], into: 300) == [24, 120, 40])

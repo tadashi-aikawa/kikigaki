@@ -360,3 +360,28 @@ test('収まらない表だけ広い列から等しく詰め、狭い列は自�
   assert.ok(widths[1] === widths[2] && widths[1] > 300);
   assert.ok(widths.reduce((sum, width) => sum + width, 0) <= 700);
 });
+test('箇条書きの行頭のラベルを塗りにし、`:` は字として残す', () => {
+  const md = createRenderer();
+  const label = source => [...md.render(source).matchAll(/<span class="bullet-label([^"]*)">([^<]*)<span class="bullet-label-colon">:<\/span><\/span>/g)]
+    .map(m => m[2] + m[1]);
+  assert.deepEqual(label('- 案H: 段階的に強める\n    - 理由: 戻せない\n        - 例: 3段目'), ['案H', '理由 is-nested', '例 is-nested']);
+  // 太字のラベルは2つの形とも拾い、塗りの中は太字にしない。
+  assert.deepEqual(label('- **検証**: 全件通過\n- **理由:** 遅い\n- **選択肢**:'), ['検証', '理由', '選択肢']);
+  assert.ok(md.render('- **検証**: 全件通過').includes('<li><span class="bullet-label">検証<span class="bullet-label-colon">:</span></span> 全件通過</li>'));
+  // 字数と空白は問わない。13字以上は折り返してよいラベル。数字だけも拾う。
+  assert.deepEqual(label('- Chrome Beta: 公開\n- 決定事項として明記した内容のまとめ: 自動判定しない\n1. 0: 番号への回答'),
+    ['Chrome Beta', '決定事項として明記した内容のまとめ is-long', '0']);
+  // ラベルだけの行、改行と<br>の手前もラベルの行末。
+  assert.deepEqual(label('- 選択肢:\n- 前提:<br>続き\n- 条件:\n  続き'), ['選択肢', '前提', '条件']);
+  // タスクの項目もチェックボックスの後ろから拾う。
+  assert.deepEqual(label('- [ ] 担当: 佐藤\n- [x] **期限**: 9/10'), ['担当', '期限']);
+  // 入れ子の数は箇条書きだけで数え、calloutの中の1段目は1段目のまま。
+  assert.deepEqual(label('> [!note] 題\n> - 理由: 中'), ['理由']);
+});
+test('ラベルの形でない行は塗らない', () => {
+  const md = createRenderer();
+  for (const source of ['- 18:43 に開始', '- https://example.com', '- 理由:遅い', '- 理由:**遅い**', '- 理由 : 遅い',
+    '- 理由： 全角', '- `swift test`: コード', '- 推奨はA。理由: 文', '理由: 地の文', '- **理**由: 途中まで太字',
+    '- *理由*: 斜体', '- [理由](https://example.com): リンク', '- **太字の文** と続く'])
+    assert.ok(!md.render(source).includes('bullet-label'), source);
+});

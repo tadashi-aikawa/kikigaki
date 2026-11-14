@@ -223,5 +223,95 @@ export function createRenderer() {
     }
   });
   md.renderer.rules.callout_title = (tokens, i) => '<div class="callout-title">' + escape(tokens[i].content) + '</div>';
+  // 箇条書きの行頭の「ラベル: 」を塗りで描く。`:` は字として残して見せない(preview.cssの .bullet-label)。
+  // text_joinの後に置き、エスケープや実体参照で割れた字を1つのtextにしてから判定する。
+  md.core.ruler.push('bullet_label', state => {
+    let lists = 0;
+    for (let i = 0; i < state.tokens.length; i++) {
+      const token = state.tokens[i];
+      if (token.type === 'bullet_list_open' || token.type === 'ordered_list_open') lists++;
+      if (token.type === 'bullet_list_close' || token.type === 'ordered_list_close') lists--;
+      if (token.type !== 'list_item_open') continue;
+      // 項目の最初の段落だけを見る。2段落目以降と、見出し・コードで始まる項目は拾わない。
+      const inline = state.tokens[i + 1]?.type === 'paragraph_open' ? state.tokens[i + 2] : null;
+      if (inline?.type !== 'inline') continue;
+      splitBulletLabel(inline.children, lists > 1, state.Token);
+    }
+  });
+  md.renderer.rules.bullet_label = (tokens, i) => {
+    const { label, long, nested } = tokens[i].meta;
+    return '<span class="bullet-label' + (nested ? ' is-nested' : '') + (long ? ' is-long' : '')
+      + '">' + escape(label) + '<span class="bullet-label-colon">:</span></span>';
+  };
   return md;
+}
+
+/**
+ * 行頭から `:` まで。判定はparliamentの `packages/web/src/bullet-label.ts`、仕様の正はその
+ * `docs/thread-bullet-label.md`。AIの返事の同じ判定は `KikigakiCore/MarkdownBulletLabel.swift`。
+ * ラベルにコロン・括弧・記号類・句読点を含めない。字数と空白は問わず、数字だけ(`0: …`)も拾う。
+ * `:` の後ろは空白1つか行末。`18:43` や `https://` はコロンの後ろに空白が無いので拾わない。
+ */
+const LABEL = /^([^\n:：()（）[\]`*_~<>"'|。、，．！？!?「」『』]+):( |$)/u;
+/** この字数を超えるラベルは、塗りのまま折り返してよい(preview.cssの .is-long) */
+const NOWRAP_LABEL_CHARS = 12;
+
+/** 行の終わり。改行(breaks: trueで行内の改行はsoftbreak)と `<br>` の手前も行末として扱う */
+const endsLine = token => !token || token.type === 'softbreak' || token.type === 'hardbreak'
+  || (token.type === 'html_inline' && /^<br\s*\/?>$/i.test(token.content));
+
+function labelOf(text, lineEnds) {
+  const match = LABEL.exec(text);
+  if (!match) return null;
+  const label = match[1];
+  // `理由 : …` のように空白で始まる・終わるものは、ラベルの切れ目が読めない。
+  if (label.trim() !== label) return null;
+  if (match[2] === '' && !lineEnds) return null;
+  return { label, long: [...label].length > NOWRAP_LABEL_CHARS, rest: text.slice(label.length + 1) };
+}
+
+/**
+ * 項目の行内トークンの先頭からラベルを切り出し、`bullet_label` トークンへ置き換える。
+ * 先頭は飾りの無い地の文か、ちょうどラベルを囲む太字(`**理由**: …` / `**理由:** …`)だけ。
+ * 太字は中身とラベルがちょうど一致するときだけ拾い、塗りの中は太字にしない。
+ */
+export function splitBulletLabel(children, nested, Token) {
+  let at = 0, lead = '';
+  // タスクの項目はチェックボックスの後ろに空白1つを挟んで本文が続く。
+  if (children[0]?.type === 'html_inline' && /^<input class="task-list-item-checkbox"/.test(children[0].content)) {
+    at = 1;
+    // 太字で始まる本文では、空白1つだけのtextが太字の前に残る。
+    if (children[1]?.type === 'text' && children[1].content === ' ') at = 2;
+    else if (children[1]?.type === 'text' && children[1].content.startsWith(' ')) lead = ' ';
+  }
+  // 太字で始まる行は、markdown-itが太字の前に空のtextを置く。
+  while (children[at]?.type === 'text' && children[at].content === '') at++;
+  const head = children[at];
+  let found, removed;
+  if (head?.type === 'text') {
+    found = labelOf(head.content.slice(lead.length), endsLine(children[at + 1]));
+    removed = 1;
+  } else if (head?.type === 'strong_open' && children[at + 1]?.type === 'text' && children[at + 2]?.type === 'strong_close') {
+    const inner = children[at + 1].content, next = children[at + 3];
+    const follows = next?.type === 'text' ? next.content : '';
+    const after = children[at + (next?.type === 'text' ? 4 : 3)];
+    found = labelOf(inner + follows, endsLine(after));
+    if (!found || (found.label !== inner && found.label + ':' !== inner)) return;
+    removed = next?.type === 'text' ? 4 : 3;
+  }
+  if (!found) return;
+  const label = new Token('bullet_label', '', 0);
+  label.meta = { label: found.label, long: found.long, nested };
+  const replaced = [label];
+  if (found.rest) {
+    const rest = new Token('text', '', 0);
+    rest.content = found.rest;
+    replaced.push(rest);
+  }
+  if (lead) {
+    const space = new Token('text', '', 0);
+    space.content = lead;
+    replaced.unshift(space);
+  }
+  children.splice(at, removed, ...replaced);
 }
