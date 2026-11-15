@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRenderer, withoutFrontmatter, imageURL } from './renderer.js';
-import { changedEntries, UpdateHighlighter, foldUpdateMarks } from './updates.js';
+import { changedEntries, UpdateHighlighter, foldUpdateMarks, figureEntries } from './updates.js';
 import { isTimeline, wrapTimeline } from './timeline.js';
 import { fitColumns } from './tables.js';
 import { boardLinks, boardNodeID, isBoardHeading } from './board.js';
 import { zoomDiagram, diagramOverflow, fitDiagram } from './diagrams.js';
 import { minimapTopicID, minimapTextColor, minimapFontSize, minimapScale } from './minimap.js';
-import { figureSize, safeCSSValue } from './figure-rules.js';
+import { figureSize, safeCSSValue, validName, noteText, figureKeys } from './figure-rules.js';
 test('典型的なボードとIDなしの旧ボードは幅33%・高さ27%のまま', () => {
   const viewport = { width:900, height:850 }, fontSize = minimapFontSize([42, 42, 62]);
   assert.equal(minimapScale({ width:900, height:600 }, viewport, fontSize), 0.33);
@@ -211,6 +211,49 @@ test('基準がある間は依頼中の編集を累積で強調し、置き直�
   updates.reset();
   assert.deepEqual(updates.plan(entries(['x','y'])), { entries: [], persist: false });
   assert.deepEqual(keys(updates.plan(entries(['x','y','z']))), ['z']);
+});
+test('SVGの図は文が変わった付箋と新しい付箋だけを光らせ、付箋の無い図だけ枠を光らせる', () => {
+  const highlight = () => () => {};
+  const figure = (name, notes, hash = 'h') => ({ figure:name, element:{}, hash, highlight,
+    notes:notes.map(([id, text]) => ({ id, text })) });
+  const plan = (updates, figures) => updates.plan(figureEntries(figures)).entries
+    .map(entry => entry.note ?? 'FIG:' + entry.figure);
+  const updates = new UpdateHighlighter();
+  updates.plan(figureEntries([figure('kpt', [['k1', 'Keep'], ['p1', 'Problem']]), figure('plain', [], 'a')]));
+  updates.mark();
+  // 位置・色・大きさだけの変化は原文が変わっても同じ項目になる。文が変わった付箋と新しい付箋だけが光る
+  assert.deepEqual(plan(updates, [figure('kpt', [['p1', 'Problem'], ['k1', 'Keep!'], ['t1', 'Try']], 'h2'), figure('plain', [], 'a')]), ['k1', 't1']);
+  // 付箋の無い図は、原文が変わったら枠
+  assert.deepEqual(plan(updates, [figure('kpt', [['k1', 'Keep'], ['p1', 'Problem']]), figure('plain', [], 'b')]), ['FIG:plain']);
+  // 消えた付箋と、最後の付箋を消した図は光らない
+  assert.deepEqual(plan(updates, [figure('kpt', [], 'h3'), figure('plain', [], 'a')]), []);
+  // 比べる側に付箋が無く、今の側に付箋がある図は、付箋だけが光る
+  updates.mark();
+  assert.deepEqual(plan(updates, [figure('kpt', [['k1', 'Keep']], 'h4'), figure('plain', [], 'a')]), ['k1']);
+  // 図の名前が違えば別の付箋として比べる
+  updates.mark();
+  assert.deepEqual(plan(updates, [figure('other', [['k1', 'Keep']], 'h4'), figure('plain', [], 'a')]), ['k1']);
+});
+test('図は重ならない名前で引き、重なる名前と名前の無い図は見出しと順番に名前を添えて引く', () => {
+  const keys = figureKeys([{ name:'kpt', at:'a0' }, { name:'dup', at:'a1' }, { name:'dup', at:'b0' }, { name:'', at:'b1' }]);
+  // 一意な名前は置き場が変わっても同じ。
+  assert.equal(keys[0], figureKeys([{ name:'kpt', at:'z9' }])[0]);
+  assert.equal(new Set(keys).size, 4);
+  // 重なったまま別の名前へ変えると、同じ置き場でも別の図になる。付箋は新しいものとして光る。
+  const renamed = figureKeys([{ name:'kpt', at:'a0' }, { name:'dup2', at:'a1' }, { name:'dup2', at:'b0' }, { name:'', at:'b1' }]);
+  assert.notEqual(renamed[1], keys[1]); assert.notEqual(renamed[2], keys[2]);
+  assert.equal(renamed[3], keys[3]);
+  const updates = new UpdateHighlighter();
+  const figure = (key, text) => ({ figure:key, element:{}, hash:'h', highlight:() => () => {}, notes:[{ id:'k1', text }] });
+  updates.plan(figureEntries([figure(keys[1], 'Keep')]));
+  assert.deepEqual(updates.plan(figureEntries([figure(renamed[1], 'Keep')])).entries.map(entry => entry.note), ['k1']);
+});
+test('付箋の名前と種類はUTF-8のバイト数で数え、空白と制御文字を受けない', () => {
+  assert.equal(validName('k1', 64), true);
+  assert.equal(validName('あ'.repeat(21), 64), true);
+  assert.equal(validName('あ'.repeat(22), 64), false);
+  for (const value of ['', 'a b', 'a\tb', 'a\u0007', null, undefined]) assert.equal(validName(value, 64), false, String(value));
+  assert.equal(noteText('  午後は\n  だいたい   5並列 '), '午後は だいたい 5並列');
 });
 test('本文が無いうちに置いた基準は最初の描画を基準にする', () => {
   const entries = values => values.map(key => ({ key }));

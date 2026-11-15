@@ -19,16 +19,35 @@ export class UpdateHighlighter {
   mark() { this.#baseline = { entries: this.#previous }; }
   // 描画のたびに呼ぶ。強調する項目と、4秒で消さずに残すかを返す。
   plan(entries) {
-    const keys = entries.map(({ key }) => ({ key }));
-    let changed = [];
+    const keys = entries.map(({ key, figure, note }) => ({ key, figure, note }));
+    let changed = [], before = null;
     if (this.#baseline) {
       // 基準を置いた時点で本文が無ければ、最初の描画を基準にして初回表示を光らせない。
-      if (this.#baseline.entries) changed = changedEntries(this.#baseline.entries, entries);
+      if (this.#baseline.entries) before = this.#baseline.entries;
       else this.#baseline = { entries: keys };
-    } else if (this.#previous) changed = changedEntries(this.#previous, entries);
+    } else before = this.#previous;
+    if (before) {
+      // 図の枠を光らせるのは、比べる側にも今の側にも付箋の無い図だけ。最後の付箋を消した図は光らせない。
+      const noted = new Set(before.filter(entry => entry.note !== undefined).map(entry => entry.figure));
+      changed = changedEntries(before, entries)
+        .filter(entry => entry.figure === undefined || entry.note !== undefined || !noted.has(entry.figure));
+    }
     this.#previous = keys;
     return { entries: changed, persist: this.hasBaseline };
   }
+}
+// SVGの図の比べる項目。付箋のある図は付箋ごとに、図の名前・付箋の名前・文で比べる。
+// 位置・色・大きさだけが変わった付箋は同じ項目になり、光らない。付箋の無い図は、原文で図の枠を比べる。
+// figure は図を突き合わせる名前、element は本文の中の置き場、highlight は付箋を光らせる関数。
+export function figureEntries(figures) {
+  const entries = [];
+  for (const { figure, element, hash, notes, highlight } of figures) {
+    if (!notes.length) { entries.push({ key:'FIG:' + hash, nodes:[], element, figure }); continue; }
+    for (const note of notes) entries.push({
+      key:'NOTE:' + JSON.stringify([figure, note.id, note.text]), nodes:[], element, figure, note:note.id, highlight,
+    });
+  }
+  return entries;
 }
 export function updateEntries(root) {
   const groups = new Map(), walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -54,10 +73,7 @@ export function updateEntries(root) {
     const key = url.protocol === 'minutes-image:' ? url.searchParams.get('path') : image.src;
     groups.set(image, { key:'IMG:' + key, nodes:[], element:image });
   }
-  // SVGの図は親のDOMに文字を持たない。原文が変わったら、画像と同じく図の枠で示す。
-  for (const figure of root.querySelectorAll('.svg-canvas[data-figure-hash]')) {
-    groups.set(figure, { key:'FIG:' + figure.dataset.figureHash, nodes:[], element:figure });
-  }
+  // SVGの図は親のDOMに文字を持たない。比べる項目は figureEntries が作る。
   return [...groups.values()];
 }
 // 変更のあった要素を含む見出しを、内側から順に並べて返す。
@@ -88,9 +104,11 @@ export function foldUpdateMarks(chains) {
   }
   return marks;
 }
-let expiry, animations = [], marked = [], markedLinks = [];
+let expiry, animations = [], marked = [], markedLinks = [], figureCleanups = [];
 export function clearUpdates() {
   clearTimeout(expiry); CSS.highlights.delete('updated');
+  // 図の中の強調は、iframeへも消すよう伝える。
+  figureCleanups.forEach(cleanup => cleanup()); figureCleanups = [];
   animations.forEach(animation => animation.cancel()); animations = [];
   marked.forEach(element => element.classList.remove('updated-block')); marked = [];
   markedLinks.forEach(link => delete link.dataset.updated); markedLinks = [];
@@ -107,9 +125,14 @@ export function highlightUpdates(entries, persist = false, tocLinkFor = null) {
       link.dataset.updated = mark; markedLinks.push(link);
     }
   }
-  const ranges = [];
+  const ranges = [], notes = new Map();
   for (const entry of entries.slice(0, 1000)) {
-    if (entry.nodes.length) {
+    if (entry.note !== undefined) {
+      // 付箋は図ごとにまとめ、iframeの中で付箋の外形に重ねて描く。
+      if (!entry.highlight) continue;
+      if (!notes.has(entry.highlight)) notes.set(entry.highlight, []);
+      notes.get(entry.highlight).push(entry.note);
+    } else if (entry.nodes.length) {
       const range = document.createRange(); range.setStart(entry.nodes[0], 0);
       range.setEnd(entry.nodes.at(-1), entry.nodes.at(-1).length); ranges.push(range);
     } else if (persist) {
@@ -119,6 +142,7 @@ export function highlightUpdates(entries, persist = false, tocLinkFor = null) {
       animations.push(entry.element.animate([{ opacity:0.55 }, { opacity:1 }], { duration:4000 }));
     }
   }
+  for (const [highlight, ids] of notes) figureCleanups.push(highlight(ids));
   const highlight = new Highlight(...ranges); highlight.priority = -1;
   CSS.highlights.set('updated', highlight);
   // 基準がある間は1依頼分の編集をすべて残す。時間では消さない。

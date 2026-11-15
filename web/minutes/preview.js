@@ -2,12 +2,13 @@ import { createRenderer, withoutFrontmatter } from './renderer.js';
 import DOMPurify from 'dompurify';
 import mermaid from 'mermaid';
 import { cleanHTML } from './html.js';
-import { UpdateHighlighter, updateEntries, clearUpdates, highlightUpdates } from './updates.js';
+import { UpdateHighlighter, updateEntries, figureEntries, clearUpdates, highlightUpdates } from './updates.js';
 import { isTimeline, wrapTimeline } from './timeline.js';
 import { layoutTables } from './tables.js';
 import { boardLinks, attachBoardLinks, styleRejectedBoardNodes } from './board.js';
 import { DiagramInteractions } from './diagrams.js';
 import { prepareFigure, figureDocument } from './figures.js';
+import { figureKeys } from './figure-rules.js';
 const md = createRenderer(), root = document.getElementById('minutes');
 const diagrams = new DiagramInteractions();
 const canvas = new DiagramInteractions();
@@ -253,11 +254,23 @@ function hitFigure(record, point) {
   record.seq += 1; record.waiting = true;
   record.frame.contentWindow.postMessage({ kind:'hit', seq:record.seq, x:point.x, y:point.y }, '*');
 }
+// 更新で光らせる付箋をiframeへ渡す。読み込み前なら覚えておき、iframeの準備の知らせで渡す。
+// 戻り値は強調を消す関数。消すときもiframeへ伝える。
+function highlightFigure(record, ids) {
+  const send = () => {
+    if (record.loaded) record.frame.contentWindow?.postMessage({ kind:'highlight', ids:record.highlight }, '*');
+  };
+  record.highlight = ids; send();
+  return () => { record.highlight = []; send(); };
+}
 // iframeからの知らせを受ける1か所。送り主が親の作った図で、種類と形が決めたとおりのものだけを通す。
 addEventListener('message', event => {
   const record = frames.get(event.source), data = event.data;
   if (!record || !data || typeof data !== 'object') return;
-  if (data.kind === 'ready' && !record.ready && Number.isInteger(data.failed) && data.failed >= 0) {
+  if (data.kind === 'loaded' && !record.loaded) {
+    record.loaded = true;
+    if (record.highlight.length) record.frame.contentWindow?.postMessage({ kind:'highlight', ids:record.highlight }, '*');
+  } else if (data.kind === 'ready' && !record.ready && Number.isInteger(data.failed) && data.failed >= 0) {
     record.ready = true; record.holder.dataset.ready = 'true';
     if (!data.failed || !record.holder.isConnected) return;
     // 図の中は変えず、読めなかった件数を図の下に出す。次の描き直しで読み直す。
@@ -527,7 +540,7 @@ window.minutes = {
       updateListeners.signal.addEventListener('abort', cleanup, { once:true });
     }
     frames.clear();
-    const figureCounts = new Map();
+    const figureCounts = new Map(), figureUpdates = [];
     for (const { holder, figure } of figures) {
       const frame = document.createElement('iframe');
       // scriptを許すのは同梱の canvas.js を動かすため。SVGが書いたscriptは無害化と子のCSPが止める。
@@ -538,7 +551,9 @@ window.minutes = {
       const sectionID = section?.querySelector(':scope > :is(h1,h2,h3,h4,h5,h6)')?.id || '';
       const index = figureCounts.get(sectionID) || 0; figureCounts.set(sectionID, index + 1);
       const key = JSON.stringify(['svg', sectionID, index]); diagramKeys.add(key);
-      const record = { holder, frame, figure, seq:0, waiting:false, ready:false };
+      const record = { holder, frame, figure, seq:0, waiting:false, ready:false, loaded:false, highlight:[] };
+      figureUpdates.push({ name:figure.name, at:key,
+        element:holder, hash:figure.hash, notes:figure.notes, highlight:ids => highlightFigure(record, ids) });
       const cleanup = diagrams.attach(holder, key, { figure:{
         width:figure.size.width, height:figure.size.height, onClick:point => hitFigure(record, point) } });
       // iframeは置き場所を移すと読み込み直す。置き場所が決まってから中身を入れる。
@@ -556,7 +571,9 @@ window.minutes = {
     updateTOCPosition();
     refreshSearch();
     // 中断された途中のDOMは比較元にしない。直前に描画を完了した本文だけを保持する。
-    const plan = updates.plan(updateEntries(root));
+    // 更新の強調で図を突き合わせる名前。名前が重なる図と名前の無い図は、見出しのIDと節の中の順番で引く。
+    figureKeys(figureUpdates).forEach((figure, index) => { figureUpdates[index].figure = figure; });
+    const plan = updates.plan([...updateEntries(root), ...figureEntries(figureUpdates)]);
     // rebuildTOC はこの前に走るため、目次の印は描画のたびに今のリンクへ付け直す。
     highlightUpdates(plan.entries, plan.persist, heading => tocLinks[headings.indexOf(heading)]);
     // 全ての図と閲読位置を復元してから、操作列を最終の配置へ合わせる。

@@ -238,12 +238,12 @@ extension AppKitTests {
                 return seen;
                 """, arguments: ["markup": markup, "childCSP": childCSP], contentWorld: .page) as? [String])
         }
-        #expect(try await run(childCSP: true).sorted() == ["hit", "ready"])
+        #expect(try await run(childCSP: true).sorted() == ["hit", "loaded", "ready"])
         // 子のCSPを外すと、SVGが書いた同梱のスクリプトへの参照が読まれる。上の結果が子のCSPの働きだと分かる。
         // inlineのscript・イベント属性・入れ子は、継いだCSPとsandboxが止めたまま。
         let control = try await run(childCSP: false)
         #expect(control.contains("duplicate"))
-        #expect(control.filter { $0 != "duplicate" }.sorted() == ["hit", "ready"])
+        #expect(control.filter { $0 != "duplicate" }.sorted() == ["hit", "loaded", "ready"])
     }
 
     @Test func 図を選んで拡大縮小し広げてたたみ図の中のリンクを開く() async throws {
@@ -333,6 +333,83 @@ extension AppKitTests {
             try await wait { preview.document.renderedText.contains("本文その1") }
             try await ready(web, count: 1)
         }
+    }
+
+    // 付箋ごとの更新の強調。iframeの中は親から読めないので、画面の画素で確かめる。
+    @Test func 文が変わった付箋と新しい付箋だけを光らせ付箋の無い図だけ枠を光らせる() async throws {
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        func note(_ id: String, _ text: String, _ transform: String, _ extra: String = "") -> String {
+            ##"<g id="\##(id)" data-kind="note" data-area="keep" transform="\##(transform)">\##(extra)<rect width="180" height="180" fill="#ffffff" stroke="#888"/><text x="10" y="30">\##(text)</text></g>"##
+        }
+        // 図のCSSは文書の全体に効く。強調の層を消したり塗り替えたりしようとする規則を置いても、強調は出る。
+        let hostile = ##"<style>div{display:none !important;scale:0 !important;translate:300px 0 !important} rect{fill:#ffffff !important;transform:none} *{opacity:1}</style>"##
+        func fixture(_ marker: String, kpt: [String], plain: String, gone: String) -> String {
+            """
+            # 図の更新
+
+            \(marker)
+
+            ## KPT
+
+            <svg id="kpt" width="600" height="200" viewBox="0 0 600 200">\(hostile)<rect width="600" height="200" fill="#ffffff"/>\(kpt.joined())</svg>
+
+            ## ほか
+
+            <svg id="plain" width="200" height="100"><rect width="200" height="100" fill="\(plain)"/></svg>
+
+            ## 消す
+
+            <svg id="gone" width="200" height="100"><rect width="200" height="100" fill="#ffffff"/>\(gone)</svg>
+            """
+        }
+        let before = fixture("本文その1", kpt: [note("k1", "Keep", "translate(0,0)", "<title>題</title><style>.k1{fill:#ffffff}</style>"), note("p1", "Problem", "translate(200,0)")],
+                             plain: "#d9efc9", gone: ##"<g id="x1" data-kind="note"><rect width="100" height="100" fill="#ffffff"/><text y="20">消す</text></g>"##)
+        // k1は位置と、付箋の中のCSSと題だけ、p1は文が変わり、t1は傾けて足す。付箋の無い図は色だけ、最後の付箋は消す。
+        let after = fixture("本文その2", kpt: [note("t1", "Try", "translate(10,10) rotate(8)"), note("p1", "Problem!", "translate(200,0)"),
+                                              note("k1", "Keep", "translate(400,0)", "<title>別の題</title><style>.k1{fill:#fefefe}</style>")],
+                            plain: "#fbd9cf", gone: ##"<rect width="100" height="100" fill="#ffffff"/>"##)
+        let (preview, window, file) = try await open(before, in: root, width: 900)
+        defer { preview.stop(); window.orderOut(nil) }
+        let web = preview.document.webView
+        try await wait { preview.document.renderedText.contains("本文その1") }
+        try await ready(web, count: 3)
+        // 図の中の座標の画素の緑。淡い紫を重ねると下がる。白は255。
+        func green(_ points: [(Double, Double)]) async throws -> [Int] {
+            let value = try await web.evaluateJavaScript("""
+                (() => { const r = document.querySelector('.svg-canvas iframe').getBoundingClientRect(); return [r.left, r.top, r.width / 600]; })()
+                """)
+            let rect = try #require(value as? [Double])
+            let image = try await web.takeSnapshot(configuration: WKSnapshotConfiguration())
+            let data = try #require(image.tiffRepresentation)
+            let bitmap = try #require(NSBitmapImageRep(data: data))
+            let ratio: Double = Double(bitmap.pixelsWide) / Double(web.bounds.width)
+            var result: [Int] = []
+            for (x, y) in points {
+                let px = Int((rect[0] + x * rect[2]) * ratio), py = Int((rect[1] + y * rect[2]) * ratio)
+                let color = try #require(bitmap.colorAt(x: px, y: py)?.usingColorSpace(.sRGB))
+                result.append(Int(color.greenComponent * 255))
+            }
+            return result
+        }
+        // AIへ依頼を送った時点を基準にする。
+        preview.markUpdateBaseline()
+        try Data(after.utf8).write(to: file, options: .atomic)
+        try await wait { preview.document.renderedText.contains("本文その2") }
+        try await ready(web, count: 3)
+        // 測る点: t1の中、p1の中、位置だけ動いたk1の中、付箋の外。
+        let points = [(100.0, 120.0), (290.0, 150.0), (490.0, 150.0), (590.0, 195.0)]
+        try await wait { let g = try await green(points); return g[0] < 240 && g[1] < 240 }
+        let lit = try await green(points)
+        #expect(lit[2] > 250 && lit[3] > 250, "\(lit)")
+        // 付箋の無い図だけ、図の枠を光らせる。最後の付箋を消した図は光らせない。
+        #expect(try await web.evaluateJavaScript("[...document.querySelectorAll('.svg-canvas')].map(f => f.classList.contains('updated-block')).join(',')") as? String == "false,true,false")
+        // 目次は、付箋の変わった節と、枠の光った節に印を付ける。最初の見出しは直下の本文も変えている。
+        let marks = try await web.evaluateJavaScript("[...document.querySelectorAll('#toc nav a')].map(a => a.textContent + ':' + (a.dataset.updated || '')).join(',')") as? String
+        #expect(marks == "図の更新:self,KPT:self,ほか:self,消す:", "\(marks ?? "")")
+        // 次の依頼で基準を置き直すと、iframeの中の強調も消える。
+        preview.markUpdateBaseline()
+        try await wait { let g = try await green(points); return g[0] > 250 && g[1] > 250 }
+        #expect(try await web.evaluateJavaScript("document.querySelector('.svg-canvas.updated-block') === null") as? Bool == true)
     }
 }
 }

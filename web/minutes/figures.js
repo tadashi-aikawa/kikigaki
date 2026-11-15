@@ -1,6 +1,6 @@
 import createDOMPurify from 'dompurify';
 import { imageURL } from './renderer.js';
-import { figureSize, figureHash, safeCSSValue } from './figure-rules.js';
+import { figureSize, figureHash, safeCSSValue, validName, noteText } from './figure-rules.js';
 
 // 議事録のSVGの図を、切り離したiframeで描くための準備。親ページで動く。
 // 設計時の決定は docs/records/svg-canvas-design.md、現行仕様は docs/svg-canvas.md。
@@ -128,10 +128,43 @@ export function prepareFigure(source, context) {
     }
   }
   return {
-    markup:svg.outerHTML, links, localImages,
+    markup:svg.outerHTML, links, localImages, notes:figureNotes(svg),
     size:figureSize({ width:svg.getAttribute('width'), height:svg.getAttribute('height'), viewBox:svg.getAttribute('viewBox') }),
     name:svg.getAttribute('id') || '', hash:figureHash(source),
   };
+}
+
+// 指せる要素 (付箋)。id と data-kind を持つSVGの要素で、名前が図の中で重ならないもの。
+// 入れ子なら内側を採る。無害化した後のDOMから読むので、iframeの中の要素と食い違わない。
+function figureNotes(svg) {
+  const counts = new Map();
+  for (const element of [svg, ...svg.querySelectorAll('[id]')]) {
+    const id = element.getAttribute('id');
+    if (id !== null) counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  const candidates = new Set([...svg.querySelectorAll('[data-kind]')].filter(element =>
+    element.namespaceURI === SVG && validName(element.getAttribute('id'), 64)
+    && counts.get(element.getAttribute('id')) === 1 && validName(element.getAttribute('data-kind'), 32)));
+  const outer = new Set();
+  for (const element of candidates) {
+    for (let parent = element.parentElement; parent && parent !== svg; parent = parent.parentElement) {
+      if (candidates.has(parent)) outer.add(parent);
+    }
+  }
+  return [...candidates].filter(element => !outer.has(element)).map(element => ({
+    id:element.getAttribute('id'), kind:element.getAttribute('data-kind'), text:noteText(shownText(element)),
+  }));
+}
+// 付箋の中の、画面に出る文字。CSSの本文や題・説明は文ではないので、変えても光らせない。
+const hiddenText = new Set(['style', 'script', 'title', 'desc', 'metadata']);
+function shownText(element) {
+  let text = '';
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    acceptNode:node => node.nodeType === Node.ELEMENT_NODE && hiddenText.has(node.localName)
+      ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  while (walker.nextNode()) if (walker.currentNode.nodeType === Node.TEXT_NODE) text += walker.currentNode.data;
+  return text;
 }
 
 // iframeへ入れる文書。SVGが書いたスクリプトは、nonceを持たないので子のCSPが止める。

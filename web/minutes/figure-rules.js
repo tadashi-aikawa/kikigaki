@@ -21,6 +21,27 @@ export function figureSize({ width, height, viewBox }) {
   return { width:300, height:150 };
 }
 
+// 図と付箋の名前・種類として使えるか。長さはUTF-8のバイト数で数え、空白と制御文字を含まない。
+// 数え方をアプリの検証と揃えるため、文字数ではなくバイト数にする。
+const encoder = new TextEncoder();
+export function validName(value, max) {
+  if (typeof value !== 'string' || /[\s\p{Cc}]/u.test(value)) return false;
+  const bytes = encoder.encode(value).length;
+  return bytes >= 1 && bytes <= max;
+}
+// 付箋の文。空白を1つに畳む。更新の強調はこの文で、文が変わった付箋を見分ける。
+export function noteText(text) { return text.replace(/\s+/g, ' ').trim(); }
+
+// 更新の強調で図を突き合わせる名前。figures は描く順の { name, at } で、at は見出しのIDと節の中の順番。
+// 議事録の中で重ならない名前の図は名前で引く。重なる名前の図と名前の無い図は at で引き、名前も添える。
+// 名前を添えるので、重なったままの名前を別の名前へ変えたときも、付箋は新しいものとして光る。
+export function figureKeys(figures) {
+  const counts = new Map();
+  for (const { name } of figures) if (name) counts.set(name, (counts.get(name) || 0) + 1);
+  return figures.map(({ name, at }) => counts.get(name) === 1
+    ? JSON.stringify(['name', name]) : JSON.stringify(['at', at, name]));
+}
+
 // 図の原文が同じかを比べる短い印。暗号の強さは要らない。
 export function figureHash(source) {
   let hash = 0x811c9dc5;
