@@ -211,6 +211,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 - [AIを会話の行として並べる表示の結合検証](docs/records/ai-timeline-verification.md)
 - [AI依頼の進行表示の検証記録](docs/records/ai-progress-verification.md)
 - [議論のボードの検証記録と受入手順](docs/records/board-verification.md)
+- [SVGキャンバスの要件と全体設計](docs/records/svg-canvas-design.md)
 
 ## コミットメッセージ
 
