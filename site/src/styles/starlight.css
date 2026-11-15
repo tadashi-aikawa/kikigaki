@@ -204,6 +204,15 @@
   background: var(--sl-color-gray-6);
 }
 
+/* 設定リファレンスのキー名の下に添える対応バージョン。
+   列を足すと狭い表がさらに狭くなるので、キーの列の中に小さく置く */
+.sl-markdown-content .since {
+  display: block;
+  color: var(--sl-color-gray-3);
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
 /* 本文の画面キャプチャと動画と図: 背景の色が本文と同じなので枠で区切る。
    素材は2倍で撮っているので、幅をその半分にすると文字が本文と同じくらいになる */
 .sl-markdown-content :is(img[src*="/captures/"], img[src*="/diagrams/"], video[src*="/demos/"]) {

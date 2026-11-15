@@ -16,6 +16,8 @@ description: config.toml に書ける設定と、画面で選ぶもの
     - 反映: AIエージェントの設定と `autoSendPhrases` は会議の開始時に決まります。次の会議から効きます
 - 書式や値が正しくないと、読み直しを止めて理由を表示します
 - 開始シートや画面で決めた値は、設定ファイルへ書き戻しません
+- 表のキー名の下の「v0.23.0 から」は、そのキーをこのページの書き方で使える最初のバージョンです
+    - 例: `alwaysPrompt` は、v0.14.0 までは `prompt` という名前でした。v0.14.0 で `alwaysPrompt` と書いても効きません
 
 ## エディタでキーを補完する
 
@@ -98,14 +100,14 @@ autoSendPhrases = ["アバンティ", "アヴァンティ"]
 
 | キー | 既定 | 説明 |
 | --- | --- | --- |
-| `outputDir` | `~/Documents/KIKIGAKI` | Markdownと録音WAVの保存先。絶対パスか `~` から始まるパスで書く。相対パスと空文字は設定エラー。`/` で区切った要素がちょうど `..` のときも設定エラー。要素がちょうど `.` のときと、重なった `/`、末尾の `/` は取り除いて読む。`a..b` や `...` のように名前に含まれるドットはそのまま使える |
-| `saveRecording` | `false` | `true` で、録音WAVをMarkdownと同じ名前で並べて残す。停止後に発言ごとの音声を聞ける |
-| `measureAudioLevels` | `false` | `true` で、発話ごとの音量と小音量の候補を画面に出し、`.levels.json` とMarkdown末尾の表に残す。音量を調べるための表示。次の会議から効く |
-| `participantsKey` | `participants` | 話者名の候補に「参加者」として出す名前を、議事録の先頭のどのキーから読むか。`attendees` などに変えられる。空白・`:`・`#`・`,`・引用符・括弧を含む名前、空文字、`-` で始まる名前は設定エラー |
-| `autoSendPhrases` | `["アバンティ", "アヴァンティ"]` | プロファイルで合図を指定しない場合に使う共通の合図。`[]` で無効。文字列の配列で最大20個、1個64文字まで。空白や記号を除き、かなを揃えた後の空と重複は設定エラー。次の会議から効く |
-| `manualSendHotkey` | 未割り当て | ほかのアプリを使っている間も、会議の手動宛先へ下書きを送るキー。`"cmd+shift+space"` のように `+` でつなぐ。修飾は `ctrl` `alt` `shift` `cmd`。`ctrl` `alt` `cmd` のどれかが要り、F1〜F20だけは単独で使える。キーは英数字・`space`・`enter`・`tab`・`escape`・`f1`〜`f20`。空文字は未割り当て。「設定を再読込」ですぐ効く。使い方は [グローバルキーで送る](../ai-participant/#グローバルキーで送る) |
-| `screenCaptureHotkey` | 未割り当て | ほかのアプリを使っている間も、録音中・一時停止中の画面の記録を止める・始めるキー。書き方は `manualSendHotkey` と同じ。`manualSendHotkey` と同じキーは設定エラー。「設定を再読込」ですぐ効く。使い方は [キーで止める・始める](../recording/#キーで止める始める) |
-| `autoSaveIntervalSeconds` | `60` | 録音中に、会議のMarkdownへ途中の記録を書く間隔 (秒)。10〜3600の整数で書く。範囲外は設定エラー。次の会議から効く。詳細は [録音中の途中保存](../recording/#録音中の途中保存) |
+| `outputDir`<span class="since">v0.1.0 から</span> | `~/Documents/KIKIGAKI` | Markdownと録音WAVの保存先。絶対パスか `~` から始まるパスで書く。相対パスと空文字は設定エラー。`/` で区切った要素がちょうど `..` のときも設定エラー。要素がちょうど `.` のときと、重なった `/`、末尾の `/` は取り除いて読む。`a..b` や `...` のように名前に含まれるドットはそのまま使える |
+| `saveRecording`<span class="since">v0.1.0 から</span> | `false` | `true` で、録音WAVをMarkdownと同じ名前で並べて残す。停止後に発言ごとの音声を聞ける |
+| `measureAudioLevels`<span class="since">v0.6.0 から</span> | `false` | `true` で、発話ごとの音量と小音量の候補を画面に出し、`.levels.json` とMarkdown末尾の表に残す。音量を調べるための表示。次の会議から効く |
+| `participantsKey`<span class="since">v0.14.0 から</span> | `participants` | 話者名の候補に「参加者」として出す名前を、議事録の先頭のどのキーから読むか。`attendees` などに変えられる。空白・`:`・`#`・`,`・引用符・括弧を含む名前、空文字、`-` で始まる名前は設定エラー |
+| `autoSendPhrases`<span class="since">v0.15.0 から</span> | `["アバンティ", "アヴァンティ"]` | プロファイルで合図を指定しない場合に使う共通の合図。`[]` で無効。文字列の配列で最大20個、1個64文字まで。空白や記号を除き、かなを揃えた後の空と重複は設定エラー。次の会議から効く |
+| `manualSendHotkey`<span class="since">v0.16.0 から</span> | 未割り当て | ほかのアプリを使っている間も、会議の手動宛先へ下書きを送るキー。`"cmd+shift+space"` のように `+` でつなぐ。修飾は `ctrl` `alt` `shift` `cmd`。`ctrl` `alt` `cmd` のどれかが要り、F1〜F20だけは単独で使える。キーは英数字・`space`・`enter`・`tab`・`escape`・`f1`〜`f20`。空文字は未割り当て。「設定を再読込」ですぐ効く。使い方は [グローバルキーで送る](../ai-participant/#グローバルキーで送る) |
+| `screenCaptureHotkey`<span class="since">v0.23.0 から</span> | 未割り当て | ほかのアプリを使っている間も、録音中・一時停止中の画面の記録を止める・始めるキー。書き方は `manualSendHotkey` と同じ。`manualSendHotkey` と同じキーは設定エラー。「設定を再読込」ですぐ効く。使い方は [キーで止める・始める](../recording/#キーで止める始める) |
+| `autoSaveIntervalSeconds`<span class="since">v0.18.0 から</span> | `60` | 録音中に、会議のMarkdownへ途中の記録を書く間隔 (秒)。10〜3600の整数で書く。範囲外は設定エラー。次の会議から効く。詳細は [録音中の途中保存](../recording/#録音中の途中保存) |
 
 - `measureAudioLevels` は、小さな声を除外する設定とは別です
 - `outputDir` は、AIエージェントの参加でCodexに書き込みを許可する場所でもあります
@@ -119,8 +121,8 @@ autoSendPhrases = ["アバンティ", "アヴァンティ"]
 
 | キー | 既定 | 説明 |
 | --- | --- | --- |
-| `name` | なし | 話者名。空と重複は設定エラー |
-| `avatar` | なし | 省略可。画像のローカルパスか、HTTP・HTTPSの画像URL。`~/` から始まるパスも使える |
+| `name`<span class="since">v0.1.0 から</span> | なし | 話者名。空と重複は設定エラー |
+| `avatar`<span class="since">v0.1.0 から</span> | なし | 省略可。画像のローカルパスか、HTTP・HTTPSの画像URL。`~/` から始まるパスも使える |
 
 ```toml
 [[speakers]]
@@ -148,26 +150,26 @@ avatar = "~/Pictures/avatars/tanaka.png"
 
 | キー | 既定 | 説明 |
 | --- | --- | --- |
-| `name` | `address` から決まる名前 | 宛先の表示名。重複は設定エラー。自分で書く場合は64バイトまで |
-| `cli` | `codex` | `codex` か `claude` |
-| `command` | 自動で探す | CLIの絶対パス。見つからないときだけ書く |
-| `herdrCommand` | 自動で探す | herdrの絶対パス。全宛先で共通。2つ目以降は省略でき、先頭の値を引き継ぐ。先頭と違う値を書くと設定エラー |
-| `model` | CLIの既定 | モデル名 |
-| `effort` | CLIの既定 | 推論の強さ。値は下記 |
-| `address` | `迅雷へ` | 宛名。末尾の「へ」を除いた部分が会議でのAIエージェントの名前になる |
-| `avatar` | 紫のイニシャル | AIエージェントの返事の行に出す画像。`[[speakers]]` と同じくローカルパスかHTTP・HTTPSのURL |
-| `cwd` | `~/Library/Application Support/KIKIGAKI/ai-work/` | AIエージェントを起動する作業ディレクトリ。絶対パスか `~/` から始まるパスで、存在するディレクトリを書く |
-| `extraArgs` | 空 | CLIへの追加の引数。使える指定は下記 |
+| `name`<span class="since">v0.4.0 から</span> | `address` から決まる名前 | 宛先の表示名。重複は設定エラー。自分で書く場合は64バイトまで |
+| `cli`<span class="since">v0.4.0 から</span> | `codex` | `codex` か `claude` |
+| `command`<span class="since">v0.4.0 から</span> | 自動で探す | CLIの絶対パス。見つからないときだけ書く |
+| `herdrCommand`<span class="since">v0.4.0 から</span> | 自動で探す | herdrの絶対パス。全宛先で共通。2つ目以降は省略でき、先頭の値を引き継ぐ。先頭と違う値を書くと設定エラー |
+| `model`<span class="since">v0.4.0 から</span> | CLIの既定 | モデル名 |
+| `effort`<span class="since">v0.4.0 から</span> | CLIの既定 | 推論の強さ。値は下記 |
+| `address`<span class="since">v0.4.0 から</span> | `迅雷へ` | 宛名。末尾の「へ」を除いた部分が会議でのAIエージェントの名前になる |
+| `avatar`<span class="since">v0.4.0 から</span> | 紫のイニシャル | AIエージェントの返事の行に出す画像。`[[speakers]]` と同じくローカルパスかHTTP・HTTPSのURL |
+| `cwd`<span class="since">v0.4.0 から</span> | `~/Library/Application Support/KIKIGAKI/ai-work/` | AIエージェントを起動する作業ディレクトリ。絶対パスか `~/` から始まるパスで、存在するディレクトリを書く |
+| `extraArgs`<span class="since">v0.4.0 から</span> | 空 | CLIへの追加の引数。使える指定は下記 |
 
 ### 送信
 
 | キー | 既定 | 説明 |
 | --- | --- | --- |
-| `alwaysPrompt` | 空 | すべての送信の末尾に「追加プロンプト」として付く補助指示。32 KiBまで |
-| `allowWork` | `true` | 送信シートの「作業を許可する」の初期値 |
-| `identifySpeakers` | `false` | `true` で、会話を送るときにAIへ話者名の割当も頼む。名乗りなどの根拠がある名前だけを付ける |
-| `notifySound` | 人が待つ返事だけ | この宛先から返事が届いたときに通知音を鳴らす。省略時は、手動の依頼への返事と確認質問で鳴らし、自動送信への通常の返事では鳴らさない。`true` か `false` を書くと、手動・自動送信を問わずその値に従う。詳しくは [返事が届いたら音と通知で知らせる](../ai-participant/#返事が届いたら音と通知で知らせる) |
-| `notifyBanner` | 人が待つ返事だけ | この宛先から返事が届いたときにOSの通知を出す。本文は返事の冒頭。省略時と書いたときの効き方は `notifySound` と同じ |
+| `alwaysPrompt`<span class="since">v0.15.0 から</span> | 空 | すべての送信の末尾に「追加プロンプト」として付く補助指示。32 KiBまで |
+| `allowWork`<span class="since">v0.4.0 から</span> | `true` | 送信シートの「作業を許可する」の初期値 |
+| `identifySpeakers`<span class="since">v0.14.0 から</span> | `false` | `true` で、会話を送るときにAIへ話者名の割当も頼む。名乗りなどの根拠がある名前だけを付ける |
+| `notifySound`<span class="since">v0.4.0 から</span> | 人が待つ返事だけ | この宛先から返事が届いたときに通知音を鳴らす。省略時は、手動の依頼への返事と確認質問で鳴らし、自動送信への通常の返事では鳴らさない。`true` か `false` を書くと、手動・自動送信を問わずその値に従う。詳しくは [返事が届いたら音と通知で知らせる](../ai-participant/#返事が届いたら音と通知で知らせる) |
+| `notifyBanner`<span class="since">v0.16.0 から</span> | 人が待つ返事だけ | この宛先から返事が届いたときにOSの通知を出す。本文は返事の冒頭。省略時と書いたときの効き方は `notifySound` と同じ |
 
 ### 送信キー `[aiSubmitKeys]`
 
@@ -182,8 +184,8 @@ claude = ["ctrl+x", "ctrl+s"]
 
 | キー | 既定 | 説明 |
 | --- | --- | --- |
-| `codex` | Enterだけで送信 | Codexの送信キー。KIKIGAKIは本文の後にEnterを送り、続けてこのキーを送る |
-| `claude` | Enterだけで送信 | Claude Codeの送信キー。効き方は `codex` と同じ |
+| `codex`<span class="since">v0.23.0 から</span> | Enterだけで送信 | Codexの送信キー。KIKIGAKIは本文の後にEnterを送り、続けてこのキーを送る |
+| `claude`<span class="since">v0.23.0 から</span> | Enterだけで送信 | Claude Codeの送信キー。効き方は `codex` と同じ |
 
 - 1打鍵を1つの文字列で書き、2打鍵の組は `["ctrl+x", "ctrl+s"]` のように並べます。4打鍵まで
 - 修飾キーは `ctrl` `shift` `alt` `cmd` を `+` でつなぎます。キーは `enter` `space` `tab` `esc` `backspace` `up` `down` `left` `right` `f1`〜`f20`、または英数字・記号の1文字です
@@ -198,23 +200,23 @@ claude = ["ctrl+x", "ctrl+s"]
 
 | キー | 既定 | 説明 |
 | --- | --- | --- |
-| `autoStart` | `false` | `true` で、録音開始シートの自動送信の宛先の既定にする。全宛先で1つまで。`board` の無い宛先では `initialPrompt` が必要 |
-| `initialPrompt` | 空 | 手動・自動実行シートと録音開始シートのプロンプトの初期値。32 KiBまで |
-| `autoIntervalMinutes` | `3` | 自動送信の間隔。1〜120分。シートの選択肢に無い値も、その値で選べるようになる |
+| `autoStart`<span class="since">v0.4.0 から</span> | `false` | `true` で、録音開始シートの自動送信の宛先の既定にする。全宛先で1つまで。`board` の無い宛先では `initialPrompt` が必要 |
+| `initialPrompt`<span class="since">v0.15.0 から</span> | 空 | 手動・自動実行シートと録音開始シートのプロンプトの初期値。32 KiBまで |
+| `autoIntervalMinutes`<span class="since">v0.4.0 から</span> | `3` | 自動送信の間隔。1〜120分。シートの選択肢に無い値も、その値で選べるようになる |
 
 ### 声の合図
 
 | キー | 既定 | 説明 |
 | --- | --- | --- |
-| `autoSendPhrases` | 共通の合図を使う | このプロファイルが手動宛先の間に使う合図。指定すると共通の合図を置き換える。`[]` で無効。最大20個、1個64文字まで。文字列以外、かなや空白・記号を揃えた後の空と重複は設定エラー |
+| `autoSendPhrases`<span class="since">v0.16.0 から</span> | 共通の合図を使う | このプロファイルが手動宛先の間に使う合図。指定すると共通の合図を置き換える。`[]` で無効。最大20個、1個64文字まで。文字列以外、かなや空白・記号を揃えた後の空と重複は設定エラー |
 
 ### ボード
 
 | キー | 既定 | 説明 |
 | --- | --- | --- |
-| `board` | なし | ボードとして自動送信で更新する見出し。`## ボード` のような1行のMarkdown見出し。複数の宛先で同じ見出しを使える |
-| `boardPrompt` | 内蔵 | ボードのプロンプトを全文差し替える。`board` があるときだけ書ける |
-| `boardLocation` | なし | 議事録のパスが無いときの書き先をAIエージェントに伝える。`board` があるときだけ書ける。`${...}` や `~` はAIエージェントが解釈する |
+| `board`<span class="since">v0.9.0 から</span> | なし | ボードとして自動送信で更新する見出し。`## ボード` のような1行のMarkdown見出し。複数の宛先で同じ見出しを使える |
+| `boardPrompt`<span class="since">v0.9.0 から</span> | 内蔵 | ボードのプロンプトを全文差し替える。`board` があるときだけ書ける |
+| `boardLocation`<span class="since">v0.9.0 から</span> | なし | 議事録のパスが無いときの書き先をAIエージェントに伝える。`board` があるときだけ書ける。`${...}` や `~` はAIエージェントが解釈する |
 
 ボードの使い方は [議事録とボード](../minutes-and-board/) を参照してください。
 
