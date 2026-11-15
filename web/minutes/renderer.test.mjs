@@ -8,6 +8,7 @@ import { fitColumns } from './tables.js';
 import { boardLinks, boardNodeID, isBoardHeading } from './board.js';
 import { zoomDiagram, diagramOverflow, fitDiagram } from './diagrams.js';
 import { minimapTopicID, minimapTextColor, minimapFontSize, minimapScale } from './minimap.js';
+import { figureSize, safeCSSValue } from './figure-rules.js';
 test('典型的なボードとIDなしの旧ボードは幅33%・高さ27%のまま', () => {
   const viewport = { width:900, height:850 }, fontSize = minimapFontSize([42, 42, 62]);
   assert.equal(minimapScale({ width:900, height:600 }, viewport, fontSize), 0.33);
@@ -384,4 +385,46 @@ test('ラベルの形でない行は塗らない', () => {
     '- 理由： 全角', '- `swift test`: コード', '- 推奨はA。理由: 文', '理由: 地の文', '- **理**由: 途中まで太字',
     '- *理由*: 斜体', '- [理由](https://example.com): リンク', '- **太字の文** と続く'])
     assert.ok(!md.render(source).includes('bullet-label'), source);
+});
+test('幅へ収めた大きな図は、倍率の下限より小さいところから操作しても跳ばない', () => {
+  // SVGの図は下限を掛けずに収める。Mermaidとボードは既定の下限25%のまま。
+  const state = { scale:1, x:0, y:0 };
+  fitDiagram(state, { x:0, y:0, width:4000, height:1000 }, { width:600, height:400 }, 4, 0);
+  assert.equal(state.scale, 0.15);
+  fitDiagram(state, { x:0, y:0, width:4000, height:1000 }, { width:600, height:400 });
+  assert.equal(state.scale, 0.25);
+  const small = { scale:0.15, x:0, y:0 };
+  zoomDiagram(small, 0.16, { x:0, y:0 }); assert.equal(small.scale, 0.16);
+  zoomDiagram(small, 0.1, { x:0, y:0 }); assert.equal(small.scale, 0.16);
+  zoomDiagram(small, 0.3, { x:0, y:0 }); assert.equal(small.scale, 0.3);
+  zoomDiagram(small, 0.1, { x:0, y:0 }); assert.equal(small.scale, 0.25);
+});
+test('SVGの図の表示する大きさは width と height を先に採り、欠けた分を viewBox の比で補う', () => {
+  // 表示する大きさと中の座標は別。width="200" と viewBox の図は、従来の画像と同じ幅200で出す。
+  assert.deepEqual(figureSize({ width:'200', height:'100', viewBox:'0 0 1000 500' }), { width:200, height:100 });
+  assert.deepEqual(figureSize({ width:'240px', height:'70', viewBox:null }), { width:240, height:70 });
+  assert.deepEqual(figureSize({ width:'200', height:null, viewBox:'0 0 1000 400' }), { width:200, height:80 });
+  assert.deepEqual(figureSize({ width:null, height:'80', viewBox:'0,0,1000,400' }), { width:200, height:80 });
+  assert.deepEqual(figureSize({ width:null, height:null, viewBox:'0 0 1000 440' }), { width:1000, height:440 });
+  assert.deepEqual(figureSize({ width:null, height:null, viewBox:null }), { width:300, height:150 });
+  // 割合・0以下・数でない値は、無いものとして扱う。
+  for (const width of ['100%', '0', '-5', 'auto', '12em', ''])
+    assert.deepEqual(figureSize({ width, height:'50', viewBox:'0 0 400 100' }), { width:200, height:50 }, width);
+  for (const viewBox of ['0 0 0 100', '0 0 100', '0 0 a 100', '0 0 -10 100'])
+    assert.deepEqual(figureSize({ width:null, height:null, viewBox }), { width:300, height:150 }, viewBox);
+});
+test('SVGの図のCSSの値は、同じ図の中を指す url() だけを残す', () => {
+  const base = 'minutes-app://bundle/index.html';
+  assert.equal(safeCSSValue('fill', 'url(#g)', base), 'url("#g")');
+  assert.equal(safeCSSValue('fill', "url('#g') red", base), 'url("#g") red');
+  // CSSOMが親ページのURLへ解決して返した参照は、断片だけへ戻す。
+  assert.equal(safeCSSValue('filter', 'url("minutes-app://bundle/index.html#shadow")', base), 'url("#shadow")');
+  assert.equal(safeCSSValue('fill', 'rgb(1, 2, 3)', base), 'rgb(1, 2, 3)');
+  for (const value of ['url(https://example.com/a.png)', 'url("minutes-image://ctx/?path=/etc/hosts.png")',
+    'url(minutes-app://bundle/other.html#g)', 'url(a.svg#g)', 'url(#g) url(https://example.com/b.png)',
+    'image-set("https://example.com/a.png" 1x)', 'var(--picture)', 'cross-fade(url(#a), url(#b))',
+    'u\\72l(https://example.com/a.png)', 'attr(data-url)', 'url(#g'])
+    assert.equal(safeCSSValue('background-image', value, base), null, value);
+  // 変数の宣言は、中身にかかわらず外す。
+  assert.equal(safeCSSValue('--picture', '"https://example.com/a.png"', base), null);
 });

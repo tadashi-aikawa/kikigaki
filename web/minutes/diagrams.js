@@ -3,7 +3,8 @@ import { createMinimap, minimapScale } from './minimap.js';
 // pageZoomとは独立した、図ごとの表示倍率。座標はページのCSS pxで保持する。
 export const MIN_DIAGRAM_SCALE = 0.25, MAX_DIAGRAM_SCALE = 4;
 export function zoomDiagram(state, scale, point) {
-  const next = Math.max(MIN_DIAGRAM_SCALE, Math.min(MAX_DIAGRAM_SCALE, scale));
+  // 幅へ収めた大きなSVGの図は、下限より小さい倍率から始まる。そこからの操作で下限へ跳ばさない。
+  const next = Math.max(Math.min(MIN_DIAGRAM_SCALE, state.scale), Math.min(MAX_DIAGRAM_SCALE, scale));
   if (!Number.isFinite(next)) return;
   const ratio = next / state.scale;
   state.x = point.x - (point.x - state.x) * ratio;
@@ -18,9 +19,9 @@ export function diagramOverflow(bounds, viewport) {
     top:bounds.y < -1, bottom:bounds.y + bounds.height > viewport.height + 1,
   };
 }
-export function fitDiagram(state, bounds, viewport, maximum = MAX_DIAGRAM_SCALE) {
+export function fitDiagram(state, bounds, viewport, maximum = MAX_DIAGRAM_SCALE, minimum = MIN_DIAGRAM_SCALE) {
   if (bounds.width <= 0 || bounds.height <= 0 || viewport.width <= 0 || viewport.height <= 0) return;
-  state.scale = Math.max(MIN_DIAGRAM_SCALE, Math.min(maximum,
+  state.scale = Math.max(minimum, Math.min(maximum,
     viewport.width / bounds.width, viewport.height / bounds.height));
   state.x = (viewport.width - bounds.width * state.scale) / 2 - bounds.x * state.scale;
   state.y = (viewport.height - bounds.height * state.scale) / 2 - bounds.y * state.scale;
@@ -36,7 +37,10 @@ export class DiagramInteractions {
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape' && [...this.states.values()].some(state => state.selected)) {
         event.preventDefault();
-        if (this.selected?.state.canvas) this.selected.clearFocus(); else this.deselect();
+        // 1回につき1つ戻る。広げた図は、まずたたむ。
+        if (this.selected?.state.canvas) this.selected.clearFocus();
+        else if (this.selected?.state.expanded) this.selected.setExpanded(false);
+        else this.deselect();
       }
     });
     addEventListener('scroll', () => this.positionControls(), { passive:true });
@@ -55,7 +59,8 @@ export class DiagramInteractions {
     const width = controls.getBoundingClientRect().width;
     controls.style.left = frame.right - width - gap + 'px';
     const toc = document.getElementById('toc');
-    if (!toc || toc.hidden) return;
+    // 広げた図は目次の上に重なる。目次を避けない。
+    if (!toc || toc.hidden || this.selected.state.expanded) return;
     const menu = toc.getBoundingClientRect(), box = controls.getBoundingClientRect();
     if (box.top < menu.bottom && box.bottom > menu.top && box.right > menu.left && box.left < menu.right) {
       const left = menu.left - width - gap;
@@ -64,7 +69,10 @@ export class DiagramInteractions {
       else controls.style.top = menu.bottom + gap + 'px';
     }
   }
-  reset() { this.selected?.cancel(); this.selected = null; this.states.clear(); }
+  reset() {
+    this.selected?.cancel(); this.selected = null; this.states.clear();
+    document.body.classList.remove('diagram-expanded-mode');
+  }
   revealSearch(node) {
     if (this.selected?.state.canvas && this.selected.holder.contains(node)) {
       // 同じノード内の次の一致も、見出し移動の2回目のクリックにはしない。
@@ -72,11 +80,14 @@ export class DiagramInteractions {
     }
   }
   paintSearch(matches, current) { this.selected?.paintSearch?.(matches, current); }
+  // 広げた図をたたむ。図の中のリンクから本文の見出しへ移るときに使う。
+  collapse() { if (this.selected?.state.expanded) this.selected.setExpanded(false); }
   // 再描画中に古いDOMを操作しない。選択キーと状態は次のDOMへ引き継ぐ。
   detach() { this.selected?.remember?.(); this.selected?.cancel(); this.selected = null; }
   deselect() {
     if (this.selected?.state.canvas) return;
     if (this.selected) {
+      if (this.selected.state.expanded) this.selected.setExpanded(false);
       this.selected.holder.classList.remove('diagram-selected', 'diagram-dragging');
       // Escではクリックによるフォーカス移動が起きない。倍率ボタンやカードも含めて抜ける。
       if (this.selected.holder.contains(document.activeElement)) document.activeElement.blur();
@@ -87,22 +98,41 @@ export class DiagramInteractions {
     for (const state of this.states.values()) state.selected = false;
     this.selected = null;
   }
-  attach(holder, key, { canvas = false, navigate = () => {}, pageZoom = 1 } = {}) {
+  // figure は切り離したiframeで描くSVGの図。{ width, height, onClick } を渡す。
+  // 中身がSVG要素でもiframeでも、寸法は stage の最初の子から引く。
+  attach(holder, key, { canvas = false, navigate = () => {}, pageZoom = 1, figure = null } = {}) {
     const state = this.states.get(key) || { scale:1, x:0, y:0, window:canvas, selected:canvas, mode:'fit', focusID:null };
     state.canvas = canvas;
     this.states.set(key, state);
     holder.dataset.diagramKey = key;
     holder.tabIndex = 0;
-    holder.setAttribute('aria-label', canvas ? 'ボード。拡大縮小・移動。ノードをクリックでフォーカス、Escで解除' : 'Mermaid図。クリックで選択し、拡大縮小・移動。Escで解除');
+    holder.setAttribute('aria-label', canvas ? 'ボード。拡大縮小・移動。ノードをクリックでフォーカス、Escで解除'
+      : figure ? 'SVGの図。クリックで選択し、拡大縮小・移動。Escで解除' : 'Mermaid図。クリックで選択し、拡大縮小・移動。Escで解除');
     holder.classList.toggle('board-canvas', canvas);
     const stage = document.createElement('div'); stage.className = 'diagram-stage';
     stage.append(...holder.childNodes); holder.append(stage);
+    const svg = stage.querySelector('svg'), content = svg || stage.firstElementChild;
     // 新しいSVGの自然寸法を、transformを掛ける前に測る。高さはDOMごとの値で、
     // 再描画へ持ち越さない。選択時はこの高さを使い、周囲の配置を変えない。
     // 折り畳まれた節ではDOMの高さが0になる。自然幅はviewBox幅と同じなので、
     // その場合はSVGの自然高を使い、節を開いたあとも図を潰さない。
-    let height = holder.getBoundingClientRect().height || stage.querySelector('svg').viewBox.baseVal.height;
-    const svg = stage.querySelector('svg');
+    let height = holder.getBoundingClientRect().height || (figure ? figure.height : svg.viewBox.baseVal.height);
+    // SVGの図は、操作するまで従来の画像と同じくペイン幅へ収める。小さい図は引き伸ばさない。
+    const fitToWidth = () => {
+      if (!figure || state.mode !== 'fit' || state.expanded) return;
+      state.scale = Math.min(1, holder.clientWidth / figure.width) || 1;
+      state.x = state.y = 0;
+      height = figure.height * state.scale;
+      holder.style.height = height + 'px';
+    };
+    if (figure) {
+      // 寸法は親が原文から読んで渡す。iframeの読み込みを待たずに置き場の大きさが決まる。
+      holder.style.width = figure.width + 'px';
+      height = figure.height * (Math.min(1, holder.clientWidth / figure.width) || 1);
+      holder.style.height = height + 'px';
+      if (state.expanded) { holder.classList.add('diagram-expanded'); document.body.classList.add('diagram-expanded-mode'); }
+      else fitToWidth();
+    }
     const nodes = new Map(), nodeBoxes = new Map();
     if (canvas) for (const node of svg.querySelectorAll('g.node')) {
       const id = boardNodeID(node, svg);
@@ -147,7 +177,7 @@ export class DiagramInteractions {
     const bounds = () => {
       if (canvas) return { x:canvasBounds.x*state.scale+state.x, y:canvasBounds.y*state.scale+state.y,
         width:canvasBounds.width*state.scale, height:canvasBounds.height*state.scale };
-      const frame = holder.getBoundingClientRect(), box = svg.getBoundingClientRect();
+      const frame = holder.getBoundingClientRect(), box = content.getBoundingClientRect();
       return { x:box.left - frame.left, y:box.top - frame.top, width:box.width, height:box.height };
     };
     const updateEdges = () => {
@@ -165,8 +195,11 @@ export class DiagramInteractions {
         width:box.width / state.scale, height:box.height / state.scale };
     };
     const fitAll = () => {
-      fitDiagram(state, naturalBounds(), viewport(), canvas ? 2 : MAX_DIAGRAM_SCALE);
       state.mode = 'fit';
+      // 本文の中のSVGの図は、最初の表示と同じくペイン幅へ収める。倍率の下限は掛けない。
+      if (figure && !state.expanded) { fitToWidth(); return; }
+      // 広げたSVGの図も、全体が収まるまで縮める。Mermaidとボードの下限は変えない。
+      fitDiagram(state, naturalBounds(), viewport(), canvas ? 2 : MAX_DIAGRAM_SCALE, figure ? 0 : MIN_DIAGRAM_SCALE);
     };
     const nodePoint = node => {
       const box = node.getBoundingClientRect(), frame = holder.getBoundingClientRect();
@@ -309,12 +342,40 @@ export class DiagramInteractions {
     const reset = button('戻す', '図を等倍・初期位置へ戻す', () => {
       clearFocus(); state.mode = 'manual'; state.scale = 1; state.x = state.y = 0; apply();
     });
-    controls.append(minus, label, plus, fit, reset); holder.append(controls);
+    // ペイン全体をその図にする。たたむと、広げる前の倍率と位置へ戻る。
+    // 既存の「戻す」は等倍・初期位置へ戻す操作なので、別の名前にしている。
+    const setExpanded = on => {
+      if (!figure || !!state.expanded === on) return;
+      if (on) {
+        state.restore = { scale:state.scale, x:state.x, y:state.y, mode:state.mode };
+        state.expanded = true;
+        holder.classList.add('diagram-expanded'); document.body.classList.add('diagram-expanded-mode');
+        fitAll();
+      } else {
+        state.expanded = false;
+        holder.classList.remove('diagram-expanded'); document.body.classList.remove('diagram-expanded-mode');
+        if (state.restore) Object.assign(state, state.restore);
+        state.restore = null;
+        fitToWidth();
+      }
+      apply();
+    };
+    const expand = button('広げる', '図をペイン全体へ広げる', () => setExpanded(!state.expanded));
+    controls.append(minus, label, plus, fit, reset); if (figure) controls.append(expand);
+    holder.append(controls);
     let drag = null, gesture = null, suppressClick = false, applyFrame = null;
     const apply = ({ delayedMap = false } = {}) => {
       if (applyFrame !== null) { cancelAnimationFrame(applyFrame); applyFrame = null; }
-      if (state.window && !canvas) {
+      if (state.window && !canvas && !state.expanded) {
         holder.classList.add('diagram-window'); holder.style.height = height + 'px';
+      }
+      if (figure) {
+        const text = state.expanded ? 'たたむ' : '広げる';
+        if (expand.dataset.label !== text) {
+          expand.dataset.label = text;
+          const name = state.expanded ? '図をたたんで本文へ戻る' : '図をペイン全体へ広げる';
+          expand.setAttribute('aria-label', name); expand.title = name;
+        }
       }
       stage.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
       painted = { scale:state.scale, x:state.x, y:state.y };
@@ -358,7 +419,7 @@ export class DiagramInteractions {
         state.x = -holder.scrollLeft; state.y = -holder.scrollTop;
         holder.scrollLeft = holder.scrollTop = 0;
       }
-      state.selected = true; this.selected = { holder, state, cancel, controls, clearFocus, remember, focusNode, paintSearch };
+      state.selected = true; this.selected = { holder, state, cancel, controls, clearFocus, remember, focusNode, paintSearch, setExpanded };
       holder.classList.add(canvas ? 'canvas-active' : 'diagram-selected'); apply();
       if (!canvas) holder.focus({ preventScroll:true });
     };
@@ -373,6 +434,11 @@ export class DiagramInteractions {
       if (!state.selected) {
         // 最初のクリックは選択。選択後のカードのクリックは既存の見出し移動を使う。
         event.preventDefault(); event.stopImmediatePropagation(); select();
+      } else if (figure?.onClick && !event.target.closest('.diagram-controls')) {
+        // iframeはイベントを受けない。クリックの場所を図の中の座標へ直して渡す。
+        event.preventDefault(); event.stopImmediatePropagation();
+        const rect = holder.getBoundingClientRect();
+        figure.onClick({ x:(event.clientX - rect.left - state.x) / state.scale, y:(event.clientY - rect.top - state.y) / state.scale });
       }
     }, true);
     holder.addEventListener('pointerdown', event => {
@@ -400,9 +466,13 @@ export class DiagramInteractions {
     const observer = new ResizeObserver(() => {
       if (canvas) measureCanvas();
       if (canvas && state.mode === 'fit') { fitAll(); apply(); }
-      else { updateEdges(); this.positionControls(); }
+      else if (figure && state.mode === 'fit') {
+        // 広げた図はペイン全体へ、本文の中の図はペイン幅へ収め直す。
+        if (state.expanded) fitAll(); else fitToWidth();
+        apply();
+      } else { updateEdges(); this.positionControls(); }
     });
-    observer.observe(holder); observer.observe(svg);
+    observer.observe(holder); observer.observe(content);
     document.addEventListener('pointermove', move, { signal:listeners.signal });
     document.addEventListener('pointerup', end, { signal:listeners.signal });
     holder.addEventListener('pointercancel', cancel);

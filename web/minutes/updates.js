@@ -54,6 +54,10 @@ export function updateEntries(root) {
     const key = url.protocol === 'minutes-image:' ? url.searchParams.get('path') : image.src;
     groups.set(image, { key:'IMG:' + key, nodes:[], element:image });
   }
+  // SVGの図は親のDOMに文字を持たない。原文が変わったら、画像と同じく図の枠で示す。
+  for (const figure of root.querySelectorAll('.svg-canvas[data-figure-hash]')) {
+    groups.set(figure, { key:'FIG:' + figure.dataset.figureHash, nodes:[], element:figure });
+  }
   return [...groups.values()];
 }
 // 変更のあった要素を含む見出しを、内側から順に並べて返す。

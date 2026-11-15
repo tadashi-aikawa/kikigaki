@@ -392,12 +392,15 @@ extension AppKitTests {
 
         次の本文。
 
-        ~~~svg
-        <svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect width="100" height="50" fill="purple"/></svg>
-        ~~~
+        ![図](図.svg)
 
         [^one]: 着地点の脚注。
         """
+        // 本文に書いたSVGの図はiframeで描く (SVGCanvasTests)。ここでは画像ファイルで拡大モーダルを確かめる。
+        let root = try testDirectory(); defer { try? FileManager.default.removeItem(at: root) }
+        try Data(#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect width="100" height="50" fill="purple"/></svg>"#.utf8)
+            .write(to: root.appendingPathComponent("図.svg"))
+        preview.document.setFile(root.appendingPathComponent("議事録.md"))
         preview.document.render(fixture, reset: true)
         try await wait { preview.document.renderedText.contains("着地点の脚注") }
         let web = preview.document.webView
@@ -560,11 +563,12 @@ extension AppKitTests {
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.callout').length") as? Int == 1)
         #expect(try await web.evaluateJavaScript("document.querySelectorAll('.footnotes').length") as? Int == 1)
         #expect(try await web.evaluateJavaScript("window.INJECTED === undefined") as? Bool == true)
+        // 参照した画像ファイルは従来どおり画像で、本文に書いたSVGの図は切り離したiframeで描く。
         try await wait {
-            try await web.evaluateJavaScript("[...document.querySelectorAll('main img')].length === 4 && [...document.querySelectorAll('main img')].every(i => i.complete && i.naturalWidth > 0)") as? Bool == true
+            try await web.evaluateJavaScript("[...document.querySelectorAll('main img')].length === 2 && [...document.querySelectorAll('main img')].every(i => i.complete && i.naturalWidth > 0) && document.querySelectorAll('.svg-canvas[data-ready]').length === 2") as? Bool == true
         }
-        // xmlnsが無くHTMLだけの実体参照を含む図も、XMLへ書き直して画像として読める。
-        #expect(try await web.evaluateJavaScript("document.querySelectorAll('main .image-error').length === 0 && decodeURIComponent(document.querySelectorAll('main img')[3].src).includes('退場\\u00a0©')") as? Bool == true)
+        // xmlnsが無くHTMLだけの実体参照を含む図も、iframeの中でHTMLとして読むので描ける。
+        #expect(try await web.evaluateJavaScript("document.querySelectorAll('main .image-error').length === 0 && document.querySelectorAll('.svg-canvas iframe')[1].srcdoc.includes('退場&nbsp;©')") as? Bool == true)
         let state = try await web.evaluateJavaScript("window.minutes.state()") as? [String: Any]
         #expect(try #require(state?["width"] as? Double) > 720)
         let search = try await web.evaluateJavaScript("window.minutes.search('説明と体験')") as? [String: Int]

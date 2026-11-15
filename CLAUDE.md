@@ -113,7 +113,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `outputDir` をCodexの書き込み許可へ加えるため、全会議のMarkdown・添付と画面の記録の画像・state・archive・minutes・返送tokenを含むrequestsをモデルから書き換えられる。会議Markdownを直接編集しない制約はSkillの規則で、サンドボックスでは保証されない。[議事録プレビューの設計](docs/minutes-preview.md) の「Skillの規則と書き込み許可」
   - 速報を並走させると高精度側の認識結果も変わり、語尾や助詞が落ちやすくなる。認識品質の検証は等倍で行う。[文字起こしの速報表示](docs/fast-transcription.md)
   - 話者補正が残す限界。吸収の廃止で元の形に戻る事例を含む。[話者の割当と固定](docs/speaker-assignment.md) の「受け入れた限界」
-  - 議事録に書かれた外部画像は、表示時に配信元へ通信する。議事録の外にあるローカル画像も絶対パスで指せば表示する。議事録を書くのは利用者自身と利用者が設定したAIで、信頼できない相手が書く前提を置かない。表示側で塞いでもAIは自分のネットワークを持つため、塞ぐ効果が薄い。[議事録の描画と検索](docs/minutes-rendering.md)
+  - 議事録に書かれた外部画像は、表示時に配信元へ通信する。議事録の外にあるローカル画像も絶対パスで指せば表示する。SVGの図の中の画像も同じ。議事録を書くのは利用者自身と利用者が設定したAIで、信頼できない相手が書く前提を置かない。表示側で塞いでもAIは自分のネットワークを持つため、塞ぐ効果が薄い。[議事録の描画と検索](docs/minutes-rendering.md)
   - 診断用の環境変数を付けると、製品版でも会話の本文がログに出る。診断に要る情報なので削らない。診断ログは会議の本文と同じ機密として扱う。[開発用のフラグと環境変数](docs/dev-flags.md)
 - テストが本文を読む文書: `docs/board.md` と `docs/ai-participant.md` の内蔵プロンプトはコードと機械照合する。囲みのコードフェンスを崩さない。
 - 文書の置き場
@@ -143,7 +143,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | `recording.md` | [録音開始シート](docs/start-sheet.md)、[音声ファイルの書き起こし](docs/audio-file.md)、[発話の確定表示](docs/utterance-progress.md)、[話者判別の切替](docs/diarization-toggle.md)、[話者の手動統合](docs/speaker-mapping.md)、[小音量発話の除外](docs/audio-exclusion.md)、[手入力の設計](docs/typed-entry.md)、[書き起こしウィンドウ](docs/transcript-window.md)、[発言ごとの音声再生](docs/utterance-playback.md)、[画面の記録](docs/screen-capture.md) |
 | `online-meetings.md` | [システム音声の取り込み](docs/system-audio.md) |
 | `ai-participant.md` | [AI参加者の設計](docs/ai-participant.md)、[AI設定の複数プロファイル](docs/ai-profiles.md)、[AIへの定期自動送信](docs/ai-scheduled.md)、[AIを会話の参加者として並べる](docs/ai-timeline.md)、[AIへの受け渡し](docs/ai-handoff.md) |
-| `minutes-and-board.md` | [議事録ペイン](docs/minutes-pane.md)、[議事録の描画と検索](docs/minutes-rendering.md)、[議事録プレビューの設計](docs/minutes-preview.md)、[議論のボード](docs/board.md) |
+| `minutes-and-board.md` | [議事録ペイン](docs/minutes-pane.md)、[議事録の描画と検索](docs/minutes-rendering.md)、[SVGの図](docs/svg-canvas.md)、[議事録プレビューの設計](docs/minutes-preview.md)、[議論のボード](docs/board.md) |
 | `data.md` | `site/` が単一情報源。根拠は [議事録プレビューの設計](docs/minutes-preview.md) の書き込み許可、[AI参加者の設計](docs/ai-participant.md) の受け渡し、[AIへの受け渡し](docs/ai-handoff.md) の画像の参照、[設定リファレンス](docs/config.md) の保存物 |
 | `configuration.md` | [設定リファレンス](docs/config.md)、[AI設定の複数プロファイル](docs/ai-profiles.md) |
 
@@ -174,6 +174,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | [発言ごとの音声再生](docs/utterance-playback.md) | 再生できる会議と時点、▶の操作、流す区間 | 行の再生・録音WAVの扱いを変える前 |
 | [議事録ペイン](docs/minutes-pane.md) | 右ペインの操作、履歴、幅と復元、ファイル監視 | 議事録ペインのUIを変える前 |
 | [議事録の描画と検索](docs/minutes-rendering.md) | 対応する記法、検索、Wikiリンク、描画資産の再生成 | 議事録の描画・`web/minutes` を変える前 |
+| [SVGの図](docs/svg-canvas.md) | 議事録タブのSVGの図の描き方、図に残すものと外すもの、画像とリンク、拡大縮小と「広げる」、iframeの実行境界 | 議事録のSVGの図・`figures.js` ・ `canvas.js` を変える前 |
 | [議事録プレビューの設計](docs/minutes-preview.md) | 議事録の受け渡し、`ai/minutes.json`、書き込み許可と受け入れたリスク | 議事録の書き先・通知・Codexの許可を変える前 |
 | [議事録プレビューの表示例](docs/minutes-preview-example.md) | 描画の確認に使う議事録の例 | 描画を目で確かめるとき |
 | [議論のボード](docs/board.md) | ボードの設定、内蔵プロンプト、見出しの扱い | ボード・`BoardPrompt` を変える前。テストが本文を読む |

@@ -80,6 +80,11 @@ pre code { padding:0; background:none; } img { max-width:100%; height:auto; } .i
 .diagram-selected { outline:2px solid var(--accent); outline-offset:0; cursor:grab; user-select:none; }
 .diagram-selected svg,.diagram-selected svg * { cursor:inherit !important; }
 .diagram-selected.diagram-dragging { cursor:grabbing; }
+.svg-canvas { max-width:100%; overflow:hidden; }
+.svg-canvas iframe { display:block; border:0; background:transparent; pointer-events:none; }
+.diagram-expanded { position:fixed; inset:0; z-index:20; width:auto !important; height:auto !important; max-width:none; margin:0; background:var(--paper); }
+.diagram-expanded.diagram-selected { outline-offset:-2px; }
+body.diagram-expanded-mode { overflow:hidden; }
 .diagram-controls { display:none; position:fixed; z-index:1; align-items:center; flex-wrap:wrap; gap:3px; padding:3px; border:1px solid var(--rule); border-radius:6px; background:var(--paper); color:var(--accent); font:12px/1.5 -apple-system,sans-serif; cursor:default; }
 .diagram-selected .diagram-controls { display:flex; }
 .canvas-active .diagram-controls { display:flex; }

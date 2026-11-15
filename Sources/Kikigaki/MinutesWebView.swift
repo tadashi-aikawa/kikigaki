@@ -283,7 +283,12 @@ actor MinutesImageReader {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         // 本文内のリンクは専用messageで人のクリックだけを扱う。別HTMLの読み込みは許可しない。
-        decisionHandler(navigationAction.request.url?.absoluteString == "minutes-app://bundle/index.html" ? .allow : .cancel)
+        // サブフレームは、SVGの図を描く srcdoc のiframeだけを通す。本体の index.html もサブフレームへは通さない。
+        // sandboxはiframe自身の遷移を止めないので、図からの遷移はここと本体CSPの frame-src が受け持つ。
+        let url = navigationAction.request.url?.absoluteString
+        let allowed = navigationAction.targetFrame?.isMainFrame == false
+            ? url == "about:srcdoc" : url == "minutes-app://bundle/index.html"
+        decisionHandler(allowed ? .allow : .cancel)
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         ready = false; onError?("議事録の表示が終了しました。再読込してください")

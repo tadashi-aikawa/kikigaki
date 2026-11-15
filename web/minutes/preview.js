@@ -7,6 +7,7 @@ import { isTimeline, wrapTimeline } from './timeline.js';
 import { layoutTables } from './tables.js';
 import { boardLinks, attachBoardLinks, styleRejectedBoardNodes } from './board.js';
 import { DiagramInteractions } from './diagrams.js';
+import { prepareFigure, figureDocument } from './figures.js';
 const md = createRenderer(), root = document.getElementById('minutes');
 const diagrams = new DiagramInteractions();
 const canvas = new DiagramInteractions();
@@ -233,6 +234,47 @@ const report = value => window.webkit?.messageHandlers.minutes.postMessage(value
 const safeHTML = value => DOMPurify.sanitize(value, { ADD_TAGS: ['eq', 'eqn'], ADD_URI_SAFE_ATTR: ['data-wiki'],
   ADD_ATTR: ['data-heading', 'data-kind'], ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|minutes-image):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i });
 
+// 本文と図の中のリンクの行き先。本文の中の見出しへは移動し、ほかはアプリへ渡して種類を確かめてもらう。
+function followLink(href) {
+  if (href.startsWith('#')) {
+    let name; try { name = decodeURIComponent(href.slice(1)); } catch { return; }
+    const target = document.getElementById(name) || document.getElementById('heading-' + name) ||
+      [...root.querySelectorAll('[data-heading]')].find(el => el.dataset.heading === name);
+    jumpTo(target); return;
+  }
+  report({ kind: 'link', href });
+}
+// SVGの図のiframe。送り主のウィンドウから、親が持つ図の情報を引く。
+// 描き直しで作り直した図は別のウィンドウになるので、古い図からの知らせはここで引けずに捨てられる。
+const frames = new Map();
+function hitFigure(record, point) {
+  // いまiframeへ尋ねるのはリンクだけ。リンクの無い図には尋ねない。
+  if (!record.figure.links.length || !record.frame.contentWindow) return;
+  record.seq += 1; record.waiting = true;
+  record.frame.contentWindow.postMessage({ kind:'hit', seq:record.seq, x:point.x, y:point.y }, '*');
+}
+// iframeからの知らせを受ける1か所。送り主が親の作った図で、種類と形が決めたとおりのものだけを通す。
+addEventListener('message', event => {
+  const record = frames.get(event.source), data = event.data;
+  if (!record || !data || typeof data !== 'object') return;
+  if (data.kind === 'ready' && !record.ready && Number.isInteger(data.failed) && data.failed >= 0) {
+    record.ready = true; record.holder.dataset.ready = 'true';
+    if (!data.failed || !record.holder.isConnected) return;
+    // 図の中は変えず、読めなかった件数を図の下に出す。次の描き直しで読み直す。
+    const notice = document.createElement('span'); notice.className = 'image-error';
+    notice.textContent = '図の中の画像を表示できません: ' + Math.min(data.failed, 999) + '件';
+    record.holder.after(notice);
+    refreshSearch(false);
+  } else if (data.kind === 'hit' && record.waiting && data.seq === record.seq) {
+    // 親が出したクリックへの返答だけを受ける。リンク先は親の一覧から引き、iframeの言う行き先は使わない。
+    record.waiting = false;
+    const href = Number.isInteger(data.link) ? record.figure.links[data.link] : undefined;
+    if (typeof href !== 'string') return;
+    if (href.startsWith('#')) diagrams.collapse();
+    followLink(href);
+  }
+});
+
 function decorateCodeBlocks(codeBlocks, ticket) {
   root.querySelectorAll('.code-block[data-code-index]').forEach(block => {
     // 生HTMLはclassとdata属性を落とすため、描画器が生成した普通のコードだけがここへ来る。
@@ -391,6 +433,16 @@ window.minutes = {
       } catch { pre.title = '図を描画できないため、記法を表示しています'; }
     }
     if (current !== generation) return;
+    // SVGの図は切り離したiframeで描く。寸法とリンクはここで原文から読み、iframeは本文へつないでから作る。
+    // ボードタブで描く文書は、従来の画像のまま。
+    const figures = [];
+    if (!boardCanvasEnabled && !boardLinksEnabled) for (const pre of [...draft.querySelectorAll('.svg-source')]) {
+      const figure = prepareFigure(pre.textContent, newContext);
+      if (!figure) continue;
+      const holder = document.createElement('div'); holder.className = 'diagram svg-canvas';
+      holder.dataset.figureHash = figure.hash;
+      pre.replaceWith(holder); figures.push({ holder, figure });
+    }
     // ここから描画完了までawaitを挟まず、本文・図の操作・検索を一度に見せ直す。
     cancelNavigation();
     if (reset) updates.reset();
@@ -474,7 +526,28 @@ window.minutes = {
       }
       updateListeners.signal.addEventListener('abort', cleanup, { once:true });
     }
+    frames.clear();
+    const figureCounts = new Map();
+    for (const { holder, figure } of figures) {
+      const frame = document.createElement('iframe');
+      // scriptを許すのは同梱の canvas.js を動かすため。SVGが書いたscriptは無害化と子のCSPが止める。
+      frame.setAttribute('sandbox', 'allow-scripts'); frame.title = 'SVGの図';
+      frame.style.width = figure.size.width + 'px'; frame.style.height = figure.size.height + 'px';
+      holder.append(frame);
+      const section = holder.closest('.heading-section');
+      const sectionID = section?.querySelector(':scope > :is(h1,h2,h3,h4,h5,h6)')?.id || '';
+      const index = figureCounts.get(sectionID) || 0; figureCounts.set(sectionID, index + 1);
+      const key = JSON.stringify(['svg', sectionID, index]); diagramKeys.add(key);
+      const record = { holder, frame, figure, seq:0, waiting:false, ready:false };
+      const cleanup = diagrams.attach(holder, key, { figure:{
+        width:figure.size.width, height:figure.size.height, onClick:point => hitFigure(record, point) } });
+      // iframeは置き場所を移すと読み込み直す。置き場所が決まってから中身を入れる。
+      frame.srcdoc = figureDocument(figure.markup);
+      frames.set(frame.contentWindow, record);
+      updateListeners.signal.addEventListener('abort', cleanup, { once:true });
+    }
     if (current !== generation) return;
+    document.body.classList.toggle('diagram-expanded-mode', !!root.querySelector('.diagram-expanded'));
     document.body.classList.toggle('board-canvas-mode', !!root.querySelector('.board-canvas'));
     const legacyBody = root.querySelector('.board-legacy-body');
     if (legacyBody && legacyState) legacyBody.scrollTop = legacyState.scroll;
@@ -504,8 +577,9 @@ window.minutes = {
     } else jumpTo(target);
     return !!target;
   },
-  clear() { cancelNavigation(); diagrams.reset(); canvas.reset(); document.body.classList.remove('board-canvas-mode'); generation++; updates.reset(); clearUpdates(); updateListeners.abort(); closeImage(); folded.clear(); source = ''; root.replaceChildren(); rebuildTOC(true); query = ''; refreshSearch(); scrollTo(0, 0); },
-  invalidate() { cancelNavigation(); generation++; clearUpdates(); updateListeners.abort(); },
+  clear() { cancelNavigation(); diagrams.reset(); canvas.reset(); frames.clear(); document.body.classList.remove('board-canvas-mode'); generation++; updates.reset(); clearUpdates(); updateListeners.abort(); closeImage(); folded.clear(); source = ''; root.replaceChildren(); rebuildTOC(true); query = ''; refreshSearch(); scrollTo(0, 0); },
+  // 取消と読み込み失敗で本文を隠す。図への対応も捨て、遅れて届いた返答でリンクを開かない。
+  invalidate() { cancelNavigation(); generation++; clearUpdates(); updateListeners.abort(); frames.clear(); },
   search(value, direction = 0, reveal = true) {
     if (query !== value) { query = value; hit = 0; return refreshSearch(reveal); }
     if (ranges.length && direction) hit = (hit + direction + ranges.length) % ranges.length;
@@ -513,6 +587,8 @@ window.minutes = {
   },
   state() { return { text: root.innerText, width: root.getBoundingClientRect().width, scroll: scrollY, selection: selectionOffsets(), html: root.innerHTML }; },
   select(start, end) { restoreSelection([start, end]); },
+  // 図のiframeへ入れる文書。実WebKitのテストが、子のCSPの効き方を確かめるのに使う。
+  figureDocument,
 };
 root.addEventListener('pointerdown', () => report({ kind: 'focus' }));
 root.addEventListener('keydown', event => {
@@ -528,14 +604,7 @@ root.addEventListener('click', event => {
   // wikilinkはhrefを持たない。Vault名はSwift側が保持しているので宛先だけ渡す。
   const wiki = link.getAttribute('data-wiki');
   if (wiki) { report({ kind: 'wiki', target: wiki }); return; }
-  const href = link.getAttribute('href') || '';
-  if (href.startsWith('#')) {
-    let name; try { name = decodeURIComponent(href.slice(1)); } catch { return; }
-    const target = document.getElementById(name) || document.getElementById('heading-' + name) ||
-      [...root.querySelectorAll('[data-heading]')].find(el => el.dataset.heading === name);
-    jumpTo(target); return;
-  }
-  report({ kind: 'link', href });
+  followLink(link.getAttribute('href') || '');
 });
 function decorateCallouts() {
   // 種別語は制限しないため、ここに無いもの(abstract・summary・example・question・quote・todoなど)はnoteの顔へ寄せる。

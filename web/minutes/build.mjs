@@ -5,6 +5,9 @@ const out = '../../Sources/Kikigaki/MinutesAssets';
 await mkdir(out, { recursive: true });
 await build({ entryPoints: ['preview.js'], outfile: `${out}/preview.js`, bundle: true,
   minify: true, format: 'iife', target: 'safari18', legalComments: 'linked' });
+// SVGの図のiframeの中で動く。本体とは別のファイルにして、iframeへ本体のコードを読ませない。
+await build({ entryPoints: ['canvas.js'], outfile: `${out}/canvas.js`, bundle: true,
+  minify: true, format: 'iife', target: 'safari18', legalComments: 'none' });
 for (const file of ['preview.css', 'index.html']) await cp(file, `${out}/${file}`);
 await cp('node_modules/katex/dist/katex.min.css', `${out}/katex.min.css`);
 await cp('node_modules/katex/dist/fonts', `${out}/fonts`, { recursive: true });
