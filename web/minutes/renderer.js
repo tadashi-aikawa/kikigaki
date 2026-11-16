@@ -190,7 +190,8 @@ export function createRenderer() {
           if (boardLevel !== null && level <= boardLevel) boardLevel = null;
           if (isBoardHeading(inline.content, level, state.env.boardHeading)) boardLevel = level;
         }
-        const explicit = /\s+\{#([^{}\s]+)\}\s*$/.exec(inline.content);
+        // `{#id}` と、Python-Markdownのattr_listが書く `{ #id }` の両方を読む。括弧の内側の空白は任意。
+        const explicit = /\s+\{\s*#([^{}\s]+)\s*\}\s*$/.exec(inline.content);
         if (explicit) {
           inline.content = inline.content.slice(0, explicit.index);
           inline.children = []; md.inline.parse(inline.content, md, state.env, inline.children);

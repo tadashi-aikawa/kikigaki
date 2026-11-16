@@ -288,6 +288,18 @@ test('見出しIDの重複と表内wikilink', () => {
   assert.match(html, /id="heading-jump"/); assert.match(html, /\*\*別名\*\*/);
   assert.match(html, /<td>名前<\/td>/);
 });
+test('見出しの明示IDは括弧の内側に空白があっても読む', () => {
+  for (const anchor of ['{ #a3 }', '{ #a3}', '{#a3 }', '{  #a3  }']) {
+    const html = render('## 議題 ' + anchor);
+    assert.match(html, /<h2 id="heading-a3" data-heading="a3">議題<\/h2>/, anchor);
+  }
+  const html = render('## 議題 { #a3 }\n\n## 議題 { #a3 }\n\n## 料金 **10%** { #fee }');
+  assert.match(html, /id="heading-a3-1"/);
+  assert.match(html, /<h2 id="heading-fee" data-heading="fee">料金 <strong>10%<\/strong><\/h2>/);
+  // 記法でないものは見出しの文字として残す。
+  assert.match(render('## 議題 { a3 }'), /<h2[^>]*>議題 \{ a3 \}<\/h2>/);
+  assert.match(render('## 議題 { #a 3 }'), /<h2[^>]*>議題 \{ #a 3 \}<\/h2>/);
+});
 test('Vault内だけwikilinkをリンクにする', () => {
   const inVault = text => createRenderer().render(text, { context: 'test', vault: '仕事' });
   const html = inVault('[[議事/定例.md|**別名**]]\n\n[[ノート#見出し]]\n\n[[#章]]\n\n![[a.png]]\n\n![[ノート]]');
