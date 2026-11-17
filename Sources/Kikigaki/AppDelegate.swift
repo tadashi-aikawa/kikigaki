@@ -129,8 +129,8 @@ struct ReplayDebugOptions {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var voiceCueNotification: VoiceCueNotification?
-    private var manualSendHotkey: (hotkey: GlobalHotkey, registration: GlobalHotkeyRegistration)?
-    private var screenCaptureHotkey: (hotkey: GlobalHotkey, registration: GlobalHotkeyRegistration)?
+    /// 設定のキー名ごとの登録。
+    private var hotkeys: [String: (hotkey: GlobalHotkey, registration: GlobalHotkeyRegistration)] = [:]
     private var statusItem: StatusItem?
     private var window: TranscriptWindowController?
     /// 撮っているディスプレイの上のバッジと知らせ。
@@ -280,6 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         session.notifyVoiceCue = { [weak self] in self?.voiceCueNotification?.post($0) }
         session.notifyHotkey = { [weak self] in self?.voiceCueNotification?.post($0, title: "KIKIGAKI · グローバルキー") }
         session.notifyScreenHotkey = { [weak self] in self?.voiceCueNotification?.post(title: "KIKIGAKI · グローバルキー", body: $0) }
+        session.notifyScreenCaptured = { [weak self] in self?.screenIndicator.flashCaptured() }
         registerHotkeys(config)
 
         let statusItem = StatusItem()
@@ -711,20 +712,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func registerHotkeys(_ config: ResolvedConfig) {
         // replayは利用者が起動中の本体とキーを奪い合わないよう登録しない
         guard replayURL == nil else { return }
-        let manualChanged = config.manualSendHotkey != manualSendHotkey?.hotkey
-        let screenChanged = config.screenCaptureHotkey != screenCaptureHotkey?.hotkey
-        // 替わる方を先に全部外してから登録する。再読込で2つのキーを入れ替えても、外す前の自分のキーとぶつからない
-        if manualChanged { manualSendHotkey?.registration.unregister(); manualSendHotkey = nil }
-        if screenChanged { screenCaptureHotkey?.registration.unregister(); screenCaptureHotkey = nil }
-        if manualChanged, let hotkey = config.manualSendHotkey {
-            manualSendHotkey = registerHotkey(hotkey, key: "manualSendHotkey") { [weak self] in
-                self?.session?.sendManualDraft(trigger: .hotkey(hotkey))
-            }
+        let wanted: [(key: String, hotkey: GlobalHotkey?, handler: (GlobalHotkey) -> Void)] = [
+            ("manualSendHotkey", config.manualSendHotkey, { [weak self] in self?.session?.sendManualDraft(trigger: .hotkey($0)) }),
+            ("screenCaptureHotkey", config.screenCaptureHotkey, { [weak self] in self?.session?.toggleScreenCapture(hotkey: $0) }),
+            ("screenCaptureNowHotkey", config.screenCaptureNowHotkey, { [weak self] in self?.session?.captureScreenNow(hotkey: $0) }),
+            // ピンはウィンドウの状態なので、録音していなくても効かせる
+            ("pinWindowHotkey", config.pinWindowHotkey, { [weak self] _ in self?.window?.togglePinFromHotkey() }),
+        ]
+        let changed = wanted.filter { $0.hotkey != hotkeys[$0.key]?.hotkey }
+        // 替わる方を先に全部外してから登録する。再読込でキーを入れ替えても、外す前の自分のキーとぶつからない
+        for item in changed {
+            hotkeys[item.key]?.registration.unregister()
+            hotkeys[item.key] = nil
         }
-        if screenChanged, let hotkey = config.screenCaptureHotkey {
-            screenCaptureHotkey = registerHotkey(hotkey, key: "screenCaptureHotkey") { [weak self] in
-                self?.session?.toggleScreenCapture(hotkey: hotkey)
-            }
+        for item in changed {
+            guard let hotkey = item.hotkey else { continue }
+            let handler = item.handler
+            hotkeys[item.key] = registerHotkey(hotkey, key: item.key) { handler(hotkey) }
         }
     }
 

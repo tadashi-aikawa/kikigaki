@@ -199,6 +199,18 @@ final class TranscriptWindowController: NSWindowController, NSSearchFieldDelegat
     }
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    /// グローバルキーで最前面の固定を切り替える。仕様は docs/transcript-window.md の「最前面への固定」
+    /// - 固定したとき: 閉じた・最小化した・裏に隠れたウィンドウも前に出す。押した瞬間に書き起こしを見られるようにする
+    ///   - KIKIGAKIを前面のアプリにしない。キーの入力先は押す前のアプリのまま
+    /// - 解除したとき: ウィンドウは動かさない
+    func togglePinFromHotkey() {
+        guard compactFooter.togglePin(), let window else { return }
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.orderFrontRegardless()
+        refreshMinutes()
+    }
+
     func show() {
         // 初回表示でAppKitは初期first responder(既定はcontentView)からキービューループの先頭を選ぶ。
         // 待機中は手入力欄が無効なため、議事録のパス欄が先頭になり、ただ開いただけでカーソルが入る。

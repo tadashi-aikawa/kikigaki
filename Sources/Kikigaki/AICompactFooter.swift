@@ -272,22 +272,27 @@ final class AICompactFooter: NSStackView {
         for view in [destinations, rule, confirmation, warning, spacer, minutesNotice, screen, pin, more] { addArrangedSubview(view) }
         pin.tint = Washi.muted
         pin.setAccessibilityValue("OFF")
-        pin.callback = { [weak self] in
-            guard let self, let window = self.window else { return }
-            let pinned = window.level != .floating
-            window.level = pinned ? .floating : .normal
-            self.pin.symbolName = pinned ? "pin.fill" : "pin"
-            self.pin.tint = pinned ? Washi.red : Washi.muted
-            self.pin.toolTip = pinned ? "最前面の固定を解除" : "最前面に固定"
-            self.pin.setAccessibilityLabel(self.pin.toolTip)
-            self.pin.setAccessibilityValue(pinned ? "ON" : "OFF")
-            self.pin.needsDisplay = true
-        }
+        pin.callback = { [weak self] in self?.togglePin() }
         more.tint = Washi.muted
         Washi.surface(self)
     }
     required init?(coder: NSCoder) { fatalError() }
     deinit { timer?.invalidate(); observers.forEach { NotificationCenter.default.removeObserver($0) } }
+
+    /// 最前面の固定を切り替え、ピンの見た目を合わせる。固定したらtrue。ピンのボタンとグローバルキーの共通の入口
+    @discardableResult
+    func togglePin() -> Bool {
+        guard let window else { return false }
+        let pinned = window.level != .floating
+        window.level = pinned ? .floating : .normal
+        pin.symbolName = pinned ? "pin.fill" : "pin"
+        pin.tint = pinned ? Washi.red : Washi.muted
+        pin.toolTip = pinned ? "最前面の固定を解除" : "最前面に固定"
+        pin.setAccessibilityLabel(pin.toolTip)
+        pin.setAccessibilityValue(pinned ? "ON" : "OFF")
+        pin.needsDisplay = true
+        return pinned
+    }
     func update(_ state: SessionSnapshot, reduceMotion: Bool, now: Date = Date()) {
         self.state = state
         screen.update(state.screenControl)

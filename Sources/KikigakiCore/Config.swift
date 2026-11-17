@@ -21,6 +21,10 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
     public var manualSendHotkey: String?
     /// 録音中の画面の記録を止める・入れ直す、OS全体で効くキー。空文字は未割り当て
     public var screenCaptureHotkey: String?
+    /// 録音中の画面の記録で「いま撮る」と同じ1枚を撮る、OS全体で効くキー。空文字は未割り当て
+    public var screenCaptureNowHotkey: String?
+    /// 書き起こしウィンドウの最前面固定を切り替える、OS全体で効くキー。空文字は未割り当て
+    public var pinWindowHotkey: String?
     /// 録音中に会議Markdownへ途中の記録を書く間隔(秒)
     public var autoSaveIntervalSeconds: Int?
     public var speakers: [Speaker]?
@@ -33,10 +37,13 @@ public struct KikigakiConfig: Codable, Equatable, Sendable {
                 speakers: [Speaker]? = nil, ai: AIProfileList? = nil, measureAudioLevels: Bool? = nil,
                 participantsKey: String? = nil, autoSendPhrases: [String]? = nil, manualSendHotkey: String? = nil,
                 autoSaveIntervalSeconds: Int? = nil, screenCaptureHotkey: String? = nil,
-                aiSubmitKeys: AISubmitKeysConfig? = nil) {
+                aiSubmitKeys: AISubmitKeysConfig? = nil, screenCaptureNowHotkey: String? = nil,
+                pinWindowHotkey: String? = nil) {
         self.outputDir = outputDir
         self.aiSubmitKeys = aiSubmitKeys
         self.screenCaptureHotkey = screenCaptureHotkey
+        self.screenCaptureNowHotkey = screenCaptureNowHotkey
+        self.pinWindowHotkey = pinWindowHotkey
         self.saveRecording = saveRecording
         self.measureAudioLevels = measureAudioLevels
         self.participantsKey = participantsKey
@@ -71,6 +78,10 @@ public struct ResolvedConfig: Equatable, Sendable {
     public var manualSendHotkey: GlobalHotkey?
     /// 既定は未割り当て。理由は `manualSendHotkey` と同じ
     public var screenCaptureHotkey: GlobalHotkey?
+    /// 既定は未割り当て。理由は `manualSendHotkey` と同じ
+    public var screenCaptureNowHotkey: GlobalHotkey?
+    /// 既定は未割り当て。理由は `manualSendHotkey` と同じ
+    public var pinWindowHotkey: GlobalHotkey?
     /// 録音開始時に会議へ固定する。進行中の会議の間隔は再読込で変えない
     public var autoSaveIntervalSeconds: Int
     public var speakers: [KikigakiConfig.Speaker]
@@ -99,6 +110,8 @@ public struct ResolvedConfig: Equatable, Sendable {
         autoSendPhrases = config.autoSendPhrases ?? Self.defaultAutoSendPhrases
         manualSendHotkey = config.manualSendHotkey.flatMap(GlobalHotkey.init)
         screenCaptureHotkey = config.screenCaptureHotkey.flatMap(GlobalHotkey.init)
+        screenCaptureNowHotkey = config.screenCaptureNowHotkey.flatMap(GlobalHotkey.init)
+        pinWindowHotkey = config.pinWindowHotkey.flatMap(GlobalHotkey.init)
         autoSaveIntervalSeconds = config.autoSaveIntervalSeconds ?? Self.defaultAutoSaveIntervalSeconds
         speakers = (config.speakers ?? []).map { speaker in
             var speaker = speaker
@@ -167,17 +180,22 @@ public enum ConfigLoader {
         if let phrases = config.autoSendPhrases {
             try AutoSendPhrase.validate(phrases)
         }
-        let hotkeys = [("manualSendHotkey", config.manualSendHotkey), ("screenCaptureHotkey", config.screenCaptureHotkey)]
+        // 並びは設定リファレンスの並び。重なりのエラーは後のキーの名前で出す
+        let hotkeys = [("manualSendHotkey", config.manualSendHotkey), ("screenCaptureHotkey", config.screenCaptureHotkey),
+                       ("screenCaptureNowHotkey", config.screenCaptureNowHotkey), ("pinWindowHotkey", config.pinWindowHotkey)]
         for case let (key, text?) in hotkeys where !text.isEmpty && GlobalHotkey(text) == nil {
             // 単独キーやshiftだけの組は、全アプリでその文字を打てなくする
             throw ConfigError.invalid(description:
                 "\(key) must be modifier+key with ctrl, alt or cmd (F1-F20 may stand alone) (got: \(text))")
         }
         // 同じキーは2つ目の登録が必ず失敗する。どちらが効くかを登録の順で決めない
-        if let manual = config.manualSendHotkey.flatMap(GlobalHotkey.init),
-           manual == config.screenCaptureHotkey.flatMap(GlobalHotkey.init) {
-            throw ConfigError.invalid(description:
-                "screenCaptureHotkey must differ from manualSendHotkey (got: \(manual.display))")
+        var assigned: [(key: String, hotkey: GlobalHotkey)] = []
+        for case let (key, text?) in hotkeys {
+            guard let hotkey = GlobalHotkey(text) else { continue }
+            if let earlier = assigned.first(where: { $0.hotkey == hotkey }) {
+                throw ConfigError.invalid(description: "\(key) must differ from \(earlier.key) (got: \(hotkey.display))")
+            }
+            assigned.append((key, hotkey))
         }
         if let seconds = config.autoSaveIntervalSeconds, !ResolvedConfig.autoSaveIntervalRange.contains(seconds) {
             throw ConfigError.invalid(description: "autoSaveIntervalSeconds must be 10...3600 (got: \(seconds))")

@@ -42,6 +42,56 @@ import Testing
         for text in ["a", "shift+a", "cmd+left"] {
             #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "manualSendHotkey = \"\(text)\"") }
             #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "screenCaptureHotkey = \"\(text)\"") }
+            #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "screenCaptureNowHotkey = \"\(text)\"") }
+            #expect(throws: ConfigError.self) { try ConfigLoader.parse(toml: "pinWindowHotkey = \"\(text)\"") }
+        }
+    }
+
+    @Test func いま撮るとピンのキーも既定で未割り当てで_読める() throws {
+        let empty = ResolvedConfig(config: try ConfigLoader.parse(toml: ""))
+        #expect(empty.screenCaptureNowHotkey == nil && empty.pinWindowHotkey == nil)
+        let blank = ResolvedConfig(config: try ConfigLoader.parse(toml: """
+            screenCaptureNowHotkey = ""
+            pinWindowHotkey = ""
+            """))
+        #expect(blank.screenCaptureNowHotkey == nil && blank.pinWindowHotkey == nil)
+        let config = ResolvedConfig(config: try ConfigLoader.parse(toml: """
+            manualSendHotkey = "cmd+shift+space"
+            screenCaptureHotkey = "ctrl+alt+cmd+s"
+            screenCaptureNowHotkey = "ctrl+alt+cmd+p"
+            pinWindowHotkey = "ctrl+alt+cmd+t"
+            """))
+        #expect(config.screenCaptureNowHotkey == GlobalHotkey("ctrl+alt+cmd+p"))
+        #expect(config.pinWindowHotkey == GlobalHotkey("ctrl+alt+cmd+t"))
+    }
+
+    @Test func グローバルキーのどの2つが重なっても設定エラーにし_後のキーの名前で知らせる() {
+        #expect(throws: ConfigError.invalid(description: "pinWindowHotkey must differ from manualSendHotkey (got: ⇧⌘Space)")) {
+            try ConfigLoader.parse(toml: """
+                manualSendHotkey = "cmd+shift+space"
+                pinWindowHotkey = "shift+cmd+space"
+                """)
+        }
+        #expect(throws: ConfigError.invalid(description: "screenCaptureNowHotkey must differ from screenCaptureHotkey (got: ⌃⌥⌘S)")) {
+            try ConfigLoader.parse(toml: """
+                screenCaptureHotkey = "ctrl+alt+cmd+s"
+                screenCaptureNowHotkey = "ctrl+alt+cmd+s"
+                """)
+        }
+        #expect(throws: ConfigError.invalid(description: "pinWindowHotkey must differ from screenCaptureNowHotkey (got: F18)")) {
+            try ConfigLoader.parse(toml: """
+                screenCaptureNowHotkey = "f18"
+                pinWindowHotkey = "F18"
+                """)
+        }
+        // 未割り当てどうしは重ならない。
+        #expect(throws: Never.self) {
+            try ConfigLoader.parse(toml: """
+                manualSendHotkey = ""
+                screenCaptureHotkey = ""
+                screenCaptureNowHotkey = ""
+                pinWindowHotkey = ""
+                """)
         }
     }
 

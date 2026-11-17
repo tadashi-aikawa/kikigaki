@@ -925,6 +925,34 @@ extension AppKitTests {
         #expect(sounds().isEmpty)
     }
 
+    @Test func いま撮るのグローバルキーは撮れる場面で1枚撮ってバッジで知らせ_撮れない場面は理由を通知して断る() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, _, recorder) = recordingWithoutScreen(root)
+        let shot = try image(0.8)
+        var shots: [String] = []
+        recorder.screenshotForTesting = { shots.append($0.name); return shot }
+        let (sounds, notices) = hotkeyed(session)
+        var captured = 0
+        session.notifyScreenCaptured = { captured += 1 }
+        let hotkey = try #require(GlobalHotkey("ctrl+alt+cmd+p"))
+        // 「撮らない」の間は撮らない。
+        #expect(!session.captureScreenNow(hotkey: hotkey))
+        session.selectScreen(display)
+        await session.waitScreenOperationsForTesting()
+        #expect(session.captureScreenNow(hotkey: hotkey))
+        // 受け付けた時点で知らせる。撮った1枚はフッターの「いま撮る」と同じく行として公開する。
+        #expect(captured == 1)
+        await wait { session.screenEntriesForTesting.count == 1 && recorder.pendingForTesting == 0 }
+        #expect(shots == ["EV3895"])
+        // 一時停止中はフッターのメニューにも「いま撮る」を出さない。
+        session.togglePause()
+        #expect(!session.captureScreenNow(hotkey: hotkey))
+        #expect(captured == 1 && shots == ["EV3895"])
+        #expect(notices() == ["画面を撮れませんでした。画面の記録を停止しています（⌃⌥⌘P）",
+                              "画面を撮れませんでした。録音中だけ撮れます（⌃⌥⌘P）"])
+        #expect(sounds() == [false, false])
+    }
+
     @Test func 撮れなくなった後にグローバルキーで撮り直す途中にもう一度押すと止める() async throws {
         let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
         var allowed = false

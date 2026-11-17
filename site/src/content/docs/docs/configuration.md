@@ -60,6 +60,10 @@ autoSendPhrases = ["アバンティ", "アヴァンティ"]
 manualSendHotkey = "cmd+shift+space"
 # どのアプリを使っていても、画面の記録を止める・始めるキー。既定: 未割り当て
 screenCaptureHotkey = "ctrl+alt+cmd+s"
+# どのアプリを使っていても、記録中の画面をいま撮るキー。既定: 未割り当て
+screenCaptureNowHotkey = "ctrl+alt+cmd+p"
+# どのアプリを使っていても、書き起こしウィンドウを最前面に固定・解除するキー。既定: 未割り当て
+pinWindowHotkey = "ctrl+alt+cmd+t"
 # 録音中にMarkdownへ途中の記録を書く間隔(秒)。既定: 60
 autoSaveIntervalSeconds = 60
 
@@ -106,7 +110,9 @@ autoSendPhrases = ["アバンティ", "アヴァンティ"]
 | `participantsKey`<span class="since">v0.14.0 から</span> | `participants` | 話者名の候補に「参加者」として出す名前を、議事録の先頭のどのキーから読むか。`attendees` などに変えられる。空白・`:`・`#`・`,`・引用符・括弧を含む名前、空文字、`-` で始まる名前は設定エラー |
 | `autoSendPhrases`<span class="since">v0.15.0 から</span> | `["アバンティ", "アヴァンティ"]` | プロファイルで合図を指定しない場合に使う共通の合図。`[]` で無効。文字列の配列で最大20個、1個64文字まで。空白や記号を除き、かなを揃えた後の空と重複は設定エラー。次の会議から効く |
 | `manualSendHotkey`<span class="since">v0.16.0 から</span> | 未割り当て | ほかのアプリを使っている間も、会議の手動宛先へ下書きを送るキー。`"cmd+shift+space"` のように `+` でつなぐ。修飾は `ctrl` `alt` `shift` `cmd`。`ctrl` `alt` `cmd` のどれかが要り、F1〜F20だけは単独で使える。キーは英数字・`space`・`enter`・`tab`・`escape`・`f1`〜`f20`。空文字は未割り当て。「設定を再読込」ですぐ効く。使い方は [グローバルキーで送る](../ai-participant/#グローバルキーで送る) |
-| `screenCaptureHotkey`<span class="since">v0.23.0 から</span> | 未割り当て | ほかのアプリを使っている間も、録音中・一時停止中の画面の記録を止める・始めるキー。書き方は `manualSendHotkey` と同じ。`manualSendHotkey` と同じキーは設定エラー。「設定を再読込」ですぐ効く。使い方は [キーで止める・始める](../recording/#キーで止める始める) |
+| `screenCaptureHotkey`<span class="since">v0.23.0 から</span> | 未割り当て | ほかのアプリを使っている間も、録音中・一時停止中の画面の記録を止める・始めるキー。書き方は `manualSendHotkey` と同じ。ほかのグローバルキーと同じキーは設定エラー。「設定を再読込」ですぐ効く。使い方は [キーで止める・始める](../recording/#キーで止める始める) |
+| `screenCaptureNowHotkey`<span class="since">v0.25.0 から</span> | 未割り当て | ほかのアプリを使っている間も、録音中に記録している画面を1枚撮るキー。フッターのメニューの「いま撮る」と同じ。書き方は `manualSendHotkey` と同じ。ほかのグローバルキーと同じキーは設定エラー。「設定を再読込」ですぐ効く。使い方は [キーでいま撮る](../recording/#キーでいま撮る) |
+| `pinWindowHotkey`<span class="since">v0.25.0 から</span> | 未割り当て | ほかのアプリを使っている間も、書き起こしウィンドウを最前面に固定・解除するキー。フッターのピンボタンと同じ。録音していなくても効く。書き方は `manualSendHotkey` と同じ。ほかのグローバルキーと同じキーは設定エラー。「設定を再読込」ですぐ効く。使い方は [最前面に固定する](../recording/#最前面に固定する) |
 | `autoSaveIntervalSeconds`<span class="since">v0.18.0 から</span> | `60` | 録音中に、会議のMarkdownへ途中の記録を書く間隔 (秒)。10〜3600の整数で書く。範囲外は設定エラー。次の会議から効く。詳細は [録音中の途中保存](../recording/#録音中の途中保存) |
 
 - `measureAudioLevels` は、小さな声を除外する設定とは別です

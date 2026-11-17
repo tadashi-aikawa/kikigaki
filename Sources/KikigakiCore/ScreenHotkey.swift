@@ -9,6 +9,47 @@ import Foundation
 /// 2. 開始シートで最後にディスプレイを選んで始めたときの名前
 /// 3. メインのディスプレイ
 /// 4. つながっている最初のディスプレイ
+/// グローバルキーで「いま撮る」を押したときに撮れない理由。仕様は [画面の記録](docs/screen-capture.md) の「グローバルキー」
+///
+/// 撮れるのはフッターのメニューに「いま撮る」が出ている場面と同じ。それ以外は理由を返し、呼び出し側が `Basso` と通知で断る。
+/// - 理由: ウィンドウが見えないまま押すので、押して何も起きない、を作らない
+public enum ScreenCaptureNowRefusal: Equatable, Sendable {
+    /// 録音中でない。一時停止中・停止後・停止処理中も含む
+    case notRecording
+    /// 画面を撮らない会議。音声ファイルの書き起こしとreplay
+    case noScreenCapture
+    /// 「撮らない」を選んでいる
+    case off
+    /// 撮れなくなった後
+    case unavailable
+    /// 撮り始めるのを待っている。対象の替え・再開・撮れなくなった後の選び直しで、ストリームを準備している間
+    case starting
+
+    /// 撮れるならnil。
+    /// - ready: 撮影側に、いまの対象の撮影に要るものが揃っているか
+    public static func check<Target>(recording: Bool, screenCapture: Bool, target: ScreenTarget<Target>,
+                                     ready: Bool) -> Self? {
+        guard recording else { return .notRecording }
+        guard screenCapture else { return .noScreenCapture }
+        if target.isStarting { return .starting }
+        switch target.display {
+        case .off: return .off
+        case .failed: return .unavailable
+        case .on: return target.canCaptureNow(recording: true) && ready ? nil : .starting
+        }
+    }
+
+    public var reason: String {
+        switch self {
+        case .notRecording: return "録音中だけ撮れます"
+        case .noScreenCapture: return "この会議では画面を記録しません"
+        case .off: return "画面の記録を停止しています"
+        case .unavailable: return "画面を記録できていません"
+        case .starting: return "画面の記録を始めるのを待っています"
+        }
+    }
+}
+
 public enum ScreenHotkeyChoice: Equatable, Sendable {
     case stop
     /// つながっているディスプレイの添字

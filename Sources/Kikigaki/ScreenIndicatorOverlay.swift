@@ -17,6 +17,8 @@ final class ScreenIndicatorOverlay {
     /// 中央からバッジへ移る時間と、消える時間。
     static let moveDuration: TimeInterval = 0.35
     static let fadeDuration: TimeInterval = 0.3
+    /// 「いま撮る」のキーで撮れたとき、バッジを「撮りました」に替えておく時間。
+    static let capturedHold: TimeInterval = 1.0
 
     private(set) var state: ScreenIndicator<ScreenDisplay> = .hidden
     let badgePanel = IndicatorPanel()
@@ -24,6 +26,8 @@ final class ScreenIndicatorOverlay {
     /// いま出している知らせ。古い知らせの続きの処理は、番号が替わっていたら何もしない。
     private(set) var notice: ScreenIndicator<ScreenDisplay>.Notice?
     private var noticeNumber = 0
+    /// 「撮りました」の続きの処理は、番号が替わっていたら何もしない。続けて押したら最後の1回から数え直す。
+    private var flashNumber = 0
     private var screenObserver: NSObjectProtocol?
 
     init() {
@@ -71,9 +75,26 @@ final class ScreenIndicatorOverlay {
 
     // MARK: - バッジ
 
-    private func placeBadge() {
+    /// 「いま撮る」のキーで撮れた。バッジを `capturedHold` の間だけ透かしを外した「撮りました」にし、「記録中」へ戻す。
+    /// バッジを出していないとき・知らせを出している間は何もしない。知らせのほうが目に入っている。
+    /// 戻す前にバッジを置き直す契機が来たら、その時点で「記録中」へ戻る。
+    func flashCaptured() {
+        guard notice == nil, state.badge != nil else { return }
+        flashNumber += 1
+        let number = flashNumber
+        placeBadge(kind: .captured)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.capturedHold) { [weak self] in
+            MainActor.assumeIsolated {
+                // 知らせが始まっていたら、バッジは知らせの終わりに置き直される。
+                guard let self, self.flashNumber == number, self.notice == nil else { return }
+                self.placeBadge()
+            }
+        }
+    }
+
+    private func placeBadge(kind: IndicatorChip.Kind = .recording) {
         guard let target = state.badge, let screen = Self.screen(for: target) else { hideBadge(); return }
-        let chip = IndicatorChip(kind: .recording, size: .badge, scale: screen.backingScaleFactor)
+        let chip = IndicatorChip(kind: kind, size: .badge, scale: screen.backingScaleFactor)
         badgePanel.setFrame(ScreenIndicatorLayout.badgeFrame(width: chip.width, in: screen.frame), display: false)
         badgePanel.show(chip.layer, at: CGPoint(x: chip.width / 2, y: ScreenIndicatorLayout.badgeHeight / 2))
         badgePanel.alphaValue = 1
@@ -208,8 +229,9 @@ final class IndicatorPanel: NSPanel {
 }
 
 /// バッジと知らせの丸い面。録音中のバッジと同じ組み方で、朱・墨・朱の輪郭の3通り。
+/// captured: 「いま撮る」のキーで撮れたときに、バッジを一時だけ替える形。録音中と同じ朱で、透かさない
 struct IndicatorChip {
-    enum Kind { case recording, stopped, unavailable }
+    enum Kind { case recording, captured, stopped, unavailable }
     enum Size { case badge, notice }
 
     let layer: CALayer
@@ -230,6 +252,7 @@ struct IndicatorChip {
         switch (kind, size) {
         case (.recording, .badge): return "記録中"
         case (.recording, .notice): return "画面を記録中"
+        case (.captured, _): return "撮りました"
         case (.stopped, _): return "画面の記録を停止"
         case (.unavailable, _): return "画面を記録できません"
         }
@@ -239,14 +262,15 @@ struct IndicatorChip {
         let m = Self.metrics(size)
         let background: NSColor, foreground: NSColor
         switch kind {
-        case .recording: background = Washi.red; foreground = Washi.paper
+        case .recording, .captured: background = Washi.red; foreground = Washi.paper
         case .stopped: background = Washi.ink; foreground = Washi.paper
         case .unavailable: background = Washi.paper; foreground = Washi.red
         }
         let font = NSFont.systemFont(ofSize: m.font, weight: .semibold)
         let string = NSAttributedString(string: Self.text(kind, size), attributes: [.font: font, .foregroundColor: foreground, .kern: m.font * 0.02])
         let textSize = string.size()
-        let leadWidth = kind == .recording ? m.dot : m.icon * 1.25
+        let dotted = kind == .recording || kind == .captured
+        let leadWidth = dotted ? m.dot : m.icon * 1.25
         let width = ceil(m.leading + leadWidth + m.gap + textSize.width + m.trailing)
         self.width = width
 
@@ -260,9 +284,10 @@ struct IndicatorChip {
             chip.borderWidth = m.border
         }
         // 撮っている間のバッジは少し透かし、画面の中身を隠しすぎない。
+        // 撮れた知らせは透かさず、いつものバッジより目に留まるようにする。
         if kind == .recording, size == .badge { chip.opacity = 0.72 }
 
-        if kind == .recording {
+        if dotted {
             let dot = CALayer()
             dot.frame = CGRect(x: m.leading, y: (m.height - m.dot) / 2, width: m.dot, height: m.dot)
             dot.cornerRadius = m.dot / 2

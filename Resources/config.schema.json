@@ -42,9 +42,19 @@
       "examples": ["cmd+shift+space", "ctrl+alt+cmd+a"]
     },
     "screenCaptureHotkey": {
-      "description": "どのアプリが前面でも、録音中の画面の記録を止める・入れ直すキー。書式は manualSendHotkey と同じで、同じキーは設定エラー。空文字で未割り当て。\n\n任意 · 既定: 未割り当て",
+      "description": "どのアプリが前面でも、録音中の画面の記録を止める・入れ直すキー。書式は manualSendHotkey と同じで、ほかのグローバルキーと同じキーは設定エラー。空文字で未割り当て。\n\n任意 · 既定: 未割り当て",
       "type": "string",
       "examples": ["ctrl+alt+cmd+s", "f18"]
+    },
+    "screenCaptureNowHotkey": {
+      "description": "どのアプリが前面でも、録音中の画面の記録で「いま撮る」と同じ1枚を撮るキー。書式は manualSendHotkey と同じで、ほかのグローバルキーと同じキーは設定エラー。空文字で未割り当て。\n\n任意 · 既定: 未割り当て",
+      "type": "string",
+      "examples": ["ctrl+alt+cmd+p", "f17"]
+    },
+    "pinWindowHotkey": {
+      "description": "どのアプリが前面でも、書き起こしウィンドウの最前面固定を切り替えるキー。録音していなくても効く。書式は manualSendHotkey と同じで、ほかのグローバルキーと同じキーは設定エラー。空文字で未割り当て。\n\n任意 · 既定: 未割り当て",
+      "type": "string",
+      "examples": ["ctrl+alt+cmd+t", "f16"]
     },
     "autoSaveIntervalSeconds": {
       "description": "録音中に会議Markdownへ途中の記録を書く間隔(秒)。10〜3600。次の会議から反映。\n\n任意 · 既定: `60`",

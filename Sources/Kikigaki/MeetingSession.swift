@@ -206,6 +206,8 @@ final class MeetingSession {
     var notifyHotkey: (VoiceCueFeedback) -> Void = { _ in }
     /// 画面の記録のグローバルキーの通知の本文。表題は手動送信のキーと同じ
     var notifyScreenHotkey: (String) -> Void = { _ in }
+    /// グローバルキーの「いま撮る」で画像を取れた。撮っているディスプレイのバッジで知らせる
+    var notifyScreenCaptured: () -> Void = {}
     /// グローバルキーで入れ直す先を決める材料。検証で差し替える
     var connectedScreenDisplays: () -> [ScreenDisplay] = { ScreenDisplay.connected() }
     var mainScreenDisplayID: () -> CGDirectDisplayID? = { CGMainDisplayID() }
@@ -1058,10 +1060,37 @@ final class MeetingSession {
     }
 
     /// フッターの画面のメニューの「いま撮る」。録音中だけ。押した時点で1枚取り、しきい値によらず保存する。
-    func captureScreenNow() {
+    /// 受け付けたらtrue。
+    @discardableResult
+    func captureScreenNow() -> Bool {
         // 時刻・音声位置・受付は押した処理の中で確定する。撮影だけを後から流す。
-        guard canCaptureScreenNow, let screenRecorder, let request = screenRecorder.beginCapture() else { return }
+        guard canCaptureScreenNow, let screenRecorder, let request = screenRecorder.beginCapture() else { return false }
         Task { await screenRecorder.capture(request) }
+        return true
+    }
+
+    /// グローバルキーの「いま撮る」。仕様は docs/screen-capture.md の「グローバルキー」
+    /// 撮れる場面はフッターのメニューの「いま撮る」と同じ。受け付けたら撮っているディスプレイのバッジで知らせる。
+    /// - 知らせは受け付けた時点で出す。撮った音声位置と時刻も押した時点に置くので、押した瞬間を知らせる
+    ///   - 撮影APIが失敗したときは、フッターのメニューの「いま撮る」と同じ失敗の扱いになる
+    /// - 撮れない: ウィンドウが見えないまま押すので、画面の記録のキーと同じく `Basso` と通知で断る
+    @discardableResult
+    func captureScreenNow(hotkey: GlobalHotkey) -> Bool {
+        let refusal = ScreenCaptureNowRefusal.check(recording: snapshot.state == .recording, screenCapture: screenRecorder != nil,
+                                                    target: screenTarget, ready: screenRecorder?.canCaptureNow == true)
+        if let refusal {
+            playAutoSendSound(false)
+            notifyScreenHotkey("画面を撮れませんでした。\(refusal.reason)（\(hotkey.display)）")
+            return false
+        }
+        // 受付は撮影側の状態をロックの中で見直す。確かめた直後に撮影が止まっていたら、撮り始めるのを待つ間として断る
+        guard captureScreenNow() else {
+            playAutoSendSound(false)
+            notifyScreenHotkey("画面を撮れませんでした。\(ScreenCaptureNowRefusal.starting.reason)（\(hotkey.display)）")
+            return false
+        }
+        notifyScreenCaptured()
+        return true
     }
 
     /// 選んだ対象を撮っている録音中で、その撮影に要るものが揃っている間だけ。
