@@ -16,6 +16,12 @@ public struct ScreenThumbnail: Equatable, Sendable {
         max(1, Int((Double(width) * Double(imageHeight) / Double(imageWidth)).rounded()))
     }
 
+    /// 全てのマスが真っ黒か。画面のスリープの前後に届く、何も描かれていないフレームを見分ける。自動の撮影はこれを撮らない。
+    /// しきい値はマスの差の既定値と同じ8。平均の輝度が8を超えるマスが1つでもあれば真っ黒としない。
+    /// 黒地の小さく細い文字は、マスの平均で8以下に埋もれて真っ黒とみなされうる。
+    public var isBlack: Bool { luma.allSatisfy { $0 <= Self.blackLuma } }
+    public static let blackLuma: UInt8 = 8
+
     /// 等倍の輝度をマスごとの単純平均で縮める。補間の癖に判定を左右させない。
     /// - pixel: 行頭からの位置で1画素の輝度を返す。呼び出し側の画素の並び(BGRAなど)をここへ持ち込まない
     public static func average(width w: Int, height h: Int, to tw: Int, pixel: (_ x: Int, _ y: Int) -> UInt8) -> ScreenThumbnail {
@@ -170,6 +176,9 @@ public struct ScreenChangeDetector: Sendable {
     private var inFlight: [InFlight] = []
     private var retryNotBefore = -Double.infinity
     private var lastMotion = -Double.infinity
+    /// 画面が消えて戻った後で、戻った画面がまだ落ち着いていない。数え直した後の最初の観測を動き始めとして数え、
+    /// 落ち着くまでは基準が無くても保存しない。落ち着いたら下ろす。`restart`・`reset`・寸法の変化では下ろさない。
+    private var settling = false
     private var excludedRows = 0
     /// 観測の世代。`restart` と `reset` で進める。古い世代で決めた外すマスの候補は確定しない。
     private var generation = 0
@@ -226,6 +235,7 @@ public struct ScreenChangeDetector: Sendable {
             }
         } else {
             excludedRows = min(thumbnail.height, Int((parameters.excludedTopFraction * Double(thumbnail.height)).rounded(.up)))
+            if settling { lastMotion = time; motionSince = time }
         }
         latest = (frame, thumbnail, acceptedBefore)
         latestDone = false
@@ -265,11 +275,16 @@ public struct ScreenChangeDetector: Sendable {
     /// - 直近に公開した画面も基準と同じく引き継ぐ。最後に見た時刻は一時停止の間も進むので、12秒より長い一時停止の後は比べない
     /// - 外すマスと動き始めた時刻は捨て、観測の世代を進める。一時停止の前に決めた動き続けて撮った1枚が再開の後に成功しても、外すマスは確定しない
     ///   - 理由: 再開の後の画面に、一時停止の前の動きで決めたマスを掛けないため
-    public mutating func restart() {
+    /// - awaitingSettle: 画面が消えて戻った。次の観測を動き始めとして数え、落ち着くまで保存しない。比較の基準は同じく引き継ぐ
+    ///   - 理由: 実機で、画面だけのスリープから戻った最初の1枚が、明るくなりきる前の暗い画面で残った。真っ黒ではないので見分けられない
+    ///   - 落ち着くまでに `awaitingSettle` を付けずに数え直しても、待ちは消さない。戻った画面を見る前に一時停止・再開を挟んでも待つ
+    ///   - 比較の基準が無くても待つ。落ち着いた1枚を最初の1枚として撮る
+    public mutating func restart(awaitingSettle: Bool = false) {
         latest = nil; latestDone = false
         lastMotion = -Double.infinity
         generation += 1
         clearMovement()
+        if awaitingSettle { settling = true }
     }
 
     /// 撮れない期間に入った。保留中のフレームを後から保存しない。保存中の決定の結果は、この後に返っても無視する。
@@ -338,9 +353,14 @@ public struct ScreenChangeDetector: Sendable {
     private mutating func evaluate(now: Double) -> Decision? {
         guard let latest else { return nil }
         updateRecent(now: now, thumbnail: latest.thumbnail)
+        // 戻った画面の待ちは、保存するかどうかと関係なく落ち着いた時点で下ろす。
+        // 下の保存の可否で戻ると、「いま撮る」で使い終えた観測のまま待ちが残り、後の一時停止からの再開まで待たせる。
+        if settling, now - lastMotion >= parameters.settle { settling = false }
         // 保存中の観測と、保存に成功した観測は、同じ観測のうちはもう一度決めない。見分けはフレームの番号で行う。
         guard now >= retryNotBefore, !latestDone,
               !inFlight.contains(where: { $0.frame == latest.frame }) else { return nil }
+        // 画面が戻った後は、落ち着くまで基準が無くても保存しない。基準があれば下の落ち着きと動き続ける画面の規則に任せる。
+        if settling, baseline == nil { return nil }
         guard let baseline else { return decide(latest, now: now, reason: .first, exclusion: nil) }
         if now - lastMotion >= parameters.settle {
             guard changedFraction(baseline, latest.thumbnail, excluding: exclusion) > parameters.save, !seenRecently else { return nil }

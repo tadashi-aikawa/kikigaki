@@ -128,6 +128,8 @@ final class MeetingSession {
     private let removeScreenFile: (URL) throws -> Void
     /// 画面の記録の開始・一時停止・停止を、操作した順に1本で流す。素早い一時停止と再開で、後の開始を先の停止が止めないため。
     private var screenOperation: Task<Void, Never>?
+    /// 画面の眠りと目覚めの知らせの登録。セッションはアプリと同じ寿命なので外さない。
+    private var screenSleepObservers: [NSObjectProtocol] = []
     private var finalTokens: [TimedToken] = []
     /// 話者区間。録音中は消費タスクが判定を進めたときに `consumedAudioTime` と同じ更新で受け取り、
     /// 停止後は最終判定を持つ。MainActor から話者判別のエンジンへ直接触れないための置き場
@@ -357,7 +359,25 @@ final class MeetingSession {
         snapshot.speakers = config.speakers
         snapshot.participantsKey = config.participantsKey
         aiStore?.onChange = { [weak self] in self?.aiChanged() }
+        observeScreenSleep()
         emit()
+    }
+
+    /// Macのスリープの手前と画面だけのスリープで画面の記録を中断し、目覚めたら続ける。
+    /// Macの目覚めの後も画面が眠ったままのことがあるので、Macと画面の両方の目覚めで試す。続けるかは `ScreenRecorder.wake` が決める。
+    private func observeScreenSleep() {
+        let center = NSWorkspace.shared.notificationCenter
+        let observe = { (name: Notification.Name, action: @escaping @MainActor (MeetingSession) -> Void) -> NSObjectProtocol in
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { if let self { action(self) } }
+            }
+        }
+        screenSleepObservers = [
+            observe(NSWorkspace.willSleepNotification) { $0.screensDidSleep() },
+            observe(NSWorkspace.screensDidSleepNotification) { $0.screensDidSleep() },
+            observe(NSWorkspace.didWakeNotification) { $0.screensDidWake() },
+            observe(NSWorkspace.screensDidWakeNotification) { $0.screensDidWake() },
+        ]
     }
 
     /// 設定の再読込。次の会議から反映する(進行中の会議の保存先は開始時に確定済み)
@@ -782,6 +802,23 @@ final class MeetingSession {
         // 休憩の区切りを取りこぼさない。休憩中は中身が変わらないので、後の周期では書かない
         if snapshot.state == .paused { saveInterim() }
         emit()
+    }
+
+    /// 画面が眠った。撮っていれば撮影を中断し、ストリームを閉じる。仕様は docs/screen-capture.md の「画面のスリープ」
+    /// 行は残さず、フッターと撮っている画面の印も替えない。目覚めたら同じ対象で続けるので、利用者から見て止めていない。
+    /// 保留は放さない。眠っている間も音声の判定はそのまま進み、話し始めで公開する。
+    func screensDidSleep() {
+        guard let screenRecorder, screenRecorder.sleep() else { return }
+        log("画面が眠ったので画面の記録を中断します")
+        enqueueScreen { await screenRecorder.closeStream() }
+    }
+
+    /// 画面が目覚めた。眠りで中断していれば、同じ対象で撮り直す。一時停止中・停止後・撮れなくなった後は何もしない。
+    /// 目覚めた後は、戻った画面が落ち着くのを待ってから、眠る前の画面と違えば撮る。明るくなりきる前の暗い画面を残さないため。
+    func screensDidWake() {
+        guard let screenRecorder, let epoch = screenRecorder.wake() else { return }
+        log("画面が目覚めたので画面の記録を続けます")
+        enqueueScreen { await screenRecorder.start(epoch: epoch) }
     }
 
     private func startInterimSaves(intervalSeconds: Int) {
@@ -2235,6 +2272,8 @@ extension MeetingSession {
         screenTarget = ScreenTarget()
         let recorder = makeScreenRecorder(markdownURL: markdownURL)
         recorder.startForTesting = start
+        // ストリームの停止を眠りか確かめる待ちは、検証では取らない。待ちそのものを確かめる検証は差し替える。
+        recorder.setStopGraceForTesting(.milliseconds(0))
         screenRecorder = recorder
         if let display {
             // ストリームを開かずに撮影中にする。フッターの表示も撮っている状態にそろえる。

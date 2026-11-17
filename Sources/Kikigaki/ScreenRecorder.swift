@@ -99,6 +99,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     /// ストリームを開いた対象。題と失敗の文言に使う。
     private var streamDisplay: ScreenDisplay?
     private var timer: DispatchSourceTimer?
+    /// 映っていないフレーム(`blank`・`suspended`)が届き、まだ映るフレームが届いていない。判定器の数え直しを1回にする。
+    private var dark = false
 
     /// 開いたストリームの対象の世代と、「いま撮る」の撮影に要るフィルタ。ストリームを準備し終えてから持ち、閉じたら消す。
     /// 「いま撮る」は受け付けた時点でこれを要求へ写し、以後は共有の状態を読まない。
@@ -125,6 +127,18 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     /// 受け付けて、結果がまだMainActorへ届いていない自動の保存の数。
     private var automaticPending = 0
     private var reportedUnavailable = false
+    /// 画面が眠っている。眠りの知らせから目覚めの知らせまで。この間にストリームが止まっても取得不能にしない。
+    private var asleep = false
+    /// 画面の眠りで撮影を中断した。目覚めたらストリームを開き直す。
+    private var interrupted = false
+    /// ディスプレイが眠っているか。検証では差し替える。
+    private var isDisplayAsleep: @Sendable (CGDirectDisplayID) -> Bool = { CGDisplayIsAsleep($0) != 0 }
+    /// 目覚めで開き直し、まだqueue側へ伝えていない。queue側は次の観測の手前で受け取り、戻った画面が落ち着くまで待つ。
+    /// 世代では渡さない。目覚めの世代のフレームを1枚も見ないまま一時停止・再開で世代が進むと、目覚めたことを取りこぼす。
+    private var wokeUnseen = false
+    /// ストリームが止まってから、眠りかどうかを決めるまで待つ時間。検証では縮める。
+    /// - 理由: 画面だけのスリープでは、止まった瞬間はまだディスプレイが眠っておらず、眠りの知らせも後から届く。実機で確かめた
+    private var stopGrace: DispatchTimeInterval = .seconds(3)
 
     init(markdownURL: URL, acceptedAudioTime: @escaping @Sendable () -> Double,
          publish: @escaping @MainActor (ScreenRecorder, ScreenShot, URL) -> PublishResult,
@@ -164,8 +178,39 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     func resumeCapturing() -> Int {
         lock.withLock {
             epoch += 1
+            interrupted = false
             capturing = accepting && !invalidated && !reportedUnavailable && target != nil
             return epoch
+        }
+    }
+
+    /// 画面が眠った。撮っていたら撮影を中断し、目覚めの `wake` で開き直す。ストリームの片付けは `closeStream` で後から行う。
+    /// 一時停止と同じく世代を進めるので、次の観測で判定器は比較の基準を引き継いで数え直す。
+    /// - 返す値: 撮影を中断したか
+    func sleep() -> Bool {
+        lock.withLock {
+            asleep = true
+            guard capturing else { return false }
+            epoch += 1; capturing = false; interrupted = true
+            return true
+        }
+    }
+
+    /// 画面が目覚めた。眠りで中断していれば撮影を再開する。
+    /// - 返す値: 撮り始めるなら、`start` へ渡す撮影の世代
+    /// - 対象のディスプレイがまだ眠っていれば何もしない。Macの目覚めの後に画面だけ眠ったままのことがある。画面の目覚めの知らせでもう一度呼ぶ
+    /// - 中断の後に一時停止・切り替え・取得不能・停止が挟まったら再開しない。それぞれの入口が撮影を決める
+    func wake() -> Int? {
+        let (display, isAsleep) = lock.withLock { (target, isDisplayAsleep) }
+        if let display, isAsleep(display.id) { return nil }
+        return lock.withLock {
+            asleep = false
+            guard interrupted else { return nil }
+            interrupted = false
+            epoch += 1
+            capturing = accepting && !invalidated && !reportedUnavailable && target != nil
+            if capturing { wokeUnseen = true }
+            return capturing ? epoch : nil
         }
     }
 
@@ -183,6 +228,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             target = display
             targetGeneration = generation
             reportedUnavailable = false
+            interrupted = false
+            // 替えた先は判定器を作り直し、最初の1枚を待たずに撮る。替える前に目覚めたことは持ち越さない。
+            wokeUnseen = false
             capturing = capture && display != nil && accepting && !invalidated
             return capturing ? epoch : nil
         }
@@ -190,7 +238,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
 
     /// 一時停止。この時点から撮らない。ストリームの片付けは `closeStream` で後から行う。
     func pauseCapturing() {
-        lock.withLock { epoch += 1; capturing = false }
+        lock.withLock { epoch += 1; capturing = false; interrupted = false }
     }
 
     /// 新しい保存の決定を止める。受付済みの処理は続ける。
@@ -245,7 +293,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         guard let (display, generation) = current(value) else { return }
 #if DEBUG
         if let fake = startForTesting {
-            if let reason = fake(display) { reportUnavailable(reason, epoch: value); return }
+            if let reason = fake(display) { reportStopped(reason, display: display, epoch: value); return }
             // ストリームの代わりに、撮影に要るものだけを準備する。閉じ方と「いま撮る」の確かめ方を本番と同じにする。
             queue.sync { streamEpoch = value; streamDisplay = display; lock.withLock { source = CaptureSource(target: generation, filter: nil) } }
             if !(await announceStarted(epoch: value, target: generation)) { queue.sync { clearStream(target: generation) } }
@@ -263,7 +311,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         }
         guard isCurrent(value) else { return }
         guard let target = content.displays.first(where: { $0.displayID == display.id }) else {
-            reportUnavailable("ディスプレイ「\(display.name)」が見つかりません", epoch: value)
+            reportStopped("ディスプレイ「\(display.name)」が見つかりません", display: display, epoch: value)
             return
         }
         // KIKIGAKI自身は撮影と変化の検知から外す。書き起こしの更新を「変化」にしないため。
@@ -293,7 +341,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         } catch {
             _ = queue.sync { detach(stream) }
             // 開始を待つ間に世代が変わっていれば、古い開始の失敗として片付けるだけにする。
-            reportUnavailable("画面の取得を始められません", epoch: value)
+            // 開始を待つ間に画面が眠って失敗したなら、眠りの知らせより先に届いても中断にして目覚めを待つ。
+            reportStopped("画面の取得を始められません", display: display, epoch: value)
             return
         }
         // 開いている間に一時停止・停止したら、開いたストリームをすぐ閉じる。
@@ -421,11 +470,17 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     ///     - 理由: 替える前の画面と比べると、替えた先がたまたま似ていたときに撮らない。メニューバーの高さも対象ごとに違う
     ///     - 替える前に決めた保存の結果は、新しい判定器では見つからず無視される
     private func syncEpoch(source: Int? = nil) -> Bool {
-        refreshTarget()
-        let (current, value) = lock.withLock { (capturing, epoch) }
-        if value != seenEpoch {
+        // 対象・世代・目覚めは1つのロック区間で写す。分けると、対象を読んだ後に替えて目覚めた旗を受け取り、
+        // 次の呼び出しで対象の替えとして判定器を作り直し、旗の効き目を消してしまう。
+        let (display, generation, current, value, woke) = lock.withLock { () -> (ScreenDisplay?, Int, Bool, Int, Bool) in
+            defer { wokeUnseen = false }
+            return (target, targetGeneration, capturing, epoch, wokeUnseen)
+        }
+        refreshTarget(display, generation: generation)
+        if value != seenEpoch || woke {
             seenEpoch = value
-            detector.restart()
+            // 目覚めて開き直した後は、戻った画面が落ち着くまで待つ。待ちは映るフレームを見るまで、一時停止・再開を挟んでも残る
+            detector.restart(awaitingSettle: woke)
             latest = nil
         }
         return current && (source.map { $0 == value } ?? true)
@@ -434,10 +489,17 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     /// queue上で、対象が替わっていたら判定器を作り直す。
     private func refreshTarget() {
         let (display, generation) = lock.withLock { (target, targetGeneration) }
+        refreshTarget(display, generation: generation)
+    }
+
+    /// queue上で、写した対象とその世代で判定器を作り直す。
+    private func refreshTarget(_ display: ScreenDisplay?, generation: Int) {
         guard generation != seenTarget else { return }
         seenTarget = generation
         detector = Self.detector(for: display)
         latest = nil
+        // 替えた先は消えていない画面から始める。替える前の画面が消えていたことは持ち越さない。
+        dark = false
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
@@ -456,8 +518,13 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
                     label: Self.label(display: display))
         case .idle:
             if let decision = detector.tick(at: Self.monotonic(now)) { decide(decision) }
-        case .blank, .suspended, .stopped:
-            reportUnavailable("画面を取得できなくなりました", epoch: streamEpoch)
+        case .blank, .suspended:
+            goDark()
+        case .stopped:
+            let opened = streamEpoch
+            guard detach(stream) else { return }
+            Task { try? await stream.stopCapture() }
+            reportStopped("画面を取得できなくなりました", display: display, epoch: opened)
         default:
             break
         }
@@ -465,15 +532,62 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         queue.async { [self] in
-            let opened = streamEpoch, name = streamDisplay?.name ?? ""
+            let opened = streamEpoch, display = streamDisplay
+            // 閉じた後に届いた古いストリームの停止は、いまのストリームではないので取り合わない。
             guard detach(stream) else { return }
-            reportUnavailable("ディスプレイ「\(name)」を取得できなくなりました", epoch: opened)
+            reportStopped("ディスプレイ「\(display?.name ?? "")」を取得できなくなりました", display: display, epoch: opened)
+        }
+    }
+
+    /// 撮れなくなった。画面が眠っていれば取得不能にせず中断にし、目覚めの `wake` で開き直す。どのスレッドから呼んでもよい。
+    /// ストリームの停止と、開始の失敗(ディスプレイが見つからない・取得を始められない)で通る。許可が無いときは通らない。
+    /// - 止まった瞬間に眠っていなくても、`stopGrace` だけ待ってからもう一度確かめる。その間に眠りの知らせが届けば、`sleep` が中断にする
+    ///   - 理由: 画面だけのスリープでは、ストリームの停止が眠りの知らせより先に届き、その瞬間はディスプレイもまだ眠っていない。実機で確かめた
+    ///   - 待つ間も撮影の世代は変えない。選び直し・一時停止・停止が挟まれば世代が変わり、待った後の確かめは何もしない
+    private func reportStopped(_ reason: String, display: ScreenDisplay?, epoch source: Int) {
+        guard let display else { reportUnavailable(reason, epoch: source); return }
+        if interruptBySleep(display, epoch: source) { return }
+        let grace = lock.withLock { stopGrace }
+        queue.asyncAfter(deadline: .now() + grace) { [self] in
+            if interruptBySleep(display, epoch: source) { return }
+            reportUnavailable(reason, epoch: source)
+        }
+    }
+
+    /// queue上で、画面が消えた。撮れない期間として判定を止め、映るフレームが届いたら続ける。取得不能にはしない。
+    /// - 比較の基準は一時停止からの再開と同じく引き継ぐ。戻った画面は落ち着くのを待ってから、消える前と違えば撮る
+    ///   - 理由: 戻る途中は画面が暗い。待たずに撮ると、明るくなりきる前の1枚が残る。実機で確かめた
+    /// - 消える前に決めて保存中の1枚は、この後に返っても基準に入る。消える前の画面なので捨てない
+    private func goDark() {
+        guard !dark else { return }
+        dark = true
+        detector.restart(awaitingSettle: true)
+        latest = nil
+    }
+
+    /// ストリームが止まった・開けなかったのが画面の眠りによるものなら、取得不能にせず撮影を中断する。目覚めの `wake` で開き直す。
+    /// 眠りは知らせ(`sleep`)か、そのディスプレイが眠っているかで決める。
+    /// - 理由: 眠りの知らせより先にストリームの停止や開始の失敗が届くことがある。ディスプレイの状態はその場で読める
+    /// - epoch: 止まったストリーム・失敗した開始の撮影の世代。今の世代と違えば、ほかの入口が撮影を決めた後なので何もしない
+    private func interruptBySleep(_ display: ScreenDisplay, epoch opened: Int) -> Bool {
+        let displayAsleep = lock.withLock { isDisplayAsleep }(display.id)
+        return lock.withLock {
+            guard asleep || displayAsleep, capturing, epoch == opened, !invalidated else { return false }
+            epoch += 1; capturing = false; interrupted = true
+            return true
         }
     }
 
     /// queue上で、観測した1枚を判定へ渡す。
     private func observe(_ image: CGImage, observedAt: Date, now: Date, label: String) {
         guard let thumbnail = Self.thumbnail(image, width: detector.parameters.thumbnailWidth) else { return }
+        // 真っ黒は、いつでも映っていないものとして捨てる。保存も比較もしない。
+        // - 理由: 実機で、Macのスリープからも画面だけのスリープからも、戻った最初の1枚が真っ黒の `complete` で残った。
+        //   画面だけのスリープは知らせとストリームの停止の順が定まらず、戻る経路で見分けきれない。真っ黒の画面は記録しても読み取れる情報が無い
+        // - 映っていないフレームと同じく判定を止める。落ち着き待ちの途中の画面を、黒い間に落ち着いたとみなして撮らない。比較の基準は引き継ぐ
+        if thumbnail.isBlack { goDark(); return }
+        // 映るフレームが届いた。次に画面が消えたら、また判定を止める。
+        dark = false
         let audioTime = ScreenCaptureClock.audioTime(acceptedAudioTime: acceptedAudioTime(), now: now, observedAt: observedAt)
         let shot = ScreenShot(image: image, audioTime: audioTime, observedAt: observedAt, label: label, frame: frameIndex, target: seenTarget)
         latest = shot
@@ -497,6 +611,31 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     func reportUnavailableForTesting(_ reason: String, epoch value: Int? = nil) {
         reportUnavailable(reason, epoch: value ?? lock.withLock { epoch })
     }
+    /// 映っていないフレーム(`blank`・`suspended`)が届いた。ストリームの通知と同じ経路で扱う。
+    func darkFrameForTesting() {
+        queue.sync { if syncEpoch() { goDark() } }
+    }
+    /// 開いたストリームの撮影の世代。検証ではストリームの見分けに使う。
+    var streamEpochForTesting: Int { queue.sync { streamEpoch } }
+    /// ストリームが止まった。`didStopWithError` と同じ経路で、眠りなら中断、それ以外は取得不能にする。
+    /// - opened: 止まったストリームを開いた世代。省くといまのストリーム。いまのものと違う・閉じた後なら、古いストリームの停止として取り合わない
+    func streamStoppedForTesting(opened: Int? = nil) {
+        queue.sync {
+            let current = streamEpoch, display = streamDisplay
+            // 本番の `detach(stream)` と同じく、いまのストリームの停止だけを扱う。検証にはストリームが無いので世代で見分ける。
+            guard (opened ?? current) == current, clearStream(target: nil) else { return }
+            reportStopped("ディスプレイ「\(display?.name ?? "")」を取得できなくなりました", display: display, epoch: current)
+        }
+    }
+    /// ディスプレイが眠っているかの判定を差し替える。
+    func setDisplayAsleepForTesting(_ asleep: @escaping @Sendable (CGDirectDisplayID) -> Bool) {
+        lock.withLock { isDisplayAsleep = asleep }
+    }
+    /// ストリームが止まってから眠りかを決めるまでの待ちを差し替える。
+    func setStopGraceForTesting(_ grace: DispatchTimeInterval) {
+        lock.withLock { stopGrace = grace }
+    }
+    var isCapturingForTesting: Bool { lock.withLock { capturing } }
     var pendingForTesting: Int { lock.withLock { pending } }
     /// 受け付けた「いま撮る」を、撮影を終えた画像として保存の経路へ渡す。撮影を始める時点の確認は通らない。
     /// 撮影済みで保存を待つ画像の扱いと、完了を遅らせる検証で使う。撮影を始める時点の確認は `capture(_:)` と `screenshotForTesting` で確かめる。
@@ -512,7 +651,12 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     var openStreamTargetForTesting: Int? { lock.withLock { source?.target } }
     /// ストリームを開かずに、いまの対象の撮影に要るものを揃える。開始を経ない検証で「いま撮る」を受け付けるため。
     func openForTesting() {
-        queue.sync { lock.withLock { source = CaptureSource(target: targetGeneration, filter: nil) } }
+        queue.sync {
+            // 開いたストリームの世代と対象も、`start` と同じく持つ。ストリームの停止の検証で使う。
+            let (value, display) = lock.withLock { (epoch, target) }
+            streamEpoch = value; streamDisplay = display
+            lock.withLock { source = CaptureSource(target: targetGeneration, filter: nil) }
+        }
     }
     /// 判定器へ渡す今の時刻を差し替える。観測の時刻と、保存の結果・失敗の時刻を同じ時計にそろえる検証で使う。
     func setClockForTesting(_ clock: @escaping @Sendable () -> Date) {

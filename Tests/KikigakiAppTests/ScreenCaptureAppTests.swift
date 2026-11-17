@@ -12,6 +12,17 @@ final class TestClock: @unchecked Sendable {
     func set(_ value: Date) { lock.withLock { date = value } }
 }
 
+/// 検証が切り替え、撮影側のキューから読む真偽値。
+final class TestFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Bool
+    init(_ value: Bool) { stored = value }
+    var value: Bool {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
+    }
+}
+
 extension AppKitTests {
 /// 画面の記録の保存と公開の境界。ストリームは開かず、観測した1枚を同じ経路へ渡す。
 @Suite(.timeLimit(.minutes(1))) @MainActor struct ScreenCaptureAppTests {
@@ -145,6 +156,338 @@ extension AppKitTests {
         recorder.observeForTesting(try image(0.8), label: "再開後の画面")
         await wait { session.screenEntriesForTesting.count == 2 }
         #expect(session.screenEntriesForTesting.map(\.text) == ["前の画面", "再開後の画面"])
+    }
+
+    @Test func 画面が消えても取得不能にせず_戻った画面が落ち着いてから消える前と違うときだけ撮る() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        let base = Date()
+        recorder.observeForTesting(try image(0.2), observedAt: base, label: "消える前の画面")
+        await wait { session.screenEntriesForTesting.count == 1 }
+        // 消える前と同じ画面が映って落ち着いても撮らない。比較の基準は消えている間も引き継ぐ。
+        recorder.darkFrameForTesting()
+        recorder.observeForTesting(try image(0.2), observedAt: base.addingTimeInterval(10), label: "戻った同じ画面")
+        recorder.tickForTesting(at: base.addingTimeInterval(13))
+        await wait { recorder.pendingForTesting == 0 }
+        #expect(session.screenEntriesForTesting.map(\.text) == ["消える前の画面"])
+        // 違う画面でも、戻った最初の1枚は撮らない。明るくなりきる前の暗い画面かもしれない。
+        recorder.darkFrameForTesting()
+        recorder.darkFrameForTesting()
+        recorder.observeForTesting(try image(0.05), observedAt: base.addingTimeInterval(20), label: "明るくなる途中")
+        recorder.observeForTesting(try image(0.8), observedAt: base.addingTimeInterval(20.5), label: "戻った別の画面")
+        recorder.tickForTesting(at: base.addingTimeInterval(21))
+        await wait { recorder.pendingForTesting == 0 }
+        #expect(session.screenEntriesForTesting.map(\.text) == ["消える前の画面"])
+        // 落ち着いたら撮る。
+        recorder.tickForTesting(at: base.addingTimeInterval(22.5))
+        await wait { session.screenEntriesForTesting.count == 2 }
+        #expect(session.screenEntriesForTesting.map(\.text) == ["消える前の画面", "戻った別の画面"])
+        #expect(session.screenEntriesForTesting.map(\.screenEvent) == [nil, nil])
+        #expect(session.snapshot.screenCaptureWarning == nil && recorder.isCapturingForTesting)
+    }
+
+    @Test func 画面が眠る間は撮らず_目覚めたら同じ対象で行を残さずに撮り直す() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        recorder.setDisplayAsleepForTesting { _ in false }
+        recorder.observeForTesting(try image(0.2), label: "眠る前の画面")
+        await wait { session.screenEntriesForTesting.count == 1 }
+        session.screensDidSleep()
+        await session.waitScreenOperationsForTesting()
+        #expect(!recorder.isCapturingForTesting && recorder.openStreamTargetForTesting == nil)
+        recorder.observeForTesting(try image(0.8), label: "眠っている間の画面")
+        await wait { recorder.pendingForTesting == 0 }
+        #expect(session.screenEntriesForTesting.map(\.text) == ["眠る前の画面"])
+        // Macの目覚めと画面の目覚めの両方が届いても、開き直すのは1回。
+        session.screensDidWake()
+        session.screensDidWake()
+        await session.waitScreenOperationsForTesting()
+        #expect(recorder.isCapturingForTesting && recorder.canCaptureNow)
+        let woke = Date()
+        recorder.observeForTesting(try image(0.8), observedAt: woke, label: "目覚めた後の画面")
+        recorder.tickForTesting(at: woke.addingTimeInterval(1.6))
+        await wait { session.screenEntriesForTesting.count == 2 }
+        #expect(session.screenEntriesForTesting.map(\.text) == ["眠る前の画面", "目覚めた後の画面"])
+        #expect(session.screenEntriesForTesting.allSatisfy { $0.screenEvent == nil })
+        #expect(session.snapshot.screenCaptureWarning == nil)
+        #expect(session.snapshot.screenIndicator == .on(display))
+    }
+
+    @Test func Macが目覚めても画面が眠ったままなら_画面の目覚めまで撮り直さない() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        let asleep = TestFlag(true)
+        recorder.setDisplayAsleepForTesting { _ in asleep.value }
+        session.screensDidSleep()
+        session.screensDidWake()
+        await session.waitScreenOperationsForTesting()
+        #expect(!recorder.isCapturingForTesting)
+        asleep.value = false
+        session.screensDidWake()
+        await session.waitScreenOperationsForTesting()
+        #expect(recorder.isCapturingForTesting && recorder.canCaptureNow)
+    }
+
+    @Test func 眠りの知らせより先にストリームが止まっても_ディスプレイが眠っていれば取得不能にしない() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        let asleep = TestFlag(true)
+        recorder.setDisplayAsleepForTesting { _ in asleep.value }
+        recorder.observeForTesting(try image(0.2), label: "眠る前の画面")
+        await wait { session.screenEntriesForTesting.count == 1 }
+        recorder.streamStoppedForTesting()
+        session.screensDidSleep()
+        await session.waitScreenOperationsForTesting()
+        #expect(!recorder.isUnavailable && session.snapshot.screenCaptureWarning == nil)
+        asleep.value = false
+        session.screensDidWake()
+        await session.waitScreenOperationsForTesting()
+        let woke = Date()
+        recorder.observeForTesting(try image(0.8), observedAt: woke, label: "目覚めた後の画面")
+        recorder.tickForTesting(at: woke.addingTimeInterval(1.6))
+        await wait { session.screenEntriesForTesting.count == 2 }
+        #expect(session.screenEntriesForTesting.map(\.screenEvent) == [nil, nil])
+    }
+
+    @Test func 開き直した後に古いストリームの停止が届いても取り合わず_いまのストリームの停止は取得不能にする() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        recorder.setDisplayAsleepForTesting { _ in false }
+        let old = recorder.streamEpochForTesting
+        session.screensDidSleep()
+        session.screensDidWake()
+        await session.waitScreenOperationsForTesting()
+        #expect(recorder.streamEpochForTesting != old && recorder.isCapturingForTesting)
+        recorder.streamStoppedForTesting(opened: old)
+        #expect(recorder.isCapturingForTesting && !recorder.isUnavailable)
+        recorder.streamStoppedForTesting()
+        await wait { session.screenEntriesForTesting.count == 1 }
+        #expect(session.screenEntriesForTesting.map(\.screenEvent) == [.unavailable("ディスプレイ「EV3895」を取得できなくなりました")])
+    }
+
+    @Test func 開始を待つ間に画面が眠って失敗しても取得不能にせず_目覚めたら撮り直す() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let failing = TestFlag(false)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url) { _ in
+            failing.value ? "画面の取得を始められません" : nil
+        }
+        let asleep = TestFlag(false)
+        recorder.setDisplayAsleepForTesting { _ in asleep.value }
+        // 一時停止からの再開でストリームを開き直す途中に眠り、眠りの知らせより先に開始の失敗が届く。
+        session.togglePause()
+        failing.value = true; asleep.value = true
+        session.togglePause()
+        await session.waitScreenOperationsForTesting()
+        #expect(!recorder.isUnavailable && !recorder.isCapturingForTesting)
+        #expect(session.screenEntriesForTesting.isEmpty && session.snapshot.screenCaptureWarning == nil)
+        session.screensDidSleep()
+        failing.value = false; asleep.value = false
+        session.screensDidWake()
+        await session.waitScreenOperationsForTesting()
+        #expect(recorder.isCapturingForTesting && recorder.canCaptureNow)
+    }
+
+    @Test func 開始が失敗したとき画面が眠っていなければ_これまでどおり取得不能にする() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url) { _ in "画面の取得を始められません" }
+        recorder.setDisplayAsleepForTesting { _ in false }
+        session.togglePause()
+        session.togglePause()
+        await session.waitScreenOperationsForTesting()
+        await wait { session.screenEntriesForTesting.count == 1 }
+        #expect(recorder.isUnavailable)
+        #expect(session.screenEntriesForTesting.map(\.screenEvent) == [.unavailable("画面の取得を始められません")])
+    }
+
+    @Test func ストリームが止まった後に眠りの知らせが届けば_取得不能にせず目覚めで撮り直す() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        recorder.setDisplayAsleepForTesting { _ in false }
+        recorder.setStopGraceForTesting(.milliseconds(300))
+        // 画面だけのスリープ: 止まった瞬間はまだ眠っておらず、眠りの知らせが後から届く。
+        recorder.streamStoppedForTesting()
+        session.screensDidSleep()
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(!recorder.isUnavailable && session.screenEntriesForTesting.isEmpty)
+        session.screensDidWake()
+        await session.waitScreenOperationsForTesting()
+        #expect(recorder.isCapturingForTesting && recorder.canCaptureNow)
+    }
+
+    @Test(arguments: [false, true])
+    func 目覚めた直後の暗い画面は撮らず_落ち着いた画面を撮る(pauseBeforeFrame: Bool) async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        recorder.setDisplayAsleepForTesting { _ in false }
+        let base = Date()
+        recorder.observeForTesting(try image(0.2), observedAt: base, label: "眠る前の画面")
+        await wait { session.screenEntriesForTesting.count == 1 }
+        session.screensDidSleep()
+        session.screensDidWake()
+        await session.waitScreenOperationsForTesting()
+        // 戻った画面を見る前に一時停止・再開を挟んでも、落ち着くまで待つ。
+        if pauseBeforeFrame {
+            session.togglePause()
+            session.togglePause()
+            await session.waitScreenOperationsForTesting()
+        }
+        // 真っ黒も映っていないフレームも挟まない。待つのは目覚めの旗による。
+        recorder.observeForTesting(try image(0.05), observedAt: base.addingTimeInterval(10), label: "明るくなる途中")
+        recorder.tickForTesting(at: base.addingTimeInterval(11))
+        await wait { recorder.pendingForTesting == 0 }
+        #expect(session.screenEntriesForTesting.map(\.text) == ["眠る前の画面"])
+        recorder.observeForTesting(try image(0.8), observedAt: base.addingTimeInterval(11), label: "目覚めた後の画面")
+        recorder.tickForTesting(at: base.addingTimeInterval(12.6))
+        await wait { session.screenEntriesForTesting.count == 2 }
+        #expect(session.screenEntriesForTesting.map(\.text) == ["眠る前の画面", "目覚めた後の画面"])
+    }
+
+    @Test func 画面だけのスリープで止まってから戻った直後の真っ黒も撮らない() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        recorder.setDisplayAsleepForTesting { _ in false }
+        recorder.setStopGraceForTesting(.milliseconds(200))
+        let base = Date()
+        recorder.observeForTesting(try image(0.2), observedAt: base, label: "眠る前の画面")
+        await wait { session.screenEntriesForTesting.count == 1 }
+        // 眠りの手前で暗くなっていく途中の真っ黒。
+        recorder.observeForTesting(try image(0), observedAt: base.addingTimeInterval(5), label: "消える途中の真っ黒")
+        recorder.streamStoppedForTesting()
+        session.screensDidSleep()
+        session.screensDidWake()
+        await session.waitScreenOperationsForTesting()
+        recorder.observeForTesting(try image(0), observedAt: base.addingTimeInterval(10), label: "戻った直後の真っ黒")
+        recorder.observeForTesting(try image(0.05), observedAt: base.addingTimeInterval(10.3), label: "明るくなる途中")
+        try await Task.sleep(for: .milliseconds(300))
+        await wait { recorder.pendingForTesting == 0 }
+        #expect(session.screenEntriesForTesting.map(\.text) == ["眠る前の画面"])
+        recorder.observeForTesting(try image(0.8), observedAt: base.addingTimeInterval(10.6), label: "戻った画面")
+        recorder.tickForTesting(at: base.addingTimeInterval(12.2))
+        await wait { session.screenEntriesForTesting.count == 2 }
+        #expect(session.screenEntriesForTesting.map(\.text) == ["眠る前の画面", "戻った画面"])
+    }
+
+    @Test func 止まった後に知らせなしでディスプレイだけが眠っても_待ちの後に中断にする() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        let asleep = TestFlag(false)
+        recorder.setDisplayAsleepForTesting { _ in asleep.value }
+        recorder.setStopGraceForTesting(.milliseconds(200))
+        recorder.streamStoppedForTesting()
+        asleep.value = true
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(!recorder.isUnavailable && !recorder.isCapturingForTesting && session.screenEntriesForTesting.isEmpty)
+        asleep.value = false
+        session.screensDidWake()
+        await session.waitScreenOperationsForTesting()
+        #expect(recorder.isCapturingForTesting && recorder.canCaptureNow)
+    }
+
+    @Test func 止まった後も眠らないまま待ちが過ぎたら_取得不能にする() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        recorder.setDisplayAsleepForTesting { _ in false }
+        recorder.setStopGraceForTesting(.milliseconds(200))
+        recorder.streamStoppedForTesting()
+        // 待つ間はまだ取得不能にしない。
+        #expect(!recorder.isUnavailable)
+        await wait { session.screenEntriesForTesting.count == 1 }
+        #expect(session.screenEntriesForTesting.map(\.screenEvent) == [.unavailable("ディスプレイ「EV3895」を取得できなくなりました")])
+    }
+
+    @Test(arguments: ["一時停止", "撮らない"])
+    func 止まった後の待ちの間に操作したら_待ちの後に取得不能にしない(operation: String) async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        recorder.setDisplayAsleepForTesting { _ in false }
+        recorder.setStopGraceForTesting(.milliseconds(200))
+        recorder.streamStoppedForTesting()
+        if operation == "一時停止" { session.togglePause() } else { session.selectScreen(nil) }
+        try await Task.sleep(for: .milliseconds(400))
+        await session.waitScreenOperationsForTesting()
+        #expect(!recorder.isUnavailable)
+        #expect(!session.screenEntriesForTesting.contains { if case .unavailable = $0.screenEvent { true } else { false } })
+    }
+
+    @Test func 落ち着き待ちの途中で真っ黒になったら_待っていた画面を撮らず_戻った別の画面を落ち着いてから撮る() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        let base = Date()
+        recorder.observeForTesting(try image(0.2), observedAt: base, label: "画面A")
+        await wait { session.screenEntriesForTesting.count == 1 }
+        recorder.observeForTesting(try image(0.8), observedAt: base.addingTimeInterval(3), label: "画面B")
+        recorder.observeForTesting(try image(0), observedAt: base.addingTimeInterval(3.5), label: "真っ黒")
+        // 黒い間は落ち着いた時間に数えない。
+        recorder.tickForTesting(at: base.addingTimeInterval(8))
+        await wait { recorder.pendingForTesting == 0 }
+        #expect(session.screenEntriesForTesting.map(\.text) == ["画面A"])
+        // 戻った画面は落ち着くのを待ち、比較の基準Aと違えば撮る。
+        recorder.observeForTesting(try image(0.5), observedAt: base.addingTimeInterval(9), label: "画面C")
+        await wait { recorder.pendingForTesting == 0 }
+        #expect(session.screenEntriesForTesting.map(\.text) == ["画面A"])
+        recorder.tickForTesting(at: base.addingTimeInterval(10.6))
+        await wait { session.screenEntriesForTesting.count == 2 }
+        #expect(session.screenEntriesForTesting.map(\.text) == ["画面A", "画面C"])
+    }
+
+    @Test func 眠っていなくても真っ黒の画面は撮らない() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        recorder.observeForTesting(try image(0.8), label: "白い画面")
+        await wait { session.screenEntriesForTesting.count == 1 }
+        try await show(recorder, 0, label: "黒い画面", at: 3, from: Date())
+        await wait { recorder.pendingForTesting == 0 }
+        #expect(session.screenEntriesForTesting.map(\.text) == ["白い画面"])
+    }
+
+    @Test func 眠っていないときにストリームが止まったら_これまでどおり取得不能にする() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        recorder.setDisplayAsleepForTesting { _ in false }
+        recorder.streamStoppedForTesting()
+        await wait { session.screenEntriesForTesting.count == 1 }
+        #expect(session.screenEntriesForTesting.map(\.screenEvent) == [.unavailable("ディスプレイ「EV3895」を取得できなくなりました")])
+        // 目覚めの知らせが来ても、撮れなくなった対象は追わない。
+        session.screensDidWake()
+        await session.waitScreenOperationsForTesting()
+        #expect(recorder.isUnavailable && !recorder.isCapturingForTesting)
+    }
+
+    @Test func 一時停止中に眠って目覚めても撮り始めず_再開から撮る() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let (session, url) = recording(root)
+        let recorder = session.installScreenRecorderForTesting(display: display, markdownURL: url)
+        recorder.setDisplayAsleepForTesting { _ in false }
+        session.togglePause()
+        session.screensDidSleep()
+        session.screensDidWake()
+        await session.waitScreenOperationsForTesting()
+        #expect(!recorder.isCapturingForTesting)
+        // 録音中に眠り、目覚める前に一時停止したときも、目覚めでは撮り始めない。
+        session.togglePause()
+        await session.waitScreenOperationsForTesting()
+        #expect(recorder.isCapturingForTesting)
+        session.screensDidSleep()
+        session.togglePause()
+        session.screensDidWake()
+        await session.waitScreenOperationsForTesting()
+        #expect(!recorder.isCapturingForTesting)
     }
 
     @Test func 無音の間は最後の1枚だけを保留し_話し始めに公開して置き換えた画像は消す() async throws {
