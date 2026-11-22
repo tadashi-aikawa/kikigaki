@@ -27,6 +27,14 @@
 brew install --cask tadashi-aikawa/tap/kikigaki
 ```
 
+更新はメニューバーのメニューの「アップデートを確認…」から案内します。「コマンドをコピーして終了」を押すとKIKIGAKIが終了するので、コピーした次のコマンドをターミナルで実行します。
+
+```bash
+brew update && brew upgrade --cask kikigaki && open -a KIKIGAKI
+```
+
+コマンドを直接実行するときは、録音と書き起こしの完了と保存を待ってから、先にKIKIGAKIを終了してください。Homebrewを使わずに入れた場合は、録音と書き起こしの完了と保存を待ってからKIKIGAKIを終了し、リリースページの新しい `KIKIGAKI.app` で置き換えてから起動します。
+
 初回起動の許可と動作環境は [はじめに・インストール](https://tadashi-aikawa.github.io/kikigaki/docs/getting-started/) を参照してください。
 
 ## データの行き先

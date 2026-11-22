@@ -1,7 +1,7 @@
 import AppKit
 import KikigakiCore
 
-/// メニューバー常駐アイコン。録音の開始・停止・一時停止・再開と、ウィンドウ・保存先・設定・終了の入口
+/// メニューバー常駐アイコン。録音の開始・停止・一時停止・再開と、更新の確認・ウィンドウ・保存先・設定・終了の入口
 @MainActor
 final class StatusItem {
     private let item: NSStatusItem
@@ -28,6 +28,8 @@ final class StatusItem {
     var onShowWindow: (() -> Void)?
     var onOpenOutputDir: (() -> Void)?
     var onReloadConfig: (() -> Void)?
+    var onCheckForUpdates: (() -> Void)?
+    var onOpenConfigFile: (() -> Void)?
 
     init() {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -50,6 +52,10 @@ final class StatusItem {
         let versionItem = NSMenuItem(title: "KIKIGAKI \(version ?? "0.0.0-development")", action: nil, keyEquivalent: "")
         versionItem.isEnabled = false
         menu.addItem(versionItem)
+        let updateItem = NSMenuItem(title: "アップデートを確認…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updateItem.target = self
+        menu.addItem(updateItem)
+        menu.addItem(.separator())
         menu.addItem(statusMenuItem)
         menu.addItem(.separator())
         // ウィンドウを開くのが最も多い操作。版数・状態の直下に置き、録音操作より先に手が届くようにする。
@@ -67,6 +73,9 @@ final class StatusItem {
         let openItem = NSMenuItem(title: "保存先を開く", action: #selector(openOutputDir), keyEquivalent: "")
         openItem.target = self
         menu.addItem(openItem)
+        let configItem = NSMenuItem(title: "設定ファイルを開く", action: #selector(openConfigFile), keyEquivalent: "")
+        configItem.target = self
+        menu.addItem(configItem)
         let reloadItem = NSMenuItem(title: "設定を再読込", action: #selector(reloadConfig), keyEquivalent: "")
         reloadItem.target = self
         menu.addItem(reloadItem)
@@ -100,6 +109,8 @@ final class StatusItem {
     }
     @objc private func openOutputDir() { onOpenOutputDir?() }
     @objc private func reloadConfig() { onReloadConfig?() }
+    @objc private func checkForUpdates() { onCheckForUpdates?() }
+    @objc private func openConfigFile() { onOpenConfigFile?() }
 
     private static func icon(for state: RecordingState) -> NSImage? {
         // 待機中は採用ロゴ。動作中は録音・一時停止などの状態を優先する。

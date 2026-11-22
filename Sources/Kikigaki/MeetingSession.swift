@@ -1405,6 +1405,12 @@ final class MeetingSession {
         onChange?(snapshot)
     }
 
+    /// 停止後の会議の保存に失敗し、書き起こしがメモリにだけ残っているか。
+    /// 保存に失敗しても状態は待機中へ戻るので、終了すると失う。「アップデートを確認…」が終了させない条件
+    var hasUnsavedMeeting: Bool {
+        snapshot.state == .idle && archive != nil && !snapshot.saved
+    }
+
     private func save() {
         guard var archive else { return }
         let result = aiStore?.save(&archive, for: handoff.meetingID) ?? archive.save()

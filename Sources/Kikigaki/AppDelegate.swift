@@ -132,6 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 設定のキー名ごとの登録。
     private var hotkeys: [String: (hotkey: GlobalHotkey, registration: GlobalHotkeyRegistration)] = [:]
     private var statusItem: StatusItem?
+    private var updater: UpdaterFeature?
     private var window: TranscriptWindowController?
     /// 撮っているディスプレイの上のバッジと知らせ。
     private lazy var screenIndicator = ScreenIndicatorOverlay()
@@ -293,6 +294,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.setMinutesVisible(window.minutesSplit.isPreviewVisible)
         statusItem.onOpenOutputDir = { [weak self] in self?.openOutputDir() }
         statusItem.onReloadConfig = { [weak self] in self?.reloadConfig() }
+        let updater = UpdaterFeature(quitBlocker: { [weak self, weak session] in
+            guard let self, let session else { return nil }
+            return UpdateQuitBlocker.current(
+                state: session.snapshot.state, reviewingFile: session.snapshot.reviewingFile,
+                loadingAudioFile: self.loadingAudioFile, hasUnsavedMeeting: session.hasUnsavedMeeting)
+        })
+        self.updater = updater
+        statusItem.onCheckForUpdates = { updater.checkForUpdates() }
+        statusItem.onOpenConfigFile = { ConfigEditor.open(Self.configPath()) }
         self.statusItem = statusItem
 
         session.onChange = { [weak self] snapshot in

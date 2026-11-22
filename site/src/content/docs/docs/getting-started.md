@@ -20,7 +20,28 @@ brew install --cask tadashi-aikawa/tap/kikigaki
 ```
 
 AIエージェント(Claude Code か Codex のCLI)の参加に使う `kikigaki-cli` も一緒に入ります[^cli]。
-更新は `brew upgrade --cask kikigaki` です。
+
+## 更新
+
+1. メニューバーのKIKIGAKIのロゴから「アップデートを確認…」を選びます
+2. 新しいバージョンがあれば「コマンドをコピーして終了」を押します。コマンドをコピーして、KIKIGAKIが終了します
+3. ターミナルに貼り付けて実行します。更新が終わるとKIKIGAKIが起動します
+
+```bash
+brew update && brew upgrade --cask kikigaki && open -a KIKIGAKI
+```
+
+コマンドを直接実行するときは、録音と書き起こしの完了と保存を待ってから、先にKIKIGAKIを終了してください。
+
+Homebrewを使わずに入れた場合は、「アップデートを確認…」の「リリースページを開く」から新しいバージョンを入手します。
+
+1. 録音と書き起こしの完了と保存を待ってから、KIKIGAKIを終了します
+2. ダウンロードした `KIKIGAKI.app` で、今の `KIKIGAKI.app` を置き換えます
+3. KIKIGAKIを起動します
+
+:::note
+録音中・書き起こし中と、保存できていない書き起こしがあるときは、ボタンが「コマンドをコピー」になり、KIKIGAKIを終了しません。録音を終えるか保存してからKIKIGAKIを終了し、コマンドを実行してください。
+:::
 
 ## 初回起動
 
@@ -46,6 +67,7 @@ AIエージェント(Claude Code か Codex のCLI)の参加に使う `kikigaki-c
 
 設定は `~/.config/kikigaki/config.toml` に書きます。
 ファイルが無くても既定値で動くので、最初は作らなくてかまいません。
+メニューバーのメニューの「設定ファイルを開く」で開けます。ファイルが無ければ雛形を作ってから開きます。
 
 ```toml
 outputDir = "~/Documents/KIKIGAKI"

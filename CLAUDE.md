@@ -23,6 +23,8 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `NextMeetings.swift`: 次の会議の予約の値型。表示順・上限・寿命・消費の判定。仕様は [録音開始シート](docs/start-sheet.md)
   - `SpeakerNames.swift` / `TranscriptRenderer.swift` / `MeetingMarkdown.swift` / `MeetingFiles.swift`: 話者名の枡・行の整形・Markdown 生成・ファイル命名
   - `Config.swift` / `AIConfig.swift`: 設定ファイルのパースと既定値。キーの一覧は [設定リファレンス](docs/config.md)
+  - `ConfigTemplate.swift`: 「設定ファイルを開く」で書き出す雛形と、リンク切れの判定。仕様は [設定リファレンス](docs/config.md)
+  - `UpdateCheck.swift` / `SemanticVersion.swift`: 「アップデートを確認…」の応答の解釈と表示の判定。仕様は [アップデートの確認](docs/update-check.md)
   - `RecordingState.swift`: 録音状態とメニュー表題
   - `GlobalHotkey.swift`: 手動宛先へ送るグローバルキーの書式と表記。登録はアプリ側の `GlobalHotkeyRegistration.swift`
   - `SystemAudioMix.swift`: システム音声の3択、出力の3値判定、16kHzの加算とピーク保護
@@ -57,6 +59,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
   - `ScreenTargetButton.swift`: フッターの画面の記録の操作の描画
   - `ScreenIndicatorOverlay.swift`: 撮っているディスプレイの上のバッジと知らせのパネル
   - `TranscriptWindow.swift` / `StatusItem.swift` / `AppDelegate.swift`
+  - `UpdateChecker.swift` / `UpdaterFeature.swift` / `ConfigEditor.swift`: 「アップデートを確認…」の通信とNSAlert、「設定ファイルを開く」
   - `ScreenLaneView.swift` / `TranscriptWindowScreenLane.swift`: 書き起こしウィンドウの画像レーンの描画と組み立て、開閉、Quick Look
   - `AI*.swift` / `Minutes*.swift`: AI参加のherdr接続・会議の記録・進行表示と、議事録ペイン
 - `Tests/`: ユニットテスト (swift-testing)
@@ -140,7 +143,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 
 | `site/` のページ | 元になる単一情報源 |
 | --- | --- |
-| `getting-started.md` | `site/` が単一情報源。モデル取得は [Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md) |
+| `getting-started.md` | `site/` が単一情報源。モデル取得は [Nemotron fast128 への話者判別の切替](docs/nemotron-integration.md)、更新は [アップデートの確認](docs/update-check.md) |
 | `recording.md` | [録音開始シート](docs/start-sheet.md)、[音声ファイルの書き起こし](docs/audio-file.md)、[発話の確定表示](docs/utterance-progress.md)、[話者判別の切替](docs/diarization-toggle.md)、[話者の手動統合](docs/speaker-mapping.md)、[小音量発話の除外](docs/audio-exclusion.md)、[手入力の設計](docs/typed-entry.md)、[書き起こしウィンドウ](docs/transcript-window.md)、[発言ごとの音声再生](docs/utterance-playback.md)、[画面の記録](docs/screen-capture.md) |
 | `online-meetings.md` | [システム音声の取り込み](docs/system-audio.md) |
 | `ai-participant.md` | [AI参加者の設計](docs/ai-participant.md)、[AI設定の複数プロファイル](docs/ai-profiles.md)、[AIへの定期自動送信](docs/ai-scheduled.md)、[AIを会話の参加者として並べる](docs/ai-timeline.md)、[AIへの受け渡し](docs/ai-handoff.md) |
@@ -154,7 +157,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 
 | 文書 | 内容 | 読むとき |
 | --- | --- | --- |
-| [設定リファレンス](docs/config.md) | `config.toml` の全キー、廃止したキー、画面で決める値 | 設定キーを足す・変えるとき |
+| [設定リファレンス](docs/config.md) | `config.toml` の全キー、廃止したキー、画面で決める値、「設定ファイルを開く」と雛形 | 設定キーを足す・変えるとき |
 | [開発用のフラグと環境変数](docs/dev-flags.md) | 起動フラグ、replay、検証・撮影用の環境変数 | replayや検証ハーネスを使う・足すとき |
 | [発話から文字・話者確定までのフロー](docs/utterance-flow.md) | 文字起こしから話者の確定、表示までの流れと実コードの対応 | 発話の処理全体を追うとき。最初に読む |
 | [文字起こしの速報表示](docs/fast-transcription.md) | 速報と高精度の合流、確定数、AI送信の待ち | `AppleTranscriber` ・ `TranscriptMerge` ・確定数を変える前 |
@@ -180,6 +183,7 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 | [議事録プレビューの表示例](docs/minutes-preview-example.md) | 描画の確認に使う議事録の例 | 描画を目で確かめるとき |
 | [議論のボード](docs/board.md) | ボードの設定、内蔵プロンプト、見出しの扱い | ボード・`BoardPrompt` を変える前。テストが本文を読む |
 | [AI参加者の設計](docs/ai-participant.md) | 会議参加モードの契約、envelope、受信箱、同梱CLI、Skill、フック、停止後の後片付け | AI参加・同梱CLI・返送・Skillを変える前 |
+| [アップデートの確認](docs/update-check.md) | 「アップデートを確認…」の結果ごとの表示、Homebrewの案内、録音中の例外 | 更新の確認・Homebrewの案内を変える前 |
 | [Homebrew tapの更新](docs/tap-update.md) | tap更新の認証と一時領域の後始末 | `update_tap.sh`を変える前 |
 | [AIへの受け渡し](docs/ai-handoff.md) | 「会話をコピー」と会話ファイルの契約、画像の参照と `image_dirs`、保存先の字句上の正規化 | 手動コピー・画像の参照・保存先のパスの扱いを変える前 |
 | [AI設定の複数プロファイル](docs/ai-profiles.md) | `[[ai]]` のキー・検証、宛先の選択 | `AIConfig` ・宛先選択を変える前 |
