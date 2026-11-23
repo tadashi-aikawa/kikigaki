@@ -1,21 +1,35 @@
+# 利用者向けサイト (site/) をビルドして GitHub Pages へ配備する
+#
+# ビルドと配備をジョブで分ける。
+# 理由: 成果物を上げた直後に同じジョブで配備すると、配備が成果物をまだ見つけられず落ちることがある (actions/deploy-pages#451)。
+#       そのジョブを再実行すると同じrunに成果物 github-pages が2つ目として上がり、以後は「複数ある」で落ち続ける。
+#
+# 配備が落ちたときの戻し方:
+# 1. Actions の該当 run で「Re-run failed jobs」を押す。deploy ジョブだけやり直し、build の成果物は1つのまま使う
+#    - 条件: その run が今の main の先頭のコミットのもので、build が成功し、deploy だけが落ちている
+#        - 理由: 再実行は run の元のコミットを配る。main が進んだ後の古い run を通すと、公開サイトが巻き戻る
+#    - 条件: 成果物 github-pages が1つだけで、保持期限 (1日) が切れていない
+#    - 「Re-run all jobs」は押さない。前の試行の成果物が残っていると build が同名の2つ目を上げ、配備が落ちうる
+# 2. 条件に合わない run や、それでも通らない run は捨て、Actions の Pages から「Run workflow」で main の新しい run を立てる
 name: Pages
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
 permissions:
   contents: read
   pages: write
   id-token: write
 # 配備が重なったら後のpushを優先する
+# 手動起動で main 以外を選んでも main の run を止めないよう、ref ごとに分ける
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build:
+    # 配備できるのは main だけ (github-pages 環境のブランチ制限も main のみ)
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/configure-pages@v6
@@ -34,5 +48,12 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site/dist
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
       - uses: actions/deploy-pages@v5
         id: deployment

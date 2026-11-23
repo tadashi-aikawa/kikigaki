@@ -72,7 +72,8 @@ KIKIGAKI(聞書)は、会議の発話をマイクから聴いて話者付きで�
 - `web/minutes/`: 議事録の描画資産のソース。再生成は [議事録の描画と検索](docs/minutes-rendering.md)
 - `site/`: 利用者向けのサイト。Astro 1本で、トップのティザーは `src/pages/index.astro`、ドキュメントはStarlightで `src/content/docs/docs/` に置く
   - 配信先はGitHub Pagesの `https://tadashi-aikawa.github.io/kikigaki/`。ドキュメントは `/kikigaki/docs/` 以下
-  - ビルドは `pnpm --dir site install --frozen-lockfile` と `pnpm --dir site build`。mainへのpushで `.github/workflows/pages.yml` が配備する
+  - ビルドは `pnpm --dir site install --frozen-lockfile` と `pnpm --dir site build`。mainへのpushで `.github/workflows/pages.yml` が配備する。手動でも起動できる
+    - 配備が落ちたときの戻し方は `pages.yml` の冒頭。「Re-run all jobs」は押さない
   - トップの絵・動画・キャプチャは `public/illustrations/` `public/demos/` `public/captures/` に置くと出る。無ければ仮置きを出す。ファイル名は `index.astro` の `Media` の `src`
   - リンクプレビュー画像は `public/ogp.webp` で、トップとドキュメントの全ページが使う。元は `ogp/ogp.html` で、再生成の手順はその冒頭
     - 旧画像の `public/kikigaki.webp` は消さない。DiscordなどはURLごとに古いプレビューを覚えていて、その画像を読みに来る
